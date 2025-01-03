@@ -22,34 +22,44 @@ class NestCell: UICollectionViewCell {
     }
     
     private func setupViews() {
+        // Configure title label
         titleLabel.font = UIFont.systemFont(ofSize: 20.0, weight: .bold)
+        
+        // Configure subtitle label
         subtitleLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.numberOfLines = 2
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        
+        // Configure image view
         imageView.contentMode = .scaleAspectFit
         
+        // Add subviews
         contentView.addSubview(titleLabel)
         contentView.addSubview(subtitleLabel)
         contentView.addSubview(imageView)
         
+        // Disable autoresizing masks
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         imageView.translatesAutoresizingMaskIntoConstraints = false
         
         NSLayoutConstraint.activate([
-            titleLabel.bottomAnchor.constraint(equalTo: subtitleLabel.topAnchor, constant: 0),
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -16),
-            
-            subtitleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
-            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-    
-            imageView.widthAnchor.constraint(greaterThanOrEqualToConstant: 80),
-            imageView.heightAnchor.constraint(equalToConstant: 80),
-            
-            imageView.bottomAnchor.constraint(equalTo: titleLabel.topAnchor, constant: -20),
-            imageView.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 20),
+            // Image view constraints - top right corner
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            imageView.widthAnchor.constraint(equalToConstant: 100),
+            imageView.heightAnchor.constraint(equalToConstant: 100),
+            
+            // Title label constraints - bottom left
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: imageView.leadingAnchor, constant: -20),
+            titleLabel.bottomAnchor.constraint(equalTo: subtitleLabel.topAnchor, constant: -4),
+            
+            // Subtitle label constraints - below title, bottom left
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: imageView.leadingAnchor, constant: -20),
+            subtitleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
         ])
     }
     

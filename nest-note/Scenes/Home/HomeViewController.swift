@@ -7,8 +7,12 @@
 
 import UIKit
 import SwiftUI
+import Combine
 
 class HomeViewController: NNViewController, UICollectionViewDelegate {
+    
+    private var cancellables = Set<AnyCancellable>()
+
     
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -28,12 +32,22 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         configureDataSource()
         applyInitialSnapshots()
         collectionView.delegate = self
+        
+        NestService.shared.$currentNest
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadDataForCurrentUser()
+            }
+            .store(in: &cancellables)
     }
     
     override func setup() {
         navigationItem.title = "NestNote"
         navigationItem.weeTitle = "Welcome to"
         navigationController?.navigationBar.prefersLargeTitles = true
+        
+        // Set the navigation bar tint color to NNColors.primary
+        navigationController?.navigationBar.tintColor = NNColors.primary
     }
     
     override func setupNavigationBarButtons() {
@@ -67,7 +81,7 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     }
     
     enum Item: Hashable {
-        case nest(String)
+        case nest(name: String, address: String)
         case quickAccess(String)
         case event(String, String, String)
     }
@@ -136,9 +150,9 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     private func configureDataSource() {
         // Cell registrations
         let nestCellRegistration = UICollectionView.CellRegistration<NestCell, Item> { cell, indexPath, item in
-            if case let .nest(title) = item {
+            if case let .nest(name, address) = item {
                 let image = UIImage(systemName: "house.lodge.fill")
-                cell.configure(with: title, subtitle: "In progress, thru Oct 16", image: image)
+                cell.configure(with: name, subtitle: address, image: image)
                 cell.imageView.tintColor = .label
             }
             
@@ -195,12 +209,19 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         }
     }
     
+    func reloadDataForCurrentUser() {
+        // Reload the data for the current user
+        Task {
+            await updateNestCell()
+        }
+    }
+    
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         snapshot.appendSections([.nest, .quickAccess, .upcomingEvents])
         
-        snapshot.appendItems([.nest("Smith Nest")], toSection: .nest)
+        // Nest section will be populated by updateNestCell()
         snapshot.appendItems([.quickAccess("Household"), .quickAccess("Emergency")], toSection: .quickAccess)
         snapshot.appendItems([
             .event("Dinner", "6:00pm", "In 2 hrs"),
@@ -211,6 +232,35 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
     
+    // Add property for nest service
+    private let nestService = NestService.shared
+    
+    // Add method to update nest cell
+    private func updateNestCell() async {
+        var snapshot = dataSource.snapshot()
+        
+        // Remove existing nest items
+        let nestItems = snapshot.itemIdentifiers(inSection: .nest)
+        snapshot.deleteItems(nestItems)
+        
+        // Add new nest item
+        if let currentNest = nestService.currentNest {
+            snapshot.appendItems([.nest(name: currentNest.name, address: currentNest.address)], toSection: .nest)
+        } else {
+            // Fallback if no nest is set
+            snapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
+        }
+        
+        await dataSource.apply(snapshot, animatingDifferences: true)
+    }
+    
+    // MARK: - Navigation
+    
+    private func showMyNest() {
+        guard let _ = nestService.currentNest else { return }
+        navigationController?.pushViewController(NestViewController(), animated: true)
+    }
+    
     // MARK: - Bar Button Actions
     @objc func settingsButtonTapped() {
         present(UINavigationController(rootViewController: SettingsViewController()), animated: true)
@@ -218,6 +268,8 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     
     @objc func fullScheduleButtonTapped() {
         print("Full Schedule button tapped")
+        present(UINavigationController(rootViewController: CalendarViewController()), animated: true)
+//        present(CalendarViewController(), animated: true)
         // Add your logic here to show the full schedule
     }
     
@@ -227,10 +279,14 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         }
         
         switch item {
-        case .nest(let name):
-            print("Selected Nest: \(name)")
+        case .nest(let name, _):
+            showMyNest()
+            
         case .quickAccess(let type):
-            print("Selected Quick Access: \(type)")
+            guard let _ = nestService.currentNest else { return }
+            let categoryVC = NestCategoryViewController(category: type)
+            navigationController?.pushViewController(categoryVC, animated: true)
+            
         case .event(let title, let time, let status):
             print("Selected Event: \(title) at \(time), Status: \(status)")
         }

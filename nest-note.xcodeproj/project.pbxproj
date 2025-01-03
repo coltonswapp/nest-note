@@ -6,6 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29232CD077E900B90ABC /* FirebaseAnalytics */; };
+		F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29252CD077E900B90ABC /* FirebaseAuth */; };
+		F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29272CD077E900B90ABC /* FirebaseCore */; };
+		F66E292A2CD077E900B90ABC /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29292CD077E900B90ABC /* FirebaseCrashlytics */; };
+		F66E292C2CD077E900B90ABC /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292B2CD077E900B90ABC /* FirebaseDatabase */; };
+		F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292D2CD077E900B90ABC /* FirebaseFirestore */; };
+		F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */; };
+		F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29312CD077E900B90ABC /* FirebaseStorage */; };
+		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		F64DE3E92CB1C893006D21FC /* nest-note.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nest-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +48,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F66E292C2CD077E900B90ABC /* FirebaseDatabase in Frameworks */,
+				F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */,
+				F66E292A2CD077E900B90ABC /* FirebaseCrashlytics in Frameworks */,
+				F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */,
+				F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */,
+				F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */,
+				F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */,
+				F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */,
+				F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +99,15 @@
 			);
 			name = "nest-note";
 			packageProductDependencies = (
+				F66E29232CD077E900B90ABC /* FirebaseAnalytics */,
+				F66E29252CD077E900B90ABC /* FirebaseAuth */,
+				F66E29272CD077E900B90ABC /* FirebaseCore */,
+				F66E29292CD077E900B90ABC /* FirebaseCrashlytics */,
+				F66E292B2CD077E900B90ABC /* FirebaseDatabase */,
+				F66E292D2CD077E900B90ABC /* FirebaseFirestore */,
+				F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */,
+				F66E29312CD077E900B90ABC /* FirebaseStorage */,
+				F6B678292CDDED5700FDCAE4 /* Toast */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -107,6 +137,10 @@
 			);
 			mainGroup = F64DE3E02CB1C893006D21FC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F64DE3EA2CB1C893006D21FC /* Products */;
 			projectDirPath = "";
@@ -333,6 +367,73 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.4.0;
+			};
+		};
+		F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/BastiaanJansen/toast-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F66E29232CD077E900B90ABC /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		F66E29252CD077E900B90ABC /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		F66E29272CD077E900B90ABC /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		F66E29292CD077E900B90ABC /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		F66E292B2CD077E900B90ABC /* FirebaseDatabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseDatabase;
+		};
+		F66E292D2CD077E900B90ABC /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseRemoteConfig;
+		};
+		F66E29312CD077E900B90ABC /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		F6B678292CDDED5700FDCAE4 /* Toast */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */;
+			productName = Toast;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F64DE3E12CB1C893006D21FC /* Project object */;
 }

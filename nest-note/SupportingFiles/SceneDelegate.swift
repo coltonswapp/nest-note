@@ -17,10 +17,40 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
         // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
         guard let windowScene = (scene as? UIWindowScene) else { return }
-        window = UIWindow(frame: windowScene.coordinateSpace.bounds)
-        window?.windowScene = windowScene
-        window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
-        window?.makeKeyAndVisible()
+        window = UIWindow(windowScene: windowScene)
+        
+        Task {
+            do {
+                // Wait for configuration to complete
+                try await Launcher.shared.configure()
+                
+                await MainActor.run {
+                    // Set root view controller based on auth state
+                    if UserService.shared.isSignedIn {
+                        window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
+                    } else {
+                        window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
+                    }
+                    window?.makeKeyAndVisible()
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.log(level: .error, category: .launcher, message: "Configuration failed: \(error)")
+                    // Set a default root view controller even if configuration fails
+                    window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
+                    window?.makeKeyAndVisible()
+                    
+                    // Show error to user
+                    let alert = UIAlertController(
+                        title: "Setup Error",
+                        message: "Failed to complete initial setup. Some features may be unavailable.",
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    window?.rootViewController?.present(alert, animated: true)
+                }
+            }
+        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
