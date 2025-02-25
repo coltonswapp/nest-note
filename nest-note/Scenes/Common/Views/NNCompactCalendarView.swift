@@ -67,8 +67,12 @@ final class NNCompactCalendarView: UIView {
     private var eventsByDate: [Date: [SessionEvent]] = [:]
     
     // MARK: - Initialization
-    init(dateRange: DateInterval) {
+    init(dateRange: DateInterval, events: [SessionEvent]) {
         self.dateRange = dateRange
+        self.eventsByDate = events.reduce(into: [Date: [SessionEvent]]()) { dict, event in
+            let startOfDay = Calendar.current.startOfDay(for: event.startDate)
+            dict[startOfDay, default: []].append(event)
+        }   
         super.init(frame: .zero)
         setup()
     }

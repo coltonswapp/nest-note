@@ -8,12 +8,15 @@
 import UIKit.UIColor
 
 class NNColors {
-    static let primary = UIColor(red: 28/255, green: 183/255, blue: 26/255, alpha: 1.0)
-    static let primaryOpaque = UIColor(red: 182/255, green: 255/255, blue: 175/255, alpha: 1.0)
+    static let primary = UIColor(named: "NNPrimary")!
+    static let primaryLighter = UIColor(named: "NNPrimaryLighter")!
+    static let primaryAlt = UIColor(named: "NNPrimaryAltDark")!
+    static let primaryOpaque = UIColor(named: "NNPrimaryOpaque")!
     static let offBlack = UIColor(red: 37/255, green: 37/255, blue: 37/255, alpha: 1.0)
     
     static let paletteGray = UIColor(named: "NNPaletteGray")!
     static let groupedBackground = UIColor(named: "NNGroupedBackground")!
+    static let NNSystemBackground4 = UIColor(named: "NNSystemBackground4")!
     
     struct NNColorPair: Hashable {
         let fill: UIColor
@@ -22,6 +25,30 @@ class NNColors {
     
     struct EventColors {
         static let all = [blue, lightBlue, green, yellow, red, orange, black, gray]
+        
+        enum ColorType: String, Codable, CaseIterable {
+            case blue
+            case lightBlue
+            case green
+            case yellow
+            case red
+            case orange
+            case black
+            case gray
+            
+            var colorPair: NNColorPair {
+                switch self {
+                case .blue: return EventColors.blue
+                case .lightBlue: return EventColors.lightBlue
+                case .green: return EventColors.green
+                case .yellow: return EventColors.yellow
+                case .red: return EventColors.red
+                case .orange: return EventColors.orange
+                case .black: return EventColors.black
+                case .gray: return EventColors.gray
+                }
+            }
+        }
         
         static let blue = NNColorPair(
             fill: UIColor(

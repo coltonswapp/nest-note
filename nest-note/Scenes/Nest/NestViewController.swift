@@ -8,7 +8,6 @@
 import UIKit
 
 class NestViewController: NNViewController, NestLoadable {
-    
     var loadingIndicator: UIActivityIndicatorView!
     var hasLoadedInitialData: Bool = false
     var refreshControl: UIRefreshControl!
@@ -217,8 +216,9 @@ class NestViewController: NNViewController, NestLoadable {
             cell.accessories = [.disclosureIndicator()]
         }
         
-        let addressCellRegistration = UICollectionView.CellRegistration<AddressCell, String> { cell, indexPath, address in
+        let addressRegistration = UICollectionView.CellRegistration<AddressCell, String> { [weak self] cell, indexPath, address in
             cell.configure(address: address)
+            cell.delegate = self
         }
         
         let headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(
@@ -231,7 +231,7 @@ class NestViewController: NNViewController, NestLoadable {
         dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { collectionView, indexPath, item in
             if indexPath.section == Section.address.rawValue {
                 return collectionView.dequeueConfiguredReusableCell(
-                    using: addressCellRegistration,
+                    using: addressRegistration,
                     for: indexPath,
                     item: item as? String
                 )
@@ -329,5 +329,26 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                 }
             }
         }
+    }
+}
+
+extension NestViewController: AddressCellDelegate {
+    func addressCell(_ cell: AddressCell, didTapAddress address: String) {
+        // We don't have coordinates for the nest address, so we'll let
+        // AddressActionHandler handle the geocoding
+        AddressActionHandler.presentAddressOptions(
+            from: self,
+            sourceView: cell,
+            address: address,
+            onCopy: { [weak cell] in
+                cell?.showCopyFeedback()
+            }
+        )
+    }
+}
+
+extension NestViewController {
+    func handleLoadedData() {
+        return
     }
 }

@@ -87,6 +87,7 @@ class NNSheetViewController: NNViewController {
         view.backgroundColor = .black.withAlphaComponent(0.5)
         setupPanGestureRecognizer()
         setupKeyboardObservers()
+        titleField.delegate = self
     }
     
     // MARK: - Setup Methods
@@ -230,4 +231,10 @@ class NNSheetViewController: NNViewController {
         containerView.layer.add(animation, forKey: "shake")
         HapticsHelper.mediumHaptic()
     }
-} 
+}
+
+extension NNSheetViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+    }
+}

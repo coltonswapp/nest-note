@@ -74,6 +74,75 @@ extension UIView {
         }
     }
     
+    func smoothBounce(height: CGFloat = 22, duration: TimeInterval = 0.6, includeScale: Bool = false) {
+        // Position animation
+        let bounceAnimation = CAKeyframeAnimation(keyPath: "position")
+        let initialPosition = self.center
+        
+        // More points for smoother motion
+        let bounce1 = CGPoint(x: initialPosition.x, y: initialPosition.y - height)
+        let bounce2 = CGPoint(x: initialPosition.x, y: initialPosition.y - height/8)
+        let bounce3 = CGPoint(x: initialPosition.x, y: initialPosition.y - height/3)
+        let bounce4 = CGPoint(x: initialPosition.x, y: initialPosition.y - height/16)
+        let bounce5 = CGPoint(x: initialPosition.x, y: initialPosition.y)
+        
+        bounceAnimation.values = [
+            NSValue(cgPoint: initialPosition),
+            NSValue(cgPoint: bounce1),
+            NSValue(cgPoint: bounce2),
+            NSValue(cgPoint: bounce3),
+            NSValue(cgPoint: bounce4),
+            NSValue(cgPoint: bounce5)
+        ]
+        
+        bounceAnimation.keyTimes = [
+            0,
+            0.3,  // Reach peak faster
+            0.5,  // Quick drop
+            0.7,  // Small bounce
+            0.85, // Settle
+            1.0
+        ]
+        
+        bounceAnimation.timingFunctions = [
+            CAMediaTimingFunction(controlPoints: 0.4, 0.0, 0.2, 1.0), // Custom ease out
+            CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0), // Soft bounce
+            CAMediaTimingFunction(controlPoints: 0.3, 0.1, 0.3, 1.0), // Gentle ease
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeInEaseOut)
+        ]
+        
+        bounceAnimation.duration = duration
+        
+        if includeScale {
+            let scaleAnimation = CAKeyframeAnimation(keyPath: "transform.scale")
+            
+            scaleAnimation.values = [
+                1.0,   // Start normal
+                0.95,  // Slight squish
+                1.05,  // Small expand
+                1.0    // Back to normal
+            ]
+            
+            scaleAnimation.keyTimes = [
+                0,
+                0.3,
+                0.6,
+                1.0
+            ]
+            
+            scaleAnimation.duration = duration
+            
+            let animationGroup = CAAnimationGroup()
+            animationGroup.animations = [bounceAnimation, scaleAnimation]
+            animationGroup.duration = duration
+            
+            self.layer.add(animationGroup, forKey: "bounceAndScaleAnimation")
+        } else {
+            self.layer.add(bounceAnimation, forKey: "bounceAnimation")
+        }
+    }
+    
     func scaleAnimation(scaleTo: CGFloat = 1.3, duration: TimeInterval = 0.3) {
         let scaleAnimation = CAKeyframeAnimation(keyPath: "transform.scale")
         

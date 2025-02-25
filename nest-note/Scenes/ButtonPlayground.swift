@@ -224,6 +224,10 @@ class GlassyButton: UIButton {
     private let thinBorderGradientLayer = CAGradientLayer()
     private let innerBorderGradientLayer = CAGradientLayer()
     
+    private(set) var mainBorderWidth: CGFloat = 5.0
+    private(set) var thinBorderWidth: CGFloat = 1.5
+    private(set) var innerBorderWidth: CGFloat = 1.5
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupButton()
@@ -282,12 +286,8 @@ class GlassyButton: UIButton {
         updateBorderGradient()
     }
     
-    private func updateBorderGradient() {
+    func updateBorderGradient() {
         guard let backgroundColor = backgroundColor else { return }
-        
-        let mainBorderWidth: CGFloat = 5.0
-        let thinBorderWidth: CGFloat = 1.5
-        let innerBorderWidth: CGFloat = 1.5
         
         // Configure main gradient
         borderGradientLayer.frame = bounds
@@ -378,6 +378,20 @@ class GlassyButton: UIButton {
             updateBorderGradient()
         }
     }
+    
+    func updateBorderWidths(main: CGFloat? = nil, thin: CGFloat? = nil, inner: CGFloat? = nil) {
+        if let main = main {
+            mainBorderWidth = main
+        }
+        if let thin = thin {
+            thinBorderWidth = thin
+        }
+        if let inner = inner {
+            innerBorderWidth = inner
+        }
+        updateBorderGradient()
+    }
+    
 }
 
 // Add these helper methods for color manipulation

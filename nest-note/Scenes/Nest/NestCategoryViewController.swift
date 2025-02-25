@@ -8,6 +8,10 @@
 import UIKit
 
 class NestCategoryViewController: UIViewController, NestLoadable {
+    func handleLoadedData() {
+        return
+    }
+    
     // Required by NestLoadable
     var loadingIndicator: UIActivityIndicatorView!
     var hasLoadedInitialData: Bool = false

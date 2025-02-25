@@ -7,8 +7,8 @@ protocol InviteSitterViewControllerDelegate: AnyObject {
 class InviteSitterViewController: NNViewController {
     
     private let searchBarView: NNSearchBarView = {
-        let view = NNSearchBarView()
-        view.frame.size.height = 50
+        let view = NNSearchBarView(placeholder: "Search for a sitter")
+        view.frame.size.height = 60
         return view
     }()
     
@@ -16,6 +16,7 @@ class InviteSitterViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, SitterItem>!
     private var inviteButton: NNPrimaryLabeledButton!
     private var selectedSitter: SitterItem?
+    private let initialSelectedSitter: SitterItem?
     
     enum Section {
         case recent
@@ -26,27 +27,43 @@ class InviteSitterViewController: NNViewController {
     
     // Replace sampleSitters with this larger dataset
     private let sampleSitters = [
-        SitterItem(name: "Sarah Johnson", email: "sarah.j@gmail.com"),
-        SitterItem(name: "Mike Peters", email: "mike.peters@yahoo.com"),
-        SitterItem(name: "Emma Wilson", email: "emma.w@outlook.com"),
-        SitterItem(name: "Alex Thompson", email: "alex.t@gmail.com"),
-        SitterItem(name: "Lisa Chen", email: "lisa.chen@outlook.com"),
-        SitterItem(name: "David Miller", email: "david.m@gmail.com"),
-        SitterItem(name: "Rachel Green", email: "rachel.g@yahoo.com"),
-        SitterItem(name: "James Wilson", email: "james.w@gmail.com"),
-        SitterItem(name: "Sophie Brown", email: "sophie.b@outlook.com"),
-        SitterItem(name: "Oliver Smith", email: "oliver.s@gmail.com"),
-        SitterItem(name: "Emily Davis", email: "emily.d@yahoo.com"),
-        SitterItem(name: "Michael Chang", email: "michael.c@gmail.com"),
-        SitterItem(name: "Isabella Rodriguez", email: "bella.r@outlook.com")
+        SitterItem(id: "1", name: "Sarah Johnson", email: "sarah.j@gmail.com"),
+        SitterItem(id: "2", name: "Mike Peters", email: "mike.peters@yahoo.com"),
+        SitterItem(id: "3", name: "Emma Wilson", email: "emma.w@outlook.com"),
+        SitterItem(id: "4", name: "Alex Thompson", email: "alex.t@gmail.com"),
+        SitterItem(id: "5", name: "Lisa Chen", email: "lisa.chen@outlook.com"),
+        SitterItem(id: "6", name: "David Miller", email: "david.m@gmail.com"),
+        SitterItem(id: "7", name: "Rachel Green", email: "rachel.g@yahoo.com"),
+        SitterItem(id: "8", name: "James Wilson", email: "james.w@gmail.com"),
+        SitterItem(id: "9", name: "Sophie Brown", email: "sophie.b@outlook.com"),
+        SitterItem(id: "10", name: "Oliver Smith", email: "oliver.s@gmail.com"),
+        SitterItem(id: "11", name: "Emily Davis", email: "emily.d@yahoo.com"),
+        SitterItem(id: "12", name: "Michael Chang", email: "michael.c@gmail.com"),
+        SitterItem(id: "13", name: "Isabella Rodriguez", email: "bella.r@outlook.com")
     ]
     
     weak var delegate: InviteSitterViewControllerDelegate?
     
+    init(selectedSitter: SitterItem? = nil) {
+        self.initialSelectedSitter = selectedSitter
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-        filterSitters(with: "")
-        updateInviteButtonState()
+        
+        // Set initial selection first
+        if let sitter = initialSelectedSitter {
+            selectedSitter = sitter
+            updateInviteButtonState()
+        }
+        
+        // Then load sitters and apply snapshot
+        loadSitters()
     }
     
     override func setup() {
@@ -54,8 +71,8 @@ class InviteSitterViewController: NNViewController {
         searchBarView.searchBar.delegate = self
         
         // Initialize sitters
-        allSitters = sampleSitters
-        filteredSitters = allSitters
+//        allSitters = sampleSitters
+//        filteredSitters = allSitters
     }
     
     override func addSubviews() {
@@ -73,10 +90,6 @@ class InviteSitterViewController: NNViewController {
         let buttons = [closeButton]
         buttons.forEach { $0.tintColor = .label }
         navigationItem.rightBarButtonItems = buttons
-    }
-    
-    @objc func closeButtonTapped() {
-        self.dismiss(animated: true)
     }
     
     private func setupCollectionView() {
@@ -151,7 +164,19 @@ class InviteSitterViewController: NNViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, SitterItem>()
         snapshot.appendSections([.recent])
         snapshot.appendItems(filteredSitters, toSection: .recent)
-        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+        
+        // First apply the snapshot
+        dataSource.apply(snapshot, animatingDifferences: animatingDifferences) { [weak self] in
+            // Then update the UI to reflect selection
+            guard let self = self,
+                  let selectedSitter = self.selectedSitter,
+                  let index = self.filteredSitters.firstIndex(where: { $0.id == selectedSitter.id }) else { return }
+            
+            DispatchQueue.main.async {
+                let indexPath = IndexPath(row: index, section: 0)
+                self.collectionView.selectItem(at: indexPath, animated: false, scrollPosition: .centeredVertically)
+            }
+        }
     }
     
     private func filterSitters(with searchText: String) {
@@ -181,41 +206,57 @@ class InviteSitterViewController: NNViewController {
     private func updateInviteButtonState() {
         inviteButton.isEnabled = selectedSitter != nil
     }
+    
+    private func loadSitters() {
+        Task {
+            do {
+                allSitters = sampleSitters
+                filteredSitters = allSitters
+                applySnapshot()
+            } catch {
+//                Logger.log(level: .error, category: .sitterService, message: "Failed to load sitters: \(error.localizedDescription)")
+            }
+        }
+    }
 }
 
 // Add UICollectionViewDelegate
 extension InviteSitterViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let selectedSitter = dataSource.itemIdentifier(for: indexPath) else { return }
+        guard let tappedSitter = dataSource.itemIdentifier(for: indexPath) else { return }
         
-        var snapshot = dataSource.snapshot()
+        // Store previous selection before updating
+        let previousSitter = selectedSitter
         
-        // If selecting the same sitter, deselect it
-        if self.selectedSitter?.id == selectedSitter.id {
-            self.selectedSitter = nil
-            snapshot.reloadItems([selectedSitter])
+        // Toggle selection
+        if selectedSitter?.id == tappedSitter.id {
+            selectedSitter = nil
         } else {
-            // If selecting a different sitter:
-            // 1. Clear previous selection if it exists
-            if let previousSitter = self.selectedSitter {
-                snapshot.reloadItems([previousSitter])
-            }
-            
-            // 2. Set new selection
-            self.selectedSitter = selectedSitter
-            snapshot.reloadItems([selectedSitter])
+            selectedSitter = tappedSitter
         }
         
-        // Apply changes
+        // Update UI
+        var snapshot = dataSource.snapshot()
+        
+        // Always reconfigure the tapped cell
+        snapshot.reconfigureItems([tappedSitter])
+        
+        // If there was a previous selection, reconfigure that cell too
+        if let previous = previousSitter, previous.id != tappedSitter.id {
+            snapshot.reconfigureItems([previous])
+        }
+        
         dataSource.apply(snapshot, animatingDifferences: true)
         
-        // Deselect for visual feedback
+        // Always deselect the cell to remove the persistent highlight
         collectionView.deselectItem(at: indexPath, animated: true)
         
-        // Update button state
         updateInviteButtonState()
-        
         searchBarView.searchBar.resignFirstResponder()
+    }
+    
+    func shouldHighlightItem(at indexPath: IndexPath, in collectionView: UICollectionView) -> Bool {
+        return true
     }
 }
 

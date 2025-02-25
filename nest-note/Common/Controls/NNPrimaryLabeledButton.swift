@@ -46,6 +46,8 @@ class NNBaseControl: UIControl {
         return stack
     }()
     
+    private var visualEffectView: UIVisualEffectView?
+    
     // MARK: - Initialization
     init(title: String, image: UIImage? = nil) {
         super.init(frame: .zero)
@@ -59,6 +61,10 @@ class NNBaseControl: UIControl {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = 18
+    }
+    
+    func setTitle(_ title: String) {
+        self.titleLabel.text = title
     }
     
     // MARK: - Setup
@@ -154,20 +160,6 @@ class NNBaseControl: UIControl {
             layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
         }
     }
-}
-
-// Now NNPrimaryLabeledButton can be much simpler
-class NNPrimaryLabeledButton: NNBaseControl {
-    private var visualEffectView: UIVisualEffectView?
-    
-    override var isEnabled: Bool {
-        didSet {
-            UIView.animate(withDuration: 0.3) {
-                self.backgroundColor = self.isEnabled ? NNColors.primary : .systemGray4
-                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
-            }
-        }
-    }
     
     /// Pins the button to the bottom of the superview with standard insets and optionally adds a blur effect
     /// - Parameters:
@@ -179,13 +171,13 @@ class NNPrimaryLabeledButton: NNBaseControl {
     ///   - addBlurEffect: Whether to add a blur effect view below the button (default is false)
     ///   - blurRadius: The radius of the blur effect (default is 16)
     ///   - blurMaskImage: The mask image for the blur effect (default is nil)
-    func pinToBottom(of view: UIView, 
-                    useSafeArea: Bool = true, 
-                    horizontalPadding: CGFloat = 20, 
-                    bottomPadding: CGFloat = 10, 
-                    height: CGFloat = 55, 
-                    addBlurEffect: Bool = false, 
-                    blurRadius: Double = 16, 
+    func pinToBottom(of view: UIView,
+                    useSafeArea: Bool = true,
+                    horizontalPadding: CGFloat = 20,
+                    bottomPadding: CGFloat = 10,
+                    height: CGFloat = 55,
+                    addBlurEffect: Bool = false,
+                    blurRadius: Double = 16,
                     blurMaskImage: UIImage? = nil) {
         translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(self)
@@ -225,6 +217,19 @@ class NNPrimaryLabeledButton: NNBaseControl {
             visualEffectView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             visualEffectView.topAnchor.constraint(equalTo: bottomAnchor, constant: -self.frame.height - 80)
         ])
+    }
+}
+
+// Now NNPrimaryLabeledButton can be much simpler
+class NNPrimaryLabeledButton: NNBaseControl {
+    
+    override var isEnabled: Bool {
+        didSet {
+            UIView.animate(withDuration: 0.3) {
+                self.backgroundColor = self.isEnabled ? NNColors.primary : .systemGray4
+                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
+            }
+        }
     }
 }
 
@@ -453,7 +458,7 @@ enum FillStyle {
 }
 
 // Add the UIColor extension for darker colors
-private extension UIColor {
+extension UIColor {
     func darker(by percentage: CGFloat = 30.0) -> UIColor {
         return self.adjust(by: -1 * abs(percentage))
     }
@@ -509,7 +514,8 @@ class NNSmallPrimaryButton: UIButton {
         layer.cornerRadius = 18
     }
     
-    func setTitle(title: String) {
+    override func setTitle(_ title: String?, for state: UIControl.State) {
+        guard let title else { return }
         var container = AttributeContainer()
         container.font = .systemFont(ofSize: 16, weight: .semibold)
         configuration?.attributedTitle = AttributedString(title, attributes: container)

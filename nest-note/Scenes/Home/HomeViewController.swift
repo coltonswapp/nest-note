@@ -33,6 +33,16 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         applyInitialSnapshots()
         collectionView.delegate = self
         
+        SessionManager.shared.setHomeViewController(self)
+        
+        // Add notification observer for session bar visibility changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(sessionBarVisibilityChanged),
+            name: NSNotification.Name("SessionBarVisibilityChanged"),
+            object: nil
+        )
+        
         NestService.shared.$currentNest
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -66,28 +76,44 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     }
     
     enum Section: Int, Hashable, CaseIterable {
+        case currentSession
         case nest
         case quickAccess
         case upcomingEvents
         
         init?(rawValue: Int) {
             switch rawValue {
-            case 0: self = .nest
-            case 1: self = .quickAccess
-            case 2: self = .upcomingEvents
+            case 0: self = .currentSession
+            case 1: self = .nest
+            case 2: self = .quickAccess
+            case 3: self = .upcomingEvents
             default: return nil
             }
         }
     }
     
     enum Item: Hashable {
+        case currentSession(title: String, duration: String)
         case nest(name: String, address: String)
         case quickAccess(String)
-        case event(String, String, String)
+        case upcomingEvents
+        case sessionEvent(SessionEvent)
+        case moreEvents(Int)
     }
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    
+    private var upcomingEvents: [SessionEvent] = [] {
+        didSet {
+            // Update the events cell when events change
+            if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .upcomingEvents).first {
+                var snapshot = dataSource.snapshot()
+                snapshot.reloadItems([eventsItem])
+                dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+    }
     
     private func configureCollectionView() {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
@@ -98,6 +124,25 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     private func createLayout() -> UICollectionViewLayout {
         let layout = UICollectionViewCompositionalLayout { (sectionIndex, layoutEnvironment) -> NSCollectionLayoutSection? in
             switch self.dataSource.snapshot().sectionIdentifiers[sectionIndex] {
+            case .currentSession:
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 18, bottom: 2, trailing: 18)
+                
+                // Add footer
+                let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(20))
+                let footer = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: footerSize,
+                    elementKind: UICollectionView.elementKindSectionFooter,
+                    alignment: .bottom
+                )
+                section.boundarySupplementaryItems = [footer]
+                
+                return section
+                
             case .nest:
                 // Full width item with fixed height of 220
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
@@ -122,7 +167,7 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 return section
                 
             case .upcomingEvents:
-                var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+                var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 configuration.showsSeparators = true
                 configuration.separatorConfiguration.color = .separator
                 
@@ -137,8 +182,13 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
                 section.boundarySupplementaryItems = [header]
                 
-                // Adjust content insets if needed
-                section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+                // Add section insets to match iOS standard insetGrouped style
+                section.contentInsets = NSDirectionalEdgeInsets(
+                    top: 0,
+                    leading: 16,
+                    bottom: 0,
+                    trailing: 16
+                )
                 
                 return section
             }
@@ -156,7 +206,7 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 cell.imageView.tintColor = .label
             }
             
-            cell.backgroundColor = .systemGray6
+            cell.backgroundColor = .secondarySystemGroupedBackground
             cell.layer.cornerRadius = 12
             cell.layer.masksToBounds = true
         }
@@ -173,29 +223,75 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 cell.imageView.tintColor = .label
             }
             
-            cell.backgroundColor = .systemGray6
+            cell.backgroundColor = .secondarySystemGroupedBackground
             cell.layer.cornerRadius = 12
             cell.layer.masksToBounds = true
         }
         
-        let eventCellRegistration = UICollectionView.CellRegistration<EventCell, Item> { cell, indexPath, item in
-            if case let .event(title, time, status) = item {
-                cell.configure(title: title, time: time, status: status)
+        let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
+            if case .upcomingEvents = item {
+                cell.configure(eventCount: self.upcomingEvents.count)
             }
-            
-            cell.layer.cornerRadius = 12
-            cell.layer.masksToBounds = true
+        }
+        
+        let sessionEventRegistration = UICollectionView.CellRegistration<SessionEventCell, Item> { cell, indexPath, item in
+            if case let .sessionEvent(event) = item {
+                cell.includeDate = true
+                cell.configure(with: event)
+            }
+        }
+        
+        let moreEventsRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case let .moreEvents(count) = item {
+                var content = cell.defaultContentConfiguration()
+                let text = "+\(count) more"
+                
+                let attributedString = NSAttributedString(
+                    string: text,
+                    attributes: [
+                        .underlineStyle: NSUnderlineStyle.single.rawValue,
+                        .foregroundColor: UIColor.secondaryLabel
+                    ]
+                )
+                
+                content.attributedText = attributedString
+                content.textProperties.alignment = .center
+                cell.contentConfiguration = content
+            }
+        }
+        
+        let currentSessionCellRegistration = UICollectionView.CellRegistration<CurrentSessionCell, Item> { cell, indexPath, item in
+            if case let .currentSession(title, duration) = item {
+                cell.configure(title: title, duration: duration)
+                
+                // Configure the cell's background
+                var backgroundConfig = UIBackgroundConfiguration.listCell()
+                backgroundConfig.backgroundColor = NNColors.primaryAlt
+                backgroundConfig.cornerRadius = 12
+                cell.backgroundConfiguration = backgroundConfig
+            }
         }
         
         // DataSource
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch self.dataSource.snapshot().sectionIdentifiers[indexPath.section] {
+            case .currentSession:
+                return collectionView.dequeueConfiguredReusableCell(using: currentSessionCellRegistration, for: indexPath, item: item)
             case .nest:
                 return collectionView.dequeueConfiguredReusableCell(using: nestCellRegistration, for: indexPath, item: item)
             case .quickAccess:
                 return collectionView.dequeueConfiguredReusableCell(using: quickAccessCellRegistration, for: indexPath, item: item)
             case .upcomingEvents:
-                return collectionView.dequeueConfiguredReusableCell(using: eventCellRegistration, for: indexPath, item: item)
+                switch item {
+                case .upcomingEvents:
+                    return collectionView.dequeueConfiguredReusableCell(using: eventsCellRegistration, for: indexPath, item: item)
+                case .sessionEvent:
+                    return collectionView.dequeueConfiguredReusableCell(using: sessionEventRegistration, for: indexPath, item: item)
+                case .moreEvents:
+                    return collectionView.dequeueConfiguredReusableCell(using: moreEventsRegistration, for: indexPath, item: item)
+                default:
+                    fatalError("Unexpected item type in upcomingEvents section")
+                }
             }
         }
         
@@ -204,8 +300,30 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
             supplementaryView.fullScheduleButton.addTarget(self, action: #selector(self.fullScheduleButtonTapped), for: .touchUpInside)
         }
         
+        // In configureDataSource(), add the footer registration
+        let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { supplementaryView, elementKind, indexPath in
+            var configuration = supplementaryView.defaultContentConfiguration()
+            
+            // Configure footer based on section
+            if case .currentSession = self.dataSource.snapshot().sectionIdentifiers[indexPath.section] {
+                configuration.text = "Tap for session details"
+                configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
+                configuration.textProperties.color = .tertiaryLabel
+                configuration.textProperties.alignment = .center
+            }
+            
+            supplementaryView.contentConfiguration = configuration
+        }
+        
+        // Update the supplementaryViewProvider
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
-            return collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+            if kind == UICollectionView.elementKindSectionHeader {
+                return collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+            } else {
+                return collectionView.dequeueConfiguredReusableSupplementary(using: footerRegistration, for: indexPath)
+            }
         }
     }
     
@@ -213,21 +331,21 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
         // Reload the data for the current user
         Task {
             await updateNestCell()
+            loadUpcomingEvents()
         }
     }
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
-        snapshot.appendSections([.nest, .quickAccess, .upcomingEvents])
+        snapshot.appendSections([.currentSession, .nest, .quickAccess, .upcomingEvents])
+        
+        // Add current session
+        snapshot.appendItems([.currentSession(title: "Finch Family Session", duration: "Dec. 4-6")], toSection: .currentSession)
         
         // Nest section will be populated by updateNestCell()
         snapshot.appendItems([.quickAccess("Household"), .quickAccess("Emergency")], toSection: .quickAccess)
-        snapshot.appendItems([
-            .event("Dinner", "6:00pm", "In 2 hrs"),
-            .event("Cheer pickup", "7:15pm", "In 3 hrs"),
-            .event("Wake up routines", "7:45am", "Tomorrow")
-        ], toSection: .upcomingEvents)
+        snapshot.appendItems([.upcomingEvents], toSection: .upcomingEvents) // Just add the header cell
         
         dataSource.apply(snapshot, animatingDifferences: false)
     }
@@ -287,11 +405,58 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
             let categoryVC = NestCategoryViewController(category: type)
             navigationController?.pushViewController(categoryVC, animated: true)
             
-        case .event(let title, let time, let status):
-            print("Selected Event: \(title) at \(time), Status: \(status)")
+        case .upcomingEvents:
+            fullScheduleButtonTapped()
+        default:
+            break
         }
         
         // Optionally, deselect the item
         collectionView.deselectItem(at: indexPath, animated: true)
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateCollectionViewInsets()
+    }
+    
+    private func updateCollectionViewInsets() {
+        let bottomInset = SessionManager.shared.getRequiredBottomInset()
+        collectionView.contentInset.bottom = bottomInset
+        collectionView.scrollIndicatorInsets.bottom = bottomInset
+    }
+    
+    @objc private func sessionBarVisibilityChanged() {
+        UIView.animate(withDuration: 0.3) {
+            self.updateCollectionViewInsets()
+        }
+    }
+    
+    private func loadUpcomingEvents() {
+        // Generate random events
+        upcomingEvents = SessionEventGenerator.generateRandomEvents(
+            in: DateInterval(start: Date(), 
+                            end: Date().addingTimeInterval(2700)), 
+            count: 6
+        )
+        
+        // Update the snapshot to show events
+        var snapshot = dataSource.snapshot()
+        let upcomingEventsItems = snapshot.itemIdentifiers(inSection: .upcomingEvents)
+        snapshot.deleteItems(upcomingEventsItems)
+        
+        // Add header cell
+        snapshot.appendItems([.upcomingEvents], toSection: .upcomingEvents)
+        
+        // Add visible events (up to 3)
+        let visibleEvents = upcomingEvents.prefix(3)
+        snapshot.appendItems(visibleEvents.map { .sessionEvent($0) }, toSection: .upcomingEvents)
+        
+        // Add "more" cell if needed
+        if upcomingEvents.count > 3 {
+            snapshot.appendItems([.moreEvents(upcomingEvents.count - 3)], toSection: .upcomingEvents)
+        }
+        
+        dataSource.apply(snapshot, animatingDifferences: true)
     }
 }

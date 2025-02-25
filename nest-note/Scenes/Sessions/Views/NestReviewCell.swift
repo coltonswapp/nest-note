@@ -8,6 +8,9 @@
 import UIKit
 
 final class NestReviewCell: UICollectionViewListCell {
+    
+    weak var delegate: EntryReviewCellDelegate?
+    
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -42,6 +45,7 @@ final class NestReviewCell: UICollectionViewListCell {
         var container = AttributeContainer()
         container.font = .systemFont(ofSize: 16, weight: .bold)
         button.configuration?.attributedTitle = AttributedString("Review Nest", attributes: container)
+        button.addTarget(self, action: #selector(reviewButtonTapped), for: .touchUpInside)
         return button
     }()
     
@@ -76,6 +80,10 @@ final class NestReviewCell: UICollectionViewListCell {
     }
     
     func configure(itemCount: Int) {
-        reviewButton.setTitle(title: "Review \(itemCount) items")
+        reviewButton.setTitle("Review \(itemCount) items", for: .normal)
+    }
+    
+    @objc func reviewButtonTapped() {
+        delegate?.didTapReview()
     }
 }

@@ -40,4 +40,8 @@ class NNViewController: UIViewController {
         // Default empty implementation
         // Subclasses can override this if needed
     }
+    
+    @objc func closeButtonTapped() {
+        self.dismiss(animated: true)
+    }
 }

@@ -9,6 +9,19 @@ protocol VisibilityCellDelegate: AnyObject {
     func didChangeVisibilityLevel(_ level: VisibilityLevel)
 }
 
+protocol EntryReviewCellDelegate: AnyObject {
+    func didTapReview()
+}
+
+protocol EditSessionViewControllerDelegate: AnyObject {
+    func editSessionViewController(_ controller: EditSessionViewController, didCreateSession session: SessionItem)
+    func editSessionViewController(_ controller: EditSessionViewController, didUpdateSession session: SessionItem)
+}
+
+protocol StatusCellDelegate: AnyObject {
+    func didChangeSessionStatus(_ status: SessionStatus)
+}
+
 final class EditSessionViewController: NNViewController {
     // MARK: - Properties
     private var collectionView: UICollectionView!
@@ -30,6 +43,14 @@ final class EditSessionViewController: NNViewController {
     private var visibilityLevel: VisibilityLevel = .standard
     
     private var sessionItem: SessionItem
+    private var hasUnsavedChanges: Bool = false {
+        didSet {
+            updateSaveButtonState()
+        }
+    }
+    
+    // Keep a copy of the original session for comparison
+    private let originalSession: SessionItem
     
     private var visibilityMenu: UIMenu {
         let standard = UIAction(title: "Standard", image: UIImage(systemName: "eye")) { [weak self] _ in
@@ -54,8 +75,70 @@ final class EditSessionViewController: NNViewController {
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
     
+    // Add property for save button
+    private lazy var saveButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(title: "Create Session")
+        button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
+        return button
+    }()
+    
+    // Add selectedSitter property
+    private var selectedSitter: SitterItem? {
+        didSet {
+            // Update the UI when sitter changes
+            if let snapshot = dataSource.snapshot().itemIdentifiers(inSection: .sitter).first {
+                var newSnapshot = dataSource.snapshot()
+                newSnapshot.reloadItems([snapshot])
+                dataSource.apply(newSnapshot, animatingDifferences: true)
+            }
+        }
+    }
+    
+    weak var delegate: EditSessionViewControllerDelegate?
+    
+    private let isEditingSession: Bool
+    
+    // Computed properties to access current date values
+    private var currentDateSelection: (startDate: Date, endDate: Date, isMultiDay: Bool)? {
+        guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+              case let .dateSelection(start, end, multiDay) = dateItem else {
+            return nil
+        }
+        return (start, end, multiDay)
+    }
+    
+    private var currentStartDate: Date {
+        return currentDateSelection?.startDate ?? Date()
+    }
+    
+    private var currentEndDate: Date {
+        return currentDateSelection?.endDate ?? Date().addingTimeInterval(60 * 60 * 2)
+    }
+    
+    private var currentIsMultiDay: Bool {
+        return currentDateSelection?.isMultiDay ?? false
+    }
+    
+    // Add dateRange property for consistency
+    private let dateRange: DateInterval
+    
+    // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
+        self.originalSession = sessionItem
+        self.isEditingSession = sessionItem.id != UUID().uuidString
+        
+        // Create date range based on session type
+        if sessionItem.isMultiDay {
+            self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
+        } else {
+            // For single day, range is just that day
+            let calendar = Calendar.current
+            let startOfDay = calendar.middleOfDay(for: sessionItem.startDate)
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+            self.dateRange = DateInterval(start: startOfDay, end: endOfDay)
+        }
+        
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -74,6 +157,11 @@ final class EditSessionViewController: NNViewController {
             sheetPresentationController.detents = [.large()]
             sheetPresentationController.prefersGrabberVisible = false
         }
+        
+        // Fetch events if we're editing an existing session
+        if isEditingSession {
+            fetchSessionEvents()
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -81,10 +169,38 @@ final class EditSessionViewController: NNViewController {
     }
     
     override func setup() {
+        super.setup()
+        
         configureCollectionView()
         setupNavigationBar()
         configureDataSource()
         applyInitialSnapshots()
+        
+        saveButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        
+        // Update UI based on editing state
+        titleTextField.text = sessionItem.title
+        updateSaveButtonState()
+        
+        // If editing, pre-populate the date selection
+        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+           case .dateSelection = dateItem {
+            var newSnapshot = dataSource.snapshot()
+            newSnapshot.deleteItems([dateItem])
+            newSnapshot.appendItems([.dateSelection(
+                startDate: sessionItem.startDate,
+                endDate: sessionItem.endDate,
+                isMultiDay: sessionItem.isMultiDay
+            )], toSection: .date)
+            dataSource.apply(newSnapshot, animatingDifferences: false)
+        }
+        
+        // Pre-populate other fields if editing
+        visibilityLevel = sessionItem.visibilityLevel
+        selectedSitter = sessionItem.associatedSitterID.map { id in
+            // You'll need to fetch the actual sitter details
+            SitterItem(id: "1", name: "Sitter Name", email: "email@example.com")
+        }
         
         // Generate exactly 6 test events
 //        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
@@ -93,6 +209,14 @@ final class EditSessionViewController: NNViewController {
 //            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
 //            updateEventsSection(with: sessionEvents)
 //        }
+        
+        // Add observer for status info
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showStatusInfo),
+            name: Notification.Name("ShowSessionStatusInfo"),
+            object: nil
+        )
     }
     
     private func setupNavigationBar() {
@@ -155,8 +279,50 @@ final class EditSessionViewController: NNViewController {
         titleTextField.delegate = self
     }
     
-    @objc private func closeButtonTapped() {
+    @objc override func closeButtonTapped() {
         dismiss(animated: true)
+    }
+    
+    @objc private func saveButtonTapped() {
+        Task {
+            do {
+                // Validate required fields
+                guard let title = titleTextField.text, !title.isEmpty else {
+                    showToast(text: "Please enter a session title", sentiment: .negative)
+                    return
+                }
+                
+                guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+                      case let .dateSelection(startDate, endDate, isMultiDay) = dateItem else {
+                    showToast(text: "Invalid date selection", sentiment: .negative)
+                    return
+                }
+                
+                // Update existing sessionItem with new values
+                sessionItem.title = title
+                sessionItem.associatedSitterID = selectedSitter?.id
+                sessionItem.startDate = startDate
+                sessionItem.endDate = endDate
+                sessionItem.isMultiDay = isMultiDay
+                sessionItem.visibilityLevel = visibilityLevel
+                
+                if isEditingSession {
+                    try await SessionService.shared.updateSession(sessionItem)
+                    delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
+                } else {
+                    let newSession = try await SessionService.shared.createSession(sessionItem)
+                    delegate?.editSessionViewController(self, didCreateSession: newSession)
+                }
+                
+                dismiss(animated: true)
+                
+            } catch ServiceError.noCurrentNest {
+                showToast(text: "Something went wrong", sentiment: .negative)
+            } catch {
+                showToast(text: "Failed to \(isEditingSession ? "update" : "create") session")
+                Logger.log(level: .error, category: .sessionService, message: "Error saving session: \(error.localizedDescription)")
+            }
+        }
     }
     
     // MARK: - Collection View Setup
@@ -164,7 +330,18 @@ final class EditSessionViewController: NNViewController {
         let layout = createLayout()
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.contentInset = UIEdgeInsets(top: 20, left: 0, bottom: 40, right: 0)
+        
+        let insets = UIEdgeInsets(
+            top: 20,
+            left: 0,
+            bottom: 100, // Increased to accommodate button height + padding
+            right: 0
+        )
+        
+        // Add bottom inset to accommodate the pinned button
+        collectionView.contentInset = insets
+        collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: insets.bottom - 30, right: 0)
+        
         view.addSubview(collectionView)
     }
     
@@ -194,9 +371,10 @@ final class EditSessionViewController: NNViewController {
             
             switch item {
             case .inviteSitter:
-                if let sitter = self?.sessionItem.sitter {
+                if let sitter = self?.selectedSitter {
                     // Show selected sitter
                     content.text = sitter.name
+                    content.secondaryText = sitter.email
                     
                     let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
                         .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
@@ -204,6 +382,7 @@ final class EditSessionViewController: NNViewController {
                 } else {
                     // Show default state
                     content.text = "Add a sitter"
+                    content.secondaryText = nil
                     
                     let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
                     let image = UIImage(systemName: "person.badge.plus", withConfiguration: symbolConfiguration)?
@@ -233,9 +412,17 @@ final class EditSessionViewController: NNViewController {
             }
         }
         
+        let statusRegistration = UICollectionView.CellRegistration<StatusCell, Item> { [weak self] cell, indexPath, item in
+            if case let .sessionStatus(status) = item {
+                cell.configure(with: status)
+                cell.delegate = self
+            }
+        }
+        
         let nestReviewRegistration = UICollectionView.CellRegistration<NestReviewCell, Item> { cell, indexPath, item in
             if case .nestReview = item {
                 cell.configure(itemCount: 12) // You can make this dynamic later
+                cell.delegate = self
             }
         }
         
@@ -246,9 +433,9 @@ final class EditSessionViewController: NNViewController {
             }
         }
         
-        let eventsRegistration = UICollectionView.CellRegistration<EventsCell, Item> { [weak self] cell, indexPath, item in
+        let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
             if case .events = item {
-                cell.configure(eventCount: self?.sessionEvents.count ?? 0)
+                cell.configure(eventCount: self.sessionEvents.count ?? 0)
             }
         }
         
@@ -311,12 +498,14 @@ final class EditSessionViewController: NNViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: inviteSitterRegistration, for: indexPath, item: item)
             case .visibilityLevel(let level):
                 return collectionView.dequeueConfiguredReusableCell(using: visibilityRegistration, for: indexPath, item: item)
+            case .sessionStatus(let status):
+                return collectionView.dequeueConfiguredReusableCell(using: statusRegistration, for: indexPath, item: item)
             case .nestReview:
                 return collectionView.dequeueConfiguredReusableCell(using: nestReviewRegistration, for: indexPath, item: item)
             case .dateSelection:
                 return collectionView.dequeueConfiguredReusableCell(using: dateRegistration, for: indexPath, item: item)
             case .events:
-                return collectionView.dequeueConfiguredReusableCell(using: eventsRegistration, for: indexPath, item: item)
+                return collectionView.dequeueConfiguredReusableCell(using: eventsCellRegistration, for: indexPath, item: item)
             case .sessionEvent(let event):
                 return collectionView.dequeueConfiguredReusableCell(using: sessionEventRegistration, for: indexPath, item: item)
             case .moreEvents(let count):
@@ -335,9 +524,10 @@ final class EditSessionViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.sitter, .date, .visibility, .nestReview, .events])
+        snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .events])
         snapshot.appendItems([.inviteSitter], toSection: .sitter)
         snapshot.appendItems([.visibilityLevel(visibilityLevel)], toSection: .visibility)
+        snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
         snapshot.appendItems([.nestReview], toSection: .nestReview)
         snapshot.appendItems([.dateSelection(startDate: initialDate.0, endDate: initialDate.1, isMultiDay: initialDate.2)], toSection: .date)
         snapshot.appendItems([.events], toSection: .events)
@@ -356,21 +546,14 @@ final class EditSessionViewController: NNViewController {
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
-        let eventVC = SessionEventViewController()
+        let eventVC = SessionEventViewController(sessionID: sessionItem.id)
         present(eventVC, animated: true)
     }
     
-    @objc private func inviteSitterButtonTapped() {
-        let inviteSitterVC = InviteSitterViewController()
+    private func inviteSitterButtonTapped() {
+        let inviteSitterVC = InviteSitterViewController(selectedSitter: selectedSitter)
         inviteSitterVC.delegate = self
         let nav = UINavigationController(rootViewController: inviteSitterVC)
-        nav.modalPresentationStyle = .formSheet
-        
-        if let sheet = nav.sheetPresentationController {
-            sheet.detents = [.large()]
-            sheet.prefersGrabberVisible = true
-        }
-        
         present(nav, animated: true)
     }
     
@@ -422,10 +605,146 @@ final class EditSessionViewController: NNViewController {
         }
         
         let dateRange = DateInterval(start: startDate, end: endDate)
-        let calendarVC = SessionCalendarViewController(dateRange: dateRange, events: sessionEvents)
+        let calendarVC = SessionCalendarViewController(sessionID: sessionItem.id, dateRange: dateRange, events: sessionEvents)
         calendarVC.delegate = self
         let nav = UINavigationController(rootViewController: calendarVC)
         present(nav, animated: true)
+    }
+    
+    private func presentEntryReview() {
+        let reviewVC = EntryReviewViewController()
+        let nav = UINavigationController(rootViewController: reviewVC)
+        
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        
+        present(nav, animated: true)
+    }
+    
+    private func updateSaveButtonState() {
+        saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
+        
+        // Update button title to show state
+        let baseTitle = isEditingSession ? "Save Changes" : "Create Session"
+        saveButton.titleLabel.text = hasUnsavedChanges ? baseTitle : baseTitle
+        
+        // Optionally animate the button if there are changes
+        if hasUnsavedChanges {
+            saveButton.transform = .identity
+            UIView.animate(withDuration: 0.3, delay: 0, options: [.allowUserInteraction]) {
+                self.saveButton.transform = .identity
+            }
+        }
+    }
+    
+    private func checkForChanges() {
+        let hasChanges = 
+            titleTextField.text != originalSession.title ||
+            selectedSitter?.id != originalSession.associatedSitterID ||
+            currentStartDate != originalSession.startDate ||
+            currentEndDate != originalSession.endDate ||
+            currentIsMultiDay != originalSession.isMultiDay ||
+            visibilityLevel != originalSession.visibilityLevel ||
+            sessionItem.status != originalSession.status
+        
+        hasUnsavedChanges = hasChanges
+    }
+    
+    private func fetchSessionEvents() {
+        Task {
+            do {
+                let events = try await SessionService.shared.getSessionEvents(sessionID: sessionItem.id)
+                
+                await MainActor.run {
+                    // Update local events array
+                    self.sessionEvents = events
+                    
+                    // Update the events section in the collection view
+                    updateEventsSection(with: events)
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    // Show error to user
+                    let alert = UIAlertController(
+                        title: "Error",
+                        message: "Failed to load session events. Please try again.",
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(alert, animated: true)
+                }
+            }
+        }
+    }
+    
+    // Add a method to refresh events (useful after calendar updates)
+    func refreshEvents() {
+        if isEditingSession {
+            fetchSessionEvents()
+        }
+    }
+    
+    // Update calendar presentation
+    private func presentCalendarViewController() {
+        let calendarVC = SessionCalendarViewController(
+            sessionID: sessionItem.id,
+            dateRange: dateRange,
+            events: sessionEvents
+        )
+        calendarVC.delegate = self
+        let nav = UINavigationController(rootViewController: calendarVC)
+        present(nav, animated: true)
+    }
+    
+    private var statusMenu: UIMenu {
+        let actions = [
+            UIAction(title: "Upcoming", image: UIImage(systemName: SessionStatus.upcoming.icon)) { [weak self] _ in
+                self?.updateSessionStatus(.upcoming)
+            },
+            UIAction(title: "In-progress", image: UIImage(systemName: SessionStatus.inProgress.icon)) { [weak self] _ in
+                self?.updateSessionStatus(.inProgress)
+            },
+            UIAction(title: "Extended", image: UIImage(systemName: SessionStatus.extended.icon)) { [weak self] _ in
+                self?.updateSessionStatus(.extended)
+            },
+            UIAction(title: "Completed", image: UIImage(systemName: SessionStatus.completed.icon)) { [weak self] _ in
+                self?.updateSessionStatus(.completed)
+            }
+        ]
+        
+        return UIMenu(title: "Select Session Status", children: actions)
+    }
+    
+    private func updateSessionStatus(_ status: SessionStatus) {
+        sessionItem.status = status
+        
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
+            snapshot.deleteItems([existingItem])
+            snapshot.appendItems([.sessionStatus(status)], toSection: .status)
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
+        checkForChanges()
+    }
+    
+    @objc private func showStatusInfo() {
+        let alert = UIAlertController(
+            title: "Session Status",
+            message: """
+            Upcoming: Session hasn't started yet
+            In-progress: Session is currently in progress
+            Extended: Session has gone past its end time
+            Completed: Session has been marked as finished
+            """,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 
@@ -435,6 +754,7 @@ extension EditSessionViewController {
         case overview
         case sitter
         case visibility
+        case status
         case nestReview
         case date
         case events
@@ -446,6 +766,7 @@ extension EditSessionViewController {
         case overview
         case inviteSitter
         case visibilityLevel(VisibilityLevel)
+        case sessionStatus(SessionStatus)
         case nestReview
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
         case events
@@ -461,20 +782,23 @@ extension EditSessionViewController {
             case .visibilityLevel(let level):
                 hasher.combine(2)
                 hasher.combine(level)
-            case .nestReview:
+            case .sessionStatus(let status):
                 hasher.combine(3)
-            case .dateSelection(let start, let end, let isMultiDay):
+                hasher.combine(status)
+            case .nestReview:
                 hasher.combine(4)
+            case .dateSelection(let start, let end, let isMultiDay):
+                hasher.combine(5)
                 hasher.combine(start)
                 hasher.combine(end)
                 hasher.combine(isMultiDay)
             case .events:
-                hasher.combine(5)
-            case .sessionEvent(let event):
                 hasher.combine(6)
+            case .sessionEvent(let event):
+                hasher.combine(7)
                 hasher.combine(event)
             case .moreEvents(let count):
-                hasher.combine(7)
+                hasher.combine(8)
                 hasher.combine(count)
             }
         }
@@ -488,6 +812,8 @@ extension EditSessionViewController {
                 return true
             case let (.visibilityLevel(l1), .visibilityLevel(l2)):
                 return l1 == l2
+            case let (.sessionStatus(s1), .sessionStatus(s2)):
+                return s1 == s2
             case let (.dateSelection(s1, e1, m1), .dateSelection(s2, e2, m2)):
                 return s1 == s2 && e1 == e2 && m1 == m2
             case let (.sessionEvent(e1), .sessionEvent(e2)):
@@ -520,14 +846,13 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .inviteSitter:
             inviteSitterButtonTapped()
         case .visibilityLevel:
-            // Present the menu
-            if let cell = collectionView.cellForItem(at: indexPath) {
-                presentVisibilityMenu(from: cell)
-            }
+            break
+        case .sessionStatus:
+            break
         case .dateSelection:
             break
         case .nestReview:
-            print("Tapped nest review")
+            break
         case .overview:
             break
         case .events, .moreEvents:
@@ -544,25 +869,16 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 presentSessionEventViewController()
             } else {
                 // For longer sessions, show the calendar view
-                presentSessionCalendarViewController()
+                presentCalendarViewController()
             }
         case .sessionEvent(let event):
             // Present event details
-            let eventVC = SessionEventViewController()
+            let eventVC = SessionEventViewController(sessionID: sessionItem.id, event: event)
+            eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
-    }
-    
-    private func presentVisibilityMenu(from cell: UICollectionViewCell) {
-        // Create a UIButton just for presenting the menu
-        let button = UIButton(frame: cell.bounds)
-        cell.addSubview(button)
-        button.menu = visibilityMenu
-        button.showsMenuAsPrimaryAction = true
-        button.sendActions(for: .touchUpInside)
-        button.removeFromSuperview()
     }
 }
 
@@ -570,6 +886,14 @@ extension EditSessionViewController: UICollectionViewDelegate {
 extension EditSessionViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
+        return true
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        // Schedule change check after text update
+        DispatchQueue.main.async {
+            self.checkForChanges()
+        }
         return true
     }
 }
@@ -596,6 +920,7 @@ extension EditSessionViewController: DatePresentationDelegate {
         }
         
         present(nav, animated: true)
+        checkForChanges()
     }
     
     func didToggleMultiDay(_ isMultiDay: Bool, startDate: Date, endDate: Date) {
@@ -609,10 +934,18 @@ extension EditSessionViewController: DatePresentationDelegate {
                                               isMultiDay: isMultiDay)],
                               toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
+        checkForChanges()
     }
 }
 
-// Add NNDateTimePickerSheetDelegate conformance
+// MARK: - Communicate from NestReviewCell to present entry review
+extension EditSessionViewController: EntryReviewCellDelegate {
+    func didTapReview() {
+        presentEntryReview()
+    }
+}
+
+// MARK: - Communicate from date cell to update session dates, etc
 extension EditSessionViewController: NNDateTimePickerSheetDelegate {
     func dateTimePickerSheet(_ sheet: NNDateTimePickerSheet, didSelectDate date: Date) {
         // Find the date cell and update it
@@ -700,49 +1033,99 @@ final class SessionOverviewCell: UICollectionViewListCell {
         }
     }
 }
+// Add delegate conformance
+extension EditSessionViewController: InviteSitterViewControllerDelegate {
+    func inviteSitterViewController(_ controller: InviteSitterViewController, didSelectSitter sitter: SitterItem) {
+        selectedSitter = sitter // Store the entire SitterItem
+        checkForChanges() // Add this to check for changes after sitter selection
+        dismiss(animated: true)
+    }
+} 
 
-final class EventsCell: UICollectionViewListCell {
+// Add delegate conformance
+extension EditSessionViewController: VisibilityCellDelegate {
+    func didChangeVisibilityLevel(_ level: VisibilityLevel) {
+        visibilityLevel = level
+        checkForChanges()
+    }
+} 
+
+// Add delegate conformance
+extension EditSessionViewController: SessionCalendarViewControllerDelegate {
+    func calendarViewController(_ controller: SessionCalendarViewController, didUpdateEvents events: [SessionEvent]) {
+        // Update local events array
+        sessionEvents = events
+        
+        // Update events section
+        updateEventsSection(with: events)
+        
+        // Check for unsaved changes
+        checkForChanges()
+    }
+} 
+
+// Add event delegate
+extension EditSessionViewController: SessionEventViewControllerDelegate {
+    func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
+        guard let event = event else { return }
+        
+        // Update local events array
+        if let existingIndex = sessionEvents.firstIndex(where: { $0.id == event.id }) {
+            sessionEvents[existingIndex] = event
+        } else {
+            sessionEvents.append(event)
+        }
+        
+        // Sort events by start time
+        sessionEvents.sort { $0.startDate < $1.startDate }
+        
+        // Update events section
+        updateEventsSection(with: sessionEvents)
+        
+        // Check for unsaved changes
+        checkForChanges()
+    }
+}
+
+private extension String {
+    var isNilOrEmpty: Bool {
+        return self.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+} 
+
+final class StatusCell: UICollectionViewListCell {
+    weak var delegate: StatusCellDelegate?
+    private var currentStatus: SessionStatus = .upcoming
+    
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = NNColors.primary
         
         let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
-            .applying(UIImage.SymbolConfiguration(hierarchicalColor: NNColors.primary))
-        
-        let image = UIImage(systemName: "calendar.badge.plus", withConfiguration: symbolConfig)
-        
-        imageView.image = image
+        imageView.image = UIImage(systemName: "eye.fill", withConfiguration: symbolConfig)
         return imageView
     }()
     
-    private let titleLabel: UILabel = {
+    private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Events"
         label.font = .preferredFont(forTextStyle: .body)
         label.adjustsFontForContentSizeCategory = true
+        label.text = "Session Status"
         return label
     }()
     
-    private let plusButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        
-        let symbolConfig = UIImage.SymbolConfiguration(weight: .regular)
-        let image = UIImage(systemName: "plus", withConfiguration: symbolConfig)?
-            .withTintColor(.systemBlue, renderingMode: .alwaysOriginal)
-        
-        button.setImage(image, for: .normal)
+    private lazy var statusButton: NNSmallPrimaryButton = {
+        let button = NNSmallPrimaryButton(
+            title: "Test",
+            image: UIImage(systemName: "chevron.up.chevron.down"),
+            imagePlacement: .right,
+            backgroundColor: NNColors.primary.withAlphaComponent(0.15),
+            foregroundColor: NNColors.primary
+        )
+        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
         return button
-    }()
-    
-    private let eventCountLabel: UILabel = {
-        let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .body)
-        label.textColor = .secondaryLabel
-        return label
     }()
     
     override init(frame: CGRect) {
@@ -755,10 +1138,10 @@ final class EventsCell: UICollectionViewListCell {
     }
     
     private func setupCell() {
-        contentView.addSubview(iconImageView)
-        contentView.addSubview(titleLabel)
-        contentView.addSubview(plusButton)
-        contentView.addSubview(eventCountLabel)
+        [titleLabel, statusButton, iconImageView].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview($0)
+        }
         
         NSLayoutConstraint.activate([
             iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
@@ -767,59 +1150,110 @@ final class EventsCell: UICollectionViewListCell {
             iconImageView.heightAnchor.constraint(equalToConstant: 24),
             
             titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
-            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             
-            plusButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            plusButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            plusButton.widthAnchor.constraint(equalToConstant: 28),
-            plusButton.heightAnchor.constraint(equalToConstant: 28),
-            
-            eventCountLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            eventCountLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            statusButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            statusButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            statusButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            statusButton.heightAnchor.constraint(equalToConstant: 40).with(priority: .defaultHigh)
         ])
+        
+        iconImageView.image = UIImage(systemName: "info.circle")?.withRenderingMode(.alwaysTemplate)
+        
+        // Add tap gesture to icon
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(iconTapped))
+        iconImageView.addGestureRecognizer(tapGesture)
+        iconImageView.isUserInteractionEnabled = true
     }
     
-    func configure(eventCount: Int) {
-        plusButton.isHidden = eventCount > 0
-        eventCountLabel.isHidden = eventCount == 0
+    func configure(with status: SessionStatus) {
+        currentStatus = status
+        updateButtonAppearance()
+        setupStatusMenu(selectedStatus: status)
+    }
+    
+    private func updateButtonAppearance() {
+        var container = AttributeContainer()
+        container.font = UIFont.boldSystemFont(ofSize: 16)
         
-        if eventCount > 0 {
-            eventCountLabel.text = "\(eventCount) events"
+        statusButton.configuration?.attributedTitle = AttributedString(currentStatus.displayName, attributes: container)
+        iconImageView.image = UIImage(systemName: currentStatus.icon)
+    }
+    
+    private func setupStatusMenu(selectedStatus: SessionStatus) {
+        let infoAction = UIAction(title: "About Session Status", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+            self?.showStatusInfo()
         }
-    }
-} 
-
-// Add delegate conformance
-extension EditSessionViewController: InviteSitterViewControllerDelegate {
-    func inviteSitterViewController(_ controller: InviteSitterViewController, didSelectSitter sitter: SitterItem) {
-        // Update the session with the selected sitter
-        sessionItem.sitter = sitter
         
-        // Update the UI to show the selected sitter
-        var snapshot = dataSource.snapshot()
-        if let sitterItem = snapshot.itemIdentifiers(inSection: .sitter).first {
-            snapshot.reloadItems([sitterItem])
-            dataSource.apply(snapshot, animatingDifferences: true)
-        }
-    }
-} 
-
-// Add delegate conformance
-extension EditSessionViewController: VisibilityCellDelegate {
-    func didChangeVisibilityLevel(_ level: VisibilityLevel) {
-        updateVisibilityLevel(level)
-    }
-} 
-
-// Add delegate conformance
-extension EditSessionViewController: SessionCalendarViewControllerDelegate {
-    func calendarViewController(_ controller: SessionCalendarViewController, didUpdateEvents events: [SessionEvent]) {
-        // Update local events
-        sessionEvents = events
+        let statusActions = [
+            UIAction(
+                title: "Upcoming",
+                image: UIImage(systemName: SessionStatus.upcoming.icon),
+                state: selectedStatus == .upcoming ? .on : .off
+            ) { [weak self] _ in
+                self?.updateStatus(.upcoming)
+            },
+            UIAction(
+                title: "In-progress",
+                image: UIImage(systemName: SessionStatus.inProgress.icon),
+                state: selectedStatus == .inProgress ? .on : .off
+            ) { [weak self] _ in
+                self?.updateStatus(.inProgress)
+            },
+            UIAction(
+                title: "Extended",
+                image: UIImage(systemName: SessionStatus.extended.icon),
+                state: selectedStatus == .extended ? .on : .off
+            ) { [weak self] _ in
+                self?.updateStatus(.extended)
+            },
+            UIAction(
+                title: "Completed",
+                image: UIImage(systemName: SessionStatus.completed.icon),
+                state: selectedStatus == .completed ? .on : .off
+            ) { [weak self] _ in
+                self?.updateStatus(.completed)
+            }
+        ]
         
-        // Update events section
-        updateEventsSection(with: events)
+        let statusSection = UIMenu(title: "Select Status", options: .displayInline, children: statusActions)
+        let infoSection = UIMenu(title: "Learn More", options: .displayInline, children: [infoAction])
+        
+        statusButton.menu = UIMenu(children: [statusSection, infoSection])
+        statusButton.showsMenuAsPrimaryAction = true
+    }
+    
+    private func updateStatus(_ newStatus: SessionStatus) {
+        HapticsHelper.lightHaptic()
+        currentStatus = newStatus
+        
+        // Update button appearance
+        updateButtonAppearance()
+        
+        // Notify delegate
+        delegate?.didChangeSessionStatus(newStatus)
+        
+        // Recreate menu with updated state
+        setupStatusMenu(selectedStatus: newStatus)
+    }
+    
+    private func showStatusInfo() {
+        // You can implement this to show a status info alert through your view controller
+        NotificationCenter.default.post(
+            name: Notification.Name("ShowSessionStatusInfo"),
+            object: nil
+        )
+    }
+    
+    @objc private func iconTapped() {
+        showStatusInfo()
+    }
+}
+
+// Add delegate conformance
+extension EditSessionViewController: StatusCellDelegate {
+    func didChangeSessionStatus(_ status: SessionStatus) {
+        updateSessionStatus(status)
     }
 } 
 

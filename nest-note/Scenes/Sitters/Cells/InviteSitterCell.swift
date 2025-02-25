@@ -3,22 +3,6 @@ import UIKit
 class InviteSitterCell: UICollectionViewListCell {
     static let reuseIdentifier = "InviteSitterCell"
     
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupViews()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupViews() {
-        // Configure the content view
-        var bgConfig = UIBackgroundConfiguration.listGroupedCell()
-        bgConfig.backgroundColor = .secondarySystemGroupedBackground
-        backgroundConfiguration = bgConfig
-    }
-    
     func configure(name: String, email: String, isSelected: Bool = false) {
         // Get default content configuration
         var content = defaultContentConfiguration()
