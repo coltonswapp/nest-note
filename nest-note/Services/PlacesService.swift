@@ -59,7 +59,7 @@ final class PlacesService {
         return place
     }
     
-    func fetchPlaces() async throws -> [Place] {
+    func fetchPlaces(includeTemporary: Bool = true) async throws -> [Place] {
         guard let nestId = NestService.shared.currentNest?.id else {
             throw ServiceError.noCurrentNest
         }
@@ -71,11 +71,14 @@ final class PlacesService {
             .collection("places")
             .getDocuments()
         
-        let places = try snapshot.documents.map { try $0.data(as: Place.self) }
-        self.places = places
+        let allPlaces = try snapshot.documents.map { try $0.data(as: Place.self) }
         
-        Logger.log(level: .info, category: .placesService, message: "Fetched \(places.count) places ✅")
-        return places
+        // Filter out temporary places if not requested
+        let filteredPlaces = includeTemporary ? allPlaces : allPlaces.filter { !$0.isTemporary }
+        self.places = filteredPlaces
+        
+        Logger.log(level: .info, category: .placesService, message: "Fetched \(filteredPlaces.count) places ✅ (\(filteredPlaces.filter(\.isTemporary).count) temp places)")
+        return filteredPlaces
     }
     
     func getPlace(for id: String) async -> Place? {
@@ -145,14 +148,19 @@ final class PlacesService {
     }
     
     func loadImages(for place: Place) async throws -> UIImage {
+        // If the place has no thumbnails (temporary place), return a placeholder
+        guard let thumbnailURLs = place.thumbnailURLs else {
+            return UIImage(systemName: "mappin.circle") ?? UIImage()
+        }
+        
         // Load both images concurrently
         
         if let asset = imageAssets[place.id] {
             return asset.image(with: .current)
         }
         
-        async let lightImage = loadSingleImage(from: place.thumbnailURLs.light)
-        async let darkImage = loadSingleImage(from: place.thumbnailURLs.dark)
+        async let lightImage = loadSingleImage(from: thumbnailURLs.light)
+        async let darkImage = loadSingleImage(from: thumbnailURLs.dark)
         
         // Wait for both to complete
         let (light, dark) = try await (lightImage, darkImage)
@@ -206,7 +214,7 @@ final class PlacesService {
         let docRef = db.collection("nests")
             .document(nestId)
             .collection("places")
-            .document(place.id ?? UUID().uuidString)
+            .document(place.id)
         
         try docRef.setData(from: place)
     }
@@ -353,6 +361,55 @@ final class PlacesService {
             )
             // Continue without throwing - we don't want thumbnail deletion failures 
             // to prevent place updates/deletions
+        }
+    }
+    
+    // Add this method to create a temporary place WITHOUT saving to Firestore
+    func createTemporaryPlaceInMemory(address: String, 
+                                     coordinate: CLLocationCoordinate2D) -> Place {
+        guard let nestId = NestService.shared.currentNest?.id else {
+            fatalError("No current nest")
+        }
+        
+        Logger.log(level: .info, category: .placesService, message: "Creating in-memory temporary place")
+        
+        let placeID: String = UUID().uuidString
+        
+        // Create temporary place without thumbnails and without saving to Firestore
+        let place = Place(
+            id: placeID,
+            nestId: nestId,
+            alias: nil,
+            address: address,
+            coordinate: coordinate,
+            thumbnailURLs: nil,
+            isTemporary: true
+        )
+        
+        Logger.log(level: .info, category: .placesService, message: "In-memory temporary place created ✅")
+        return place
+    }
+    
+    // Add method to save a temporary place that was previously only in memory
+    func saveTemporaryPlace(_ place: Place) async throws {
+        guard place.isTemporary else {
+            throw ServiceError.invalidOperation("Cannot save non-temporary place with this method")
+        }
+        
+        try await savePlaceDocument(place)
+        
+        places.append(place)
+        Logger.log(level: .info, category: .placesService, message: "Temporary place saved to Firestore ✅")
+    }
+    
+    // Add method to clean up temporary places
+    func cleanupTemporaryPlaces(olderThan date: Date? = nil) {
+        if let date = date {
+            places.removeAll { $0.isTemporary && $0.createdAt < date }
+        } else {
+            // Remove all temporary places that aren't associated with an active event
+            // This would require checking against EventsService
+            places.removeAll { $0.isTemporary }
         }
     }
 }

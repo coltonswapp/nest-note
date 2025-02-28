@@ -11,11 +11,17 @@ protocol PlaceListViewControllerDelegate: AnyObject {
     func placeListViewController(didDeletePlace place: Place)
 }
 
+protocol TemporaryPlaceSelectionDelegate: AnyObject {
+    func didSelectTemporaryPlace(address: String, coordinate: CLLocationCoordinate2D)
+}
+
 final class PlaceListViewController: NNViewController {
     
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Place>!
+    private var showTemporaryPlaces: Bool = false
+    private var chooseOnMapButton: NNPrimaryLabeledButton?
     
     enum LayoutStyle {
         case grid, list
@@ -61,6 +67,11 @@ final class PlaceListViewController: NNViewController {
         configureDataSource()
         setupNavigationBarButtons()
         setupEmptyState()
+        
+        // Only show the "Choose on Map" button when in selection mode
+        if isSelecting {
+            setupChooseOnMapButton()
+        }
     }
     
     override func setupNavigationBarButtons() {
@@ -97,6 +108,19 @@ final class PlaceListViewController: NNViewController {
         // Register cells
         collectionView.register(PlaceCell.self, forCellWithReuseIdentifier: PlaceCell.reuseIdentifier)
         collectionView.register(PlaceListCell.self, forCellWithReuseIdentifier: PlaceListCell.reuseIdentifier)
+        
+        if isSelecting {
+            let insets = UIEdgeInsets(
+                top: 20,
+                left: 0,
+                bottom: 100, // Increased to accommodate button height + padding
+                right: 0
+            )
+            
+            // Add bottom inset to accommodate the pinned button
+            collectionView.contentInset = insets
+            collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: insets.bottom - 30, right: 0)
+        }
         
         view.addSubview(collectionView)
         
@@ -173,6 +197,7 @@ final class PlaceListViewController: NNViewController {
                 for: indexPath
             ) as! PlaceCell
             
+            // Use the displayName property instead of alias
             // Force a layout pass after configuration
             cell.configure(with: place, isGridLayout: self.currentLayout == .grid)
             cell.layoutIfNeeded()
@@ -185,8 +210,8 @@ final class PlaceListViewController: NNViewController {
     private func fetchPlaces() {
         Task {
             do {
-                // Just fetch and apply - no need to store locally
-                _ = try await PlacesService.shared.fetchPlaces()
+                // Fetch all places including temporary ones
+                _ = try await PlacesService.shared.fetchPlaces(includeTemporary: true)
                 applySnapshot()
             } catch {
                 Logger.log(level: .error, category: .placesService, 
@@ -198,7 +223,10 @@ final class PlaceListViewController: NNViewController {
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Place>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(PlacesService.shared.places)
+        
+        // Only show non-temporary places in the list view
+        let placesToShow = PlacesService.shared.places.filter { !$0.isTemporary }
+        snapshot.appendItems(placesToShow)
         
         Task { @MainActor in
             await dataSource.apply(snapshot, animatingDifferences: true)
@@ -248,6 +276,22 @@ final class PlaceListViewController: NNViewController {
     private func updateEmptyState() {
         emptyStateView?.isHidden = !PlacesService.shared.places.isEmpty
         collectionView.isHidden = PlacesService.shared.places.isEmpty
+    }
+    
+    private func setupChooseOnMapButton() {
+        chooseOnMapButton = NNPrimaryLabeledButton(title: "Choose on Map")
+        chooseOnMapButton?.addTarget(self, action: #selector(chooseOnMapButtonTapped), for: .touchUpInside)
+        
+        if let button = chooseOnMapButton {
+            button.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        }
+    }
+    
+    @objc private func chooseOnMapButtonTapped() {
+        let selectPlaceVC = SelectPlaceViewController()
+        selectPlaceVC.isTemporarySelection = true
+        selectPlaceVC.temporaryPlaceDelegate = self
+        navigationController?.pushViewController(selectPlaceVC, animated: true)
     }
 }
 
@@ -309,5 +353,22 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
         dataSource.apply(snapshot, animatingDifferences: true)
         showToast(text: "Place deleted", sentiment: .positive)
         updateEmptyState()
+    }
+}
+
+// Add extension to implement the delegate
+extension PlaceListViewController: TemporaryPlaceSelectionDelegate {
+    func didSelectTemporaryPlace(address: String, coordinate: CLLocationCoordinate2D) {
+        // Create a temporary place in memory only (not saved to Firestore yet)
+        let temporaryPlace = PlacesService.shared.createTemporaryPlaceInMemory(
+            address: address,
+            coordinate: coordinate
+        )
+        
+        // Notify the selection delegate
+        DispatchQueue.main.async { [weak self] in
+            self?.selectionDelegate?.didSelectPlace(temporaryPlace)
+            self?.dismiss(animated: true)
+        }
     }
 }

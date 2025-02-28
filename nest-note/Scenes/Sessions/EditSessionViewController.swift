@@ -1084,6 +1084,8 @@ extension EditSessionViewController: SessionEventViewControllerDelegate {
         
         // Check for unsaved changes
         checkForChanges()
+        
+        showToast(text: "Event Updated", sentiment: .positive)
     }
 }
 

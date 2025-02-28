@@ -46,7 +46,7 @@ final class PlaceDetailViewController: NNViewController {
             coordinate: place.locationCoordinate,
             addressDictionary: [CNPostalAddressStreetKey: place.address]
         )
-        self.alias = place.alias
+        self.alias = place.alias ?? "Temporary Place"
         self.thumbnail = thumbnail
         self.thumbnailAsset = thumbnail.imageAsset
         

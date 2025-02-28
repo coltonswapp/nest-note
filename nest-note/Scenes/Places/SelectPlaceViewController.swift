@@ -21,6 +21,7 @@ protocol SelectPlaceLocationDelegate: AnyObject {
 class SelectPlaceViewController: NNViewController {
     
     weak var locationDelegate: SelectPlaceLocationDelegate?
+    weak var temporaryPlaceDelegate: TemporaryPlaceSelectionDelegate?
     
     private let searchBarView: NNSearchBarView = {
         let view = NNSearchBarView(placeholder: "1 Infinite Loop, Cupertino, CA",
@@ -133,6 +134,9 @@ class SelectPlaceViewController: NNViewController {
     
     private var currentState: SelectionState = .initial
     
+    // Add properties for temporary place selection
+    var isTemporarySelection = false
+    
     init() {
         super.init(nibName: nil, bundle: nil)
     }
@@ -151,7 +155,13 @@ class SelectPlaceViewController: NNViewController {
     }
     
     override func setup() {
-        title = existingPlace == nil ? "Add a Place" : "Update Location"
+        // Update title based on selection mode
+        if isTemporarySelection {
+            title = "Select Location"
+        } else {
+            title = existingPlace == nil ? "Add a Place" : "Update Location"
+        }
+        
         searchBarView.searchBar.delegate = self
         mapView.delegate = self
         setupNavigationBarButtons()
@@ -286,9 +296,15 @@ class SelectPlaceViewController: NNViewController {
     }
     
     private func setupAddPlaceButton() {
-        addPlaceButton = NNPrimaryLabeledButton(
-            title: existingPlace == nil ? "Select Place" : "Update Location"
-        )
+        let buttonTitle: String
+        
+        if let _ = existingPlace {
+            buttonTitle = "Update Location"
+        } else {
+            buttonTitle = "Select Place"
+        }
+        
+        addPlaceButton = NNPrimaryLabeledButton(title: buttonTitle)
         addPlaceButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
         addPlaceButton.addTarget(self, action: #selector(addPlaceButtonTapped), for: .touchUpInside)
     }
@@ -310,14 +326,32 @@ class SelectPlaceViewController: NNViewController {
             selectPlace(at: coordinate)
             
             // Update button for next state
-            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
+            if isTemporarySelection {
+                addPlaceButton.setTitle("Use This Location")
+            } else {
+                addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
+            }
             currentState = .pinDropped
             
         case .pinDropped:
             // Second tap - Generate thumbnail and proceed
             guard let placemark = currentPlacemark else { return }
             
-            // Generate thumbnail for both new and updated places
+            if isTemporarySelection {
+                // For temporary places, just pass back the location data
+                let address = formatAddress(from: placemark)
+                let coordinate = placemark.location?.coordinate ?? mapView.centerCoordinate
+                
+                temporaryPlaceDelegate?.didSelectTemporaryPlace(
+                    address: address,
+                    coordinate: coordinate
+                )
+                
+                navigationController?.popViewController(animated: true)
+                return
+            }
+            
+            // For permanent places, continue with thumbnail generation
             MapThumbnailGenerator.shared.generateDynamicThumbnail(
                 for: placemark.location?.coordinate ?? mapView.centerCoordinate,
                 visibleRegion: mapView.region
@@ -403,11 +437,6 @@ class SelectPlaceViewController: NNViewController {
                 self.addAnnotation(at: coordinate, with: address)
                 self.centerPinView.isHidden = true
                 self.hasSelectedPlace = true
-                if let _ = self.existingPlace {
-                    self.addPlaceButton.setTitle("Update Pin")
-                } else {
-                    self.addPlaceButton.setTitle("Add Place")
-                }
                 HapticsHelper.lightHaptic()
             }
         }

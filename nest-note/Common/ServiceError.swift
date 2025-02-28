@@ -11,6 +11,7 @@ enum ServiceError: LocalizedError {
     case cannotDelete
     case imageConversionFailed
     case imageUploadFailed
+    case invalidOperation(String)
     
     var errorDescription: String? {
         switch self {
@@ -34,6 +35,8 @@ enum ServiceError: LocalizedError {
             return "Failed to convert image to data"
         case .imageUploadFailed:
             return "Failed to upload image"
+        case .invalidOperation:
+            return "Invalid operation"
         }
     }
     
@@ -59,6 +62,8 @@ enum ServiceError: LocalizedError {
             return "Failed to convert image to data"
         case .imageUploadFailed:
             return "The image upload to storage failed"
+        case .invalidOperation:
+            return "Try again"
         }
     }
     
@@ -84,6 +89,8 @@ enum ServiceError: LocalizedError {
             return "Reload and try again"
         case .imageUploadFailed:
             return "Check your connection and try again"
+        case .invalidOperation:
+            return "Try again"
         }
     }
 } 

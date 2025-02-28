@@ -9,10 +9,41 @@ import UIKit
 import SwiftUI
 import Combine
 
+import FirebaseFunctions
+import FirebaseAuth
+
 class HomeViewController: NNViewController, UICollectionViewDelegate {
     
     private var cancellables = Set<AnyCancellable>()
-
+    
+    func testFirebaseFunction() async {
+        if let user = Auth.auth().currentUser {
+            print("User is logged in with ID: \(user.uid)")
+            
+            // Get a fresh token
+            do {
+                let idToken = try await user.getIDToken(forcingRefresh: true)
+                print("Successfully retrieved fresh token")
+            } catch {
+                print("Error refreshing token: \(error)")
+            }
+        } else {
+            print("No user is logged in!")
+            return
+        }
+        
+        // Then call the function
+        let functions = Functions.functions()
+        do {
+            let result = try await functions.httpsCallable("helloNestNote").call(["testKey": "testValue"])
+            if let data = result.data as? [String: Any] {
+                print("Function response: \(data)")
+            }
+        } catch {
+            print("Error calling Firebase function: \(error.localizedDescription)")
+            print("Detailed error: \(error)")
+        }
+    }
     
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -49,6 +80,10 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 self?.reloadDataForCurrentUser()
             }
             .store(in: &cancellables)
+        
+        Task {
+            await testFirebaseFunction()
+        }
     }
     
     override func setup() {

@@ -307,7 +307,14 @@ final class SessionEventViewController: NNSheetViewController {
         // Save using SessionService
         Task {
             do {
+                // First, if we have a temporary place that hasn't been saved yet, save it
+                if let place = locationView.place, place.isTemporary {
+                    try await PlacesService.shared.saveTemporaryPlace(place)
+                }
+                
+                // Then save the event
                 try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                
                 await MainActor.run {
                     eventDelegate?.sessionEventViewController(self, didCreateEvent: event)
                     dismiss(animated: true)
@@ -408,7 +415,7 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     @objc func showLocationSelector() {
-        let view = PlaceListViewController()
+        let view = PlaceListViewController(isSelecting: true)
         view.selectionDelegate = self
         let nav = UINavigationController(rootViewController: view)
         present(nav, animated: true)
@@ -515,7 +522,6 @@ class SessionEventLocationView: UIView {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 12
-        imageView.backgroundColor = .secondarySystemBackground
         imageView.isUserInteractionEnabled = true
         return imageView
     }()
@@ -593,9 +599,7 @@ class SessionEventLocationView: UIView {
     }
     
     func configureWith(_ place: Place?) {
-        
         if let place {
-
             self.place = place
             
             let attributedString = NSAttributedString(
@@ -610,28 +614,49 @@ class SessionEventLocationView: UIView {
             addressLabel.isUserInteractionEnabled = true
             addressLabel.addGestureRecognizer(addressTapGesture)
             
-            let imageTapGesture = UITapGestureRecognizer(target: self, action: #selector(imageTapped))
-            thumbnailImageView.addGestureRecognizer(imageTapGesture)
-            
             labelStack.isHidden = false
-            thumbnailImageView.isHidden = false
+            
+            // Handle temporary places differently
+            if place.isTemporary {
+                // For temporary places, show a placeholder icon instead of a thumbnail
+                thumbnailImageView.image = UIImage(systemName: "mappin.circle.fill")
+                thumbnailImageView.tintColor = .systemBlue
+                thumbnailImageView.contentMode = .scaleAspectFit
+                thumbnailImageView.isHidden = false
+                
+                // Remove image tap gesture for temporary places
+                thumbnailImageView.gestureRecognizers?.forEach { thumbnailImageView.removeGestureRecognizer($0) }
+            } else {
+                // For permanent places, load the thumbnail and add tap gesture
+                let imageTapGesture = UITapGestureRecognizer(target: self, action: #selector(imageTapped))
+                thumbnailImageView.addGestureRecognizer(imageTapGesture)
+                thumbnailImageView.isHidden = false
+                thumbnailImageView.contentMode = .scaleAspectFill
+            
             
             aliasLabel.text = place.alias
             addressLabel.attributedText = attributedString
-            Task {
-                do {
-                    let image = try await PlacesService.shared.loadImages(for: place)
-                    if aliasLabel.text == place.alias {
-                        thumbnailImageView.image = image
+                
+            aliasLabel.text = place.alias
+            addressLabel.attributedText = attributedString
+                Task {
+                    do {
+                        let image = try await PlacesService.shared.loadImages(for: place)
+                        if aliasLabel.text == place.displayName {
+                            thumbnailImageView.image = image
+                        }
+                    } catch {
+                        thumbnailImageView.image = UIImage(systemName: "photo.fill")
                     }
-                } catch {
-                    thumbnailImageView.image = UIImage(systemName: "photo.fill")
                 }
             }
+            
+            // Use displayName instead of alias to handle temporary places
+            aliasLabel.text = place.displayName
+            addressLabel.attributedText = attributedString
             emptyLabel.isHidden = true
         } else {
             emptyLabel.isHidden = false
-            
             labelStack.isHidden = true
             thumbnailImageView.isHidden = true
         }

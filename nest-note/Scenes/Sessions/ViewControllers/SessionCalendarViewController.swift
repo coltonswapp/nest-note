@@ -894,5 +894,6 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
         // Notify delegate of updated events
         let allEvents = eventsByDate.values.flatMap { $0 }
         delegate?.calendarViewController(self, didUpdateEvents: allEvents)
+        showToast(text: "Event Updated", sentiment: .positive)
     }
 }
