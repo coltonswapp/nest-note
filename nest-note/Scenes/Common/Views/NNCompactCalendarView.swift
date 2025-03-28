@@ -197,6 +197,34 @@ final class NNCompactCalendarView: UIView {
         self.eventsByDate = events
         collectionView.reloadData()
     }
+    
+    // MARK: - Public Methods
+    func scrollToWeek(containing date: Date, animated: Bool = true) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        
+        // Find the week index that contains this date
+        let allDates = weeks.flatMap { $0 }
+        guard let dateIndex = allDates.firstIndex(where: { calendar.isDate($0, inSameDayAs: startOfDay) }) else { return }
+        
+        // Calculate which week this date belongs to
+        let weekIndex = dateIndex / 7
+        
+        // Calculate the x offset for this week
+        let weekWidth = collectionView.bounds.width
+        let xOffset = CGFloat(weekIndex) * weekWidth
+        
+        // Scroll to the week
+        collectionView.setContentOffset(CGPoint(x: xOffset, y: 0), animated: animated)
+        
+        // Update the month/year labels
+        if let firstDateOfWeek = weeks[weekIndex].first {
+            updateMonthYearLabels(for: firstDateOfWeek)
+        }
+        
+        // Update current week index
+        currentWeekIndex = weekIndex
+    }
 }
 
 // MARK: - UICollectionView DataSource & Delegate

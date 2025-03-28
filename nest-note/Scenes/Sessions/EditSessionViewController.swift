@@ -1,5 +1,7 @@
 import UIKit
+import Foundation
 
+// MARK: - Protocols
 protocol DatePresentationDelegate: AnyObject {
     func presentDatePicker(for type: NNDateTimePickerSheet.PickerType, initialDate: Date)
     func didToggleMultiDay(_ isMultiDay: Bool, startDate: Date, endDate: Date)
@@ -7,6 +9,7 @@ protocol DatePresentationDelegate: AnyObject {
 
 protocol VisibilityCellDelegate: AnyObject {
     func didChangeVisibilityLevel(_ level: VisibilityLevel)
+    func didRequestVisibilityLevelInfo()
 }
 
 protocol EntryReviewCellDelegate: AnyObject {
@@ -22,7 +25,19 @@ protocol StatusCellDelegate: AnyObject {
     func didChangeSessionStatus(_ status: SessionStatus)
 }
 
-final class EditSessionViewController: NNViewController {
+protocol InviteSitterViewControllerDelegate: AnyObject {
+    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem)
+    func inviteSitterViewControllerDidCancel(_ controller: InviteSitterViewController)
+    func inviteDetailViewControllerDidDeleteInvite()
+}
+
+protocol InviteStatusCellDelegate: AnyObject {
+    func inviteStatusCell(_ cell: InviteStatusCell, didTapViewInviteWithCode code: String)
+    func inviteStatusCellDidTapSendInvite(_ cell: InviteStatusCell)
+}
+
+// MARK: - EditSessionViewController
+class EditSessionViewController: NNViewController {
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -76,8 +91,9 @@ final class EditSessionViewController: NNViewController {
     private let maxVisibleEvents = 4
     
     // Add property for save button
-    private lazy var saveButton: NNPrimaryLabeledButton = {
-        let button = NNPrimaryLabeledButton(title: "Create Session")
+    private lazy var saveButton: NNLoadingButton = {
+        let buttonTitle = isEditingSession ? "Save Changes" : "Create Session"
+        let button = NNLoadingButton(title: buttonTitle, titleColor: .white, fillStyle: .fill(NNColors.primary))
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
     }()
@@ -126,7 +142,9 @@ final class EditSessionViewController: NNViewController {
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
         self.originalSession = sessionItem
-        self.isEditingSession = sessionItem.id != UUID().uuidString
+        // A session is considered "new" if it's equal to a default session
+        // This is more reliable than checking nestID since some existing sessions might not have nestID set
+        self.isEditingSession = sessionItem != SessionItem()
         
         // Create date range based on session type
         if sessionItem.isMultiDay {
@@ -197,9 +215,20 @@ final class EditSessionViewController: NNViewController {
         
         // Pre-populate other fields if editing
         visibilityLevel = sessionItem.visibilityLevel
-        selectedSitter = sessionItem.associatedSitterID.map { id in
-            // You'll need to fetch the actual sitter details
-            SitterItem(id: "1", name: "Sitter Name", email: "email@example.com")
+        
+        // Fetch sitter if we have an ID
+        if let sitterId = sessionItem.assignedSitter?.userID {
+            Task {
+                do {
+                    if let savedSitter = try await NestService.shared.fetchSavedSitterById(sitterId) {
+                        await MainActor.run {
+                            self.selectedSitter = SitterItem(id: savedSitter.id, name: savedSitter.name, email: savedSitter.email)
+                        }
+                    }
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Error fetching sitter: \(error.localizedDescription)")
+                }
+            }
         }
         
         // Generate exactly 6 test events
@@ -300,15 +329,30 @@ final class EditSessionViewController: NNViewController {
                 
                 // Update existing sessionItem with new values
                 sessionItem.title = title
-                sessionItem.associatedSitterID = selectedSitter?.id
+                if let selectedSitter = selectedSitter {
+                    if let existingAssignedSitter = sessionItem.assignedSitter,
+                       existingAssignedSitter.email == selectedSitter.email {
+                        // Keep existing assigned sitter if it's the same person
+                        // (preserves invite status and invite ID)
+                    } else {
+                        // Only create new assigned sitter if it's a different person
+                        sessionItem.assignedSitter = AssignedSitter(
+                            id: selectedSitter.id,
+                            name: selectedSitter.name,
+                            email: selectedSitter.email,
+                            userID: nil,
+                            inviteStatus: .none,
+                            inviteID: nil
+                        )
+                    }
+                }
                 sessionItem.startDate = startDate
                 sessionItem.endDate = endDate
                 sessionItem.isMultiDay = isMultiDay
                 sessionItem.visibilityLevel = visibilityLevel
                 
                 if isEditingSession {
-                    try await SessionService.shared.updateSession(sessionItem)
-                    delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
+                    try await updateSession()
                 } else {
                     let newSession = try await SessionService.shared.createSession(sessionItem)
                     delegate?.editSessionViewController(self, didCreateSession: newSession)
@@ -374,7 +418,21 @@ final class EditSessionViewController: NNViewController {
                 if let sitter = self?.selectedSitter {
                     // Show selected sitter
                     content.text = sitter.name
-                    content.secondaryText = sitter.email
+                    
+                    // Get invite status from session's assigned sitter
+                    if let assignedSitter = self?.sessionItem.assignedSitter {
+                        content.secondaryText = assignedSitter.inviteStatus.displayName
+                    } else {
+                        content.secondaryText = SessionInviteStatus.none.displayName
+                    }
+                    
+                    let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
+                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                    content.image = image
+                } else if let assignedSitter = self?.sessionItem.assignedSitter {
+                    // Show assigned sitter
+                    content.text = assignedSitter.name
+                    content.secondaryText = assignedSitter.inviteStatus.displayName
                     
                     let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
                         .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
@@ -396,6 +454,12 @@ final class EditSessionViewController: NNViewController {
                 
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
+                
+                content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+                
+                // Set secondary text color to secondaryLabel
+                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.color = .secondaryLabel
                 
                 cell.accessories = [.disclosureIndicator()]
             default:
@@ -526,7 +590,7 @@ final class EditSessionViewController: NNViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .events])
         snapshot.appendItems([.inviteSitter], toSection: .sitter)
-        snapshot.appendItems([.visibilityLevel(visibilityLevel)], toSection: .visibility)
+        snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
         snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
         snapshot.appendItems([.nestReview], toSection: .nestReview)
         snapshot.appendItems([.dateSelection(startDate: initialDate.0, endDate: initialDate.1, isMultiDay: initialDate.2)], toSection: .date)
@@ -551,7 +615,7 @@ final class EditSessionViewController: NNViewController {
     }
     
     private func inviteSitterButtonTapped() {
-        let inviteSitterVC = InviteSitterViewController(selectedSitter: selectedSitter)
+        let inviteSitterVC = SitterListViewController(displayMode: .selectSitter, selectedSitter: selectedSitter, session: sessionItem)
         inviteSitterVC.delegate = self
         let nav = UINavigationController(rootViewController: inviteSitterVC)
         present(nav, animated: true)
@@ -605,7 +669,7 @@ final class EditSessionViewController: NNViewController {
         }
         
         let dateRange = DateInterval(start: startDate, end: endDate)
-        let calendarVC = SessionCalendarViewController(sessionID: sessionItem.id, dateRange: dateRange, events: sessionEvents)
+        let calendarVC = SessionCalendarViewController(sessionID: sessionItem.id, nestID: sessionItem.nestID, dateRange: dateRange, events: sessionEvents)
         calendarVC.delegate = self
         let nav = UINavigationController(rootViewController: calendarVC)
         present(nav, animated: true)
@@ -628,7 +692,7 @@ final class EditSessionViewController: NNViewController {
         
         // Update button title to show state
         let baseTitle = isEditingSession ? "Save Changes" : "Create Session"
-        saveButton.titleLabel.text = hasUnsavedChanges ? baseTitle : baseTitle
+        saveButton.titleLabel.text = baseTitle
         
         // Optionally animate the button if there are changes
         if hasUnsavedChanges {
@@ -642,7 +706,7 @@ final class EditSessionViewController: NNViewController {
     private func checkForChanges() {
         let hasChanges = 
             titleTextField.text != originalSession.title ||
-            selectedSitter?.id != originalSession.associatedSitterID ||
+            selectedSitter?.id != originalSession.assignedSitter?.id ||
             currentStartDate != originalSession.startDate ||
             currentEndDate != originalSession.endDate ||
             currentIsMultiDay != originalSession.isMultiDay ||
@@ -653,9 +717,12 @@ final class EditSessionViewController: NNViewController {
     }
     
     private func fetchSessionEvents() {
+        // Only fetch events if we're editing an existing session
+        guard isEditingSession else { return }
+        
         Task {
             do {
-                let events = try await SessionService.shared.getSessionEvents(sessionID: sessionItem.id)
+                let events = try await SessionService.shared.getSessionEvents(for: sessionItem.id, nestID: sessionItem.nestID)
                 
                 await MainActor.run {
                     // Update local events array
@@ -692,6 +759,7 @@ final class EditSessionViewController: NNViewController {
     private func presentCalendarViewController() {
         let calendarVC = SessionCalendarViewController(
             sessionID: sessionItem.id,
+            nestID: sessionItem.nestID,
             dateRange: dateRange,
             events: sessionEvents
         )
@@ -745,6 +813,61 @@ final class EditSessionViewController: NNViewController {
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+    
+    private func validateSession() -> Bool {
+        var isValid = true
+        var errors: [String] = []
+        
+        // Check if title is empty
+        if sessionItem.title.isEmpty {
+            errors.append("Please add a title")
+            isValid = false
+        }
+        
+        // Check if sitter is assigned
+        if sessionItem.assignedSitter == nil {
+            errors.append("Please assign a sitter")
+            isValid = false
+        }
+        
+        // Check if dates are valid
+        if sessionItem.startDate >= sessionItem.endDate {
+            errors.append("End date must be after start date")
+            isValid = false
+        }
+        
+        if !isValid {
+            let alert = UIAlertController(
+                title: "Missing Information",
+                message: errors.joined(separator: "\n"),
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        }
+        
+        return isValid
+    }
+    
+    private func updateSession() async throws {
+        // Validate session before updating
+        guard validateSession() else { return }
+        
+        saveButton.startLoading()
+        
+        // Update session in Firestore
+        try await SessionService.shared.updateSession(sessionItem)
+        
+        // Show success animation after delay
+        try await Task.sleep(for: .seconds(1))
+        saveButton.stopLoading(withSuccess: true)
+        
+        // Wait briefly to show success state before dismissing
+        try await Task.sleep(for: .seconds(0.5))
+        
+        delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
+        dismiss(animated: true)
     }
 }
 
@@ -1033,12 +1156,29 @@ final class SessionOverviewCell: UICollectionViewListCell {
         }
     }
 }
+
 // Add delegate conformance
-extension EditSessionViewController: InviteSitterViewControllerDelegate {
-    func inviteSitterViewController(_ controller: InviteSitterViewController, didSelectSitter sitter: SitterItem) {
+extension EditSessionViewController: SitterListViewControllerDelegate {
+    func didDeleteSitterInvite() {
+        // Clear the assigned sitter
+        sessionItem.assignedSitter = nil
+        selectedSitter = nil
+        
+        // Update the UI
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+            snapshot.reloadItems([existingItem])
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
+        // Mark as having unsaved changes
+        checkForChanges()
+        showToast(text: "Invite deleted")
+    }
+    
+    func sitterListViewController(didSelectSitter sitter: SitterItem) {
         selectedSitter = sitter // Store the entire SitterItem
         checkForChanges() // Add this to check for changes after sitter selection
-        dismiss(animated: true)
     }
 } 
 
@@ -1048,7 +1188,13 @@ extension EditSessionViewController: VisibilityCellDelegate {
         visibilityLevel = level
         checkForChanges()
     }
-} 
+    
+    func didRequestVisibilityLevelInfo() {
+        let viewController = VisibilityLevelInfoViewController()
+        present(viewController, animated: true)
+        HapticsHelper.lightHaptic()
+    }
+}
 
 // Add delegate conformance
 extension EditSessionViewController: SessionCalendarViewControllerDelegate {
@@ -1256,6 +1402,54 @@ final class StatusCell: UICollectionViewListCell {
 extension EditSessionViewController: StatusCellDelegate {
     func didChangeSessionStatus(_ status: SessionStatus) {
         updateSessionStatus(status)
+    }
+}
+
+// MARK: - InviteSitterViewControllerDelegate
+extension EditSessionViewController: InviteSitterViewControllerDelegate {
+    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem) {
+        // Update the selected sitter
+        selectedSitter = sitter
+        
+        // Update the UI
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+            snapshot.reloadItems([existingItem])
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
+        // Mark as having unsaved changes
+        checkForChanges()
+    }
+    
+    func inviteSitterViewControllerDidCancel(_ controller: InviteSitterViewController) {
+        // Just pop back to the previous screen
+        navigationController?.popViewController(animated: true)
+    }
+    
+    func inviteDetailViewControllerDidDeleteInvite() {
+        return
+    }
+}
+
+// MARK: - InviteStatusCellDelegate
+extension EditSessionViewController: InviteStatusCellDelegate {
+    func inviteStatusCell(_ cell: InviteStatusCell, didTapViewInviteWithCode code: String) {
+        let inviteDetailVC = InviteDetailViewController()
+        inviteDetailVC.configure(with: code, sessionID: sessionItem.id)
+        inviteDetailVC.delegate = self
+        navigationController?.pushViewController(inviteDetailVC, animated: true)
+    }
+    
+    func inviteStatusCellDidTapSendInvite(_ cell: InviteStatusCell) {
+        guard let selectedSitter = selectedSitter else { return }
+        
+        // Create and configure the InviteSitterViewController
+        let inviteSitterVC = InviteSitterViewController(sitter: selectedSitter, session: sessionItem)
+        inviteSitterVC.delegate = self
+        
+        // Push it onto the navigation stack
+        navigationController?.pushViewController(inviteSitterVC, animated: true)
     }
 } 
 

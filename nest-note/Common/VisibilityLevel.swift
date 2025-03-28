@@ -21,6 +21,16 @@ enum VisibilityLevel: String, Codable, CaseIterable {
         }
     }
     
+    // Returns true if this level has access to the content of the target level
+    func hasAccess(to targetLevel: VisibilityLevel) -> Bool {
+        let levels: [VisibilityLevel] = [.essential, .standard, .extended, .comprehensive]
+        guard let currentIndex = levels.firstIndex(of: self),
+              let targetIndex = levels.firstIndex(of: targetLevel) else {
+            return false
+        }
+        return currentIndex >= targetIndex
+    }
+    
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)

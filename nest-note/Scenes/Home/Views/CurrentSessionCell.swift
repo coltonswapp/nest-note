@@ -40,6 +40,7 @@ final class CurrentSessionCell: UICollectionViewListCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupCell()
+        configureSelectionBehavior()
     }
     
     required init?(coder: NSCoder) {
@@ -65,6 +66,25 @@ final class CurrentSessionCell: UICollectionViewListCell {
             birdImageView.widthAnchor.constraint(equalToConstant: 35),
             birdImageView.heightAnchor.constraint(equalToConstant: 35)
         ])
+    }
+    
+    private func configureSelectionBehavior() {
+        // Create a view for the selected state
+        let selectedBgView = UIView()
+        selectedBgView.backgroundColor = NNColors.primary.darker()  // Darker version of primary color
+        selectedBgView.layer.cornerRadius = 12
+        selectedBgView.layer.masksToBounds = true
+        
+        // Set the selected background view
+        selectedBackgroundView = selectedBgView
+        
+        // Enable user interaction
+        isUserInteractionEnabled = true
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        selectedBackgroundView?.layer.cornerRadius = 12
     }
     
     func configure(title: String, duration: String) {

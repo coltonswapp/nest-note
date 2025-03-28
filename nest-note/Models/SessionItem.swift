@@ -1,30 +1,96 @@
 import Foundation
 
-struct SessionItem: Hashable, Codable {
-    var id: String = UUID().uuidString
+enum SessionInviteStatus: String, Codable {
+    case none           // No invite has been created
+    case invited        // Invite sent, waiting for response
+    case accepted       // Sitter has accepted the invite
+    case declined       // Sitter has declined the invite
+    case cancelled     // Parent cancelled the invite
+    
+    var displayName: String {
+        switch self {
+        case .none:
+            return "Not yet invited"
+        case .invited:
+            return "Invited"
+        case .accepted:
+            return "Accepted"
+        case .declined:
+            return "Declined"
+        case .cancelled:
+            return "Cancelled"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .none:
+            return "person.slash"
+        case .invited:
+            return "checkmark.circle.fill"
+        case .accepted:
+            return "checkmark.circle.fill"
+        case .declined:
+            return "xmark.circle.fill"
+        case .cancelled:
+            return "xmark.circle"
+        }
+    }
+}
+
+struct AssignedSitter: Identifiable, Hashable, Codable {
+    var id: String
+    var name: String
+    var email: String
+    var userID: String?  // Optional if they have an account
+    var inviteStatus: SessionInviteStatus 
+    var inviteID: String?  // Reference to invite if one exists
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+class SessionItem: Hashable, Codable {
+    var id: String
     var title: String
-    var associatedSitterID: String?
     var startDate: Date
     var endDate: Date
     var isMultiDay: Bool
-    var events: [SessionEvent] = []
-    var visibilityLevel: VisibilityLevel = .standard
-    var status: SessionStatus = .upcoming
+    var events: [SessionEvent]
+    var visibilityLevel: VisibilityLevel
+    var status: SessionStatus
+    var assignedSitter: AssignedSitter?
+    var nestID: String
+    
+    // Computed property to check if session has an active invite
+    var hasActiveInvite: Bool {
+        guard let sitter = assignedSitter else { return false }
+        return sitter.inviteStatus == .invited || sitter.inviteStatus == .accepted
+    }
     
     init(
+        id: String = UUID().uuidString,
         title: String = "",
-        sitterID: String? = nil,
         startDate: Date = Date(),
         endDate: Date = Date().addingTimeInterval(60 * 60 * 2), // 2 hours by default
         isMultiDay: Bool = false,
-        visibilityLevel: VisibilityLevel = .standard
+        events: [SessionEvent] = [],
+        visibilityLevel: VisibilityLevel = .standard,
+        status: SessionStatus = .upcoming,
+        assignedSitter: AssignedSitter? = nil,
+        nestID: String = NestService.shared.currentNest!.id 
     ) {
+        self.id = id
         self.title = title
-        self.associatedSitterID = sitterID
         self.startDate = startDate
         self.endDate = endDate
         self.isMultiDay = isMultiDay
+        self.events = events
         self.visibilityLevel = visibilityLevel
+        self.status = status
+        self.assignedSitter = assignedSitter
+        self.nestID = nestID
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -67,37 +133,60 @@ struct SessionItem: Hashable, Codable {
         }
     }
     
+    // MARK: - Hashable
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    static func == (lhs: SessionItem, rhs: SessionItem) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    // MARK: - Codable
     enum CodingKeys: String, CodingKey {
         case id
         case title
-        case associatedSitterID
         case startDate
         case endDate
         case isMultiDay
         case events
         case visibilityLevel
         case status
+        case assignedSitter
+        case nestID
     }
     
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
-        associatedSitterID = try container.decodeIfPresent(String.self, forKey: .associatedSitterID)
         startDate = try container.decode(Date.self, forKey: .startDate)
         endDate = try container.decode(Date.self, forKey: .endDate)
         isMultiDay = try container.decode(Bool.self, forKey: .isMultiDay)
         events = try container.decodeIfPresent([SessionEvent].self, forKey: .events) ?? []
         visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
+        assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
+        nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
             self.status = status
         } else {
+            // placeholder
+            self.status = .upcoming
             // Infer status based on current date and session dates
             self.status = inferredStatus()
         }
+    }
+    
+    // MARK: - Sitter Management
+    func updateAssignedSitter(with sitter: AssignedSitter) {
+        self.assignedSitter = sitter
+    }
+    
+    func clearAssignedSitter() {
+        self.assignedSitter = nil
     }
 }
 

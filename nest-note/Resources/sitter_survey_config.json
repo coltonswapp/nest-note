@@ -1,0 +1,122 @@
+{
+    "version": "1.0",
+    "questions": [
+        {
+            "id": "info_sharing_method",
+            "title": "How do parents typically share essential information with you when you babysit?",
+            "subtitle": null,
+            "options": [
+                "Written notes on paper",
+                "Text messages",
+                "Phone call before sitting",
+                "In-person verbal instructions",
+                "Digital document (email, shared doc)",
+                "They don't consistently share information"
+            ],
+            "multi_select": true,
+            "category": "communication",
+            "order": 1
+        },
+        {
+            "id": "missing_information",
+            "title": "What information do you most often find missing or unclear when babysitting?",
+            "subtitle": "Missing information can be frustrating!",
+            "options": [
+                "Emergency contacts",
+                "Household systems (alarm, garage, appliances)",
+                "Children's routines or schedules",
+                "Food/dietary restrictions",
+                "Medical information",
+                "House rules",
+                "Where to find essential items",
+                "Neighborhood information"
+            ],
+            "multi_select": true,
+            "category": "information",
+            "order": 2
+        },
+        {
+            "id": "information_difficulties",
+            "title": "What makes finding information during a sitting session difficult?",
+            "subtitle": null,
+            "options": [
+                "Information is scattered across multiple places",
+                "Handwritten notes are hard to read",
+                "Too much information at once",
+                "No clear organization of information",
+                "Parents forget to share key details",
+                "Information changes but updates aren't communicated"
+            ],
+            "multi_select": true,
+            "category": "challenges",
+            "order": 3
+        },
+        {
+            "id": "contact_frequency",
+            "title": "How often do you need to contact parents during sitting for information which wasn't provided?",
+            "subtitle": "Sitters should always feel well equipped to give care.",
+            "options": [
+                "Almost every time",
+                "Frequently",
+                "Sometimes",
+                "Rarely",
+                "Never"
+            ],
+            "multi_select": false,
+            "category": "communication",
+            "order": 4
+        },
+        {
+            "id": "important_information",
+            "title": "Which information would be most helpful to have organized in a single place?",
+            "subtitle": "Select all that apply.",
+            "options": [
+                "Emergency contacts",
+                "Medical information (allergies, medications)",
+                "Daily routines/schedules",
+                "House access (codes, keys, etc.)",
+                "Food/meal information",
+                "Bedtime routines",
+                "Entertainment rules",
+                "Location of essential items"
+            ],
+            "multi_select": true,
+            "category": "information",
+            "order": 5
+        },
+        {
+            "id": "helpful_features",
+            "title": "What features would be most helpful in a babysitting information app?",
+            "subtitle": "Our goal is to build the best tool for sitters.",
+            "options": [
+                "Checklists for routines",
+                "Timer/reminders for schedules",
+                "Photo capability to document activities",
+                "Emergency button with quick contacts",
+                "Notes section for feedback to parents",
+                "Voice notes option",
+                "Searchable information",
+                "Different categories of information"
+            ],
+            "multi_select": true,
+            "category": "features",
+            "order": 6
+        },
+        {
+            "id": "new_home_challenges",
+            "title": "What are your biggest challenges when babysitting in a new home for the first time?",
+            "subtitle": "This helps us understand first-time sitting experiences.",
+            "options": [
+                "Finding things",
+                "Understanding family routines",
+                "Knowing boundaries and rules",
+                "Managing children's expectations",
+                "Home systems (TV, appliances, etc.)",
+                "Feeling comfortable in someone else's space"
+            ],
+            "multi_select": true,
+            "category": "challenges",
+            "order": 7
+        }
+    ]
+} 

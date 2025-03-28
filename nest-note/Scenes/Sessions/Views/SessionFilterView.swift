@@ -7,8 +7,9 @@ protocol SessionFilterViewDelegate: AnyObject {
 class SessionFilterView: UIView {
     
     weak var delegate: SessionFilterViewDelegate?
+    private let filters: [SessionService.SessionBucket]
     
-    private var activeFilter: SessionService.SessionBucket = .upcoming {
+    private var activeFilter: SessionService.SessionBucket {
         didSet {
             updateSelection(animated: true)
             delegate?.sessionFilterView(self, didSelectFilter: activeFilter)
@@ -21,6 +22,8 @@ class SessionFilterView: UIView {
         stack.distribution = .fillEqually
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.backgroundColor = NNColors.NNSystemBackground4
+        stack.layer.cornerRadius = 18
         return stack
     }()
     
@@ -52,8 +55,10 @@ class SessionFilterView: UIView {
         return view
     }()
     
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    init(filters: [SessionService.SessionBucket] = [.upcoming, .inProgress, .past], initialFilter: SessionService.SessionBucket? = nil) {
+        self.filters = filters
+        self.activeFilter = initialFilter ?? filters.first ?? .upcoming
+        super.init(frame: .zero)
         setupView()
     }
     
@@ -92,15 +97,9 @@ class SessionFilterView: UIView {
     }
     
     private func createFilterButtons(foregroundColor: UIColor) -> [UIButton] {
-        let filters: [(String, SessionService.SessionBucket)] = [
-            ("Upcoming", .upcoming),
-            ("In-progress", .inProgress),
-            ("Past", .past)
-        ]
-        
-        return filters.map { title, filter in
+        return filters.map { filter in
             var config = UIButton.Configuration.plain()
-            config.title = title
+            config.title = filter.title
             config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
             
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
@@ -118,7 +117,10 @@ class SessionFilterView: UIView {
     }
     
     private func updateSelection(animated: Bool = true) {
-        let selectedButton = bottomStackView.arrangedSubviews[activeFilter.rawValue]
+        guard let selectedIndex = filters.firstIndex(of: activeFilter),
+              selectedIndex < bottomStackView.arrangedSubviews.count else { return }
+        
+        let selectedButton = bottomStackView.arrangedSubviews[selectedIndex]
         
         let update = {
             let buttonFrame = selectedButton.convert(selectedButton.bounds, to: self)
@@ -130,8 +132,8 @@ class SessionFilterView: UIView {
             UIView.animate(
                 withDuration: 0.25,
                 delay: 0,
-                usingSpringWithDamping: 0.8,  // Less bouncy (1.0 is no bounce)
-                initialSpringVelocity: 0.5,    // Initial velocity of the spring
+                usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.5,
                 options: [.curveEaseOut],
                 animations: update
             )
@@ -153,5 +155,16 @@ class SessionFilterView: UIView {
     
     func selectBucket(_ bucket: SessionService.SessionBucket) {
         activeFilter = bucket
+    }
+}
+
+// Add title property to SessionBucket
+extension SessionService.SessionBucket {
+    var title: String {
+        switch self {
+        case .upcoming: return "Upcoming"
+        case .inProgress: return "In-progress"
+        case .past: return "Past"
+        }
     }
 } 

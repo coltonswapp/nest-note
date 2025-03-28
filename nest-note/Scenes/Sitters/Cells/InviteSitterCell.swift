@@ -4,6 +4,7 @@ class InviteSitterCell: UICollectionViewListCell {
     static let reuseIdentifier = "InviteSitterCell"
     
     func configure(name: String, email: String, isSelected: Bool = false) {
+        
         // Get default content configuration
         var content = defaultContentConfiguration()
         

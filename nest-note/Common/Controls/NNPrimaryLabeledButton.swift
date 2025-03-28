@@ -488,8 +488,13 @@ class NNSmallPrimaryButton: UIButton {
         case left, right
     }
     
+    var imagePlacement: ImagePlacement?
+    var image: UIImage?
+    var title: String
+    var foregroundColor: UIColor
+    
     // MARK: - Properties
-    private var originalBackgroundColor: UIColor?
+    var originalBackgroundColor: UIColor?
     private var touchDownTimestamp: TimeInterval?
     private let hapticThreshold: TimeInterval = 0.15
     
@@ -499,9 +504,13 @@ class NNSmallPrimaryButton: UIButton {
          imagePlacement: ImagePlacement = .left,
          backgroundColor: UIColor = NNColors.primary,
          foregroundColor: UIColor = .white) {
+        self.title = title
+        self.foregroundColor = foregroundColor
+        self.image = image
         super.init(frame: .zero)
         self.backgroundColor = backgroundColor
         self.originalBackgroundColor = backgroundColor
+        self.imagePlacement = imagePlacement
         configureButton(title: title, image: image, imagePlacement: imagePlacement, foregroundColor: foregroundColor)
     }
     
@@ -521,7 +530,7 @@ class NNSmallPrimaryButton: UIButton {
         configuration?.attributedTitle = AttributedString(title, attributes: container)
     }
     
-    private func configureButton(title: String, image: UIImage?, imagePlacement: ImagePlacement, foregroundColor: UIColor) {
+    func configureButton(title: String, image: UIImage?, imagePlacement: ImagePlacement, foregroundColor: UIColor) {
         var config = UIButton.Configuration.plain()
         
         // Ensure subviews don't intercept touches
@@ -625,6 +634,7 @@ class NNSmallPrimaryButton: UIButton {
     override var backgroundColor: UIColor? {
         didSet {
             layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
+//            originalBackgroundColor = backgroundColor
         }
     }
 }

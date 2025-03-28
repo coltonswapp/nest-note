@@ -38,6 +38,7 @@ final class PlaceListCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
+        configureSelectionBehavior()
     }
     
     required init?(coder: NSCoder) {

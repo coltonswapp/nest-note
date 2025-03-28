@@ -7,6 +7,7 @@ final class UserDefaultsManager {
     // MARK: - Keys
     private struct Keys {
         static let placesListGridIsShowing = "placesListGridIsShowing"
+        static let savedAppMode = "savedAppMode"
     }
     
     // MARK: - Properties
@@ -19,6 +20,17 @@ final class UserDefaultsManager {
         }
         set {
             defaults.set(newValue, forKey: Keys.placesListGridIsShowing)
+        }
+    }
+    
+    // MARK: - App Mode
+    var savedAppMode: AppMode? {
+        get {
+            guard let rawValue = defaults.string(forKey: Keys.savedAppMode) else { return nil }
+            return AppMode(rawValue: rawValue)
+        }
+        set {
+            defaults.set(newValue?.rawValue, forKey: Keys.savedAppMode)
         }
     }
     

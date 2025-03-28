@@ -22,12 +22,17 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     
     private var currentStepIndex: Int = 0
     private lazy var steps: [NNOnboardingViewController] = {
-        let baseSteps: [NNOnboardingViewController] = [
+        // Base steps that are common to all users
+        var baseSteps: [NNOnboardingViewController] = [
             OBNameViewController(),
-            OBEmailViewController(),
-            OBPasswordViewController(),
             OBRoleViewController()
         ]
+        
+        // Add remaining steps
+        baseSteps.append(contentsOf: [
+            OBEmailViewController(),
+            OBPasswordViewController()
+        ])
         
         return baseSteps
     }()
@@ -54,11 +59,17 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         var password: String = ""
         var role: NestUser.UserType = .nestOwner
         var nestInfo = NestInfo()
+        var surveyResponses: [String: [String]] = [:]
         
         struct NestInfo {
             var name: String = ""
             var address: String = ""
         }
+    }
+    
+    // Public accessor for role
+    var currentRole: NestUser.UserType {
+        return userInfo.role
     }
     
     // MARK: - Validation Publishers
@@ -209,20 +220,30 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     func finishSetup() async throws {
         #if DEBUG
         if isDebugMode {
-            // Use Task instead of DispatchQueue since we're in async context
             try await Task.sleep(for: .seconds(2))
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
             self.authenticationDelegate?.signUpComplete()
-            return  // This properly returns from finishSetup()
+            return
         }
         #endif
+
         // First handle the signup logic
         let user = try await UserService.shared.signUp(with: userInfo)
         Logger.log(level: .info, category: .signup, message: "Successfully completed signup for user: \(user.personalInfo.name)")
         
+        // Save survey responses
+        if !userInfo.surveyResponses.isEmpty {
+            // Here you would save the survey responses to your backend
+            Logger.log(level: .info, category: .survey, message: "Saving survey responses: \(userInfo.surveyResponses)")
+        }
         
         // Then configure all services
-        Logger.log(level: .info, category: .signup, message: "Moving to configure laucnher...")
+        Logger.log(level: .info, category: .signup, message: "Moving to configure launcher...")
         try await Launcher.shared.configure()
+        
+        // Set onboarding completion flag
+        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        
         authenticationDelegate?.signUpComplete()
     }
     
@@ -266,6 +287,23 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     
     func updateRole(_ role: NestUser.UserType) {
         userInfo.role = role
+        
+        // Remove any existing survey steps
+        steps.removeAll { $0 is NNOnboardingSurveyViewController }
+        
+        // Add survey questions based on role
+        if let surveyConfig = loadSurveyConfig(for: role) {
+            let surveySteps = surveyConfig.questions.map { question -> NNOnboardingSurveyViewController in
+                let vc = NNOnboardingSurveyViewController()
+                vc.configure(with: question)
+                return vc
+            }
+            
+            // Insert survey steps after role selection
+            let roleIndex = steps.firstIndex(where: { $0 is OBRoleViewController }) ?? 0
+            steps.insert(contentsOf: surveySteps, at: roleIndex + 1)
+        }
+        
         // Update container's total steps count based on new role
         containerViewController.updateTotalSteps(allSteps.count)
     }
@@ -273,6 +311,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     func updateNestInfo(name: String, address: String) {
         userInfo.nestInfo.name = name
         userInfo.nestInfo.address = address
+    }
+    
+    func updateSurveyResponses(_ responses: [String: [String]]) {
+        // Merge new responses with existing ones
+        userInfo.surveyResponses.merge(responses) { _, new in new }
     }
     
     // MARK: - Validation Methods
@@ -332,7 +375,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     
     func validateRole(_ role: NestUser.UserType) {
         roleValidationSubject.send(true)
-        userInfo.role = role
+        updateRole(role)
     }
     
     func validateNest(name: String, address: String) {
@@ -346,6 +389,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
             userInfo.nestInfo.name = trimmedName
             userInfo.nestInfo.address = trimmedAddress
         }
+    }
+    
+    // MARK: - Survey Configuration
+    private func loadSurveyConfig(for role: NestUser.UserType) -> SurveyConfiguration? {
+        let configFileName = role == .nestOwner ? "parent_survey_config" : "sitter_survey_config"
+        return SurveyConfiguration.loadLocal(named: configFileName)
     }
     
     #if DEBUG

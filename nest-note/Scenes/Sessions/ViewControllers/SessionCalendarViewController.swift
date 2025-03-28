@@ -39,6 +39,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     private var eventsByDate: [Date: [SessionEvent]] = [:]
     
     private let sessionID: String?
+    private let nestID: String
     private let dateRange: DateInterval
     private var selectedDate: Date?
     private var events: [SessionEvent] = []
@@ -75,8 +76,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, dateRange: DateInterval, events: [SessionEvent] = []) {
+    init(sessionID: String? = nil, nestID: String, dateRange: DateInterval, events: [SessionEvent] = []) {
         self.sessionID = sessionID
+        self.nestID = nestID
         let calendar = Calendar.current
         
         // Strip time components and get start of day for both dates
@@ -113,6 +115,15 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         
         // Set content insets after everything is set up
         updateCollectionViewInsets()
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Scroll to today if it's within the date range
+        let today = Date()
+        if dateRange.contains(today) {
+            compactCalendarView.scrollToWeek(containing: today, animated: true)
+        }
     }
     
     func setupPaletteCalendar() {
@@ -371,7 +382,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
                 }
             }
             
-            let events = try await SessionService.shared.getSessionEvents(sessionID: sessionID)
+            let events = try await SessionService.shared.getSessionEvents(for: sessionID, nestID: nestID)
             
             await MainActor.run {
                 let calendar = Calendar.current

@@ -8,6 +8,7 @@ final class EntryDetailViewController: NNSheetViewController {
     
     // MARK: - Properties
     weak var entryDelegate: EntryDetailViewControllerDelegate?
+    private let isReadOnly: Bool
     
     private let contentTextView: UITextView = {
         let textView = UITextView()
@@ -61,10 +62,11 @@ final class EntryDetailViewController: NNSheetViewController {
     private let category: String
     
     // MARK: - Initialization
-    init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil) {
+    init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
         self.entry = entry
         self.visibilityLevel = entry?.visibility ?? .standard
+        self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
     }
     
@@ -76,17 +78,21 @@ final class EntryDetailViewController: NNSheetViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        titleLabel.text = entry == nil ? "New Entry" : "Edit Entry"
+        titleLabel.text = entry == nil ? "New Entry" : isReadOnly ? "View Entry" : "Edit Entry"
         titleField.text = entry?.title
         titleField.placeholder = "Title"
         contentTextView.text = entry?.content
         
-        setupVisibilityMenu()
-        setupInfoMenu()
+        if isReadOnly {
+            configureReadOnlyMode()
+        } else {
+            setupVisibilityMenu()
+            setupInfoMenu()
+        }
         
         itemsHiddenDuringTransition = [buttonStackView, infoButton]
         
-        if entry == nil {
+        if entry == nil && !isReadOnly {
             titleField.becomeFirstResponder()
         }
     }
@@ -199,13 +205,9 @@ final class EntryDetailViewController: NNSheetViewController {
     }
     
     private func showVisibilityLevelInfo() {
-        let alert = UIAlertController(
-            title: "Visibility Levels",
-            message: "Essential: Basic information\nStandard: Normal visibility\nExtended: More details\nComprehensive: Full information",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+        let viewController = VisibilityLevelInfoViewController()
+        present(viewController, animated: true)
+        HapticsHelper.lightHaptic()
     }
     
     private func handleDeleteTapped() {
@@ -247,6 +249,29 @@ final class EntryDetailViewController: NNSheetViewController {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+    
+    private func configureReadOnlyMode() {
+        // Disable editing
+        titleField.isEnabled = false
+        contentTextView.isEditable = false
+        
+        // Hide buttons that modify content
+        visibilityButton.isHidden = false
+        visibilityButton.isEnabled = false
+        updateVisibilityButton()
+        saveButton.isHidden = false
+        saveButton.isEnabled = false
+        
+        // Update info button menu to only show metadata
+        let createdAt = entry?.createdAt ?? Date()
+        let modifiedAt = entry?.updatedAt ?? Date()
+        
+        let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
+        let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
+        
+        infoButton.menu = UIMenu(title: "", children: [createdAtAction, modifiedAtAction])
+        infoButton.showsMenuAsPrimaryAction = true
     }
     
     // MARK: - Actions

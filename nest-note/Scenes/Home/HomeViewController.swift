@@ -80,10 +80,6 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
                 self?.reloadDataForCurrentUser()
             }
             .store(in: &cancellables)
-        
-        Task {
-            await testFirebaseFunction()
-        }
     }
     
     override func setup() {
@@ -411,7 +407,7 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     
     private func showMyNest() {
         guard let _ = nestService.currentNest else { return }
-        navigationController?.pushViewController(NestViewController(), animated: true)
+//        navigationController?.pushViewController(NestViewController(), animated: true)
     }
     
     // MARK: - Bar Button Actions
@@ -436,9 +432,10 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
             showMyNest()
             
         case .quickAccess(let type):
-            guard let _ = nestService.currentNest else { return }
-            let categoryVC = NestCategoryViewController(category: type)
-            navigationController?.pushViewController(categoryVC, animated: true)
+//            guard let _ = nestService.currentNest else { return }
+////            let categoryVC = NestCategoryViewController(category: type)
+//            navigationController?.pushViewController(categoryVC, animated: true)
+            break
             
         case .upcomingEvents:
             fullScheduleButtonTapped()

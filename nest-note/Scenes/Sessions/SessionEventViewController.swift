@@ -10,6 +10,7 @@ final class SessionEventViewController: NNSheetViewController {
     weak var eventDelegate: SessionEventViewControllerDelegate?
     private let sessionID: String?
     private let event: SessionEvent?
+    private let isReadOnly: Bool
     
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
@@ -101,11 +102,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.sessionID = sessionID
         self.event = event
+        self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
-        titleLabel.text = event == nil ? "New Event" : "Edit Event"
+        titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
     }
     
@@ -119,7 +121,7 @@ final class SessionEventViewController: NNSheetViewController {
         setupDateTimeControls()
         itemsHiddenDuringTransition = [buttonStackView]
         
-        // Configure with existing event if editing
+        // Configure with existing event
         if let event = event {
             titleField.text = event.title
             startControl.date = event.startDate
@@ -137,7 +139,18 @@ final class SessionEventViewController: NNSheetViewController {
             }
             
             // Update save button
-            saveButton.setTitle("Update Event", for: .normal)
+            saveButton.setTitle(isReadOnly ? "" : "Update Event", for: .normal)
+        }
+        
+        // Configure read-only mode if needed
+        if isReadOnly {
+            titleField.isUserInteractionEnabled = false
+            startControl.isUserInteractionEnabled = false
+            endControl.isUserInteractionEnabled = false
+            locationView.editButton.isHidden = true
+            colorStack.isHidden = true
+            colorDividerView.isHidden = true
+            buttonStackView.isHidden = true
         }
     }
     

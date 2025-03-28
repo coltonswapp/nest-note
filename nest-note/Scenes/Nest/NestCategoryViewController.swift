@@ -7,10 +7,11 @@
 
 import UIKit
 
-class NestCategoryViewController: UIViewController, NestLoadable {
-    func handleLoadedData() {
-        return
-    }
+class NestCategoryViewController: UIViewController, NestLoadable, CollectionViewLoadable {
+    // MARK: - Properties
+    private let entryRepository: EntryRepository
+    private let category: String
+    private let sessionVisibilityLevel: VisibilityLevel
     
     // Required by NestLoadable
     var loadingIndicator: UIActivityIndicatorView!
@@ -31,11 +32,12 @@ class NestCategoryViewController: UIViewController, NestLoadable {
         }
     }
     
-    private let category: String
-    
-    init(category: String, entries: [BaseEntry] = []) {
+    init(category: String, entries: [BaseEntry] = [], entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil) {
         self.category = category
         self.entries = entries
+        self.entryRepository = entryRepository
+        // If it's a NestService (owner), they get comprehensive access. Otherwise use provided level or default to standard
+        self.sessionVisibilityLevel = entryRepository is NestService ? .comprehensive : (sessionVisibilityLevel ?? .standard)
         super.init(nibName: nil, bundle: nil)
         title = category
     }
@@ -69,6 +71,30 @@ class NestCategoryViewController: UIViewController, NestLoadable {
     // Implement NestLoadable requirement
     func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]]) {
         self.entries = groupedEntries[category] ?? []
+    }
+    
+    // MARK: - CollectionViewLoadable Implementation
+    func handleLoadedData() {
+        // This is called when data is loaded
+        // We're already handling this in handleLoadedEntries
+    }
+    
+    func setupLoadingIndicator() {
+        loadingIndicator = UIActivityIndicatorView(style: .large)
+        loadingIndicator.hidesWhenStopped = true
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(loadingIndicator)
+        
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
+    func setupRefreshControl() {
+        refreshControl = UIRefreshControl()
+        refreshControl.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        collectionView.refreshControl = refreshControl
     }
     
     private func setupCollectionView() {
@@ -174,17 +200,32 @@ class NestCategoryViewController: UIViewController, NestLoadable {
                 switch section {
                 case .codes:
                     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: HalfWidthCell.reuseIdentifier, for: indexPath) as! HalfWidthCell
-                    cell.configure(key: entry.title, value: entry.content)
+                    cell.configure(
+                        key: entry.title,
+                        value: entry.content,
+                        entryVisibility: entry.visibility,
+                        sessionVisibility: self.sessionVisibilityLevel
+                    )
                     return cell
                 case .other:
                     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
-                    cell.configure(key: entry.title, value: entry.content)
+                    cell.configure(
+                        key: entry.title,
+                        value: entry.content,
+                        entryVisibility: entry.visibility,
+                        sessionVisibility: self.sessionVisibilityLevel
+                    )
                     return cell
                 }
             } else {
                 // Use full-width cells for all items in other categories
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
-                cell.configure(key: entry.title, value: entry.content)
+                cell.configure(
+                    key: entry.title,
+                    value: entry.content,
+                    entryVisibility: entry.visibility,
+                    sessionVisibility: self.sessionVisibilityLevel
+                )
                 return cell
             }
         }
@@ -226,17 +267,26 @@ class NestCategoryViewController: UIViewController, NestLoadable {
     }
     
     private func setupNavigationBar() {
-        let addEntryButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addButtonTapped))
-        navigationItem.rightBarButtonItems = [addEntryButton]
+        // Only show add button for nest owners
+        if entryRepository is NestService {
+            let addEntryButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addButtonTapped))
+            navigationItem.rightBarButtonItems = [addEntryButton]
+        }
     }
     
     @objc private func addButtonTapped() {
+        // Only allow adding entries for nest owners
+        guard entryRepository is NestService else { return }
+        
         let newEntryVC = EntryDetailViewController(category: category)
         newEntryVC.entryDelegate = self
         present(newEntryVC, animated: true)
     }
     
     private func setupSuggestionButton() {
+        // Only show suggestion button for nest owners
+        guard entryRepository is NestService else { return }
+        
         suggestionButton = NNPrimaryLabeledButton(title: "Looking for suggestions?", image: UIImage(systemName: "sparkles"))
         suggestionButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
         suggestionButton.addTarget(self, action: #selector(suggestionButtonTapped), for: .touchUpInside)
@@ -314,21 +364,70 @@ class NestCategoryViewController: UIViewController, NestLoadable {
             }
         }
     }
+    
+    // Update loadEntries to use the repository
+    private func loadEntries() async {
+        do {
+            let groupedEntries = try await entryRepository.fetchEntries()
+            await MainActor.run {
+                self.hasLoadedInitialData = true
+                self.handleLoadedEntries(groupedEntries)
+            }
+        } catch {
+            Logger.log(level: .error, category: .nestService, message: "Failed to load entries: \(error)")
+            // Handle error appropriately
+        }
+    }
+    
+    // Update refresh to use the repository
+    @objc private func refresh() {
+        Task {
+            do {
+                let groupedEntries = try await entryRepository.refreshEntries()
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                    self.handleLoadedEntries(groupedEntries)
+                }
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "Failed to refresh entries: \(error)")
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                }
+                // Handle error appropriately
+            }
+        }
+    }
 }
 
 extension NestCategoryViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        
         guard let selectedEntry = dataSource.itemIdentifier(for: indexPath),
               let cell = collectionView.cellForItem(at: indexPath) else { return }
+        
+        // Check if user has access to this entry
+        if !sessionVisibilityLevel.hasAccess(to: selectedEntry.visibility) {
+            let alert = UIAlertController(
+                title: "Access Required",
+                message: "This entry requires \(selectedEntry.visibility.title) access level. The current access level for this session is \(sessionVisibilityLevel.title).",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
         
         Logger.log(level: .info, category: .nestService, message: "Selected entry for editing: \(selectedEntry.title)")
         
         let cellFrame = collectionView.convert(cell.frame, to: nil)
+        let isReadOnly = !(entryRepository is NestService)
         
         let editEntryVC = EntryDetailViewController(
             category: category,
             entry: selectedEntry,
-            sourceFrame: cellFrame
+            sourceFrame: cellFrame,
+            isReadOnly: isReadOnly
         )
         editEntryVC.entryDelegate = self
         present(editEntryVC, animated: true)

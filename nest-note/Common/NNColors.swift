@@ -18,6 +18,9 @@ class NNColors {
     static let groupedBackground = UIColor(named: "NNGroupedBackground")!
     static let NNSystemBackground4 = UIColor(named: "NNSystemBackground4")!
     
+    /// Light is the same as .systemGray6, dark is slightly lighter than .systemGray6
+    static let NNSystemBackground6 = UIColor(named: "NNSystemBackground6")!
+    
     struct NNColorPair: Hashable {
         let fill: UIColor
         let border: UIColor

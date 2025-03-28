@@ -93,4 +93,6 @@ class MiniEntryDetailView: UIView {
         valueLabel.text = value
         timestampLabel.text = "Last modified: \(lastModified.formatted(date: .abbreviated, time: .omitted))"
     }
-} 
+}
+
+

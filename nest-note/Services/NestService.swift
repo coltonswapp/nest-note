@@ -7,16 +7,32 @@
 import Foundation
 import FirebaseFirestore
 
-final class NestService {
+final class NestService: EntryRepository {
     
     // MARK: - Properties
     static let shared = NestService()
     private let db = Firestore.firestore()
     
     @Published private(set) var currentNest: NestItem?
+    @Published private(set) var isOwner: Bool = false
     
     // Add cached entries
     private var cachedEntries: [String: [BaseEntry]]?
+    // Cache for saved sitters
+    private var cachedSavedSitters: [SavedSitter]?
+    
+    // MARK: - SavedSitter Model
+    struct SavedSitter: Identifiable, Codable, Hashable {
+        let id: String  // Firestore document ID
+        var name: String  // Sitter's name
+        var email: String  // Sitter's email (primary identifier for matching)
+        
+        init(id: String = UUID().uuidString, name: String, email: String) {
+            self.id = id
+            self.name = name
+            self.email = email
+        }
+    }
     
     // MARK: - Initialization
     private init() {}
@@ -28,8 +44,12 @@ final class NestService {
             return
         }
         
+        // Set isOwner based on user's primary role
+        isOwner = currentUser.primaryRole == .nestOwner
+        Logger.log(level: .info, category: .nestService, message: "User role set: \(isOwner ? "Owner" : "Sitter")")
+        
         // Only setup nest if user is an owner
-        guard currentUser.primaryRole == .nestOwner else {
+        guard isOwner else {
             Logger.log(level: .info, category: .nestService, message: "User is not an owner, skipping nest setup")
             return
         }
@@ -47,6 +67,7 @@ final class NestService {
     func reset() async {
         Logger.log(level: .info, category: .nestService, message: "Resetting NestService...")
         currentNest = nil
+        isOwner = false
         clearEntriesCache()
     }
     
@@ -96,6 +117,76 @@ final class NestService {
         return nest
     }
     
+    // MARK: - EntryRepository Implementation
+    func fetchEntries() async throws -> [String: [BaseEntry]] {
+        // Return cached entries if available
+        if let cachedEntries = cachedEntries {
+            return cachedEntries
+        }
+        
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        let snapshot = try await db.collection("nests").document(nestId).collection("entries").getDocuments()
+        let entries = try snapshot.documents.map { try $0.data(as: BaseEntry.self) }
+        
+        // Group entries by category
+        let groupedEntries = Dictionary(grouping: entries) { $0.category }
+        
+        // Cache the entries
+        self.cachedEntries = groupedEntries
+        
+        return groupedEntries
+    }
+    
+    func refreshEntries() async throws -> [String: [BaseEntry]] {
+        clearEntriesCache()
+        return try await fetchEntries()
+    }
+    
+    // MARK: - Category Methods
+    private var cachedCategories: [NestCategory]?
+    
+    func fetchCategories() async throws -> [NestCategory] {
+        // Return cached categories if available
+        if let cachedCategories = cachedCategories {
+            Logger.log(level: .info, category: .nestService, message: "Using cached categories")
+            return cachedCategories
+        }
+        
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Fetching categories from Firestore")
+        let snapshot = try await db.collection("nests").document(nestId).collection("nestCategories").getDocuments()
+        let categories = try snapshot.documents.map { try $0.data(as: NestCategory.self) }
+        
+        // Cache the categories
+        self.cachedCategories = categories
+        
+        // Update current nest's categories
+        if var updatedNest = currentNest {
+            updatedNest.categories = categories
+            currentNest = updatedNest
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories")
+        return categories
+    }
+    
+    func refreshCategories() async throws -> [NestCategory] {
+        Logger.log(level: .info, category: .nestService, message: "Refreshing categories")
+        cachedCategories = nil
+        return try await fetchCategories()
+    }
+    
+    func clearCategoriesCache() {
+        Logger.log(level: .info, category: .nestService, message: "Clearing categories cache")
+        cachedCategories = nil
+    }
+    
     // MARK: - Entry Methods
     func createEntry(_ entry: BaseEntry) async throws {
         guard let nestId = currentNest?.id else {
@@ -137,51 +228,27 @@ final class NestService {
         Logger.log(level: .info, category: .nestService, message: "Entry updated successfully in Firestore: \(entry.title)")
     }
     
-    func fetchEntries() async throws -> [String: [BaseEntry]] {
-        // Return cached entries if available
-        if let cachedEntries = cachedEntries {
-            Logger.log(level: .info, category: .nestService, message: "Using cached entries")
-            return cachedEntries
-        }
-        
+    func deleteEntry(_ entry: BaseEntry) async throws {
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
         
-        // Fetch categories first
-        let categories = try await fetchCategories()
-        let categoryNames = Set(categories.map { $0.name })
+        let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
+        try await docRef.delete()
         
-        let snapshot = try await db.collection("nests").document(nestId).collection("entries").getDocuments()
-        var entries = try snapshot.documents.map { try $0.data(as: BaseEntry.self) }
-        
-        // Move entries with non-existent categories to "Other"
-        for (index, entry) in entries.enumerated() {
-            if !categoryNames.contains(entry.category) {
-                entries[index].category = "Other"
-            }
+        // Update cache if it exists
+        if var updatedNest = currentNest {
+            updatedNest.entries?.removeAll { $0.id == entry.id }
+            currentNest = updatedNest
         }
         
-        // Group entries by category
-        let groupedEntries = Dictionary(grouping: entries) { $0.category }
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(entries.count) entries from Firestore")
-        
-        // Cache the entries
-        self.cachedEntries = groupedEntries
-        
-        return groupedEntries
+        clearEntriesCache()
     }
     
     // Add method to clear cache
     func clearEntriesCache() {
         Logger.log(level: .info, category: .nestService, message: "Clearing entries cache")
         cachedEntries = nil
-    }
-    
-    // Add this method for when we need to force a refresh
-    func refreshEntries() async throws -> [String: [BaseEntry]] {
-        clearEntriesCache()
-        return try await fetchEntries()
     }
     
     // Creates default entries for a new nest
@@ -191,28 +258,6 @@ final class NestService {
             try await docRef.setData(try Firestore.Encoder().encode(entry))
         }
         Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultEntries.count) default entries")
-    }
-    
-    // Add to NestService class
-    func deleteEntry(_ entry: BaseEntry) async throws {
-        guard let nestId = currentNest?.id else {
-            throw NestError.noCurrentNest
-        }
-        
-        let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-        do {
-            try await docRef.delete()
-            
-            // Update cache if it exists
-            if var groupedEntries = cachedEntries {
-                groupedEntries[entry.category]?.removeAll { $0.id == entry.id }
-                cachedEntries = groupedEntries
-            }
-            
-            Logger.log(level: .info, category: .nestService, message: "Entry deleted successfully: \(entry.title)")
-        } catch {
-            throw error
-        }
     }
 }
 
@@ -321,22 +366,97 @@ extension NestService {
         
         Logger.log(level: .info, category: .nestService, message: "Category created successfully: \(category.name)")
     }
-    
-    // Add method to fetch categories
-    func fetchCategories() async throws -> [NestCategory] {
+}
+
+// MARK: - SavedSitter Methods
+extension NestService {
+    // Fetch all saved sitters for the current nest
+    func fetchSavedSitters() async throws -> [SavedSitter] {
+        // Return cached sitters if available
+        if let cachedSavedSitters = cachedSavedSitters {
+            Logger.log(level: .info, category: .nestService, message: "Using cached saved sitters")
+            return cachedSavedSitters
+        }
+        
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
         
-        let snapshot = try await db.collection("nests").document(nestId).collection("nestCategories").getDocuments()
-        let categories = try snapshot.documents.map { try $0.data(as: NestCategory.self) }
+        let snapshot = try await db.collection("nests").document(nestId).collection("savedSitters").getDocuments()
+        let savedSitters = try snapshot.documents.map { try $0.data(as: SavedSitter.self) }
         
-        // Update current nest's categories
-        if var updatedNest = currentNest {
-            updatedNest.categories = categories
-            currentNest = updatedNest
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(savedSitters.count) saved sitters from Firestore")
+        
+        // Cache the sitters
+        self.cachedSavedSitters = savedSitters
+        
+        return savedSitters
+    }
+    
+    // Fetch a saved sitter by ID from cache or Firestore
+    func fetchSavedSitterById(_ id: String) async throws -> SavedSitter? {
+        // First check the cache
+        if let sitter = cachedSavedSitters?.first(where: { $0.id == id }) {
+            Logger.log(level: .info, category: .nestService, message: "Found sitter \(id) in cache")
+            return sitter
         }
         
-        return categories
+        // If not in cache, fetch all sitters (which will update cache)
+        let sitters = try await fetchSavedSitters()
+        return sitters.first(where: { $0.id == id })
+    }
+    
+    // Add a new saved sitter
+    func addSavedSitter(_ sitter: SavedSitter) async throws {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        let docRef = db.collection("nests").document(nestId).collection("savedSitters").document(sitter.id)
+        try await docRef.setData(try Firestore.Encoder().encode(sitter))
+        
+        // Update cache if it exists
+        if var sitters = cachedSavedSitters {
+            // Check if sitter with same ID already exists
+            if let index = sitters.firstIndex(where: { $0.id == sitter.id }) {
+                sitters[index] = sitter
+            } else {
+                sitters.append(sitter)
+            }
+            cachedSavedSitters = sitters
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Saved sitter added successfully: \(sitter.name)")
+    }
+    
+    // Delete a saved sitter
+    func deleteSavedSitter(_ sitter: SavedSitter) async throws {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        let docRef = db.collection("nests").document(nestId).collection("savedSitters").document(sitter.id)
+        try await docRef.delete()
+        
+        // Update cache if it exists
+        if var sitters = cachedSavedSitters {
+            sitters.removeAll { $0.id == sitter.id }
+            cachedSavedSitters = sitters
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Saved sitter deleted successfully: \(sitter.name)")
+    }
+    
+    // Clear saved sitters cache
+    func clearSavedSittersCache() {
+        Logger.log(level: .info, category: .nestService, message: "Clearing saved sitters cache")
+        cachedSavedSitters = nil
+    }
+    
+    // Force refresh saved sitters
+    func refreshSavedSitters() async throws -> [SavedSitter] {
+        clearSavedSittersCache()
+        return try await fetchSavedSitters()
     }
 } 
+

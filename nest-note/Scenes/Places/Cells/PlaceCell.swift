@@ -45,6 +45,16 @@ final class PlaceCell: UICollectionViewCell {
         return view
     }()
     
+    // Add overlay view for highlighting
+    private let highlightOverlay: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = .black.withAlphaComponent(0.1)
+        view.isHidden = true
+        view.layer.cornerRadius = 12
+        return view
+    }()
+    
     private var gridConstraints: [NSLayoutConstraint] = []
     private var listConstraints: [NSLayoutConstraint] = []
     
@@ -64,7 +74,6 @@ final class PlaceCell: UICollectionViewCell {
     }
     
     private func setupViews() {
-//        contentView.backgroundColor = .systemBackground
         contentView.layer.cornerRadius = 12
         contentView.clipsToBounds = true
         
@@ -74,6 +83,15 @@ final class PlaceCell: UICollectionViewCell {
         contentView.addSubview(thumbnailImageView)
         contentView.addSubview(blurEffectView)
         contentView.addSubview(labelStack)
+        contentView.addSubview(highlightOverlay)  // Add overlay
+        
+        // Add overlay constraints
+        NSLayoutConstraint.activate([
+            highlightOverlay.topAnchor.constraint(equalTo: contentView.topAnchor),
+            highlightOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            highlightOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            highlightOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
         
         // Apply the blur effect
         blurEffectView.effect = UIBlurEffect.variableBlurEffect(
@@ -147,21 +165,18 @@ final class PlaceCell: UICollectionViewCell {
         addressLabel.text = nil
     }
     
-    // Add these methods for proper highlighting
+    // Update highlighting behavior
     override var isHighlighted: Bool {
         didSet {
             UIView.animate(withDuration: 0.1) {
+                // Scale effect
                 self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity
                 
-                // Apply highlight to content view instead of cell
-                self.contentView.backgroundColor = self.isHighlighted ? .tertiarySystemGroupedBackground : .clear
+                // Show/hide overlay
+                self.highlightOverlay.isHidden = !self.isHighlighted
+                self.highlightOverlay.backgroundColor = self.isHighlighted ?
+                    .black.withAlphaComponent(0.15) : .black.withAlphaComponent(0.1)
             }
-        }
-    }
-    
-    override var isSelected: Bool {
-        didSet {
-            // Optional: Add selection styling if needed
         }
     }
     

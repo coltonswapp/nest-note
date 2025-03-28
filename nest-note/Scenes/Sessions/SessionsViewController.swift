@@ -1,6 +1,6 @@
 import UIKit
 
-class SessionsViewController: NNViewController {
+class NestSessionsViewController: NNViewController {
     struct MonthSection: Hashable {
         let date: Date
         let bucket: SessionService.SessionBucket
@@ -65,13 +65,7 @@ class SessionsViewController: NNViewController {
         }
     }
     
-    private lazy var newSessionButton: NNPrimaryLabeledButton = {
-        let button = NNPrimaryLabeledButton(
-            title: "New Session"
-        )
-        button.addTarget(self, action: #selector(newSessionTapped), for: .touchUpInside)
-        return button
-    }()
+    private var ctaButton: NNPrimaryLabeledButton!
     
     private lazy var emptyStateView: NNEmptyStateView = {
         let view = NNEmptyStateView(
@@ -94,7 +88,7 @@ class SessionsViewController: NNViewController {
     }
     
     override func setup() {
-        title = "Sessions"
+        title = "Nest Sessions"
         setupFilterView()
         setupCollectionView()
         setupEmptyStateView()
@@ -203,10 +197,23 @@ class SessionsViewController: NNViewController {
     }
     
     private func loadSessions() {
+        fetchNestSessions()
+    }
+    
+    private func fetchNestSessions() {
         Task {
             do {
                 guard let nestID = NestService.shared.currentNest?.id else {
-                    // Handle no current nest
+                    // Show error state for no current nest
+                    await MainActor.run {
+                        self.allSessions = []
+                        self.emptyStateView.configure(
+                            icon: UIImage(systemName: "house.slash"),
+                            title: "No Current Nest",
+                            subtitle: "Please select a nest to view its sessions."
+                        )
+                        self.updateEmptyState()
+                    }
                     return
                 }
                 
@@ -215,6 +222,7 @@ class SessionsViewController: NNViewController {
                 await MainActor.run {
                     // Store all sessions
                     self.allSessions = collection.upcoming + collection.inProgress + collection.past
+                    updateEmptyState()
                 }
             } catch {
                 // Handle error
@@ -229,8 +237,12 @@ class SessionsViewController: NNViewController {
     }
     
     private func setupNewSessionButton() {
-        view.addSubview(newSessionButton)
-        newSessionButton.pinToBottom(
+        ctaButton = NNPrimaryLabeledButton(title: "New Session")
+        view.addSubview(ctaButton)
+        
+        ctaButton.addTarget(self, action: #selector(ctaTapped), for: .touchUpInside)
+        
+        ctaButton.pinToBottom(
             of: view,
             addBlurEffect: true, 
             blurMaskImage: UIImage(named: "testBG3")!
@@ -281,7 +293,7 @@ class SessionsViewController: NNViewController {
         }
     }
     
-    @objc private func newSessionTapped() {
+    @objc private func ctaTapped() {
         let vc = EditSessionViewController()
         vc.delegate = self
         vc.modalPresentationStyle = .pageSheet
@@ -289,7 +301,7 @@ class SessionsViewController: NNViewController {
     }
 }
 
-extension SessionsViewController: UICollectionViewDelegate {
+extension NestSessionsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard case .session(let session) = dataSource.itemIdentifier(for: indexPath) else {
             collectionView.deselectItem(at: indexPath, animated: true)
@@ -305,7 +317,7 @@ extension SessionsViewController: UICollectionViewDelegate {
     }
 }
 
-extension SessionsViewController: SessionFilterViewDelegate {
+extension NestSessionsViewController: SessionFilterViewDelegate {
     func sessionFilterView(_ filterView: SessionFilterView, didSelectFilter filter: SessionService.SessionBucket) {
         currentBucket = filter
         updateDisplayedSessions()
@@ -321,7 +333,7 @@ extension Calendar {
 }
 
 // MARK: - EditSessionViewControllerDelegate
-extension SessionsViewController: EditSessionViewControllerDelegate {
+extension NestSessionsViewController: EditSessionViewControllerDelegate {
     func editSessionViewController(_ controller: EditSessionViewController, didCreateSession session: SessionItem) {
         // Refresh sessions to include the new one
         loadSessions()
@@ -352,13 +364,10 @@ extension SessionsViewController: EditSessionViewControllerDelegate {
         if currentBucket != updatedBucket {
             filterView.selectBucket(updatedBucket)
         }
-        
-        // Show success toast
-        showToast(text: "Session updated")
     }
 }
 
-extension SessionsViewController: CollectionViewLoadable {
+extension NestSessionsViewController: CollectionViewLoadable {
     func handleLoadedData() {
         updateDisplayedSessions()
     }

@@ -36,9 +36,6 @@ class SessionCell: UICollectionViewListCell {
     }
     
     private func setupViews() {
-        var bgConfig = UIBackgroundConfiguration.listCell()
-        bgConfig.backgroundColor = .secondarySystemGroupedBackground
-        backgroundConfiguration = bgConfig
         
         // Setup empty state stack
         emptyStateStack.addArrangedSubview(emptyStateLabel)
@@ -55,7 +52,7 @@ class SessionCell: UICollectionViewListCell {
         ])
     }
     
-    func configureEmptyState(for section: SessionsViewController.Section) {
+    func configureEmptyState(for section: NestSessionsViewController.Section) {
         var bgConfig = UIBackgroundConfiguration.listCell()
         bgConfig.backgroundColor = .clear
         backgroundConfiguration = bgConfig
@@ -72,10 +69,19 @@ class SessionCell: UICollectionViewListCell {
         
         // Show empty state stack
         emptyStateStack.isHidden = false
-        contentView.backgroundColor = nil
+        contentView.backgroundColor = .systemGroupedBackground
     }
     
-    private func emptyStateConfig(for section: SessionsViewController.Section) -> (message: String, iconName: String) {
+//    override func updateConfiguration(using state: UICellConfigurationState) {
+//        super.updateConfiguration(using: state)
+//        
+//        // Update background configuration for current state
+//        var newBgConfig = backgroundConfiguration
+//        newBgConfig?.backgroundColor = state.isSelected ? .systemGray4 : .secondarySystemGroupedBackground
+//        backgroundConfiguration = newBgConfig
+//    }
+    
+    private func emptyStateConfig(for section: NestSessionsViewController.Section) -> (message: String, iconName: String) {
         switch section {
         case .inProgress:
             return ("No in-progress sessions", "person.badge.clock")
@@ -90,7 +96,12 @@ class SessionCell: UICollectionViewListCell {
         // Hide empty state stack
         emptyStateStack.isHidden = true
         
-        var content = defaultContentConfiguration()
+        // Configure background
+        var bgConfig = UIBackgroundConfiguration.listCell()
+        bgConfig.backgroundColor = .secondarySystemGroupedBackground
+        
+        // Set up content configuration
+        var content = UIListContentConfiguration.cell()
         
         // Configure text style
         content.text = session.title
@@ -124,7 +135,20 @@ class SessionCell: UICollectionViewListCell {
         // Apply standard system margins
         content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
         
+        
+        backgroundConfiguration = bgConfig
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
     }
-} 
+    
+    override var isSelected: Bool {
+        didSet {
+            // Force refresh of background configuration when selection state changes
+            var newBgConfig = backgroundConfiguration
+            newBgConfig?.backgroundColor = isSelected ? .systemGray4 : .secondarySystemGroupedBackground
+            backgroundConfiguration = newBgConfig
+        }
+    }
+}
+
+

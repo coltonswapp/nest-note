@@ -15,6 +15,7 @@ class QuickAccessCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
+        configureSelectionBehavior()
     }
     
     required init?(coder: NSCoder) {
@@ -54,6 +55,25 @@ class QuickAccessCell: UICollectionViewCell {
             stackView.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 8),
             stackView.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -8)
         ])
+    }
+    
+    private func configureSelectionBehavior() {
+        // Create a view for the selected state
+        let selectedBgView = UIView()
+        selectedBgView.backgroundColor = .systemGray4  // Darker, more noticeable selection
+        selectedBgView.layer.cornerRadius = 12
+        selectedBgView.layer.masksToBounds = true
+        
+        // Set the selected background view
+        selectedBackgroundView = selectedBgView
+        
+        // Enable user interaction
+        isUserInteractionEnabled = true
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        selectedBackgroundView?.layer.cornerRadius = 12
     }
     
     func configure(with title: String, image: UIImage?) {
