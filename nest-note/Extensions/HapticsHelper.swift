@@ -44,4 +44,9 @@ class HapticsHelper {
         let notificationGenerator = UINotificationFeedbackGenerator()
         notificationGenerator.notificationOccurred(.error)
     }
+    
+    static func successHaptic() {
+        let notificationGenerator = UINotificationFeedbackGenerator()
+        notificationGenerator.notificationOccurred(.success)
+    }
 }

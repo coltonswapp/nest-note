@@ -16,6 +16,22 @@ protocol AuthenticationDelegate: AnyObject {
 final class LandingViewController: NNViewController {
     
     // MARK: - UI Elements
+    private let topImageView: UIImageView = {
+        let view = UIImageView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.image = UIImage(named: "half_moon_top")
+        view.contentMode = .scaleAspectFill
+        return view
+    }()
+    
+    private let mainStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 40
+        return stack
+    }()
+    
     private let titleStack: UIStackView = {
         let stack = UIStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -60,9 +76,8 @@ final class LandingViewController: NNViewController {
         return stack
     }()
     
-    private lazy var emailField: UITextField = {
-        let field = UITextField()
-        field.borderStyle = .roundedRect
+    private lazy var emailField: NNTextField = {
+        let field = NNTextField()
         field.placeholder = "Email"
         field.returnKeyType = .next
         field.keyboardType = .emailAddress
@@ -72,9 +87,9 @@ final class LandingViewController: NNViewController {
         return field
     }()
     
-    private lazy var passwordField: UITextField = {
-        let field = UITextField()
-        field.borderStyle = .roundedRect
+    private lazy var passwordField: NNTextField = {
+        let field = NNTextField()
+        field.borderStyle = .none
         field.placeholder = "Password"
         field.isSecureTextEntry = true
         field.returnKeyType = .done
@@ -100,6 +115,7 @@ final class LandingViewController: NNViewController {
     // Keep delegate and keyboard constraint
     weak var delegate: AuthenticationDelegate?
     private var loginButtonBottomConstraint: NSLayoutConstraint?
+    private var mainStackTopConstraint: NSLayoutConstraint?
     
     // MARK: - Lifecycle Methods
     override func viewDidLoad() {
@@ -111,14 +127,17 @@ final class LandingViewController: NNViewController {
     }
     
     override func addSubviews() {
-        titleStack.addArrangedSubview(titleImage)
+        view.addSubview(topImageView)
+        
         titleStack.addArrangedSubview(titleLabel)
         titleStack.addArrangedSubview(subtitleLabel)
-        view.addSubview(titleStack)
         
         loginStack.addArrangedSubview(emailField)
         loginStack.addArrangedSubview(passwordField)
-        view.addSubview(loginStack)
+        
+        mainStack.addArrangedSubview(titleStack)
+        mainStack.addArrangedSubview(loginStack)
+        view.addSubview(mainStack)
         
         view.addSubview(loginButton)
         view.addSubview(signUpButton)
@@ -126,16 +145,18 @@ final class LandingViewController: NNViewController {
     
     override func constrainSubviews() {
         NSLayoutConstraint.activate([
-            titleImage.heightAnchor.constraint(equalToConstant: 45),
-            titleImage.widthAnchor.constraint(equalToConstant: 45),
-            
-            titleStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            titleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            titleStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-            
-            loginStack.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 40),
-            loginStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            loginStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            topImageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 0),
+            topImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topImageView.heightAnchor.constraint(equalToConstant: view.frame.width * 0.56),
+        ])
+        
+        mainStackTopConstraint = mainStack.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 0)
+        mainStackTopConstraint?.isActive = true
+        
+        NSLayoutConstraint.activate([
+            mainStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            mainStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             
             emailField.heightAnchor.constraint(equalToConstant: 55),
             passwordField.heightAnchor.constraint(equalToConstant: 55),
@@ -187,6 +208,8 @@ final class LandingViewController: NNViewController {
         
         UIView.animate(withDuration: duration) {
             self.loginButtonBottomConstraint?.constant = -keyboardHeight + 64
+            self.mainStackTopConstraint?.constant = -keyboardHeight * 0.25
+            self.topImageView.alpha = 0.2
             self.view.layoutIfNeeded()
         }
     }
@@ -198,6 +221,8 @@ final class LandingViewController: NNViewController {
         
         UIView.animate(withDuration: duration) {
             self.loginButtonBottomConstraint?.constant = -16
+            self.mainStackTopConstraint?.constant = -12
+            self.topImageView.alpha = 1.0
             self.view.layoutIfNeeded()
         }
     }
@@ -219,6 +244,9 @@ final class LandingViewController: NNViewController {
                 _ = try await UserService.shared.login(email: email, password: password)
                 // Let Launcher handle the rest
                 try await Launcher.shared.configure()
+                
+                // Set onboarding completion flag for existing users
+                UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
                 
                 await MainActor.run {
                     loginButton.stopLoading(withSuccess: true)
@@ -297,6 +325,7 @@ extension LandingViewController: UITextFieldDelegate {
             passwordField.becomeFirstResponder()
         case passwordField:
             textField.resignFirstResponder()
+            if ((textField.text?.isEmpty) != nil) { return true }
             loginTapped()
         default:
             textField.resignFirstResponder()
@@ -304,3 +333,73 @@ extension LandingViewController: UITextFieldDelegate {
         return true
     }
 }
+
+import UIKit
+
+class NNTextField: UITextField {
+    
+    // MARK: - Properties
+    
+    /// The inset or padding for the text rectangle
+    var textInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12) {
+        didSet {
+            setNeedsDisplay()
+        }
+    }
+    
+    // MARK: - Initialization
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupTextField()
+    }
+    
+    required init?(coder aDecoder: NSCoder) {
+        super.init(coder: aDecoder)
+        setupTextField()
+    }
+    
+    // MARK: - Setup
+    
+    private func setupTextField() {
+        // Default setup code if needed
+        backgroundColor = NNColors.NNSystemBackground6
+        layer.cornerRadius = 18
+    }
+    
+    // MARK: - Text Rectangle Overrides
+    
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        return bounds.inset(by: textInsets)
+    }
+    
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        return bounds.inset(by: textInsets)
+    }
+    
+    override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
+        return bounds.inset(by: textInsets)
+    }
+    
+    // MARK: - Convenience Methods
+    
+    /// Sets the padding (insets) for all edges at once
+    func setPadding(_ padding: CGFloat) {
+        textInsets = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
+    }
+    
+    /// Sets horizontal padding (left and right)
+    func setHorizontalPadding(_ padding: CGFloat) {
+        textInsets.left = padding
+        textInsets.right = padding
+        setNeedsDisplay()
+    }
+    
+    /// Sets vertical padding (top and bottom)
+    func setVerticalPadding(_ padding: CGFloat) {
+        textInsets.top = padding
+        textInsets.bottom = padding
+        setNeedsDisplay()
+    }
+}
+

@@ -10,6 +10,7 @@ import UIKit
 final class VisibilityCell: UICollectionViewListCell {
     weak var delegate: VisibilityCellDelegate?
     private var currentLevel: VisibilityLevel = .standard
+    private var isReadOnly: Bool = false
     
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
@@ -34,8 +35,7 @@ final class VisibilityCell: UICollectionViewListCell {
     private lazy var visibilityButton: NNSmallPrimaryButton = {
         let button = NNSmallPrimaryButton(
             title: "Test",
-            image: UIImage(systemName: "chevron.up.chevron.down"),
-            imagePlacement: .right,
+            image: nil,
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
             foregroundColor: NNColors.primary
         )
@@ -73,21 +73,41 @@ final class VisibilityCell: UICollectionViewListCell {
         ])
     }
     
-    func configure(with level: VisibilityLevel) {
+    func configure(with level: VisibilityLevel, isReadOnly: Bool = false) {
         self.currentLevel = level
+        self.isReadOnly = isReadOnly
         
         var container = AttributeContainer()
         container.font = UIFont.boldSystemFont(ofSize: 16)
         visibilityButton.configuration?.attributedTitle = AttributedString(level.title, attributes: container)
         
-        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
-        
-        setupVisibilityMenu(selectedLevel: level)
+        // Configure button based on read-only state
+        if isReadOnly {
+            visibilityButton.configureButton(
+                title: level.title,
+                image: UIImage(systemName: "lock.circle.fill"),
+                imagePlacement: .right,
+                foregroundColor: NNColors.primary
+            )
+            visibilityButton.isUserInteractionEnabled = true
+        } else {
+            visibilityButton.configureButton(
+                title: level.title,
+                image: UIImage(systemName: "chevron.up.chevron.down"),
+                imagePlacement: .right,
+                foregroundColor: NNColors.primary
+            )
+            visibilityButton.isUserInteractionEnabled = true
+            setupVisibilityMenu(selectedLevel: level)
+        }
     }
     
     private func setupVisibilityMenu(selectedLevel: VisibilityLevel) {
+        // Only setup menu if not in read-only mode
+        guard !isReadOnly else { return }
+        
         let infoAction = UIAction(title: "Learn about Levels", image: UIImage(systemName: "info.circle")) { [weak self] _ in
-            // Handle info action
+            self?.delegate?.didRequestVisibilityLevelInfo()
         }
         
         let visibilityActions = VisibilityLevel.allCases.map { level in

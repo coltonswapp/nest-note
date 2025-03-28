@@ -86,6 +86,10 @@ extension Calendar {
         return self.date(bySettingHour: 0, minute: 0, second: 0, of: date) ?? date
     }
     
+    func middleOfDay(for date: Date) -> Date {
+        return self.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
+    }
+    
     func endOfDay(for date: Date) -> Date {
         return self.date(bySettingHour: 23, minute: 59, second: 59, of: date) ?? date
     }

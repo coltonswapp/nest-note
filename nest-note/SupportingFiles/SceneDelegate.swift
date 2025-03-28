@@ -6,50 +6,42 @@
 //
 
 import UIKit
+import FirebaseAuth
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
+    private var coordinator: LaunchCoordinator?
 
-
-    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        // Use this method to optionally configure and attach the UIWindow `window` to the provided UIWindowScene `scene`.
-        // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
-        // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let windowScene = (scene as? UIWindowScene) else { return }
-        window = UIWindow(windowScene: windowScene)
+        let window = UIWindow(windowScene: windowScene)
+        self.window = window
+        
+        // Create and start coordinator
+        let coordinator = LaunchCoordinator(window: window)
+        self.coordinator = coordinator
         
         Task {
             do {
-                // Wait for configuration to complete
-                try await Launcher.shared.configure()
-                
-                await MainActor.run {
-                    // Set root view controller based on auth state
-                    if UserService.shared.isSignedIn {
-                        window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
-                    } else {
-                        window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
-                    }
-                    window?.makeKeyAndVisible()
-                }
+                try await coordinator.start()
             } catch {
-                await MainActor.run {
-                    Logger.log(level: .error, category: .launcher, message: "Configuration failed: \(error)")
-                    // Set a default root view controller even if configuration fails
-                    window?.rootViewController = UINavigationController(rootViewController: HomeViewController())
-                    window?.makeKeyAndVisible()
-                    
-                    // Show error to user
-                    let alert = UIAlertController(
-                        title: "Setup Error",
-                        message: "Failed to complete initial setup. Some features may be unavailable.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    window?.rootViewController?.present(alert, animated: true)
-                }
+                Logger.log(level: .error, category: .launcher, message: "Configuration failed: \(error)")
+                
+                // Show error to user
+                let alert = UIAlertController(
+                    title: "Setup Error",
+                    message: "Failed to complete initial setup. Some features may be unavailable.",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                window.rootViewController?.present(alert, animated: true)
             }
+        }
+        
+        // Handle any URLs that were passed to the app on launch
+        if let urlContext = options.urlContexts.first {
+            handleIncomingURL(urlContext.url)
         }
     }
 
@@ -81,6 +73,37 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // to restore the scene back to its current state.
     }
 
-
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let url = URLContexts.first?.url else { return }
+        handleIncomingURL(url)
+    }
+    
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme == "nestnote",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              components.host == "invite",
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+            return
+        }
+        
+        // Present the invite acceptance flow
+        DispatchQueue.main.async {
+            if let rootVC = self.window?.rootViewController {
+                let alert = UIAlertController(
+                    title: "Session Invite",
+                    message: "Would you like to join this session?",
+                    preferredStyle: .alert
+                )
+                
+                alert.addAction(UIAlertAction(title: "Join", style: .default) { _ in
+                    // TODO: Handle session join with code
+                    print("Joining session with code: \(code)")
+                })
+                
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                
+                rootVC.present(alert, animated: true)
+            }
+        }
+    }
 }
-

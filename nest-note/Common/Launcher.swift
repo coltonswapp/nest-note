@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let appDidReset = Notification.Name("appDidReset")
+}
+
 /// Responsible for launching and configuring core app services
 final class Launcher {
     
@@ -14,6 +18,12 @@ final class Launcher {
         
         // Setup UserService first
         let userSetupResult = await UserService.shared.setup()
+        
+        // Only reset ModeManager if no user is signed in
+        // This preserves the saved mode between launches for signed in users
+        if !userSetupResult.isSignedIn {
+            ModeManager.shared.resetToDefaultMode()
+        }
         
         // Only setup NestService if user is signed in
         if userSetupResult.isSignedIn {
@@ -33,11 +43,19 @@ final class Launcher {
     func reset() async {
         Logger.log(level: .info, category: .launcher, message: "Resetting service configuration...")
         
-        // Reset NestService first
+        // Reset ModeManager first
+        ModeManager.shared.resetToDefaultMode()
+        
+        // Reset NestService next
         await NestService.shared.reset()
         
         // Reset UserService last
         await UserService.shared.reset()
+        
+        // Post notification on main thread that app has reset
+        await MainActor.run {
+            NotificationCenter.default.post(name: .appDidReset, object: nil)
+        }
         
         Logger.log(level: .info, category: .launcher, message: "Service configuration reset complete ✅")
     }

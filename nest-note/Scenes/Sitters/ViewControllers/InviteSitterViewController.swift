@@ -1,238 +1,291 @@
 import UIKit
 
-protocol InviteSitterViewControllerDelegate: AnyObject {
-    func inviteSitterViewController(_ controller: InviteSitterViewController, didSelectSitter sitter: SitterItem)
-}
-
 class InviteSitterViewController: NNViewController {
-    
-    private let searchBarView: NNSearchBarView = {
-        let view = NNSearchBarView()
-        view.frame.size.height = 50
-        return view
+
+    // MARK: - UI Components
+    private let logoImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(systemName: "bird")
+        imageView.tintColor = NNColors.primary
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
     }()
     
-    private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Section, SitterItem>!
-    private var inviteButton: NNPrimaryLabeledButton!
-    private var selectedSitter: SitterItem?
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Invite by Code"
+        label.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        label.textAlignment = .center
+        label.textColor = .label
+        return label
+    }()
     
-    enum Section {
-        case recent
-    }
-
-    private var allSitters: [SitterItem] = []
-    private var filteredSitters: [SitterItem] = []
+    private let descriptionLabel: UILabel = {
+        let label = UILabel()
+        label.text = "They'll have everything they need—from emergency contacts to bedtime routines—ensuring consistent care while you're away"
+        label.font = UIFont.systemFont(ofSize: 16)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        return label
+    }()
     
-    // Replace sampleSitters with this larger dataset
-    private let sampleSitters = [
-        SitterItem(name: "Sarah Johnson", email: "sarah.j@gmail.com"),
-        SitterItem(name: "Mike Peters", email: "mike.peters@yahoo.com"),
-        SitterItem(name: "Emma Wilson", email: "emma.w@outlook.com"),
-        SitterItem(name: "Alex Thompson", email: "alex.t@gmail.com"),
-        SitterItem(name: "Lisa Chen", email: "lisa.chen@outlook.com"),
-        SitterItem(name: "David Miller", email: "david.m@gmail.com"),
-        SitterItem(name: "Rachel Green", email: "rachel.g@yahoo.com"),
-        SitterItem(name: "James Wilson", email: "james.w@gmail.com"),
-        SitterItem(name: "Sophie Brown", email: "sophie.b@outlook.com"),
-        SitterItem(name: "Oliver Smith", email: "oliver.s@gmail.com"),
-        SitterItem(name: "Emily Davis", email: "emily.d@yahoo.com"),
-        SitterItem(name: "Michael Chang", email: "michael.c@gmail.com"),
-        SitterItem(name: "Isabella Rodriguez", email: "bella.r@outlook.com")
-    ]
+    private let labelStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 8
+        return stack
+    }()
+    
+    private let titleStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 24
+        return stack
+    }()
+    
+    private let sectionLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "Sitter Email".uppercased()
+        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.textColor = .lightGray
+        return label
+    }()
+    
+    private let emailTextField: RoundedTextField = {
+        let field = RoundedTextField(placeholder: "Sitter Email")
+        field.textField.keyboardType = .emailAddress
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.isUserInteractionEnabled = false
+        return field
+    }()
+    
+    private let emailStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        return stack
+    }()
+    
+    private var sendInviteButton: NNLoadingButton!
+    
+    // MARK: - Properties
     
     weak var delegate: InviteSitterViewControllerDelegate?
+    private let sitter: SitterItem?
+    private let session: SessionItem?
+    
+    // MARK: - Initialization
+    
+    init(sitter: SitterItem, session: SessionItem) {
+        self.sitter = sitter
+        self.session = session
+        super.init(nibName: nil, bundle: nil)
+        emailTextField.text = sitter.email
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    // MARK: - Lifecycle
+    
+    override func loadView() {
+        super.loadView()
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        filterSitters(with: "")
-        updateInviteButtonState()
+        setupInviteButton()
+        setupActions()
     }
     
-    override func setup() {
-        title = "Add a Sitter"
-        searchBarView.searchBar.delegate = self
+    // MARK: - Setup
+    
+    override func setupNavigationBarButtons() {
+        let dismissButton = UIBarButtonItem(
+            image: UIImage(systemName: "xmark"),
+            style: .plain,
+            target: self,
+            action: #selector(closeButtonTapped)
+        )
         
-        // Initialize sitters
-        allSitters = sampleSitters
-        filteredSitters = allSitters
+        navigationItem.rightBarButtonItems = [dismissButton]
+        navigationController?.navigationBar.tintColor = .label
     }
     
     override func addSubviews() {
-        setupPaletteSearch()
-        setupCollectionView()
-        setupInviteButton()
-    }
-    
-    func setupPaletteSearch() {
-        addNavigationBarPalette(searchBarView)
-    }
-    
-    override func setupNavigationBarButtons() {
-        let closeButton = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(closeButtonTapped))
-        let buttons = [closeButton]
-        buttons.forEach { $0.tintColor = .label }
-        navigationItem.rightBarButtonItems = buttons
-    }
-    
-    @objc func closeButtonTapped() {
-        self.dismiss(animated: true)
-    }
-    
-    private func setupCollectionView() {
-        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-        config.headerMode = .supplementary
+        titleStack.addArrangedSubview(logoImageView)
+        labelStack.addArrangedSubview(titleLabel)
+        labelStack.addArrangedSubview(descriptionLabel)
+        titleStack.addArrangedSubview(labelStack)
+        view.addSubview(titleStack)
         
-        let layout = UICollectionViewCompositionalLayout.list(using: config)
-        
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        view.addSubview(collectionView)
-        
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        emailStack.addArrangedSubview(sectionLabel)
+        emailStack.addArrangedSubview(emailTextField)
+        view.addSubview(emailStack)
+    }
+    
+    override func constrainSubviews() {
+        // Layout constraints
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            
+            // Title Stack
+            logoImageView.widthAnchor.constraint(equalToConstant: 40).with(priority: .defaultHigh),
+            logoImageView.heightAnchor.constraint(equalToConstant: 40).with(priority: .defaultHigh),
+            
+            titleStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            titleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            titleStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            
+            emailTextField.heightAnchor.constraint(equalToConstant: 60),
+            emailTextField.widthAnchor.constraint(equalTo: emailStack.widthAnchor),
+            
+            emailStack.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 40),
+            emailStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            emailStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
         ])
-        
-        // Add content insets
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 16
-        collectionView.contentInset = UIEdgeInsets(
-            top: 20,
-            left: 0,
-            bottom: buttonHeight + (buttonPadding * 2),
-            right: 0
-        )
-        
-        collectionView.backgroundColor = .systemGroupedBackground
-        collectionView.register(InviteSitterCell.self, forCellWithReuseIdentifier: InviteSitterCell.reuseIdentifier)
-        collectionView.delegate = self
-        
-        // Configure datasource and apply initial data
-        configureDataSource()
-        applySnapshot(animatingDifferences: false)
-    }
-    
-    private func configureDataSource() {
-        dataSource = UICollectionViewDiffableDataSource<Section, SitterItem>(
-            collectionView: collectionView
-        ) { [weak self] collectionView, indexPath, item in
-            let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: InviteSitterCell.reuseIdentifier,
-                for: indexPath
-            ) as! InviteSitterCell
-            
-            cell.configure(
-                name: item.name,
-                email: item.email,
-                isSelected: item.id == self?.selectedSitter?.id
-            )
-            return cell
-        }
-        
-        let headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(elementKind: UICollectionView.elementKindSectionHeader) { [weak self] headerView, elementKind, indexPath in
-            guard let self = self else { return }
-            
-            headerView.configure(title: "RECENT")
-        }
-        
-        // Add supplementary view provider
-        dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
-            return collectionView.dequeueConfiguredReusableSupplementary(
-                using: headerRegistration,
-                for: indexPath
-            )
-        }
-    }
-    
-    private func applySnapshot(animatingDifferences: Bool = true) {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, SitterItem>()
-        snapshot.appendSections([.recent])
-        snapshot.appendItems(filteredSitters, toSection: .recent)
-        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
-    }
-    
-    private func filterSitters(with searchText: String) {
-        if searchText.isEmpty {
-            filteredSitters = allSitters
-        } else {
-            filteredSitters = allSitters.filter { sitter in
-                sitter.name.localizedCaseInsensitiveContains(searchText) ||
-                sitter.email.localizedCaseInsensitiveContains(searchText)
-            }
-        }
-        applySnapshot()
     }
     
     private func setupInviteButton() {
-        inviteButton = NNPrimaryLabeledButton(title: "Select Sitter")
-        inviteButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        inviteButton.addTarget(self, action: #selector(inviteButtonTapped), for: .touchUpInside)
+        sendInviteButton = NNLoadingButton(title: "Send Invite", titleColor: .white, fillStyle: .fill(NNColors.primary))
+        sendInviteButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        sendInviteButton.addTarget(self, action: #selector(sendInviteButtonTapped), for: .touchUpInside)
+        
     }
     
-    @objc private func inviteButtonTapped() {
-        guard let selectedSitter = selectedSitter else { return }
-        delegate?.inviteSitterViewController(self, didSelectSitter: selectedSitter)
+    private func setupActions() {
+        // Add text field delegate
+        emailTextField.delegate = self
+    }
+    
+    // MARK: - Actions
+    
+    @objc private func sendInviteButtonTapped() {
+        guard let sitter = sitter, let session = session else { return }
+        
+        // Start loading state
+        sendInviteButton.startLoading()
+        
+        Task {
+            do {
+                // Create invite for sitter
+                let inviteCode = try await SessionService.shared.createInviteForSitter(
+                    sessionID: session.id,
+                    sitter: sitter
+                )
+                
+                let assignedSitter: AssignedSitter = AssignedSitter(
+                    id: sitter.id,
+                    name: sitter.name,
+                    email: sitter.email,
+                    userID: nil,
+                    inviteStatus: .invited,
+                    inviteID: "invite-\(inviteCode)"
+                )
+                
+                // Update the session's assignedSitter property
+                session.updateAssignedSitter(with: assignedSitter)
+                
+                await MainActor.run {
+                    // Stop loading
+                    sendInviteButton.stopLoading()
+                    
+                    // Notify delegate that invite was sent and UI should be reloaded
+                    delegate?.inviteSitterViewControllerDidSendInvite(to: SitterItem(
+                        id: assignedSitter.id,
+                        name: assignedSitter.name,
+                        email: assignedSitter.email
+                    ))
+                    
+                    // Show invite details
+                    let inviteDetailVC = InviteDetailViewController(showDeleteButton: false)
+                    inviteDetailVC.delegate = delegate
+                    inviteDetailVC.configure(with: inviteCode, sessionID: session.id)  // Pass just the code without prefix
+                    
+                    // Configure back button title
+                    let backItem = UIBarButtonItem()
+                    backItem.title = "Back"
+                    navigationItem.backBarButtonItem = backItem
+                    
+                    // Replace current view controller with invite detail
+                    if let navigationController = self.navigationController {
+                        var viewControllers = navigationController.viewControllers
+                        viewControllers.removeLast() // Remove InviteSitterViewController
+                        viewControllers.append(inviteDetailVC) // Add InviteDetailViewController
+                        navigationController.setViewControllers(viewControllers, animated: true)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    // Stop loading
+                    sendInviteButton.stopLoading()
+                    
+                    // Show error alert
+                    let alert = UIAlertController(
+                        title: "Error",
+                        message: "Failed to create invite: \(error.localizedDescription)",
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    present(alert, animated: true)
+                }
+            }
+        }
+    }
+    
+    @objc override func closeButtonTapped() {
+        delegate?.inviteSitterViewControllerDidCancel(self)
         dismiss(animated: true)
     }
     
-    private func updateInviteButtonState() {
-        inviteButton.isEnabled = selectedSitter != nil
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+    
+    // MARK: - Helpers
+    
+    private func isValidEmail(_ email: String) -> Bool {
+        let emailRegEx = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+        let emailPred = NSPredicate(format:"SELF MATCHES %@", emailRegEx)
+        return emailPred.evaluate(with: email)
+    }
+    
+    private func showInvalidEmailAlert() {
+        let alert = UIAlertController(
+            title: "Invalid Email",
+            message: "Please enter a valid email address.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
-// Add UICollectionViewDelegate
-extension InviteSitterViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let selectedSitter = dataSource.itemIdentifier(for: indexPath) else { return }
-        
-        var snapshot = dataSource.snapshot()
-        
-        // If selecting the same sitter, deselect it
-        if self.selectedSitter?.id == selectedSitter.id {
-            self.selectedSitter = nil
-            snapshot.reloadItems([selectedSitter])
-        } else {
-            // If selecting a different sitter:
-            // 1. Clear previous selection if it exists
-            if let previousSitter = self.selectedSitter {
-                snapshot.reloadItems([previousSitter])
-            }
-            
-            // 2. Set new selection
-            self.selectedSitter = selectedSitter
-            snapshot.reloadItems([selectedSitter])
-        }
-        
-        // Apply changes
-        dataSource.apply(snapshot, animatingDifferences: true)
-        
-        // Deselect for visual feedback
-        collectionView.deselectItem(at: indexPath, animated: true)
-        
-        // Update button state
-        updateInviteButtonState()
-        
-        searchBarView.searchBar.resignFirstResponder()
+// MARK: - UITextFieldDelegate
+
+extension InviteSitterViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        // Limit email length to a reasonable size
+        let currentText = textField.text ?? ""
+        guard let stringRange = Range(range, in: currentText) else { return false }
+        let updatedText = currentText.replacingCharacters(in: stringRange, with: string)
+        return updatedText.count <= 100
     }
 }
 
-// Add UISearchBarDelegate
-extension InviteSitterViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        filterSitters(with: searchText)
-    }
-    
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.resignFirstResponder()
-    }
-    
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.text = ""
-        searchBar.resignFirstResponder()
-        searchBar.showsCancelButton = true
-        filterSitters(with: "")
-    }
-} 
+

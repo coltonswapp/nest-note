@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */; };
 		F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29232CD077E900B90ABC /* FirebaseAnalytics */; };
 		F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29252CD077E900B90ABC /* FirebaseAuth */; };
 		F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29272CD077E900B90ABC /* FirebaseCore */; };
@@ -55,6 +56,7 @@
 				F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */,
 				F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */,
 				F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */,
+				F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */,
 				F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */,
 				F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */,
 			);
@@ -63,10 +65,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		F62DB7E92D6EC32800712D4B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		F64DE3E02CB1C893006D21FC = {
 			isa = PBXGroup;
 			children = (
 				F64DE3EB2CB1C893006D21FC /* nest-note */,
+				F62DB7E92D6EC32800712D4B /* Frameworks */,
 				F64DE3EA2CB1C893006D21FC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,6 +118,7 @@
 				F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */,
 				F66E29312CD077E900B90ABC /* FirebaseStorage */,
 				F6B678292CDDED5700FDCAE4 /* Toast */,
+				F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -388,6 +399,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
 		F66E29232CD077E900B90ABC /* FirebaseAnalytics */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

@@ -14,7 +14,7 @@ class NNOnboardingViewController: UIViewController {
     let labelStack: UIStackView = {
         let stack = UIStackView()
         stack.axis = .vertical
-        stack.spacing = 8
+        stack.spacing = 16
         stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
@@ -24,14 +24,15 @@ class NNOnboardingViewController: UIViewController {
         let label = UILabel()
         label.font = .systemFont(ofSize: 24, weight: .bold)
         label.textColor = .label
-        label.textAlignment = .left
+        label.numberOfLines = 0
+        label.textAlignment = .center
         return label
     }()
     
     let subtitleLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 16, weight: .regular)
-        label.textColor = .label
+        label.textColor = .secondaryLabel
         label.numberOfLines = 0
         label.textAlignment = .center
         return label

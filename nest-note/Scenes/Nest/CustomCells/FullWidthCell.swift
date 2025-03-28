@@ -44,7 +44,7 @@ class FullWidthCell: UICollectionViewCell {
 
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            valueLabel.topAnchor.constraint(equalTo: keyLabel.bottomAnchor, constant: 2),
+            valueLabel.topAnchor.constraint(equalTo: keyLabel.bottomAnchor, constant: 8),
             valueLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
             valueLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
             valueLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -12)
@@ -59,12 +59,21 @@ class FullWidthCell: UICollectionViewCell {
 
         valueLabel.font = UIFont.systemFont(ofSize: 17)
         valueLabel.textColor = .label
-        valueLabel.numberOfLines = 0
+        valueLabel.numberOfLines = 2
     }
     
-    func configure(key: String, value: String) {
+    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel) {
         keyLabel.text = key
-        valueLabel.text = value
+        
+        // Show actual value or asterisks based on access level
+        if sessionVisibility.hasAccess(to: entryVisibility) {
+            valueLabel.text = value
+            valueLabel.textColor = .label
+        } else {
+            // For full width cells, we'll show multiple lines of asterisks to indicate more content
+            valueLabel.text = "********"
+            valueLabel.textColor = .label
+        }
     }
     
     override var isHighlighted: Bool {

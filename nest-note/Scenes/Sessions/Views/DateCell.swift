@@ -17,6 +17,36 @@ final class DateCell: UICollectionViewListCell {
     private var endDate: Date = Date()
     private var isMultiDay: Bool = false
     
+    // Create labels
+    let startLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Starts"
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    let endLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Ends"
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    
+    let multiDayLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Multi-day session"
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupControls()
@@ -34,26 +64,7 @@ final class DateCell: UICollectionViewListCell {
         startControl.translatesAutoresizingMaskIntoConstraints = false
         endControl.translatesAutoresizingMaskIntoConstraints = false
         multiDayToggle.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Create labels
-        let startLabel = UILabel()
-        startLabel.text = "Starts"
-        startLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        startLabel.textColor = .secondaryLabel
-        startLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        let endLabel = UILabel()
-        endLabel.text = "Ends"
-        endLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        endLabel.textColor = .secondaryLabel
-        endLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        let multiDayLabel = UILabel()
-        multiDayLabel.text = "Multi-day session"
-        multiDayLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        multiDayLabel.textColor = .secondaryLabel
-        multiDayLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+
         // Setup callbacks
         startControl.onDateTapped = { [weak self] in
             self?.startDateTapped()

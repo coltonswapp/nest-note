@@ -36,7 +36,7 @@ final class SessionEventGenerator {
                         title: eventTitles.randomElement()!,
                         startDate: eventDate,
                         endDate: endDate,
-                        eventColor: NNColors.EventColors.all.randomElement()!
+                        eventColor: NNColors.EventColors.ColorType.allCases.randomElement() ?? .blue
                     )
                     dateEvents.append(event)
                 }

@@ -72,12 +72,18 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
+        let modeSwitchCellRegistration = UICollectionView.CellRegistration<ModeSwitchCell, Item> { cell, indexPath, _ in
+            cell.configure()
+        }
+        
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .info:
                 return collectionView.dequeueConfiguredReusableCell(using: infoCellRegistration, for: indexPath, item: item)
             case .action:
                 return collectionView.dequeueConfiguredReusableCell(using: actionCellRegistration, for: indexPath, item: item)
+            case .modeSwitch:
+                return collectionView.dequeueConfiguredReusableCell(using: modeSwitchCellRegistration, for: indexPath, item: item)
             }
         }
         
@@ -101,7 +107,8 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
                 .info(title: "Email", detail: user.personalInfo.email),
                 .info(title: "Primary Role", detail: user.primaryRole.rawValue.capitalized),
                 .info(title: "Member Since", detail: dateFormatter.string(from: creationDate)),
-                .info(title: "Phone", detail: user.personalInfo.phone ?? "--")
+                .info(title: "Phone", detail: user.personalInfo.phone ?? "--"),
+                .modeSwitch
             ]
             snapshot.appendItems(infoItems, toSection: .info)
         }
@@ -146,8 +153,20 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         alert.addAction(UIAlertAction(title: "Sign Out", style: .destructive) { [weak self] _ in
             Task {
                 do {
+                    // First reset the app state
                     await Launcher.shared.reset()
-                    self?.navigationController?.popToRootViewController(animated: true)
+                    
+                    // Dismiss all modals (profile and settings)
+                    await MainActor.run {
+                        // Get the root view controller
+                        guard let rootVC = self?.view.window?.rootViewController else { return }
+                        
+                        // Dismiss all modals from the root view controller
+                        rootVC.dismiss(animated: true) {
+                            // After dismissal, the LaunchCoordinator will detect that the user is not signed in
+                            // and present the LandingViewController with isModalInPresentation = true
+                        }
+                    }
                 }
             }
         })
@@ -188,6 +207,7 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
     enum Item: Hashable {
         case info(title: String, detail: String)
         case action(title: String, imageName: String, destructive: Bool = false)
+        case modeSwitch
     }
 }
 
@@ -295,5 +315,67 @@ private class ActionCell: UICollectionViewListCell {
         
         iconImageView.image = UIImage(systemName: imageName)
         iconImageView.tintColor = destructive ? .systemRed : .systemGray3
+    }
+}
+
+private class ModeSwitchCell: UICollectionViewListCell {
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.textColor = .secondaryLabel
+        label.text = "CURRENT MODE"
+        return label
+    }()
+    
+    private let segmentedControl: UISegmentedControl = {
+        let control = UISegmentedControl(items: [AppMode.nestOwner.rawValue, AppMode.sitter.rawValue])
+        control.selectedSegmentIndex = ModeManager.shared.currentMode == .nestOwner ? 0 : 1
+        return control
+    }()
+    
+    private lazy var stackView: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [titleLabel, segmentedControl])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .fill
+        return stack
+    }()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+        setupActions()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupViews() {
+        contentView.addSubview(stackView)
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 8),
+            stackView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -8)
+        ])
+    }
+    
+    private func setupActions() {
+        segmentedControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+    }
+    
+    @objc private func modeChanged() {
+        let newMode: AppMode = segmentedControl.selectedSegmentIndex == 0 ? .nestOwner : .sitter
+        ModeManager.shared.currentMode = newMode
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+    }
+    
+    func configure() {
+        // Update segment control state
+        segmentedControl.selectedSegmentIndex = ModeManager.shared.currentMode == .nestOwner ? 0 : 1
     }
 } 

@@ -56,30 +56,22 @@ class HalfWidthCell: UICollectionViewCell {
         valueContainer.backgroundColor = NNColors.groupedBackground
         valueContainer.layer.cornerRadius = 10
         
-        // Update border color initially
-        updateBorderColor()
-        
         valueLabel.font = UIFont.systemFont(ofSize: 22)
         valueLabel.textColor = .label
         valueLabel.numberOfLines = 1
     }
     
-    // Add this method to update border color
-    private func updateBorderColor() {
-//        valueContainer.layer.borderColor = UIColor.secondarySystemBackground.cgColor
-    }
-    
-    // Add this override to handle theme changes
-//    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-//        super.traitCollectionDidChange(previousTraitCollection)
-//        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-//            updateBorderColor()
-//        }
-//    }
-    
-    func configure(key: String, value: String) {
+    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel) {
         keyLabel.text = key
-        valueLabel.text = value
+        
+        // Show actual value or asterisks based on access level
+        if sessionVisibility.hasAccess(to: entryVisibility) {
+            valueLabel.text = value
+            valueLabel.textColor = .label
+        } else {
+            valueLabel.text = "****"
+            valueLabel.textColor = .label
+        }
     }
     
     override var isHighlighted: Bool {

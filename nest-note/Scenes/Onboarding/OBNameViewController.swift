@@ -4,10 +4,9 @@ import Combine
 final class OBNameViewController: NNOnboardingViewController {
     
     // MARK: - UI Elements
-    private let nameTextField: UITextField = {
-        let textField = UITextField()
+    private let nameTextField: NNTextField = {
+        let textField = NNTextField()
         textField.placeholder = "Full Name"
-        textField.borderStyle = .roundedRect
         textField.translatesAutoresizingMaskIntoConstraints = false
         return textField
     }()
@@ -88,22 +87,20 @@ extension OBNameViewController: UITextFieldDelegate {
 
 final class OBEmailViewController: NNOnboardingViewController {
     // MARK: - UI Elements
-    private let emailTextField: UITextField = {
-        let textField = UITextField()
+    private let emailTextField: NNTextField = {
+        let textField = NNTextField()
         textField.placeholder = "Email"
         textField.keyboardType = .emailAddress
         textField.autocapitalizationType = .none
-        textField.borderStyle = .roundedRect
         textField.translatesAutoresizingMaskIntoConstraints = false
         return textField
     }()
     
-    private let confirmEmailTextField: UITextField = {
-        let textField = UITextField()
+    private let confirmEmailTextField: NNTextField = {
+        let textField = NNTextField()
         textField.placeholder = "Confirm Email"
         textField.keyboardType = .emailAddress
         textField.autocapitalizationType = .none
-        textField.borderStyle = .roundedRect
         textField.translatesAutoresizingMaskIntoConstraints = false
         return textField
     }()
@@ -200,10 +197,9 @@ extension OBEmailViewController: UITextFieldDelegate {
 final class OBPasswordViewController: NNOnboardingViewController {
     
     // MARK: - UI Elements
-    private let passwordTextField: UITextField = {
-        let textField = UITextField()
+    private let passwordTextField: NNTextField = {
+        let textField = NNTextField()
         textField.placeholder = "Password"
-        textField.borderStyle = .roundedRect
         textField.isSecureTextEntry = true
         textField.returnKeyType = .next
         textField.autocorrectionType = .no
@@ -216,10 +212,9 @@ final class OBPasswordViewController: NNOnboardingViewController {
         return textField
     }()
     
-    private let confirmPasswordTextField: UITextField = {
-        let textField = UITextField()
+    private let confirmPasswordTextField: NNTextField = {
+        let textField = NNTextField()
         textField.placeholder = "Confirm Password"
-        textField.borderStyle = .roundedRect
         textField.isSecureTextEntry = true
         textField.returnKeyType = .done
         textField.autocorrectionType = .no

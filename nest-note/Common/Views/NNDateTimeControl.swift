@@ -205,7 +205,7 @@ private final class DateTimeButton: UIControl {
     override var isHighlighted: Bool {
         didSet {
             UIView.animate(withDuration: 0.1) {
-                self.backgroundColor = self.isHighlighted ? .systemGray2 : .systemGroupedBackground
+                self.backgroundColor = self.isHighlighted ? .systemGray2 : NNColors.NNSystemBackground4
                 self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.95, y: 0.95) : .identity
             }
         }
@@ -222,7 +222,7 @@ private final class DateTimeButton: UIControl {
     }
     
     private func setupView() {
-        backgroundColor = .systemGroupedBackground
+        backgroundColor = NNColors.NNSystemBackground4
         layer.cornerRadius = 8
         
         addSubview(label)

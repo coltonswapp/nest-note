@@ -104,6 +104,10 @@ public extension Logger {
 
         case userService = "🧍🏼 UserService"
         case nestService = "👨🏼‍🤝‍👨🏽 NestService"
+        case sitterViewService = "🧘‍♂️ SitterViewService"
+        case sessionService = "📅 SessionService"
+        
+        case placesService = "🏙️ PlaceService"
 
         case cachedImageController = "🗾 CachedImageController"
 
@@ -111,6 +115,7 @@ public extension Logger {
         case migration = "🦣 Migrations"
 
         case testing = "🧪 Testing"
+        case survey = "📝 Survey"
     }
 
 }

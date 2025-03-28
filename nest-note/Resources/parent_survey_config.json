@@ -1,0 +1,105 @@
+{
+    "version": "1.0",
+    "questions": [
+        {
+            "id": "sitting_frequency",
+            "title": "How often do you leave your children with a sitter on a monthly basis?",
+            "subtitle": "This helps us understand your needs better",
+            "options": [
+                "< 1 time per month",
+                "1-2 times per month",
+                "3-5 times per month",
+                "> 6 times per month",
+                "Daily"
+            ],
+            "multi_select": false,
+            "category": "usage",
+            "order": 1
+        },
+        {
+            "id": "sitter_variety",
+            "title": "Do you often use the same sitter?",
+            "subtitle": null,
+            "options": [
+                "Same sitter every time",
+                "2-3 different sitters",
+                "4-7 different sitters",
+                "Different sitter each time"
+            ],
+            "multi_select": false,
+            "category": "usage",
+            "order": 2
+        },
+        {
+            "id": "sitter_relation",
+            "title": "When leaving children with sitters, how often is the sitter related to you?",
+            "subtitle": "We know Grandmas are typically the best!",
+            "options": [
+                "Typically, sitter is kin",
+                "Kin never sits",
+                "Sometimes kin, sometimes not"
+            ],
+            "multi_select": false,
+            "category": "preferences",
+            "order": 3
+        },
+        {
+            "id": "communication_methods",
+            "title": "When communicating sitting information, what methods do you use?",
+            "subtitle": "This can include instructions, routines, medications, events, etc.",
+            "options": [
+                "Sticky note / piece of paper",
+                "Text Message",
+                "Print-out schedule",
+                "An app"
+            ],
+            "multi_select": true,
+            "category": "communication",
+            "order": 4
+        },
+        {
+            "id": "info_provided",
+            "title": "Select all the relevant information that you provide sitters during their stay.",
+            "subtitle": "This will help us continue to develop useful features for NestNote.",
+            "options": [
+                "Schedules (ex. school start & end)",
+                "Routines (ex. wake & bed times)",
+                "Rules (ex. no food on couch)",
+                "Medical Information",
+                "Emergency Information",
+                "Household information",
+                "Useful contact information",
+                "Pet care instructions",
+                "Dietary restrictions and meal guidelines",
+                "WiFi and entertainment system access",
+                "Approved activities and media content",
+                "Child comfort and behavioral guidance strategies",
+                "Locations of important household items",
+                "Transportation arrangements",
+                "Homework and educational requirements",
+                "Playdate and social interaction guidelines",
+                "Cultural or religious considerations"
+            ],
+            "multi_select": true,
+            "category": "information",
+            "order": 5
+        },
+        {
+            "id": "discovery_method",
+            "title": "How did you hear about NestNote?",
+            "subtitle": "Are our TikToks working? Lol",
+            "options": [
+                "Instagram",
+                "TikTok",
+                "Facebook",
+                "Reddit",
+                "Friend / Family",
+                "Sitter / Nanny",
+                "Other"
+            ],
+            "multi_select": false,
+            "category": "discovery",
+            "order": 6
+        }
+    ]
+} 

@@ -15,6 +15,7 @@ class NestCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
+        configureSelectionBehavior()
     }
     
     required init?(coder: NSCoder) {
@@ -63,9 +64,32 @@ class NestCell: UICollectionViewCell {
         ])
     }
     
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // Update corner radius when traits change (e.g., dark/light mode)
+        selectedBackgroundView?.layer.cornerRadius = 12
+    }
+    
     func configure(with title: String, subtitle: String, image: UIImage?) {
         titleLabel.text = title
         subtitleLabel.text = subtitle
         imageView.image = image
     }
+}
+
+extension UICollectionViewCell {
+    
+    func configureSelectionBehavior(with color: UIColor = UIColor.systemGray4) {
+        // Create a view for the selected state
+        let selectedBgView = UIView()
+        selectedBgView.backgroundColor = color
+        selectedBgView.layer.masksToBounds = true
+        
+        // Set the selected background view
+        selectedBackgroundView = selectedBgView
+        
+        // Enable user interaction
+        isUserInteractionEnabled = true
+    }
+    
 }

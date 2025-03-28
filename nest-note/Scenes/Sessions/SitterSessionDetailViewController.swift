@@ -1,0 +1,623 @@
+import UIKit
+
+final class SitterSessionDetailViewController: NNViewController {
+    
+    // MARK: - Properties
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    
+    private let session: SessionItem
+    private let nestName: String
+    private var sessionEvents: [SessionEvent] = []
+    private let maxVisibleEvents = 4
+    
+    // MARK: - Enums
+    enum Section: Int {
+        case name
+        case date
+        case visibility
+        case events
+    }
+    
+    enum Item: Hashable {
+        case nestName(name: String)
+        case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
+        case visibilityLevel(VisibilityLevel)
+        case events
+        case sessionEvent(SessionEvent)
+        case moreEvents(Int)
+        
+        func hash(into hasher: inout Hasher) {
+            switch self {
+            case .nestName(name: let name):
+                hasher.combine(0)
+                hasher.combine(name)
+            case .dateSelection(let start, let end, let isMultiDay):
+                hasher.combine(1)
+                hasher.combine(start)
+                hasher.combine(end)
+                hasher.combine(isMultiDay)
+            case .visibilityLevel(let level):
+                hasher.combine(2)
+                hasher.combine(level)
+            case .events:
+                hasher.combine(3)
+            case .sessionEvent(let event):
+                hasher.combine(4)
+                hasher.combine(event)
+            case .moreEvents(let count):
+                hasher.combine(5)
+                hasher.combine(count)
+            }
+        }
+        
+        static func == (lhs: Item, rhs: Item) -> Bool {
+            switch (lhs, rhs) {
+                case let (.nestName(n1), .nestName(n2)):
+                return n1 == n2
+            case let (.dateSelection(s1, e1, m1), .dateSelection(s2, e2, m2)):
+                return s1 == s2 && e1 == e2 && m1 == m2
+            case let (.visibilityLevel(l1), .visibilityLevel(l2)):
+                return l1 == l2
+            case (.events, .events):
+                return true
+            case let (.sessionEvent(e1), .sessionEvent(e2)):
+                return e1 == e2
+            case let (.moreEvents(c1), .moreEvents(c2)):
+                return c1 == c2
+            default:
+                return false
+            }
+        }
+    }
+    
+    // MARK: - Initialization
+    init(session: SessionItem, nestName: String) {
+        self.session = session
+        self.nestName = nestName
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .pageSheet
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        collectionView.delegate = self
+        collectionView.delaysContentTouches = false
+        
+        if let sheetPresentationController = sheetPresentationController {
+            sheetPresentationController.detents = [.large()]
+            sheetPresentationController.prefersGrabberVisible = false
+        }
+        
+        // Fetch events for the session
+        fetchSessionEvents()
+    }
+    
+    override func setup() {
+        super.setup()
+        
+        configureCollectionView()
+        setupNavigationBar()
+        configureDataSource()
+        applyInitialSnapshots()
+    }
+    
+    // MARK: - Setup Methods
+    private func setupNavigationBar() {
+        // Create custom navigation bar
+        let customNavBar = UIView()
+        customNavBar.backgroundColor = .tertiarySystemGroupedBackground
+        customNavBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(customNavBar)
+        
+        // Create vertical stack for title and subtitle
+        let stackView = UIStackView()
+        stackView.axis = .vertical
+        stackView.alignment = .leading
+        stackView.spacing = 2
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Configure title label
+        let titleLabel = UILabel()
+        titleLabel.text = session.title
+        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.textAlignment = .left
+        
+        // Add labels to stack view
+        stackView.addArrangedSubview(titleLabel)
+        
+        customNavBar.addSubview(stackView)
+        
+        // Add close button
+        let closeButton = UIButton(type: .system)
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = .systemGray2
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+        customNavBar.addSubview(closeButton)
+        
+        // Add separator view
+        let separatorView = UIView()
+        separatorView.backgroundColor = .separator
+        separatorView.translatesAutoresizingMaskIntoConstraints = false
+        customNavBar.addSubview(separatorView)
+        
+        NSLayoutConstraint.activate([
+            customNavBar.topAnchor.constraint(equalTo: view.topAnchor),
+            customNavBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            customNavBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            customNavBar.heightAnchor.constraint(equalToConstant: 66),
+            
+            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            stackView.centerYAnchor.constraint(equalTo: customNavBar.centerYAnchor),
+            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            
+            closeButton.trailingAnchor.constraint(equalTo: customNavBar.trailingAnchor, constant: -16),
+            closeButton.centerYAnchor.constraint(equalTo: customNavBar.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+            
+            // Separator constraints
+            separatorView.leadingAnchor.constraint(equalTo: customNavBar.leadingAnchor),
+            separatorView.trailingAnchor.constraint(equalTo: customNavBar.trailingAnchor),
+            separatorView.bottomAnchor.constraint(equalTo: customNavBar.bottomAnchor),
+            separatorView.heightAnchor.constraint(equalToConstant: 0.5)
+        ])
+        
+        // Update collection view constraints
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: customNavBar.bottomAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+    
+    @objc override func closeButtonTapped() {
+        dismiss(animated: true)
+    }
+    
+    private func configureCollectionView() {
+        let layout = createLayout()
+        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        
+        let insets = UIEdgeInsets(
+            top: 20,
+            left: 0,
+            bottom: 100, // Increased to accommodate button height + padding
+            right: 0
+        )
+        
+        // Add bottom inset to accommodate the pinned button
+        collectionView.contentInset = insets
+        collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: insets.bottom - 30, right: 0)
+        
+        view.addSubview(collectionView)
+    }
+    
+    private func createLayout() -> UICollectionViewLayout {
+        let layout = UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
+            var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            config.footerMode = .supplementary
+            let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
+            section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)
+            return section
+        }
+        return layout
+    }
+    
+    private func configureDataSource() {
+        let nestNameRegistration = UICollectionView.CellRegistration<NestNameCell, Item> { cell, indexPath, item in
+            if case let .nestName(name: nestName) = item {
+                cell.configure(with: nestName)
+            }
+        }
+        
+        let dateRegistration = UICollectionView.CellRegistration<SitterDetailDateCell, Item> { cell, indexPath, item in
+            if case let .dateSelection(startDate, endDate, _) = item {
+                cell.configure(startDate: startDate, endDate: endDate)
+            }
+        }
+        
+        let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { cell, indexPath, item in
+            if case let .visibilityLevel(level) = item {
+                cell.configure(with: level, isReadOnly: true)
+            }
+        }
+        
+        let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
+            if case .events = item {
+                cell.configure(eventCount: self.sessionEvents.count)
+            }
+        }
+        
+        let sessionEventRegistration = UICollectionView.CellRegistration<SessionEventCell, Item> { cell, indexPath, item in
+            if case let .sessionEvent(event) = item {
+                cell.includeDate = true
+                cell.configure(with: event)
+            }
+        }
+
+        let moreEventsRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case let .moreEvents(count) = item {
+                var content = cell.defaultContentConfiguration()
+                let text = "+\(count) more"
+                
+                // Create attributed string with underline
+                let attributedString = NSAttributedString(
+                    string: text,
+                    attributes: [
+                        .underlineStyle: NSUnderlineStyle.single.rawValue,
+                        .foregroundColor: UIColor.secondaryLabel
+                    ]
+                )
+                
+                content.attributedText = attributedString
+                content.textProperties.alignment = .center
+                cell.contentConfiguration = content
+            }
+        }
+        
+        // Add footer registration
+        let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionFooter
+        ) { supplementaryView, elementKind, indexPath in
+            var configuration = supplementaryView.defaultContentConfiguration()
+            
+            // Configure footer based on section
+            if self.dataSource.sectionIdentifier(for: indexPath.section) == .events {
+                configuration.text = "Tap to view the event"
+                configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
+                configuration.textProperties.color = .tertiaryLabel
+                configuration.textProperties.alignment = .center
+            }
+            
+            supplementaryView.contentConfiguration = configuration
+        }
+        
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(
+            collectionView: collectionView
+        ) {
+            [weak self] collectionView,
+            indexPath,
+            item in
+            guard let self = self else { return UICollectionViewCell() }
+            
+            switch item {
+            case .nestName:
+                return collectionView
+                    .dequeueConfiguredReusableCell(
+                        using: nestNameRegistration,
+                        for: indexPath,
+                        item: item
+                    )
+            case .dateSelection:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: dateRegistration,
+                    for: indexPath,
+                    item: item
+                )
+                
+            case .visibilityLevel:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: visibilityRegistration,
+                    for: indexPath,
+                    item: item
+                )
+                
+            case .events:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: eventsCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+                
+            case .sessionEvent:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: sessionEventRegistration,
+                    for: indexPath,
+                    item: item
+                )
+                
+            case .moreEvents:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: moreEventsRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            }
+        }
+        
+        // Add supplementary view provider
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            return collectionView.dequeueConfiguredReusableSupplementary(
+                using: footerRegistration,
+                for: indexPath
+            )
+        }
+    }
+    
+    private func applyInitialSnapshots() {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.name, .date, .visibility, .events])
+        
+        snapshot.appendItems([.nestName(name: nestName)], toSection: .name)
+        
+        // Add date selection with initial date
+        snapshot.appendItems([.dateSelection(
+            startDate: session.startDate,
+            endDate: session.endDate,
+            isMultiDay: session.isMultiDay
+        )], toSection: .date)
+        
+        // Add visibility level
+        snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
+        
+        // Add events section
+        snapshot.appendItems([.events], toSection: .events)
+        
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+    
+    private func fetchSessionEvents() {
+        Task {
+            do {
+                let events = try await SessionService.shared.getSessionEvents(for: session.id, nestID: session.nestID)
+                
+                await MainActor.run {
+                    // Update local events array
+                    self.sessionEvents = events
+                    
+                    // Update the events section in the collection view
+                    updateEventsSection(with: events)
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    @MainActor
+    private func updateEventsSection(with events: [SessionEvent]) {
+        var snapshot = dataSource.snapshot()
+        
+        // Remove any existing event items
+        let existingItems = snapshot.itemIdentifiers(inSection: .events)
+            .filter { if case .sessionEvent = $0 { return true } else { return false } }
+        snapshot.deleteItems(existingItems)
+        
+        // Add new event items
+        let sortedEvents = events.sorted { $0.startDate < $1.startDate }
+        
+        // If we have more than maxVisibleEvents, only show the first few
+        if sortedEvents.count > maxVisibleEvents {
+            let visibleEvents = Array(sortedEvents.prefix(maxVisibleEvents))
+            let remainingCount = sortedEvents.count - maxVisibleEvents
+            
+            let eventItems = visibleEvents.map { Item.sessionEvent($0) }
+            snapshot.appendItems(eventItems, toSection: .events)
+            snapshot.appendItems([.moreEvents(remainingCount)], toSection: .events)
+        } else {
+            let eventItems = sortedEvents.map { Item.sessionEvent($0) }
+            snapshot.appendItems(eventItems, toSection: .events)
+        }
+        
+        snapshot.reconfigureItems([.events])
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
+}
+
+// MARK: - UICollectionViewDelegate
+extension SitterSessionDetailViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
+        switch item {
+        case .sessionEvent, .events, .moreEvents:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        
+        switch item {
+        case .sessionEvent(let event):
+            // Present event details in read-only mode
+            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
+            present(eventVC, animated: true)
+        case .events, .moreEvents:
+            // Get the current date range from the date cell
+            guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+                  case let .dateSelection(startDate, endDate, _) = dateItem else {
+                return
+            }
+            
+            // Present calendar view
+            let dateRange = DateInterval(start: startDate, end: endDate)
+            let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
+            let nav = UINavigationController(rootViewController: calendarVC)
+            present(nav, animated: true)
+        default:
+            break
+        }
+        
+        collectionView.deselectItem(at: indexPath, animated: true)
+    }
+}
+
+// Add this class before the UICollectionViewDelegate extension
+final class SitterDetailDateCell: UICollectionViewListCell {
+    private let startLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .body)
+        label.textColor = .label
+        label.text = "Starts"
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let startDateLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .body)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .right
+        label.textColor = .secondaryLabel
+        return label
+    }()
+    
+    private let endLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .body)
+        label.textColor = .label
+        label.text = "Ends"
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let endDateLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .body)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .right
+        label.textColor = .secondaryLabel
+        return label
+    }()
+    
+    private let verticalDividerLine: UIView = {
+        let view = UIView()
+        view.backgroundColor = NNColors.primary
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private let horizontalDividerLine: UIView = {
+        let view = UIView()
+        view.backgroundColor = NNColors.NNSystemBackground4
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private let startImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.tintColor = NNColors.primary
+        imageView.image = UIImage(systemName: "circle.fill")
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }()
+    
+    private let endImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.tintColor = NNColors.primary
+        imageView.image = UIImage(systemName: "circle.dashed")
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupViews() {
+        // Add all views to content view
+        [startLabel, startDateLabel, endLabel, endDateLabel, verticalDividerLine, horizontalDividerLine, startImageView, endImageView].forEach {
+            contentView.addSubview($0)
+        }
+        
+        // Constants for layout
+        let horizontalPadding: CGFloat = 16
+        let verticalPadding: CGFloat = 16
+        let labelSpacing: CGFloat = 8
+        let dividerWidth: CGFloat = 1
+        let imageHeight: CGFloat = 16
+        let imageWidth: CGFloat = 24
+        
+        
+        NSLayoutConstraint.activate([
+            startImageView.centerYAnchor.constraint(equalTo: startLabel.centerYAnchor),
+            startImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            startImageView.heightAnchor.constraint(equalToConstant: imageHeight),
+            startImageView.widthAnchor.constraint(equalToConstant: imageWidth),
+            
+            // Vertical divider constraints
+            verticalDividerLine.centerXAnchor.constraint(equalTo: startImageView.centerXAnchor),
+            verticalDividerLine.topAnchor.constraint(equalTo: startImageView.bottomAnchor),
+            verticalDividerLine.bottomAnchor.constraint(equalTo: endImageView.topAnchor),
+            verticalDividerLine.widthAnchor.constraint(equalToConstant: dividerWidth),
+            
+            endImageView.centerYAnchor.constraint(equalTo: endLabel.centerYAnchor),
+            endImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            endImageView.heightAnchor.constraint(equalToConstant: imageHeight),
+            endImageView.widthAnchor.constraint(equalToConstant: imageWidth),
+            
+            // Start label constraints
+            startLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: verticalPadding),
+            startLabel.leadingAnchor.constraint(equalTo: startImageView.trailingAnchor, constant: labelSpacing),
+            startLabel.trailingAnchor.constraint(lessThanOrEqualTo: startDateLabel.leadingAnchor, constant: -8).with(priority: .defaultLow),
+            
+            // Start date label constraints
+            startDateLabel.centerYAnchor.constraint(equalTo: startLabel.centerYAnchor),
+            startDateLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -horizontalPadding).with(priority: .defaultHigh),
+            
+            // End label constraints
+            endLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -verticalPadding),
+            endLabel.leadingAnchor.constraint(equalTo: startImageView.trailingAnchor, constant: labelSpacing),
+            endLabel.trailingAnchor.constraint(lessThanOrEqualTo: endDateLabel.leadingAnchor, constant: -8).with(priority: .defaultLow),
+            
+            // End date label constraints
+            endDateLabel.centerYAnchor.constraint(equalTo: endLabel.centerYAnchor),
+            endDateLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -horizontalPadding).with(priority: .defaultHigh),
+            
+            // Vertical spacing between start and end
+            endLabel.topAnchor.constraint(equalTo: startLabel.bottomAnchor, constant: 24),
+
+            // Horizontal divider constraints
+            horizontalDividerLine.leadingAnchor.constraint(equalTo: startLabel.leadingAnchor),
+            horizontalDividerLine.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            horizontalDividerLine.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            horizontalDividerLine.heightAnchor.constraint(equalToConstant: dividerWidth)
+        ])
+    }
+    
+    func configure(startDate: Date, endDate: Date) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEE, MMM d"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        
+        let calendar = Calendar.current
+        let sameDay = calendar.isDate(startDate, inSameDayAs: endDate)
+        
+        // Start date and time
+        let startDateString = dateFormatter.string(from: startDate)
+        let startTimeString = timeFormatter.string(from: startDate)
+        startDateLabel.text = "\(startDateString) at \(startTimeString)"
+        
+        // End date and time
+        if sameDay {
+            // If same day, just show the time
+            endDateLabel.text = timeFormatter.string(from: endDate)
+        } else {
+            // If different days, show full date and time
+            let endDateString = dateFormatter.string(from: endDate)
+            let endTimeString = timeFormatter.string(from: endDate)
+            endDateLabel.text = "\(endDateString) at \(endTimeString)"
+        }
+    }
+} 

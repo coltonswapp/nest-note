@@ -4,13 +4,24 @@ class NNSearchBarView: UIView {
     
     let searchBar: UISearchBar = {
         let bar = UISearchBar()
-        bar.placeholder = "Search for a sitter"
         bar.showsCancelButton = false
-        bar.keyboardType = .emailAddress
         bar.autocorrectionType = .no
         bar.autocapitalizationType = .none
         return bar
     }()
+    
+    init(placeholder: String, keyboardType: UIKeyboardType = .emailAddress) {
+        super.init(frame: .zero)
+        searchBar.placeholder = placeholder
+        searchBar.keyboardType = keyboardType
+        setupView()
+        
+        // Configure the search icon tint color
+        let textFieldInsideSearchBar = searchBar.value(forKey: "searchField") as? UITextField
+        let imageV = textFieldInsideSearchBar?.leftView as! UIImageView
+        imageV.image = imageV.image?.withRenderingMode(UIImage.RenderingMode.alwaysTemplate)
+        imageV.tintColor = NNColors.primary
+    }
     
     override init(frame: CGRect) {
         super.init(frame: frame)

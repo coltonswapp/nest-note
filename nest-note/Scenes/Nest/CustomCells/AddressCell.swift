@@ -6,10 +6,18 @@
 //
 import UIKit
 
+protocol AddressCellDelegate: AnyObject {
+    func addressCell(_ cell: AddressCell, didTapAddress address: String)
+}
+
 class AddressCell: UICollectionViewCell {
     static let reuseIdentifier = "AddressCell"
     
+    weak var delegate: AddressCellDelegate?
+    
     private let addressLabel = UILabel()
+    
+    private var currentAddress: String?
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -41,11 +49,12 @@ class AddressCell: UICollectionViewCell {
         
         // Enable user interaction
         addressLabel.isUserInteractionEnabled = true
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(addressLabelTapped))
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(addressTapped))
         addressLabel.addGestureRecognizer(tapGesture)
     }
     
     func configure(address: String) {
+        currentAddress = address
         // Set the text with underline
         let attributedString = NSAttributedString(string: address, attributes: [
             .underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -55,14 +64,14 @@ class AddressCell: UICollectionViewCell {
         addressLabel.attributedText = attributedString
     }
     
-    @objc private func addressLabelTapped() {
-        UIPasteboard.general.string = addressLabel.text
-        
-        // Provide feedback to the user
+    @objc private func addressTapped() {
+        guard let address = currentAddress else { return }
+        delegate?.addressCell(self, didTapAddress: address)
+    }
+    
+    func showCopyFeedback() {
         HapticsHelper.lightHaptic()
         
-        // Optionally, you can show a temporary label or use any other UI to indicate successful copying
-        // For example:
         let copiedLabel = UILabel()
         copiedLabel.text = "Copied!"
         copiedLabel.textColor = .white
@@ -70,6 +79,7 @@ class AddressCell: UICollectionViewCell {
         copiedLabel.textAlignment = .center
         copiedLabel.layer.cornerRadius = 10
         copiedLabel.clipsToBounds = true
+        copiedLabel.alpha = 0
         
         contentView.addSubview(copiedLabel)
         copiedLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -79,6 +89,10 @@ class AddressCell: UICollectionViewCell {
             copiedLabel.widthAnchor.constraint(equalToConstant: 100),
             copiedLabel.heightAnchor.constraint(equalToConstant: 40)
         ])
+        
+        UIView.animate(withDuration: 0.2) {
+            copiedLabel.alpha = 1
+        }
         
         UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
             copiedLabel.alpha = 0

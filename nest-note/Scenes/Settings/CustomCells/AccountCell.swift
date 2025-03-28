@@ -22,7 +22,7 @@ class AccountCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
-        
+        configureSelectionBehavior()
         backgroundColor = .secondarySystemGroupedBackground
         layer.cornerRadius = 12
         layer.masksToBounds = true

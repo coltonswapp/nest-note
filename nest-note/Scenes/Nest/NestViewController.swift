@@ -8,7 +8,6 @@
 import UIKit
 
 class NestViewController: NNViewController, NestLoadable {
-    
     var loadingIndicator: UIActivityIndicatorView!
     var hasLoadedInitialData: Bool = false
     var refreshControl: UIRefreshControl!
@@ -36,9 +35,8 @@ class NestViewController: NNViewController, NestLoadable {
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
     var collectionView: UICollectionView!
     
+    private var categories: [NestCategory] = []
     private var mainItems: [Item] {
-        guard let categories = NestService.shared.currentNest?.categories else { return [] }
-        
         return categories
             .sorted { cat1, cat2 in
                 if cat1.name == "Other" { return false }
@@ -67,9 +65,20 @@ class NestViewController: NNViewController, NestLoadable {
     
     private var newCategoryButton: NNPrimaryLabeledButton!
     
+    private let entryRepository: EntryRepository
+    
+    init(entryRepository: EntryRepository) {
+        self.entryRepository = entryRepository
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "My Nest"
+        title = entryRepository is NestService ? "My Nest" : "The Nest"
         configureCollectionView()
         setupLoadingIndicator()
         setupRefreshControl()
@@ -115,10 +124,17 @@ class NestViewController: NNViewController, NestLoadable {
     @objc private func refreshEntries() {
         Task {
             do {
-                async let categoriesTask = NestService.shared.fetchCategories()
-                async let entriesTask = NestService.shared.refreshEntries()
+                Logger.log(level: .info, category: .nestService, message: "Refreshing entries and categories")
                 
-                let (_, groupedEntries) = try await (categoriesTask, entriesTask)
+                // Refresh both entries and categories
+                async let entriesTask = entryRepository.refreshEntries()
+                async let categoriesTask = entryRepository.refreshCategories()
+                
+                let (groupedEntries, categories) = try await (entriesTask, categoriesTask)
+                Logger.log(level: .info, category: .nestService, message: "Refreshed \(groupedEntries.count) entry groups and \(categories.count) categories")
+                
+                self.categories = categories
+                
                 await MainActor.run {
                     self.entries = groupedEntries
                     self.applyInitialSnapshots()
@@ -217,8 +233,9 @@ class NestViewController: NNViewController, NestLoadable {
             cell.accessories = [.disclosureIndicator()]
         }
         
-        let addressCellRegistration = UICollectionView.CellRegistration<AddressCell, String> { cell, indexPath, address in
+        let addressRegistration = UICollectionView.CellRegistration<AddressCell, String> { [weak self] cell, indexPath, address in
             cell.configure(address: address)
+            cell.delegate = self
         }
         
         let headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(
@@ -231,7 +248,7 @@ class NestViewController: NNViewController, NestLoadable {
         dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { collectionView, indexPath, item in
             if indexPath.section == Section.address.rawValue {
                 return collectionView.dequeueConfiguredReusableCell(
-                    using: addressCellRegistration,
+                    using: addressRegistration,
                     for: indexPath,
                     item: item as? String
                 )
@@ -263,7 +280,15 @@ class NestViewController: NNViewController, NestLoadable {
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
         snapshot.appendSections([.address, .main, .routine])
         
-        if let address = NestService.shared.currentNest?.address {
+        // Get address from the appropriate service
+        var address: String?
+        if let nestService = entryRepository as? NestService {
+            address = nestService.currentNest?.address
+        } else if let sitterService = entryRepository as? SitterViewService {
+            address = sitterService.currentNestAddress
+        }
+        
+        if let address = address {
             snapshot.appendItems([address], toSection: .address)
         }
         
@@ -273,6 +298,9 @@ class NestViewController: NNViewController, NestLoadable {
     }
     
     private func setupNewCategoryButton() {
+        // Only show new category button for nest owners
+        guard entryRepository is NestService else { return }
+        
         newCategoryButton = NNPrimaryLabeledButton(title: "New Category", image: UIImage(systemName: "plus"))
         newCategoryButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
         newCategoryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
@@ -282,6 +310,35 @@ class NestViewController: NNViewController, NestLoadable {
         let totalInset = buttonHeight + buttonPadding * 2
         collectionView.contentInset.bottom = totalInset
         collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+    }
+    
+    private func loadEntries() async {
+        loadingIndicator.startAnimating()
+        
+        do {
+            Logger.log(level: .info, category: .general, message: "Starting to load entries and categories")
+            
+            // Fetch both entries and categories
+            async let entriesTask = entryRepository.fetchEntries()
+            async let categoriesTask = entryRepository.fetchCategories()
+            
+            let (groupedEntries, categories) = try await (entriesTask, categoriesTask)
+            Logger.log(level: .info, category: .general, message: "Fetched \(groupedEntries.count) entry groups and \(categories.count) categories")
+            
+            self.categories = categories
+            
+            await MainActor.run {
+                self.hasLoadedInitialData = true
+                self.handleLoadedEntries(groupedEntries)
+                self.loadingIndicator.stopAnimating()
+            }
+        } catch {
+            Logger.log(level: .error, category: .general, message: "Failed to load entries and categories: \(error)")
+            await MainActor.run {
+                self.loadingIndicator.stopAnimating()
+                self.showError(error.localizedDescription)
+            }
+        }
     }
 }
 
@@ -296,38 +353,68 @@ extension NestViewController: UICollectionViewDelegate {
         
         // Cast the item to Item type for category sections
         guard let categoryItem = item as? Item else { return }
-        let nestCategoryViewController = NestCategoryViewController(category: categoryItem.title)
+        let nestCategoryViewController = NestCategoryViewController(
+            category: categoryItem.title,
+            entryRepository: entryRepository
+        )
         navigationController?.pushViewController(nestCategoryViewController, animated: true)
     }
 }
 
 extension NestViewController: CategoryDetailViewControllerDelegate {
     func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?) {
-        guard let categoryName = category else { return }
+        guard let categoryName = category,
+              let nestService = entryRepository as? NestService else {
+            // Only NestService can create categories
+            showError("Categories can only be created by nest owners")
+            return
+        }
         
         Task {
             do {
                 // Create and save the new category
                 let newCategory = NestCategory(name: categoryName, symbolName: "folder")
-                try await NestService.shared.createCategory(newCategory)
+                try await nestService.createCategory(newCategory)
                 
-                // Refresh the categories
-                async let categoriesTask = NestService.shared.fetchCategories()
-                async let entriesTask = NestService.shared.refreshEntries()
+                // Refresh the categories and entries
+                async let categoriesTask = nestService.fetchCategories()
+                async let entriesTask = entryRepository.refreshEntries()
                 
-                let (_, groupedEntries) = try await (categoriesTask, entriesTask)
+                let (newCategories, groupedEntries) = try await (categoriesTask, entriesTask)
                 
                 await MainActor.run {
+                    self.categories = newCategories
                     self.entries = groupedEntries
                     self.applyInitialSnapshots()
                     self.showToast(text: "Category Created")
                 }
             } catch {
-                Logger.log(level: .error, category: .nestService, message: "Failed to create category: \(error)")
+                Logger.log(level: .error, category: .general, message: "Failed to create category: \(error)")
                 await MainActor.run {
                     self.showError(error.localizedDescription)
                 }
             }
         }
+    }
+}
+
+extension NestViewController: AddressCellDelegate {
+    func addressCell(_ cell: AddressCell, didTapAddress address: String) {
+        // We don't have coordinates for the nest address, so we'll let
+        // AddressActionHandler handle the geocoding
+        AddressActionHandler.presentAddressOptions(
+            from: self,
+            sourceView: cell,
+            address: address,
+            onCopy: { [weak cell] in
+                cell?.showCopyFeedback()
+            }
+        )
+    }
+}
+
+extension NestViewController {
+    func handleLoadedData() {
+        return
     }
 }

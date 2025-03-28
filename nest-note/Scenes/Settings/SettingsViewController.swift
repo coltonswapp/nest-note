@@ -81,10 +81,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         }
     }
     
-    @objc func closeButtonTapped() {
-        self.dismiss(animated: true)
-    }
-    
     private func configureCollectionView() {
         let layout = createLayout()
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
@@ -242,8 +238,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             case .sitter:
                 let sittingItems = [
                     ("Saved Nests", "heart"),
-                    ("Upcoming Sessions", "calendar"),
-                    ("Session History", "clock"),
+                    ("Sessions", "calendar"),
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
                 
@@ -251,8 +246,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 let nestItems = [
                     ("Nest Members", "person.2.fill"),
                     ("Saved Sitters", "heart"),
-                    ("Upcoming Sessions", "calendar"),
-                    ("Session History", "clock"),
+                    ("Sessions", "calendar"),
+                    ("Places", "map"),
                     ("Subscription", "creditcard")
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(nestItems, toSection: .myNest)
@@ -264,6 +259,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 ("Saved Sitters", "heart"),
                 ("Upcoming Sessions", "calendar"),
                 ("Session History", "clock"),
+                ("Places", "map"),
                 ("Subscription", "creditcard")
             ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
             snapshot.appendItems(defaultItems, toSection: .myNest)
@@ -291,7 +287,17 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Test Session Sheet", "calendar.badge.plus"),
             ("Test Calendar Events", "calendar.badge.clock"),
             ("Test Event Creation", "calendar.badge.plus"),
-            ("Test Invite Sitter Screen", "person.badge.plus")
+            ("Test Invite Sitter Screen", "person.badge.plus"),
+            ("Glassy Button Playground", "slider.horizontal.3"),
+            ("Entry Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
+            ("Debug Card Stack", "rectangle.stack"),
+            ("Test Session Bar", "rectangle.bottomthird.inset.filled"),
+            ("Load Debug Sessions", "folder.badge.plus"),
+            ("Test Add Place", "mappin.and.ellipse.circle.fill"),
+            ("Test Place List", "list.star"),
+            ("Test Place Map", "map.fill"),
+            ("Test Invite Card", "rectangle.stack.badge.person.crop"),
+            ("Test Visibility Levels", "eye.circle"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -353,17 +359,49 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 start: Date.from(year: 2024, month: 12, day: 9)!,
                 end: Date.from(year: 2024, month: 12, day: 12)!
             )
-            let vc = SessionCalendarViewController(dateRange: dateRange)
+            let vc = SessionCalendarViewController(nestID: "", dateRange: dateRange)
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
         case "Test Event Creation":
             let vc = SessionEventViewController()
             vc.eventDelegate = self
             present(vc, animated: true)
-        case "Test Invite Sitter Screen":
-            let inviteSitterVC = InviteSitterViewController()
-            
-            let nav = UINavigationController(rootViewController: inviteSitterVC)
+        case "Glassy Button Playground":
+            navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
+        case "Entry Review":
+            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
+            present(reviewVC, animated: true)
+        case "Debug Card Stack":
+            let reviewVC = DebugCardStackView()
+            present(reviewVC, animated: true)
+        case "Test Session Bar":
+            let sessionDebugVC = SessionDebugViewController()
+            navigationController?.pushViewController(sessionDebugVC, animated: true)
+        case "Load Debug Sessions":
+            SessionService.shared.loadDebugSessions()
+            // If the sessions view is visible, refresh it
+            if let sessionsVC = presentedViewController as? UINavigationController,
+               let topVC = sessionsVC.topViewController as? NestSessionsViewController {
+                topVC.refreshSessions()
+            }
+        case "Test Add Place":
+            let viewController = SelectPlaceViewController()
+            let nav = UINavigationController(rootViewController: viewController)
+            present(nav, animated: true)
+        case "Test Place List":
+            let viewController = PlaceListViewController()
+            let nav = UINavigationController(rootViewController: viewController)
+            present(nav, animated: true)
+        case "Test Place Map":
+            let viewController = PlacesMapViewController()
+            navigationController?.pushViewController(viewController, animated: true)
+        case "Test Invite Card":
+            let vc = InviteCardDebugViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Test Visibility Levels":
+            let infoVC = VisibilityLevelInfoViewController()
+            let nav = UINavigationController(rootViewController: infoVC)
+            nav.modalPresentationStyle = .formSheet
             present(nav, animated: true)
         default:
             break
@@ -393,7 +431,28 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             print("Selected current nest")
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
-                print("Selected My Nest item: \(title)")
+                switch title {
+                case "Sessions":
+                    if ModeManager.shared.isNestOwnerMode {
+                        let sessionsVC = NestSessionsViewController()
+                        let nav = UINavigationController(rootViewController: sessionsVC)
+                        present(nav, animated: true)
+                    } else {
+                        let sessionsVC = SitterSessionsViewController()
+                        let nav = UINavigationController(rootViewController: sessionsVC)
+                        present(nav, animated: true)
+                    }
+                case "Places":
+                    let placesVC = PlaceListViewController()
+                    let nav = UINavigationController(rootViewController: placesVC)
+                    present(nav, animated: true)
+                case "Saved Sitters":
+                    let sitterListVC = SitterListViewController(displayMode: .default)
+                    let nav = UINavigationController(rootViewController: sitterListVC)
+                    present(nav, animated: true)
+                default:
+                    print("Selected My Nest item: \(title)")
+                }
             } else {
                 showSignInPrompt()
             }
@@ -418,7 +477,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
 
     func showUserProfile() {
         let vc = ProfileViewController()
-        navigationController?.pushViewController(vc, animated: true)
+        let nav = UINavigationController(rootViewController: vc)
+        present(nav, animated: true)
     }
 
     private func showSignInPrompt() {

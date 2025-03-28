@@ -67,8 +67,12 @@ final class NNCompactCalendarView: UIView {
     private var eventsByDate: [Date: [SessionEvent]] = [:]
     
     // MARK: - Initialization
-    init(dateRange: DateInterval) {
+    init(dateRange: DateInterval, events: [SessionEvent]) {
         self.dateRange = dateRange
+        self.eventsByDate = events.reduce(into: [Date: [SessionEvent]]()) { dict, event in
+            let startOfDay = Calendar.current.startOfDay(for: event.startDate)
+            dict[startOfDay, default: []].append(event)
+        }   
         super.init(frame: .zero)
         setup()
     }
@@ -192,6 +196,34 @@ final class NNCompactCalendarView: UIView {
     func updateEvents(_ events: [Date: [SessionEvent]]) {
         self.eventsByDate = events
         collectionView.reloadData()
+    }
+    
+    // MARK: - Public Methods
+    func scrollToWeek(containing date: Date, animated: Bool = true) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        
+        // Find the week index that contains this date
+        let allDates = weeks.flatMap { $0 }
+        guard let dateIndex = allDates.firstIndex(where: { calendar.isDate($0, inSameDayAs: startOfDay) }) else { return }
+        
+        // Calculate which week this date belongs to
+        let weekIndex = dateIndex / 7
+        
+        // Calculate the x offset for this week
+        let weekWidth = collectionView.bounds.width
+        let xOffset = CGFloat(weekIndex) * weekWidth
+        
+        // Scroll to the week
+        collectionView.setContentOffset(CGPoint(x: xOffset, y: 0), animated: animated)
+        
+        // Update the month/year labels
+        if let firstDateOfWeek = weeks[weekIndex].first {
+            updateMonthYearLabels(for: firstDateOfWeek)
+        }
+        
+        // Update current week index
+        currentWeekIndex = weekIndex
     }
 }
 
