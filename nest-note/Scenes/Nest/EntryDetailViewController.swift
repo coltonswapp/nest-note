@@ -17,6 +17,8 @@ final class EntryDetailViewController: NNSheetViewController {
         let placeholder = NSAttributedString(string: "Content")
         textView.perform(NSSelectorFromString("setAttributedPlaceholder:"), with: placeholder)
         textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.isScrollEnabled = true
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         return textView
     }()
     
@@ -112,8 +114,7 @@ final class EntryDetailViewController: NNSheetViewController {
             contentTextView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
             contentTextView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
             contentTextView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            contentTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100),
-            contentTextView.bottomAnchor.constraint(lessThanOrEqualTo: buttonStackView.topAnchor, constant: -16),
+            contentTextView.bottomAnchor.constraint(equalTo: infoButton.topAnchor, constant: -16),
             
             infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
             infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
@@ -122,7 +123,7 @@ final class EntryDetailViewController: NNSheetViewController {
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46),
             
             visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.6),
@@ -185,8 +186,6 @@ final class EntryDetailViewController: NNSheetViewController {
         var container = AttributeContainer()
         container.font = UIFont.boldSystemFont(ofSize: 16)
         visibilityButton.configuration?.attributedTitle = AttributedString(visibilityLevel.title, attributes: container)
-//        visibilityButton.setTitle(visibilityLevel.title, for: .normal)
-//        visibilityButton.titleLabel?.font = .boldSystemFont(ofSize: 16)
         
         if let menu = visibilityButton.menu {
             let updatedActions = menu.children.compactMap { $0 as? UIMenu }.flatMap { $0.children }.map { action in

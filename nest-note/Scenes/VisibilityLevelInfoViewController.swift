@@ -6,8 +6,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.image = UIImage(named: "rectangle_pattern")
-        view.contentMode = .scaleAspectFill
+        NNAssetHelper.configureImageView(view, for: .rectanglePattern)
         view.alpha = 0.4
         return view
     }()
@@ -75,13 +74,10 @@ final class VisibilityLevelInfoViewController: NNViewController {
         
         // Pin the Got It button to the bottom
         gotItButton.pinToBottom(of: view, addBlurEffect: true)
+        topImageView.pinToTop(of: view)
         
         NSLayoutConstraint.activate([
-            topImageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 0),
-            topImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topImageView.heightAnchor.constraint(equalToConstant: view.frame.width * 0.27),
-            
+
             scrollView.topAnchor.constraint(equalTo: topImageView.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),

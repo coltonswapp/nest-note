@@ -186,6 +186,7 @@ extension LaunchCoordinator: AuthenticationDelegate {
         let onboardingCoordinator = OnboardingCoordinator()
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self
+        (containerVC as? OnboardingContainerViewController)?.delegate = self
         
         // Present the container view controller modally
         containerVC.modalPresentationStyle = .fullScreen
@@ -213,6 +214,17 @@ extension LaunchCoordinator: AuthenticationDelegate {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - OnboardingContainerDelegate
+extension LaunchCoordinator: OnboardingContainerDelegate {
+    func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
+        // Dismiss the onboarding container
+        container.dismiss(animated: true) { [weak self] in
+            // Show the login screen
+            self?.showAuthenticationFlow()
         }
     }
 }

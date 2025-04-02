@@ -33,6 +33,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         configureDataSource()
         applyInitialSnapshots()
         collectionView.delegate = self
+        
+        // Add observer for user information updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleUserInformationUpdate),
+            name: .userInformationUpdated,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -298,6 +306,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Visibility Levels", "eye.circle"),
+            ("Toast Test", "text.bubble.fill")
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -403,6 +412,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             let nav = UINavigationController(rootViewController: infoVC)
             nav.modalPresentationStyle = .formSheet
             present(nav, animated: true)
+        case "Toast Test":
+            let vc = ToastTestViewController()
+            navigationController?.pushViewController(vc, animated: true)
         default:
             break
         }
@@ -415,9 +427,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     }
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else {
-            return
-        }
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         switch item {
         case .account(let email, let name):
@@ -428,7 +438,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             }
         case .currentNest(_, _):
             // Handle nest selection
-            print("Selected current nest")
+            let vc = NestDetailViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
                 switch title {
@@ -450,6 +462,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                     let sitterListVC = SitterListViewController(displayMode: .default)
                     let nav = UINavigationController(rootViewController: sitterListVC)
                     present(nav, animated: true)
+                case "Nest Members":
+                    let featurePreviewVC = NNFeaturePreviewViewController(
+                        featureTitle: "Nest Members",
+                        featureDescription: "This feature would allow you to add a partner or spouse as a Nest Member with full owner access to NestNote."
+                    )
+                    featurePreviewVC.modalPresentationStyle = .formSheet
+                    present(featurePreviewVC, animated: true)
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -495,6 +514,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         
         present(alert, animated: true)
     }
+
+    @objc private func handleUserInformationUpdate() {
+        applyInitialSnapshots()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 }
 
 // Add extension for AuthenticationDelegate
@@ -536,12 +563,6 @@ extension SettingsViewController: EntryDetailViewControllerDelegate {
         }
     }
 }
-
-//extension SettingsViewController: SessionDetailViewControllerDelegate {
-//    func sessionDetailViewController(_ controller: SessionDetailViewController, didCreateSession session: Session?) {
-//        showToast(text: "Session created")
-//    }
-//}
 
 extension SettingsViewController: SessionEventViewControllerDelegate {
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {

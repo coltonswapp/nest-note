@@ -66,6 +66,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 self?.refreshData()
             }
             .store(in: &cancellables)
+            
+        // Subscribe to user information updates
+        NotificationCenter.default.publisher(for: .userInformationUpdated)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData()
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - HomeViewControllerType Implementation

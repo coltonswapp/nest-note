@@ -196,13 +196,17 @@ final class NestService: EntryRepository {
         let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
         try await docRef.setData(try Firestore.Encoder().encode(entry))
         
-        // Add entry to currentNest.entries
-        if var updatedNest = currentNest {
-            if updatedNest.entries == nil {
-                updatedNest.entries = []
+        // Update cache if it exists
+        if var cachedEntries = cachedEntries {
+            if var categoryEntries = cachedEntries[entry.category] {
+                categoryEntries.append(entry)
+                cachedEntries[entry.category] = categoryEntries
+                self.cachedEntries = cachedEntries
+            } else {
+                // If category doesn't exist yet, create it
+                cachedEntries[entry.category] = [entry]
+                self.cachedEntries = cachedEntries
             }
-            updatedNest.entries?.append(entry)
-            currentNest = updatedNest
         }
         
         Logger.log(level: .info, category: .nestService, message: "Entry created successfully: \(entry.title)")
@@ -216,13 +220,15 @@ final class NestService: EntryRepository {
         let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
         try await docRef.setData(try Firestore.Encoder().encode(entry))
         
-        // Update entry in currentNest.entries
-        if var updatedNest = currentNest {
-            if let index = updatedNest.entries?.firstIndex(where: { $0.id == entry.id }) {
-                updatedNest.entries?[index] = entry
-                Logger.log(level: .info, category: .nestService, message: "Updated entry in cache: \(entry.title)")
+        // Update cache if it exists
+        if var cachedEntries = cachedEntries {
+            if var categoryEntries = cachedEntries[entry.category] {
+                if let index = categoryEntries.firstIndex(where: { $0.id == entry.id }) {
+                    categoryEntries[index] = entry
+                    cachedEntries[entry.category] = categoryEntries
+                    self.cachedEntries = cachedEntries
+                }
             }
-            currentNest = updatedNest
         }
         
         Logger.log(level: .info, category: .nestService, message: "Entry updated successfully in Firestore: \(entry.title)")
@@ -457,6 +463,49 @@ extension NestService {
     func refreshSavedSitters() async throws -> [SavedSitter] {
         clearSavedSittersCache()
         return try await fetchSavedSitters()
+    }
+}
+
+// MARK: - Nest Update Methods
+extension NestService {
+    func updateNestName(_ nestId: String, _ newName: String) async throws {
+        guard let currentNest else {
+            throw NestError.noCurrentNest
+        }
+        
+        // Update in Firestore
+        let docRef = db.collection("nests").document(nestId)
+        try await docRef.updateData([
+            "name": newName,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        self.currentNest?.name = newName
+        
+        // Post notification for UI updates
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .nestService, message: "Nest name updated successfully to: \(newName)")
+    }
+    
+    func updateNestAddress(_ nestId: String, _ newAddress: String) async throws {
+        guard let currentNest else {
+            throw NestError.noCurrentNest
+        }
+        
+        // Update in Firestore
+        let docRef = db.collection("nests").document(nestId)
+        try await docRef.updateData([
+            "address": newAddress,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        self.currentNest?.address = newAddress
+        
+        // Post notification for UI updates
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .nestService, message: "Nest address updated successfully to: \(newAddress)")
     }
 } 
 
