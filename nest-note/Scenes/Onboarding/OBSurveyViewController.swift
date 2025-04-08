@@ -103,16 +103,11 @@ class OBSurveyViewController: NNOnboardingViewController {
         if currentQuestionIndex < questions.count {
             showCurrentQuestion()
         } else {
-            // Save responses and continue onboarding
-            saveResponses()
+            // Update coordinator with responses and continue onboarding
+            if let coordinator = coordinator as? OnboardingCoordinator {
+                coordinator.updateSurveyResponses(surveyResponses)
+            }
             coordinator?.next()
-        }
-    }
-    
-    private func saveResponses() {
-        // Here you would save the responses to your user info or analytics
-        if let coordinator = coordinator as? OnboardingCoordinator {
-            coordinator.updateSurveyResponses(surveyResponses)
         }
     }
     

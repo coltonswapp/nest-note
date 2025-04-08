@@ -91,7 +91,7 @@ final class LandingViewController: NNViewController {
         field.borderStyle = .none
         field.placeholder = "Password"
         field.isSecureTextEntry = true
-        field.returnKeyType = .done
+        field.returnKeyType = .default
         field.delegate = self
         return field
     }()
@@ -319,8 +319,9 @@ extension LandingViewController: UITextFieldDelegate {
             passwordField.becomeFirstResponder()
         case passwordField:
             textField.resignFirstResponder()
-            if ((textField.text?.isEmpty) != nil) { return true }
+            guard ((textField.text?.isEmpty) != nil) else { return false }
             loginTapped()
+            return true
         default:
             textField.resignFirstResponder()
         }

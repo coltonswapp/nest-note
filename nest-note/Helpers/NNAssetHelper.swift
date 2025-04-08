@@ -3,6 +3,7 @@ import UIKit
 enum NNAssetType: String {
     case rectanglePattern = "rectangle_pattern"
     case halfMoonTop = "half_moon_top"
+    case halfMoonTest = "half-moon-test"
     case halfMoonBottom = "half_moon_bottom"
     case rectanglePatternSmall = "rectangle_pattern_small"
     
@@ -12,7 +13,7 @@ enum NNAssetType: String {
             return 0.27
         case .rectanglePatternSmall:
             return 0.15
-        case .halfMoonTop:
+        case .halfMoonTop, .halfMoonTest:
             return 0.56
         case .halfMoonBottom:
             return 0.56
@@ -21,17 +22,28 @@ enum NNAssetType: String {
     
     var defaultAlpha: CGFloat {
         switch self {
-        case .rectanglePattern, .rectanglePatternSmall:
+        case .rectanglePattern:
             return 0.4
-        case .halfMoonTop, .halfMoonBottom:
+        case .halfMoonTop, .halfMoonBottom, .halfMoonTest:
             return 1.0
+        case .rectanglePatternSmall:
+            return 0.8
         }
     }
     
     var contentMode: UIView.ContentMode {
         switch self {
-        case .rectanglePattern, .rectanglePatternSmall, .halfMoonTop, .halfMoonBottom:
+        case .rectanglePattern, .rectanglePatternSmall, .halfMoonTop, .halfMoonBottom, .halfMoonTest:
             return .scaleAspectFill
+        }
+    }
+    
+    var tintColor: UIColor? {
+        switch self {
+        case .rectanglePatternSmall:
+            return NNColors.EventColors.coreFour.randomElement()?.border
+        default:
+            return nil
         }
     }
 }
@@ -42,6 +54,7 @@ class NNAssetHelper {
         imageView.contentMode = assetType.contentMode
         imageView.alpha = assetType.defaultAlpha
         imageView.image?.accessibilityIdentifier = assetType.rawValue
+        imageView.tintColor = assetType.tintColor
     }
     
     static func constrainImageView(_ imageView: UIImageView, in view: UIView, to edge: UIRectEdge = .top) {

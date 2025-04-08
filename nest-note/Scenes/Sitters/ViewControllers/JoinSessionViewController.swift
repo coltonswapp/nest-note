@@ -62,7 +62,7 @@ class JoinSessionViewController: NNViewController {
         return label
     }()
     
-    private let codeTextField: RoundedTextField = {
+    let codeTextField: RoundedTextField = {
         let field = RoundedTextField(placeholder: "000-000")
         field.textField.keyboardType = .numberPad
         field.textField.font = UIFont.systemFont(ofSize: 24, weight: .bold)
@@ -176,7 +176,7 @@ class JoinSessionViewController: NNViewController {
         ])
     }
     
-    @objc private func findSessionButtonTapped() {
+    @objc func findSessionButtonTapped() {
         if findSessionButton.titleLabel.text == "Accept Invite" {
             acceptInvite()
             return

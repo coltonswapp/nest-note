@@ -23,6 +23,7 @@ protocol EditSessionViewControllerDelegate: AnyObject {
 
 protocol StatusCellDelegate: AnyObject {
     func didChangeSessionStatus(_ status: SessionStatus)
+    func didRequestSessionStatusInfo()
 }
 
 protocol InviteSitterViewControllerDelegate: AnyObject {
@@ -238,14 +239,6 @@ class EditSessionViewController: NNViewController {
 //            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
 //            updateEventsSection(with: sessionEvents)
 //        }
-        
-        // Add observer for status info
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(showStatusInfo),
-            name: Notification.Name("ShowSessionStatusInfo"),
-            object: nil
-        )
     }
     
     private func setupNavigationBar() {
@@ -469,6 +462,38 @@ class EditSessionViewController: NNViewController {
             cell.contentConfiguration = content
         }
         
+        let expensesRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
+            var content = cell.defaultContentConfiguration()
+            
+            switch item {
+            case .expenses:
+                content.text = "Expenses"
+                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+                let image = UIImage(systemName: "dollarsign.square.fill", withConfiguration: symbolConfiguration)?
+                    .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                content.image = image
+                
+                content.imageProperties.tintColor = NNColors.primary
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 8
+                
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+                
+                content.textProperties.font = .preferredFont(forTextStyle: .body)
+                
+                // Set secondary text color to secondaryLabel
+                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.color = .secondaryLabel
+                
+                cell.accessories = [.disclosureIndicator()]
+            default:
+                break
+            }
+            
+            cell.contentConfiguration = content
+        }
+        
         let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { [weak self] cell, indexPath, item in
             if case let .visibilityLevel(level) = item {
                 cell.configure(with: level)
@@ -566,6 +591,8 @@ class EditSessionViewController: NNViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: statusRegistration, for: indexPath, item: item)
             case .nestReview:
                 return collectionView.dequeueConfiguredReusableCell(using: nestReviewRegistration, for: indexPath, item: item)
+            case .expenses:
+                return collectionView.dequeueConfiguredReusableCell(using: expensesRegistration, for: indexPath, item: item)
             case .dateSelection:
                 return collectionView.dequeueConfiguredReusableCell(using: dateRegistration, for: indexPath, item: item)
             case .events:
@@ -588,11 +615,12 @@ class EditSessionViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .events])
+        snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .expenses, .events])
         snapshot.appendItems([.inviteSitter], toSection: .sitter)
         snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
         snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
         snapshot.appendItems([.nestReview], toSection: .nestReview)
+        snapshot.appendItems([.expenses], toSection: .expenses)
         snapshot.appendItems([.dateSelection(startDate: initialDate.0, endDate: initialDate.1, isMultiDay: initialDate.2)], toSection: .date)
         snapshot.appendItems([.events], toSection: .events)
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -619,6 +647,11 @@ class EditSessionViewController: NNViewController {
         inviteSitterVC.delegate = self
         let nav = UINavigationController(rootViewController: inviteSitterVC)
         present(nav, animated: true)
+    }
+    
+    private func expenseButtonTapped() {
+        let vc = NNFeaturePreviewViewController(feature: .expenses)
+        present(vc, animated: true)
     }
     
     private func updateVisibilityLevel(_ level: VisibilityLevel) {
@@ -801,18 +834,9 @@ class EditSessionViewController: NNViewController {
     }
     
     @objc private func showStatusInfo() {
-        let alert = UIAlertController(
-            title: "Session Status",
-            message: """
-            Upcoming: Session hasn't started yet
-            In-progress: Session is currently in progress
-            Extended: Session has gone past its end time
-            Completed: Session has been marked as finished
-            """,
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+        let viewController = SessionStatusInfoViewController()
+        present(viewController, animated: true)
+        HapticsHelper.lightHaptic()
     }
     
     private func validateSession() -> Bool {
@@ -879,6 +903,7 @@ extension EditSessionViewController {
         case visibility
         case status
         case nestReview
+        case expenses
         case date
         case events
         case time
@@ -891,6 +916,7 @@ extension EditSessionViewController {
         case visibilityLevel(VisibilityLevel)
         case sessionStatus(SessionStatus)
         case nestReview
+        case expenses
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
         case events
         case sessionEvent(SessionEvent)
@@ -910,18 +936,20 @@ extension EditSessionViewController {
                 hasher.combine(status)
             case .nestReview:
                 hasher.combine(4)
-            case .dateSelection(let start, let end, let isMultiDay):
+            case .expenses:
                 hasher.combine(5)
+            case .dateSelection(let start, let end, let isMultiDay):
+                hasher.combine(6)
                 hasher.combine(start)
                 hasher.combine(end)
                 hasher.combine(isMultiDay)
             case .events:
-                hasher.combine(6)
-            case .sessionEvent(let event):
                 hasher.combine(7)
+            case .sessionEvent(let event):
+                hasher.combine(8)
                 hasher.combine(event)
             case .moreEvents(let count):
-                hasher.combine(8)
+                hasher.combine(9)
                 hasher.combine(count)
             }
         }
@@ -931,6 +959,7 @@ extension EditSessionViewController {
             case (.overview, .overview),
                  (.inviteSitter, .inviteSitter),
                  (.nestReview, .nestReview),
+                 (.expenses, .expenses),
                  (.events, .events):
                 return true
             case let (.visibilityLevel(l1), .visibilityLevel(l2)):
@@ -955,7 +984,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
-        case .inviteSitter, .events, .visibilityLevel, .moreEvents, .sessionEvent:
+        case .inviteSitter, .events, .visibilityLevel, .moreEvents, .expenses, .sessionEvent:
             return true
         default:
             return false
@@ -976,6 +1005,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
             break
         case .nestReview:
             break
+        case .expenses:
+            expenseButtonTapped()
         case .overview:
             break
         case .events, .moreEvents:
@@ -1029,7 +1060,8 @@ extension EditSessionViewController: DatePresentationDelegate {
         let pickerVC = NNDateTimePickerSheet(
             mode: mode,
             type: type,
-            initialDate: initialDate
+            initialDate: initialDate,
+            interval: 15
         )
         pickerVC.delegate = self
         
@@ -1386,11 +1418,7 @@ final class StatusCell: UICollectionViewListCell {
     }
     
     private func showStatusInfo() {
-        // You can implement this to show a status info alert through your view controller
-        NotificationCenter.default.post(
-            name: Notification.Name("ShowSessionStatusInfo"),
-            object: nil
-        )
+        delegate?.didRequestSessionStatusInfo()
     }
     
     @objc private func iconTapped() {
@@ -1402,6 +1430,12 @@ final class StatusCell: UICollectionViewListCell {
 extension EditSessionViewController: StatusCellDelegate {
     func didChangeSessionStatus(_ status: SessionStatus) {
         updateSessionStatus(status)
+    }
+    
+    func didRequestSessionStatusInfo() {
+        let viewController = SessionStatusInfoViewController()
+        present(viewController, animated: true)
+        HapticsHelper.lightHaptic()
     }
 }
 

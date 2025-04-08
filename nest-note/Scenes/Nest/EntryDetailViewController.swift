@@ -19,6 +19,9 @@ final class EntryDetailViewController: NNSheetViewController {
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isScrollEnabled = true
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+        textView.dataDetectorTypes = [.address, .phoneNumber, .link]
+        textView.isEditable = true
+        textView.isSelectable = true
         return textView
     }()
     
@@ -84,6 +87,7 @@ final class EntryDetailViewController: NNSheetViewController {
         titleField.text = entry?.title
         titleField.placeholder = "Title"
         contentTextView.text = entry?.content
+        contentTextView.delegate = self
         
         if isReadOnly {
             configureReadOnlyMode()
@@ -104,7 +108,9 @@ final class EntryDetailViewController: NNSheetViewController {
         super.addContentToContainer()
         
         buttonStackView.addArrangedSubview(visibilityButton)
-        buttonStackView.addArrangedSubview(saveButton)
+        if !isReadOnly {
+            buttonStackView.addArrangedSubview(saveButton)
+        }
         
         containerView.addSubview(contentTextView)
         containerView.addSubview(buttonStackView)
@@ -126,9 +132,15 @@ final class EntryDetailViewController: NNSheetViewController {
             buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46),
             
-            visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.6),
-            saveButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.4)
+            visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6),
+            
         ])
+        
+        if !isReadOnly {
+            NSLayoutConstraint.activate([
+                saveButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.4)
+            ])
+        }
     }
     
     // MARK: - Private Methods
@@ -324,5 +336,27 @@ final class EntryDetailViewController: NNSheetViewController {
                 dismiss(animated: true)
             }
         }
+    }
+}
+
+// MARK: - UITextViewDelegate
+extension EntryDetailViewController: UITextViewDelegate {
+    func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        if interaction == .preview {
+            return true
+        }
+        
+        if URL.scheme == "tel" {
+            UIApplication.shared.open(URL)
+        } else if URL.scheme == "mailto" {
+            UIApplication.shared.open(URL)
+        } else {
+            UIApplication.shared.open(URL, options: [:], completionHandler: nil)
+        }
+        return false
+    }
+    
+    func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        return true
     }
 } 

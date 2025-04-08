@@ -81,6 +81,11 @@ class SitterSessionCell: UICollectionViewListCell {
             return ("No in-progress sessions", "person.badge.clock")
         case .upcoming:
             return ("No upcoming sessions", "calendar.and.person")
+        case .past:
+            return (
+                "No past sessions",
+                "calendar.badge.checkmark"
+            )
         }
     }
     

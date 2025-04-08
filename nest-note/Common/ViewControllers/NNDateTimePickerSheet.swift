@@ -24,6 +24,7 @@ final class NNDateTimePickerSheet: UIViewController {
     let mode: UIDatePicker.Mode
     private let initialDate: Date
     let pickerType: PickerType
+    let pickerInterval: Int
     
     // Add an enum to specify the type of picker
     enum PickerType {
@@ -43,10 +44,11 @@ final class NNDateTimePickerSheet: UIViewController {
     }
     
     // MARK: - Initialization
-    init(mode: UIDatePicker.Mode, type: PickerType, initialDate: Date = Date()) {
+    init(mode: UIDatePicker.Mode, type: PickerType, initialDate: Date = Date(), interval: Int = 10) {
         self.mode = mode
         self.pickerType = type
         self.initialDate = initialDate
+        self.pickerInterval = interval
         super.init(nibName: nil, bundle: nil)
         self.title = pickerType.title
     }
@@ -67,7 +69,7 @@ final class NNDateTimePickerSheet: UIViewController {
         view.backgroundColor = .systemBackground
         
         picker.datePickerMode = mode
-        picker.minuteInterval = 10
+        picker.minuteInterval = pickerInterval
         picker.preferredDatePickerStyle = .wheels
         picker.date = initialDate
         view.addSubview(picker)

@@ -89,7 +89,7 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.info, .danger])
+        snapshot.appendSections([.info, .actions, .danger])
         
         // Info section
         if let nest = NestService.shared.currentNest {
@@ -104,6 +104,11 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
             ]
             snapshot.appendItems(infoItems, toSection: .info)
         }
+        
+        // Actions section
+        snapshot.appendItems([
+            .action(title: "Add another Residence", imageName: "plus.circle", destructive: false)
+        ], toSection: .actions)
         
         // Danger section
         snapshot.appendItems([.action(title: "Delete Nest", imageName: "trash", destructive: true)], toSection: .danger)
@@ -135,6 +140,10 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
             }
         case .action(let title, _, _):
             switch title {
+            case "Add another Residence":
+                let featureVC = NNFeaturePreviewViewController(feature: .multipleNests)
+                let nav = UINavigationController(rootViewController: featureVC)
+                present(nav, animated: true)
             case "Delete Nest":
                 handleDeleteNest()
             default:
@@ -172,11 +181,12 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
     // MARK: - Types
     
     enum Section: Hashable {
-        case info, danger
+        case info, actions, danger
         
         var title: String {
             switch self {
             case .info: return "Nest Information"
+            case .actions: return "Actions"
             case .danger: return "Danger Zone"
             }
         }

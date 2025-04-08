@@ -27,7 +27,9 @@ class NNColors {
     }
     
     struct EventColors {
-        static let all = [blue, lightBlue, green, yellow, red, orange, black, gray]
+        static let all: [NNColorPair] = [blue, lightBlue, green, yellow, red, orange, black, gray]
+        
+        static let coreFour: [NNColorPair] = [blue, green, red, orange]
         
         enum ColorType: String, Codable, CaseIterable {
             case blue

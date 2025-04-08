@@ -4,14 +4,17 @@
 //
 
 import UIKit
+import Combine
 
 class LogsViewController: UIViewController {
     private let tableView = UITableView()
     private var logs: [LogLine] = []
+    private var cancellables = Set<AnyCancellable>()
     
     override func viewDidLoad() {
         super.viewDidLoad()
         setup()
+        setupLogSubscription()
         fetchLogs()
     }
     
@@ -49,8 +52,17 @@ class LogsViewController: UIViewController {
         )
     }
     
+    private func setupLogSubscription() {
+        Logger.shared.$lines
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.fetchLogs()
+            }
+            .store(in: &cancellables)
+    }
+    
     private func fetchLogs() {
-        logs = Logger.shared.lines
+        logs = Logger.shared.lines.reversed()
         tableView.reloadData()
     }
     

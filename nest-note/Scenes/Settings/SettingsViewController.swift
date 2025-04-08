@@ -253,6 +253,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             case .nestOwner:
                 let nestItems = [
                     ("Nest Members", "person.2.fill"),
+                    ("Permanent Access", "person.badge.key.fill"),
                     ("Saved Sitters", "heart"),
                     ("Sessions", "calendar"),
                     ("Places", "map"),
@@ -264,6 +265,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             // Default items for signed out state
             let defaultItems = [
                 ("Nest Members", "person.2.fill"),
+                ("Permanent Access", "person.badge.key.fill"),
                 ("Saved Sitters", "heart"),
                 ("Upcoming Sessions", "calendar"),
                 ("Session History", "clock"),
@@ -286,6 +288,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         let debugItems = [
             ("Reset App State", "arrow.counterclockwise"),
             ("View Logs", "text.alignleft"),
+            ("Survey Dashboard", "chart.bar.fill"),
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
             ("Onboarding", "sparkles"),
@@ -306,7 +309,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Visibility Levels", "eye.circle"),
-            ("Toast Test", "text.bubble.fill")
+            ("Toast Test", "text.bubble.fill"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -410,11 +413,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         case "Test Visibility Levels":
             let infoVC = VisibilityLevelInfoViewController()
             let nav = UINavigationController(rootViewController: infoVC)
-            nav.modalPresentationStyle = .formSheet
             present(nav, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Survey Dashboard":
+            let vc = SurveyDashboardViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         default:
             break
         }
@@ -464,8 +470,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                     present(nav, animated: true)
                 case "Nest Members":
                     let featurePreviewVC = NNFeaturePreviewViewController(
-                        featureTitle: "Nest Members",
-                        featureDescription: "This feature would allow you to add a partner or spouse as a Nest Member with full owner access to NestNote."
+                        feature: SurveyService.Feature.nestMembers
+                    )
+                    featurePreviewVC.modalPresentationStyle = .formSheet
+                    present(featurePreviewVC, animated: true)
+                case "Permanent Access":
+                    let featurePreviewVC = NNFeaturePreviewViewController(
+                        feature: SurveyService.Feature.permanentAccess
                     )
                     featurePreviewVC.modalPresentationStyle = .formSheet
                     present(featurePreviewVC, animated: true)

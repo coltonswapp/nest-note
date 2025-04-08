@@ -1,6 +1,6 @@
 import UIKit
 
-final class VisibilityLevelInfoViewController: NNViewController {
+final class SessionStatusInfoViewController: NNViewController {
     
     // MARK: - Properties
     private let topImageView: UIImageView = {
@@ -11,31 +11,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
         return view
     }()
     
-    private let infoView = NNBulletStack(items: [
-        NNBulletItem(
-            title: "Essential",
-            description: "Critical details always visible to sitters for the safety and basic care of your children.",
-            iconName: "exclamationmark.shield.fill"
-        ),
-        
-        NNBulletItem(
-            title: "Standard",
-            description: "Additional guidelines and instructions that appear for typically longer daytime stays.",
-            iconName: "clock.fill"
-        ),
-        
-        NNBulletItem(
-            title: "Extended",
-            description: "Overnight-specific details that become visible when sitters stay through the night.",
-            iconName: "moon.stars.fill"
-        ),
-        
-        NNBulletItem(
-            title: "Comprehensive",
-            description: "Complete household management information that unlocks for extended multi-day stays.",
-            iconName: "calendar.badge.clock"
-        )
-    ])
+    private let infoView: NNBulletStack
     
     private let scrollView: UIScrollView = {
         let scroll = UIScrollView()
@@ -51,7 +27,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Visibility Levels"
+        label.text = "Session Statuses"
         label.font = .systemFont(ofSize: 22, weight: .bold)
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -60,7 +36,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Organize information into 4 visibility levels, each building on the previous to provide sitters the right details for their specific caregiving session."
+        label.text = "Understand the different states a caregiving session can be in, from scheduling to completion."
         label.font = .systemFont(ofSize: 14)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
@@ -74,6 +50,38 @@ final class VisibilityLevelInfoViewController: NNViewController {
         button.addTarget(self, action: #selector(gotItTapped), for: .touchUpInside)
         return button
     }()
+    
+    // MARK: - Initialization
+    init() {
+        let items = [
+            NNBulletItem(
+                title: "Upcoming",
+                description: "Session is scheduled but hasn't begun yet",
+                iconName: "calendar.badge.clock"
+            ),
+            NNBulletItem(
+                title: "In-Progress",
+                description: "Care is actively being provided during the scheduled time frame",
+                iconName: "calendar.badge.checkmark"
+            ),
+            NNBulletItem(
+                title: "Extended",
+                description: "Session has continued beyond its originally scheduled end time",
+                iconName: "timer.circle.fill"
+            ),
+            NNBulletItem(
+                title: "Completed",
+                description: "Session has officially ended and all activities are finalized",
+                iconName: "checkmark.circle.fill"
+            )
+        ]
+        self.infoView = NNBulletStack(items: items)
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
@@ -101,7 +109,6 @@ final class VisibilityLevelInfoViewController: NNViewController {
         topImageView.pinToTop(of: view)
         
         NSLayoutConstraint.activate([
-
             scrollView.topAnchor.constraint(equalTo: topImageView.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),

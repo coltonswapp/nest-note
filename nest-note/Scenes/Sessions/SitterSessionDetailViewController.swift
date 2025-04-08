@@ -17,6 +17,7 @@ final class SitterSessionDetailViewController: NNViewController {
         case date
         case visibility
         case events
+        case expenses
     }
     
     enum Item: Hashable {
@@ -26,6 +27,7 @@ final class SitterSessionDetailViewController: NNViewController {
         case events
         case sessionEvent(SessionEvent)
         case moreEvents(Int)
+        case expenses
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -48,6 +50,8 @@ final class SitterSessionDetailViewController: NNViewController {
             case .moreEvents(let count):
                 hasher.combine(5)
                 hasher.combine(count)
+            case .expenses:
+                hasher.combine(6)
             }
         }
         
@@ -65,6 +69,8 @@ final class SitterSessionDetailViewController: NNViewController {
                 return e1 == e2
             case let (.moreEvents(c1), .moreEvents(c2)):
                 return c1 == c2
+            case (.expenses, .expenses):
+                return true
             default:
                 return false
             }
@@ -266,6 +272,32 @@ final class SitterSessionDetailViewController: NNViewController {
             }
         }
         
+        let expensesRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case .expenses = item {
+                var content = cell.defaultContentConfiguration()
+                content.text = "Expenses"
+                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+                let image = UIImage(systemName: "dollarsign.square.fill", withConfiguration: symbolConfiguration)?
+                    .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                content.image = image
+                
+                content.imageProperties.tintColor = NNColors.primary
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 8
+                
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+                
+                content.textProperties.font = .preferredFont(forTextStyle: .body)
+                
+                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.color = .secondaryLabel
+                
+                cell.accessories = [.disclosureIndicator()]
+                cell.contentConfiguration = content
+            }
+        }
+        
         // Add footer registration
         let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionFooter
@@ -333,6 +365,13 @@ final class SitterSessionDetailViewController: NNViewController {
                     for: indexPath,
                     item: item
                 )
+                
+            case .expenses:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: expensesRegistration,
+                    for: indexPath,
+                    item: item
+                )
             }
         }
         
@@ -347,7 +386,7 @@ final class SitterSessionDetailViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.name, .date, .visibility, .events])
+        snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
         
         snapshot.appendItems([.nestName(name: nestName)], toSection: .name)
         
@@ -360,6 +399,9 @@ final class SitterSessionDetailViewController: NNViewController {
         
         // Add visibility level
         snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
+
+        // Add expenses section
+        snapshot.appendItems([.expenses], toSection: .expenses)
         
         // Add events section
         snapshot.appendItems([.events], toSection: .events)
@@ -420,7 +462,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
-        case .sessionEvent, .events, .moreEvents:
+        case .sessionEvent, .events, .moreEvents, .expenses:
             return true
         default:
             return false
@@ -447,6 +489,9 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
             let nav = UINavigationController(rootViewController: calendarVC)
             present(nav, animated: true)
+        case .expenses:
+            let vc = NNFeaturePreviewViewController(feature: .expenses)
+            present(vc, animated: true)
         default:
             break
         }

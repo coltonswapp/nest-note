@@ -1,6 +1,12 @@
 import UIKit
 
-final class VisibilityLevelInfoView: UIView {
+struct NNBulletItem {
+    let title: String
+    let description: String
+    let iconName: String
+}
+
+final class NNBulletStack: UIView {
     
     // MARK: - Properties
     private let stackView: UIStackView = {
@@ -12,9 +18,9 @@ final class VisibilityLevelInfoView: UIView {
     }()
     
     // MARK: - Initialization
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupView()
+    init(items: [NNBulletItem]) {
+        super.init(frame: .zero)
+        setupView(with: items)
     }
     
     required init?(coder: NSCoder) {
@@ -22,7 +28,7 @@ final class VisibilityLevelInfoView: UIView {
     }
     
     // MARK: - Setup
-    private func setupView() {
+    private func setupView(with items: [NNBulletItem]) {
         addSubview(stackView)
         
         NSLayoutConstraint.activate([
@@ -32,30 +38,10 @@ final class VisibilityLevelInfoView: UIView {
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         
-        // Add level info views
-        addLevelInfo(
-            title: "Essential",
-            description: "Critical details always visible to sitters for the safety and basic care of your children.",
-            iconName: "exclamationmark.shield.fill"
-        )
-        
-        addLevelInfo(
-            title: "Standard",
-            description: "Additional guidelines and instructions that appear for typically longer daytime stays.",
-            iconName: "clock.fill"
-        )
-        
-        addLevelInfo(
-            title: "Extended",
-            description: "Overnight-specific details that become visible when sitters stay through the night.",
-            iconName: "moon.stars.fill"
-        )
-        
-        addLevelInfo(
-            title: "Comprehensive",
-            description: "Complete household management information that unlocks for extended multi-day stays.",
-            iconName: "calendar.badge.clock"
-        )
+        // Add items
+        for item in items {
+            addLevelInfo(title: item.title, description: item.description, iconName: item.iconName)
+        }
     }
     
     private func addLevelInfo(title: String, description: String, iconName: String) {

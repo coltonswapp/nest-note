@@ -3,21 +3,20 @@ import UIKit
 class NNFeaturePreviewViewController: NNViewController {
     
     // MARK: - Properties
-    private let featureTitle: String
-    private let featureDescription: String
+    private let feature: SurveyService.Feature
+    private let surveyService = SurveyService.shared
     
     // MARK: - UI Elements
-private let topImageView: UIImageView = {
+    private let topImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         NNAssetHelper.configureImageView(imageView, for: .rectanglePatternSmall)
         return imageView
-}()
-
-    private let comingSoonLabel: UILabel = {
-        let label = UILabel()
-        label.text = "COMING SOON"
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+    }()
+    
+    private let comingSoonLabel: PaddedLabel = {
+        let label = PaddedLabel()
+        label.text = "COMING SOON?"
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -73,10 +72,11 @@ private let topImageView: UIImageView = {
         return button
     }()
     
+    private var hasVoted: Bool = false
+    
     // MARK: - Initialization
-    init(featureTitle: String, featureDescription: String) {
-        self.featureTitle = featureTitle
-        self.featureDescription = featureDescription
+    init(feature: SurveyService.Feature) {
+        self.feature = feature
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -91,8 +91,16 @@ private let topImageView: UIImageView = {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        titleLabel.text = featureTitle
-        descriptionLabel.text = featureDescription
+        titleLabel.text = feature.title
+        descriptionLabel.text = feature.description
+        
+        // Check if user has already voted
+        if surveyService.hasVotedForFeature(feature.id) {
+            hasVoted = true
+            disableVoting()
+        }
+        
+        HapticsHelper.lightHaptic()
     }
     
     // MARK: - Setup
@@ -111,8 +119,7 @@ private let topImageView: UIImageView = {
     override func constrainSubviews() {
         NSLayoutConstraint.activate([
             comingSoonLabel.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 20),
-            comingSoonLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            comingSoonLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            comingSoonLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
             titleLabel.topAnchor.constraint(equalTo: comingSoonLabel.bottomAnchor, constant: 8),
             titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -135,8 +142,6 @@ private let topImageView: UIImageView = {
             noThanksButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             noThanksButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             noThanksButton.heightAnchor.constraint(equalToConstant: 50),
-            
-           
         ])
         
         submitFeedbackButton.pinToBottom(of: view)
@@ -155,12 +160,40 @@ private let topImageView: UIImageView = {
             usefulButton.setSelected(false)
         }
         
-        submitFeedbackButton.isEnabled = noThanksButton.isOptionSelected || usefulButton.isOptionSelected
+        submitFeedbackButton.isEnabled = !hasVoted && (noThanksButton.isOptionSelected || usefulButton.isOptionSelected)
     }
     
     @objc private func submitFeedbackTapped() {
-        // TODO: Handle feedback submission
-        HapticsHelper.lightHaptic()
-        dismiss(animated: true)
+        guard let userId = UserService.shared.currentUser?.id else {
+            showToast(text: "Please sign in to submit feedback", sentiment: .negative)
+            return
+        }
+        
+        let vote = FeatureVote(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            featureId: feature.id,
+            vote: usefulButton.isOptionSelected ? .forFeature : .againstFeature,
+            userId: userId,
+            comments: nil
+        )
+        
+        Task {
+            do {
+                try await surveyService.submitFeatureVote(vote)
+                HapticsHelper.lightHaptic()
+                showToast(text: "Thank you for your feedback!", sentiment: .positive)
+                dismiss(animated: true)
+            } catch {
+                showToast(text: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+    
+    // MARK: - Private Methods
+    private func disableVoting() {
+        
+        submitFeedbackButton.isEnabled = false
+        instructionLabel.text = "Thank you for your feedback! You've already voted on this feature."
     }
 } 

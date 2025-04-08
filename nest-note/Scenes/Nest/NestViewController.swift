@@ -16,6 +16,7 @@ class NestViewController: NNViewController, NestLoadable {
         case address
         case main
         case routine
+        case misc
     }
     
     private struct Item: Hashable {
@@ -59,9 +60,14 @@ class NestViewController: NNViewController, NestLoadable {
         Item(title: "Extra Curricular", icon: "figure.run")
     ]
     
+    private let miscItems: [Item] = [
+        Item(title: "Contacts", icon: "person.2.fill"),
+        Item(title: "Activity Suggestions", icon: "lightbulb.fill")
+    ]
+    
     private var entries: [String: [BaseEntry]]?
     
-    private let sectionHeaders = ["", "Information Categories", "Routines"]
+    private let sectionHeaders = ["", "Information Categories", "Routines", "Misc"]
     
     private var newCategoryButton: NNPrimaryLabeledButton!
     
@@ -189,7 +195,7 @@ class NestViewController: NNViewController, NestLoadable {
                 
                 return section
                 
-            case .main, .routine:
+            case .main, .routine, .misc:
                 // Use existing insetGrouped layout for other sections
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
@@ -278,7 +284,7 @@ class NestViewController: NNViewController, NestLoadable {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
-        snapshot.appendSections([.address, .main, .routine])
+        snapshot.appendSections([.address, .main, .routine, .misc])
         
         // Get address from the appropriate service
         var address: String?
@@ -294,6 +300,7 @@ class NestViewController: NNViewController, NestLoadable {
         
         snapshot.appendItems(mainItems, toSection: .main)
         snapshot.appendItems(routineItems, toSection: .routine)
+        snapshot.appendItems(miscItems, toSection: .misc)
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
@@ -353,11 +360,44 @@ extension NestViewController: UICollectionViewDelegate {
         
         // Cast the item to Item type for category sections
         guard let categoryItem = item as? Item else { return }
-        let nestCategoryViewController = NestCategoryViewController(
-            category: categoryItem.title,
-            entryRepository: entryRepository
-        )
-        navigationController?.pushViewController(nestCategoryViewController, animated: true)
+        
+        let section = Section(rawValue: indexPath.section)!
+        
+        switch section {
+        case .main:
+            let nestCategoryViewController = NestCategoryViewController(
+                category: categoryItem.title,
+                entryRepository: entryRepository
+            )
+            navigationController?.pushViewController(nestCategoryViewController, animated: true)
+            
+        case .routine:
+            let featurePreviewVC = NNFeaturePreviewViewController(
+                feature: .routines
+            )
+            featurePreviewVC.modalPresentationStyle = .formSheet
+            present(featurePreviewVC, animated: true)
+            
+        case .misc:
+            let feature: SurveyService.Feature
+            switch categoryItem.title {
+            case "Contacts":
+                feature = .contacts
+            case "Activity Suggestions":
+                feature = .activitySuggestions
+            default:
+                return
+            }
+            
+            let featurePreviewVC = NNFeaturePreviewViewController(
+                feature: feature
+            )
+            featurePreviewVC.modalPresentationStyle = .formSheet
+            present(featurePreviewVC, animated: true)
+            
+        default:
+            break
+        }
     }
 }
 
