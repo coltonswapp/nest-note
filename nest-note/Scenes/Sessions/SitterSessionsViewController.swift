@@ -13,13 +13,15 @@ class SitterSessionsViewController: NNViewController {
     }
     
     enum Section: Int, CaseIterable {
-        case inProgress
         case upcoming
+        case inProgress
+        case past
         
         var title: String {
             switch self {
             case .inProgress: return "IN PROGRESS"
             case .upcoming: return "UPCOMING"
+            case .past: return "PAST"
             }
         }
     }
@@ -42,22 +44,22 @@ class SitterSessionsViewController: NNViewController {
             updateDisplayedSessions()
         }
     }
-    private var currentBucket: SessionService.SessionBucket = .upcoming
+    private var currentBucket: SessionService.SessionBucket = .inProgress
     
     private var filteredSessions: [SessionItem] {
-        let now = Date()
-        
         switch currentBucket {
         case .upcoming:
             return allSessions
-                .filter { $0.startDate > now }
+                .filter { $0.status == .upcoming }
                 .sorted { $0.startDate < $1.startDate }
         case .inProgress:
             return allSessions
-                .filter { $0.startDate <= now && $0.endDate > now }
+                .filter { $0.status == .inProgress || $0.status == .extended }
                 .sorted { $0.endDate < $1.endDate }
         case .past:
-            return []
+            return allSessions
+                .filter { $0.status == .completed }
+                .sorted { $0.endDate > $1.endDate }
         }
     }
     
@@ -77,6 +79,9 @@ class SitterSessionsViewController: NNViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         loadSessions()
+        
+        currentBucket = .inProgress
+        filterView.selectBucket(.inProgress)
     }
     
     override func setup() {
@@ -90,12 +95,15 @@ class SitterSessionsViewController: NNViewController {
     
     private func setupFilterView() {
         filterView = SessionFilterView(
-            filters: [.upcoming, .inProgress],
-            initialFilter: .upcoming
+            filters: [.past, .inProgress, .upcoming],
+            initialFilter: .inProgress
         )
         filterView.delegate = self
         filterView.frame.size.height = 40
         addNavigationBarPalette(filterView)
+        
+        // Set initial filter to inProgress
+        currentBucket = .inProgress
     }
     
     private func setupCollectionView() {
@@ -263,25 +271,7 @@ class SitterSessionsViewController: NNViewController {
     }
     
     private func emptyStateConfig(for bucket: SessionService.SessionBucket) -> (title: String, subtitle: String, icon: UIImage?) {
-        switch bucket {
-        case .upcoming:
-            return (
-                "No upcoming sessions",
-                "Join a session to get started.",
-                UIImage(systemName: "calendar.badge.plus")
-            )
-        case .inProgress:
-            return (
-                "No active sessions",
-                "Sessions in progress will appear here.",
-                UIImage(systemName: "calendar.badge.clock")
-            )
-        case .past:
-            // This case should never be reached in the sitter view
-            return (
-                "", "", nil
-            )
-        }
+        return SessionEmptyStateDataSource.sitterEmptyState(for: bucket)
     }
 }
 

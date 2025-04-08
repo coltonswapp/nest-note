@@ -110,7 +110,9 @@ final class LaunchCoordinator {
         self.userType = userType
         
         await MainActor.run {
-            guard let navigationController = self.navigationController else { return }
+            guard let navigationController = self.navigationController else {
+                Logger.log(level: .error, category: .launcher, message: "Could not configure for current user ❌")
+                return }
             
             // Create the appropriate home view controller
             let homeVC: UIViewController
@@ -186,6 +188,7 @@ extension LaunchCoordinator: AuthenticationDelegate {
         let onboardingCoordinator = OnboardingCoordinator()
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self
+        (containerVC as? OnboardingContainerViewController)?.delegate = self
         
         // Present the container view controller modally
         containerVC.modalPresentationStyle = .fullScreen
@@ -193,26 +196,37 @@ extension LaunchCoordinator: AuthenticationDelegate {
     }
     
     func signUpComplete() {
+        Logger.log(level: .info, category: .launcher, message: "Sign up complete, moving to Launcher...")
+        
         Task {
             // Get the view controllers
-            guard let navigationController = self.navigationController,
-                  let landingVC = navigationController.presentedViewController as? LandingViewController else {
+            guard let navigationController = self.navigationController else {
                 return
             }
             
-            // Dismiss landing VC and reconfigure
-            await MainActor.run {
-                landingVC.dismiss(animated: true) {
-                    Task {
-                        do {
-                            try await self.reconfigureAfterAuthentication()
-                        } catch {
-                            Logger.log(level: .error, category: .launcher, message: "Post-signup configuration failed: \(error)")
-                            self.handleAuthenticationError(error, presentingFrom: navigationController)
-                        }
-                    }
+            Logger.log(level: .info, category: .launcher, message: "Attempting to reconfigure after sign up...")
+            
+            Task {
+                do {
+                    try await self.reconfigureAfterAuthentication()
+                } catch {
+                    Logger.log(level: .error, category: .launcher, message: "Post-signup configuration failed: \(error)")
+                    self.handleAuthenticationError(error, presentingFrom: navigationController)
                 }
             }
+            
+            
+        }
+    }
+}
+
+// MARK: - OnboardingContainerDelegate
+extension LaunchCoordinator: OnboardingContainerDelegate {
+    func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
+        // Dismiss the onboarding container
+        container.dismiss(animated: true) { [weak self] in
+            // Show the login screen
+            self?.showAuthenticationFlow()
         }
     }
 }

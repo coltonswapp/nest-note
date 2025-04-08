@@ -1,0 +1,157 @@
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+admin.initializeApp();
+
+/**
+ * Helper function to calculate percentages for answer distributions
+ * @param {Object} distribution - The distribution of answers
+ * @param {number} total - The total number of responses
+ * @return {Object} The calculated percentages
+ */
+function calculatePercentages(distribution, total) {
+  return Object.entries(distribution).reduce((acc, [key, count]) => {
+    acc[key] = (count / total) * 100;
+    return acc;
+  }, {});
+}
+
+/**
+ * Cloud function that triggers when a new survey response is added
+ * Updates metrics for the specific survey type
+ */
+exports.onNewSurveyResponse = functions.firestore
+  .document("surveyData/{responseId}")
+  .onCreate(async (snap, context) => {
+    const response = snap.data();
+    const db = admin.firestore();
+    
+    try {
+      // Get the metrics document for this survey type
+      const metricsRef = db.collection("metrics")
+        .doc("surveys")
+        .collection(response.surveyType)
+        .doc("metrics");
+      const metricsDoc = await metricsRef.get();
+      
+      let metrics;
+      if (metricsDoc.exists) {
+        metrics = metricsDoc.data();
+      } else {
+        metrics = {
+          totalResponses: 0,
+          lastUpdated: admin.firestore.Timestamp.now(),
+          questionMetrics: {},
+        };
+      }
+      
+      // Update total responses
+      metrics.totalResponses += 1;
+      metrics.lastUpdated = admin.firestore.Timestamp.now();
+      
+      // Update metrics for each question in the response
+      response.responses.forEach(({questionId, answers}) => {
+        if (!metrics.questionMetrics[questionId]) {
+          metrics.questionMetrics[questionId] = {
+            totalResponses: 0,
+            answerDistribution: {},
+            percentages: {},
+          };
+        }
+        
+        const questionMetrics = metrics.questionMetrics[questionId];
+        questionMetrics.totalResponses += 1;
+        
+        // Update answer distribution
+        answers.forEach((answer) => {
+          questionMetrics.answerDistribution[answer] =
+            (questionMetrics.answerDistribution[answer] || 0) + 1;
+        });
+        
+        // Recalculate percentages
+        questionMetrics.percentages = calculatePercentages(
+          questionMetrics.answerDistribution,
+          questionMetrics.totalResponses,
+        );
+      });
+      
+      // Save updated metrics
+      await metricsRef.set(metrics);
+      
+      console.log(
+        `Successfully updated metrics for survey type: ${response.surveyType}`,
+      );
+    } catch (error) {
+      console.error("Error updating survey metrics:", error);
+      throw error;
+    }
+  });
+
+/**
+ * Cloud function that triggers when a new feature vote is added
+ * Updates metrics for the specific feature
+ */
+exports.onNewFeatureVote = functions.firestore
+  .document("surveyData/{voteId}")
+  .onCreate(async (snap, context) => {
+    const vote = snap.data();
+    const db = admin.firestore();
+    
+    try {
+      // Get the metrics document for this feature
+      const metricsRef = db.collection("metrics")
+        .doc("features")
+        .collection(vote.featureId)
+        .doc("metrics");
+      const metricsDoc = await metricsRef.get();
+      
+      let metrics;
+      if (metricsDoc.exists) {
+        metrics = metricsDoc.data();
+      } else {
+        metrics = {
+          votesFor: 0,
+          votesAgainst: 0,
+          votePercentage: 0,
+          lastUpdated: admin.firestore.Timestamp.now(),
+        };
+      }
+      
+      // Update vote counts
+      if (vote.vote === "for") {
+        metrics.votesFor += 1;
+      } else {
+        metrics.votesAgainst += 1;
+      }
+      
+      // Calculate new percentage
+      const totalVotes = metrics.votesFor + metrics.votesAgainst;
+      metrics.votePercentage = totalVotes > 0 ?
+        (metrics.votesFor / totalVotes) * 100 :
+        0;
+      
+      metrics.lastUpdated = admin.firestore.Timestamp.now();
+      
+      // Save updated metrics
+      await metricsRef.set(metrics);
+      
+      console.log(
+        `Successfully updated metrics for feature: ${vote.featureId}`,
+      );
+    } catch (error) {
+      console.error("Error updating feature metrics:", error);
+      throw error;
+    }
+  });
+
+/**
+ * Simplified function that avoids circular references
+ * @return {Object} A simple response object
+ */
+exports.helloNestNote = functions.https.onCall((data, context) => {
+  // Return only simple primitive values
+  return {
+    message: "Hello from NestNote Firebase Functions!",
+    timestamp: Date.now(),
+    // Don't echo back the input data for now
+  };
+}); 

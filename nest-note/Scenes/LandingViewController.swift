@@ -19,8 +19,7 @@ final class LandingViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.image = UIImage(named: "half_moon_top")
-        view.contentMode = .scaleAspectFill
+        NNAssetHelper.configureImageView(view, for: .halfMoonTop)
         return view
     }()
     
@@ -92,7 +91,7 @@ final class LandingViewController: NNViewController {
         field.borderStyle = .none
         field.placeholder = "Password"
         field.isSecureTextEntry = true
-        field.returnKeyType = .done
+        field.returnKeyType = .default
         field.delegate = self
         return field
     }()
@@ -144,12 +143,7 @@ final class LandingViewController: NNViewController {
     }
     
     override func constrainSubviews() {
-        NSLayoutConstraint.activate([
-            topImageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 0),
-            topImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topImageView.heightAnchor.constraint(equalToConstant: view.frame.width * 0.56),
-        ])
+        topImageView.pinToTop(of: view)
         
         mainStackTopConstraint = mainStack.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 0)
         mainStackTopConstraint?.isActive = true
@@ -325,8 +319,9 @@ extension LandingViewController: UITextFieldDelegate {
             passwordField.becomeFirstResponder()
         case passwordField:
             textField.resignFirstResponder()
-            if ((textField.text?.isEmpty) != nil) { return true }
+            guard ((textField.text?.isEmpty) != nil) else { return false }
             loginTapped()
+            return true
         default:
             textField.resignFirstResponder()
         }
@@ -359,6 +354,18 @@ class NNTextField: UITextField {
         setupTextField()
     }
     
+    /// Initializes a text field with an optional clear button
+    /// - Parameters:
+    ///   - frame: The frame of the text field
+    ///   - showClearButton: Whether to show a clear button on the right side
+    convenience init(frame: CGRect = .zero, showClearButton: Bool = false) {
+        self.init(frame: frame)
+        if showClearButton {
+            textInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 24)
+            clearButtonMode = .always // Disable the default clear button
+        }
+    }
+    
     // MARK: - Setup
     
     private func setupTextField() {
@@ -379,6 +386,13 @@ class NNTextField: UITextField {
     
     override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
         return bounds.inset(by: textInsets)
+    }
+    
+    // MARK: - Actions
+    
+    @objc private func clearButtonTapped() {
+        text = ""
+        HapticsHelper.lightHaptic()
     }
     
     // MARK: - Convenience Methods

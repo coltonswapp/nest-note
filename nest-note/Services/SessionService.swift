@@ -39,9 +39,9 @@ class SessionService {
     
     // Add these types at the top of the file
     enum SessionBucket: Int {
-        case upcoming
-        case inProgress
         case past
+        case inProgress
+        case upcoming
     }
 
     struct SessionCollection {
@@ -170,24 +170,15 @@ class SessionService {
             inProgress: [SessionItem](),
             past: [SessionItem]()
         )) { result, session in
-            // Create a mutable copy of the session
-            var updatedSession = session
-            
-            // Update the status based on current time and existing status
-            let inferredStatus = session.inferredStatus(at: now)
-            if inferredStatus != session.status {
-                updatedSession.status = inferredStatus
-                // In a real implementation, you might want to save this status update back to Firebase
-            }
             
             // Sort into buckets based on status
-            switch updatedSession.status {
+            switch session.status {
             case .upcoming:
-                result.upcoming.append(updatedSession)
+                result.upcoming.append(session)
             case .inProgress, .extended:
-                result.inProgress.append(updatedSession)
+                result.inProgress.append(session)
             case .completed:
-                result.past.append(updatedSession)
+                result.past.append(session)
             }
         }
         

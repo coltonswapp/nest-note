@@ -222,6 +222,38 @@ final class UserService {
         let docRef = db.collection("users").document(user.id)
         try await docRef.setData(try Firestore.Encoder().encode(user))
     }
+    
+    // MARK: - User Update Methods
+    func updateName(_ newName: String) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+        
+        // Update in Firestore
+        let docRef = db.collection("users").document(currentUser.id)
+        try await docRef.updateData([
+            "personalInfo.name": newName,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        // Update local state
+        self.currentUser?.personalInfo.name = newName
+        
+        // Update Firebase display name
+        if let firebaseUser = auth.currentUser {
+            let changeRequest = firebaseUser.createProfileChangeRequest()
+            changeRequest.displayName = newName
+            try await changeRequest.commitChanges()
+        }
+        
+        // Save updated state
+        saveAuthState()
+        
+        // Post notification for UI updates
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .userService, message: "User name updated successfully to: \(newName)")
+    }
 }
 
 // MARK: - Types

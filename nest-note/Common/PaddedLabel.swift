@@ -8,6 +8,7 @@
 import UIKit
 
 class PaddedLabel: UILabel {
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupLabel()
@@ -19,9 +20,9 @@ class PaddedLabel: UILabel {
     }
     
     private func setupLabel() {
-        backgroundColor = NNColors.primaryOpaque
-        textColor = NNColors.primary
-        font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        backgroundColor = NNColors.NNSystemBackground6
+        textColor = .tertiaryLabel
+        font = UIFont.systemFont(ofSize: 12, weight: .bold)
         textAlignment = .center
         layer.cornerRadius = 4
         clipsToBounds = true
@@ -29,8 +30,8 @@ class PaddedLabel: UILabel {
         // Allow multiple lines if needed
         numberOfLines = 0
         
-        let vertical: CGFloat = 2
-        let horizontal: CGFloat = 6
+        let vertical: CGFloat = 4
+        let horizontal: CGFloat = 10
 
         // Add padding using layout margins
         layoutMargins = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)

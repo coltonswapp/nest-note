@@ -69,38 +69,6 @@ class AddressCell: UICollectionViewCell {
         delegate?.addressCell(self, didTapAddress: address)
     }
     
-    func showCopyFeedback() {
-        HapticsHelper.lightHaptic()
-        
-        let copiedLabel = UILabel()
-        copiedLabel.text = "Copied!"
-        copiedLabel.textColor = .white
-        copiedLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        copiedLabel.textAlignment = .center
-        copiedLabel.layer.cornerRadius = 10
-        copiedLabel.clipsToBounds = true
-        copiedLabel.alpha = 0
-        
-        contentView.addSubview(copiedLabel)
-        copiedLabel.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            copiedLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            copiedLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            copiedLabel.widthAnchor.constraint(equalToConstant: 100),
-            copiedLabel.heightAnchor.constraint(equalToConstant: 40)
-        ])
-        
-        UIView.animate(withDuration: 0.2) {
-            copiedLabel.alpha = 1
-        }
-        
-        UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
-            copiedLabel.alpha = 0
-        }) { _ in
-            copiedLabel.removeFromSuperview()
-        }
-    }
-    
     override var isHighlighted: Bool {
         didSet {
             UIView.animate(withDuration: 0.1) {

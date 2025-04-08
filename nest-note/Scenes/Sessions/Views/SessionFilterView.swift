@@ -55,7 +55,7 @@ class SessionFilterView: UIView {
         return view
     }()
     
-    init(filters: [SessionService.SessionBucket] = [.upcoming, .inProgress, .past], initialFilter: SessionService.SessionBucket? = nil) {
+    init(filters: [SessionService.SessionBucket] = [.past, .inProgress, .upcoming], initialFilter: SessionService.SessionBucket? = nil) {
         self.filters = filters
         self.activeFilter = initialFilter ?? filters.first ?? .upcoming
         super.init(frame: .zero)

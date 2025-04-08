@@ -13,9 +13,9 @@ class NestSessionsViewController: NNViewController {
     }
     
     enum Section: Int, CaseIterable {
+        case past
         case inProgress
         case upcoming
-        case past
         
         var title: String {
             switch self {
@@ -44,24 +44,22 @@ class NestSessionsViewController: NNViewController {
             updateDisplayedSessions()
         }
     }
-    private var currentBucket: SessionService.SessionBucket = .upcoming
+    private var currentBucket: SessionService.SessionBucket = .inProgress
     
     private var filteredSessions: [SessionItem] {
-        let now = Date()
-        
         switch currentBucket {
-        case .upcoming:
-            return allSessions
-                .filter { $0.startDate > now }
-                .sorted { $0.startDate < $1.startDate }
-        case .inProgress:
-            return allSessions
-                .filter { $0.startDate <= now && $0.endDate > now }
-                .sorted { $0.endDate < $1.endDate }
         case .past:
             return allSessions
-                .filter { $0.endDate <= now }
+                .filter { $0.status == .completed }
                 .sorted { $0.endDate > $1.endDate }
+        case .inProgress:
+            return allSessions
+                .filter { $0.status == .inProgress || $0.status == .extended }
+                .sorted { $0.endDate < $1.endDate }
+        case .upcoming:
+            return allSessions
+                .filter { $0.status == .upcoming }
+                .sorted { $0.startDate < $1.startDate }
         }
     }
     
@@ -81,6 +79,10 @@ class NestSessionsViewController: NNViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         loadSessions()
+        
+        // Set initial filter to inProgress
+        currentBucket = .inProgress
+        filterView.selectBucket(.inProgress)
     }
     
     override func viewDidLayoutSubviews() {
@@ -271,26 +273,7 @@ class NestSessionsViewController: NNViewController {
     }
     
     private func emptyStateConfig(for bucket: SessionService.SessionBucket) -> (title: String, subtitle: String, icon: UIImage?) {
-        switch bucket {
-        case .upcoming:
-            return (
-                "No upcoming sessions",
-                "Schedule a session to get started.",
-                UIImage(systemName: "calendar.badge.plus")
-            )
-        case .inProgress:
-            return (
-                "No active sessions",
-                "Sessions in progress will appear here.",
-                UIImage(systemName: "calendar.badge.clock")
-            )
-        case .past:
-            return (
-                "No past sessions",
-                "Your past sessions will appear here.",
-                UIImage(systemName: "calendar.badge.checkmark")
-            )
-        }
+        return SessionEmptyStateDataSource.nestEmptyState(for: bucket)
     }
     
     @objc private func ctaTapped() {

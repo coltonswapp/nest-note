@@ -549,7 +549,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
     private let addressFootnoteLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Your address is not collected by NestNote and will only be shared with sitters in case of emergency."
+        label.text = "Your address is only shared with sitters during their sessions."
         label.textColor = .secondaryLabel
         label.font = .preferredFont(forTextStyle: .caption1)
         label.numberOfLines = 0

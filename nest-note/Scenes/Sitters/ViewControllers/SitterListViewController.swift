@@ -33,25 +33,19 @@ extension SitterItem {
     }
 }
 
-class SitterListViewController: NNViewController {
-    
+class SitterListViewController: NNViewController, CollectionViewLoadable {
     // MARK: - Properties
     private var currentSession: SessionItem?
     private var selectedSitter: SitterItem?
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
     private var sitters: [SitterItem] = []
     
+    // MARK: - CollectionViewLoadable Properties
+    var loadingIndicator: UIActivityIndicatorView!
+    var refreshControl: UIRefreshControl!
+    
     // MARK: - UI Elements
-    private lazy var collectionView: UICollectionView = {
-        let config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-        let layout = UICollectionViewCompositionalLayout.list(using: config)
-        
-        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        collectionView.backgroundColor = .systemGroupedBackground
-        collectionView.delegate = self
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        return collectionView
-    }()
+    var collectionView: UICollectionView!
     
     private let searchBarView: NNSearchBarView = {
         let view = NNSearchBarView(placeholder: "Search for a sitter")
@@ -124,15 +118,14 @@ class SitterListViewController: NNViewController {
             updateInviteButtonState()
         }
         
-        // Then load sitters and apply snapshot
-        loadSitters()
-    }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+        // Setup loading indicator and refresh control
+        setupLoadingIndicator()
+        setupRefreshControl()
         
-        // Refresh sitters when view appears
-        refreshSitters()
+        // Then load sitters and apply snapshot
+        Task {
+            await loadData()
+        }
     }
     
     override func setup() {
@@ -226,17 +219,11 @@ class SitterListViewController: NNViewController {
         }
         
         let layout = UICollectionViewCompositionalLayout.list(using: config)
+        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.allowsSelection = displayMode == .selectSitter
         view.addSubview(collectionView)
-        
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
         
         // Add content insets
         let buttonHeight: CGFloat = 55
@@ -247,7 +234,6 @@ class SitterListViewController: NNViewController {
             bottom: buttonHeight + (buttonPadding * 2),
             right: 0
         )
-        
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.register(InviteStatusCell.self, forCellWithReuseIdentifier: InviteStatusCell.reuseIdentifier)
         collectionView.register(InviteSitterCell.self, forCellWithReuseIdentifier: InviteSitterCell.reuseIdentifier)
@@ -389,17 +375,15 @@ class SitterListViewController: NNViewController {
             )
         }
         
-        // Only update if visibility changed
-        if emptyStateView.isHidden == shouldShowEmptyState {
-            emptyStateView.isHidden = !shouldShowEmptyState
-            collectionView.isHidden = shouldShowEmptyState
-            
-            // Fade in/out animation
-            UIView.animate(withDuration: 0.3) {
-                self.emptyStateView.alpha = shouldShowEmptyState ? 1.0 : 0.0
-                self.collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
-            }
+        // Update visibility based on data state
+        UIView.animate(withDuration: 0.3) {
+            self.emptyStateView.alpha = shouldShowEmptyState ? 1.0 : 0.0
+            self.collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
         }
+        
+        // Update hidden state after animation
+        emptyStateView.isHidden = !shouldShowEmptyState
+        collectionView.isHidden = shouldShowEmptyState
     }
     
     private func setupInviteButton() {
@@ -444,37 +428,51 @@ class SitterListViewController: NNViewController {
         }
     }
     
-    private func loadSitters() {
-        Task {
-            do {
-                // Fetch saved sitters from NestService
-                let savedSitters = try await NestService.shared.fetchSavedSitters()
-                
-                // Convert SavedSitter to SitterItem
-                allSitters = savedSitters.map { SitterItem(from: $0) }
-                
-                // Initialize filteredSitters if in selectSitter mode
-                if displayMode == .selectSitter {
-                    filteredSitters = allSitters
-                    sitters = filteredSitters
-                } else {
-                    sitters = allSitters
-                }
-                
+    // MARK: - CollectionViewLoadable Implementation
+    func handleLoadedData() {
+        // Initialize filteredSitters if in selectSitter mode
+        if displayMode == .selectSitter {
+            filteredSitters = allSitters
+            sitters = filteredSitters
+        } else {
+            sitters = allSitters
+        }
+        
+        // Update UI based on data
+        if sitters.isEmpty {
+            emptyStateView.isHidden = false
+            collectionView.isHidden = true
+        } else {
+            emptyStateView.isHidden = true
+            collectionView.isHidden = false
+            applySnapshot()
+        }
+    }
+    
+    func loadData(showLoadingIndicator: Bool = true) async {
+        do {
+            if showLoadingIndicator {
                 await MainActor.run {
-                    applySnapshot()
+                    loadingIndicator.startAnimating()
+                    collectionView.isHidden = true
+                    emptyStateView.isHidden = true
                 }
-            } catch {
-                print("Failed to load sitters: \(error.localizedDescription)")
-                
-                // Clear sitters on error
-                allSitters = []
-                filteredSitters = []
-                sitters = []
-                
-                await MainActor.run {
-                    applySnapshot()
-                }
+            }
+            
+            // Fetch saved sitters from NestService
+            let savedSitters = try await NestService.shared.fetchSavedSitters()
+            
+            await MainActor.run {
+                self.allSitters = savedSitters.map { SitterItem(from: $0) }
+                self.handleLoadedData()
+                self.loadingIndicator.stopAnimating()
+            }
+        } catch {
+            await MainActor.run {
+                self.loadingIndicator.stopAnimating()
+                self.emptyStateView.isHidden = false
+                self.collectionView.isHidden = true
+                Logger.log(level: .error, category: .general, message: "Error loading sitters: \(error.localizedDescription)")
             }
         }
     }
@@ -502,17 +500,6 @@ class SitterListViewController: NNViewController {
         updateEmptyStateVisibility()
     }
     
-    @objc private func sendInviteButtonTapped() {
-        guard let selectedSitter = selectedSitter, let session = currentSession else { return }
-        
-        // Create and configure the InviteSitterViewController
-        let inviteSitterVC = InviteSitterViewController(sitter: selectedSitter, session: session)
-        inviteSitterVC.delegate = self
-        
-        // Push it onto the navigation stack
-        navigationController?.pushViewController(inviteSitterVC, animated: true)
-    }
-    
     // Add method to save a sitter to Firestore
     private func saveSitter(_ sitter: SitterItem) {
         Task {
@@ -522,7 +509,7 @@ class SitterListViewController: NNViewController {
                 try await NestService.shared.addSavedSitter(savedSitter)
                 
                 // Reload sitters to update the UI
-                loadSitters()
+                await loadData()
             } catch {
                 print("Failed to save sitter: \(error.localizedDescription)")
                 
@@ -549,7 +536,7 @@ class SitterListViewController: NNViewController {
                 try await NestService.shared.deleteSavedSitter(savedSitter)
                 
                 // Reload sitters to update the UI
-                loadSitters()
+                await loadData()
             } catch {
                 print("Failed to delete sitter: \(error.localizedDescription)")
                 
@@ -563,52 +550,6 @@ class SitterListViewController: NNViewController {
                     alert.addAction(UIAlertAction(title: "OK", style: .default))
                     present(alert, animated: true)
                 }
-            }
-        }
-    }
-    
-    // Update refreshSitters method
-    private func refreshSitters() {
-        Task {
-            do {
-                // Force refresh saved sitters from NestService
-                let savedSitters = try await NestService.shared.refreshSavedSitters()
-                
-                // Convert SavedSitter to SitterItem
-                allSitters = savedSitters.map { SitterItem(from: $0) }
-                
-                // Update filtered sitters if in selectSitter mode
-                if displayMode == .selectSitter {
-                    filterSitters(with: searchBarView.searchBar.text ?? "")
-                } else {
-                    // In default mode, update sitters directly
-                    sitters = allSitters
-                }
-                
-                await MainActor.run {
-                    // Force a new snapshot with the updated data
-                    var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
-                    
-                    // Add invite status section if we have a selected sitter
-                    if let selectedSitter = selectedSitter {
-                        snapshot.appendSections([.inviteStatus])
-                        snapshot.appendItems([SelectedSitterItem(sitter: selectedSitter)], toSection: .inviteStatus)
-                    }
-                    
-                    // Add sitters section if we have sitters
-                    if !sitters.isEmpty {
-                        snapshot.appendSections([.sitters])
-                        snapshot.appendItems(sitters, toSection: .sitters)
-                    }
-                    
-                    // Apply the new snapshot and force refresh
-                    dataSource.apply(snapshot, animatingDifferences: true)
-                    
-                    // Update empty state visibility
-                    updateEmptyStateVisibility()
-                }
-            } catch {
-                print("Failed to refresh sitters: \(error.localizedDescription)")
             }
         }
     }
@@ -893,7 +834,9 @@ extension SitterListViewController: AddSitterViewControllerDelegate {
         showToast(text: "Sitter added successfully")
         
         // Refresh the list to show the new sitter
-        refreshSitters()
+        Task {
+            await loadData()
+        }
     }
     
     func addSitterViewControllerDidCancel(_ controller: AddSitterViewController) {

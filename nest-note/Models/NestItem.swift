@@ -8,8 +8,8 @@ import Foundation
 struct NestItem: Codable {
     let id: String
     let ownerId: String
-    let name: String
-    let address: String
+    var name: String
+    var address: String
     var entries: [BaseEntry]?
     var categories: [NestCategory]?
     

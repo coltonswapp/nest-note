@@ -233,13 +233,30 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         
         // Save survey responses
         if !userInfo.surveyResponses.isEmpty {
-            // Here you would save the survey responses to your backend
-            Logger.log(level: .info, category: .survey, message: "Saving survey responses: \(userInfo.surveyResponses)")
+            let response = SurveyResponse(
+                id: UUID().uuidString,
+                timestamp: Date(),
+                surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
+                version: "1.0", // TODO: Get from config
+                responses: userInfo.surveyResponses.map { SurveyResponse.QuestionResponse(questionId: $0.key, answers: $0.value) },
+                metadata: [
+                    "userId": user.id,
+                    "role": userInfo.role.rawValue
+                ]
+            )
+            
+            do {
+                try await SurveyService.shared.submitSurveyResponse(response)
+                Logger.log(level: .info, category: .survey, message: "Successfully submitted survey responses for user: \(user.personalInfo.name)")
+            } catch {
+                Logger.log(level: .error, category: .survey, message: "Failed to submit survey responses: \(error)")
+                // Continue with onboarding even if submission fails
+            }
         }
         
         // Then configure all services
         Logger.log(level: .info, category: .signup, message: "Moving to configure launcher...")
-        try await Launcher.shared.configure()
+//        try await Launcher.shared.configure()
         
         // Set onboarding completion flag
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")

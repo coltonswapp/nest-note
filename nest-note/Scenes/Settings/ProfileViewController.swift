@@ -18,6 +18,14 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         configureDataSource()
         applyInitialSnapshots()
         collectionView.delegate = self
+        
+        // Add observer for user information updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleUserInformationUpdate),
+            name: .userInformationUpdated,
+            object: nil
+        )
     }
     
     override func setup() {
@@ -60,7 +68,6 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         }
         
         let infoCellRegistration = UICollectionView.CellRegistration<InfoCell, Item> { cell, indexPath, item in
-            
             if case let .info(title, detail) = item {
                 cell.configure(title: title, detail: detail)
             }
@@ -126,6 +133,15 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         switch item {
+        case .info(let title, _):
+            switch title {
+            case "Name":
+                let editVC = EditUserInfoViewController(type: .name)
+                let nav = UINavigationController(rootViewController: editVC)
+                present(nav, animated: true)
+            default:
+                break
+            }
         case .action(let title, _, _):
             switch title {
             case "Sign Out":
@@ -190,6 +206,14 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         present(alert, animated: true)
     }
     
+    @objc private func handleUserInformationUpdate() {
+        applyInitialSnapshots()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
     // MARK: - Types
     
     enum Section: Hashable {
@@ -208,59 +232,6 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         case info(title: String, detail: String)
         case action(title: String, imageName: String, destructive: Bool = false)
         case modeSwitch
-    }
-}
-
-private class InfoCell: UICollectionViewListCell {
-    private let titleLabel: UILabel = {
-        let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
-        label.textColor = .secondaryLabel
-        label.textAlignment = .left
-        return label
-    }()
-    
-    private let detailLabel: UILabel = {
-        let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .regular)
-        label.textColor = .label
-        label.textAlignment = .left
-        return label
-    }()
-    
-    private lazy var stackView: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [titleLabel, detailLabel])
-        stack.axis = .vertical
-        stack.spacing = 4
-        stack.alignment = .leading
-        stack.distribution = .equalSpacing
-        return stack
-    }()
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupViews()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupViews() {
-        contentView.addSubview(stackView)
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 8),
-            stackView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -8)
-        ])
-    }
-    
-    func configure(title: String, detail: String) {
-        titleLabel.text = title.uppercased()
-        detailLabel.text = detail
     }
 }
 
@@ -378,4 +349,4 @@ private class ModeSwitchCell: UICollectionViewListCell {
         // Update segment control state
         segmentedControl.selectedSegmentIndex = ModeManager.shared.currentMode == .nestOwner ? 0 : 1
     }
-} 
+}

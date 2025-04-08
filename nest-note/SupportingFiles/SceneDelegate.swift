@@ -86,23 +86,20 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             return
         }
         
-        // Present the invite acceptance flow
+        // Present the JoinSessionViewController with the code pre-filled
         DispatchQueue.main.async {
             if let rootVC = self.window?.rootViewController {
-                let alert = UIAlertController(
-                    title: "Session Invite",
-                    message: "Would you like to join this session?",
-                    preferredStyle: .alert
-                )
+                let joinSessionVC = JoinSessionViewController()
+                let navigationController = UINavigationController(rootViewController: joinSessionVC)
                 
-                alert.addAction(UIAlertAction(title: "Join", style: .default) { _ in
-                    // TODO: Handle session join with code
-                    print("Joining session with code: \(code)")
-                })
+                // Pre-fill the code
+                let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
+                joinSessionVC.codeTextField.textField.text = formattedCode
                 
-                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-                
-                rootVC.present(alert, animated: true)
+                rootVC.present(navigationController, animated: true) { 
+                    // Automatically start finding the session
+                    joinSessionVC.findSessionButtonTapped()
+                }
             }
         }
     }

@@ -9,6 +9,9 @@ import UIKit
 
 final class OnboardingContainerViewController: UIViewController {
     
+    // MARK: - Delegate
+    weak var delegate: OnboardingContainerDelegate?
+    
     // MARK: - UI Elements
     let progressBar: UIProgressView = {
         let progress = UIProgressView(progressViewStyle: .bar)
@@ -17,6 +20,15 @@ final class OnboardingContainerViewController: UIViewController {
         progress.translatesAutoresizingMaskIntoConstraints = false
         progress.clipsToBounds = true
         return progress
+    }()
+    
+    private let ellipsisButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.tintColor = .label
+        button.showsMenuAsPrimaryAction = true
+        return button
     }()
     
     private let containerView: UIView = {
@@ -59,19 +71,54 @@ final class OnboardingContainerViewController: UIViewController {
         view.backgroundColor = .systemBackground
         
         view.addSubview(progressBar)
+        view.addSubview(ellipsisButton)
         view.addSubview(containerView)
         
         NSLayoutConstraint.activate([
             progressBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
             progressBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            progressBar.trailingAnchor.constraint(equalTo: ellipsisButton.leadingAnchor, constant: -8),
             progressBar.heightAnchor.constraint(equalToConstant: 4),
+            
+            ellipsisButton.centerYAnchor.constraint(equalTo: progressBar.centerYAnchor),
+            ellipsisButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            ellipsisButton.widthAnchor.constraint(equalToConstant: 44),
+            ellipsisButton.heightAnchor.constraint(equalToConstant: 44),
             
             containerView.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: 24),
             containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        
+        setupEllipsisMenu()
+    }
+    
+    private func setupEllipsisMenu() {
+        let backToLogin = UIAction(
+            title: "Back to Login",
+            image: UIImage(systemName: "arrow.left.circle"),
+            attributes: []
+        ) { [weak self] _ in
+            self?.delegate?.onboardingContainerDidRequestAbort(self!)
+        }
+        
+        let help = UIAction(
+            title: "Help",
+            image: UIImage(systemName: "questionmark.circle"),
+            attributes: []
+        ) { [weak self] _ in
+            // TODO: Implement help action
+            print("Help tapped")
+        }
+        
+        let menu = UIMenu(
+            title: "",
+            options: .displayInline,
+            children: [backToLogin, help]
+        )
+        
+        ellipsisButton.menu = menu
     }
     
     private func addChildViewController() {
@@ -107,4 +154,9 @@ final class OnboardingContainerViewController: UIViewController {
             self.progressBar.setProgress(progress, animated: true)
         }
     }
+}
+
+// MARK: - Delegate Protocol
+protocol OnboardingContainerDelegate: AnyObject {
+    func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController)
 }

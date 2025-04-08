@@ -6,13 +6,36 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.image = UIImage(named: "rectangle_pattern")
-        view.contentMode = .scaleAspectFill
+        NNAssetHelper.configureImageView(view, for: .rectanglePattern)
         view.alpha = 0.4
         return view
     }()
     
-    private let infoView = VisibilityLevelInfoView()
+    private let infoView = NNBulletStack(items: [
+        NNBulletItem(
+            title: "Essential",
+            description: "Critical details always visible to sitters for the safety and basic care of your children.",
+            iconName: "exclamationmark.shield.fill"
+        ),
+        
+        NNBulletItem(
+            title: "Standard",
+            description: "Additional guidelines and instructions that appear for typically longer daytime stays.",
+            iconName: "clock.fill"
+        ),
+        
+        NNBulletItem(
+            title: "Extended",
+            description: "Overnight-specific details that become visible when sitters stay through the night.",
+            iconName: "moon.stars.fill"
+        ),
+        
+        NNBulletItem(
+            title: "Comprehensive",
+            description: "Complete household management information that unlocks for extended multi-day stays.",
+            iconName: "calendar.badge.clock"
+        )
+    ])
     
     private let scrollView: UIScrollView = {
         let scroll = UIScrollView()
@@ -75,13 +98,10 @@ final class VisibilityLevelInfoViewController: NNViewController {
         
         // Pin the Got It button to the bottom
         gotItButton.pinToBottom(of: view, addBlurEffect: true)
+        topImageView.pinToTop(of: view)
         
         NSLayoutConstraint.activate([
-            topImageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 0),
-            topImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topImageView.heightAnchor.constraint(equalToConstant: view.frame.width * 0.27),
-            
+
             scrollView.topAnchor.constraint(equalTo: topImageView.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
