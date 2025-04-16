@@ -76,6 +76,13 @@ class NestSessionsViewController: NNViewController {
         return view
     }()
     
+    private lazy var loadingSpinner: UIActivityIndicatorView = {
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        return spinner
+    }()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         loadSessions()
@@ -96,6 +103,13 @@ class NestSessionsViewController: NNViewController {
         setupEmptyStateView()
         setupNewSessionButton()
         configureDataSource()
+        
+        // Add loading spinner
+        view.addSubview(loadingSpinner)
+        NSLayoutConstraint.activate([
+            loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
     }
     
     private func setupFilterView() {
@@ -205,6 +219,8 @@ class NestSessionsViewController: NNViewController {
     private func fetchNestSessions() {
         Task {
             do {
+                emptyStateView.isHidden = true
+                loadingSpinner.startAnimating()
                 guard let nestID = NestService.shared.currentNest?.id else {
                     // Show error state for no current nest
                     await MainActor.run {
@@ -215,6 +231,7 @@ class NestSessionsViewController: NNViewController {
                             subtitle: "Please select a nest to view its sessions."
                         )
                         self.updateEmptyState()
+                        self.loadingSpinner.stopAnimating()
                     }
                     return
                 }
@@ -225,10 +242,14 @@ class NestSessionsViewController: NNViewController {
                     // Store all sessions
                     self.allSessions = collection.upcoming + collection.inProgress + collection.past
                     updateEmptyState()
+                    self.loadingSpinner.stopAnimating()
                 }
             } catch {
                 // Handle error
                 print("Error loading sessions: \(error)")
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                }
             }
         }
     }
