@@ -2,6 +2,7 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
+import UserNotifications
 
 final class UserService {
     
@@ -36,10 +37,19 @@ final class UserService {
                 self.isAuthenticated = true
                 
                 // Try to save any pending FCM token
-//                if let token = pendingFCMToken {
-//                    try await updateFCMToken(token)
-//                    pendingFCMToken = nil
-//                }
+                if let token = pendingFCMToken {
+                    try await updateFCMToken(token)
+                    pendingFCMToken = nil
+                }
+                
+                // Request notification permissions when user logs in
+                await requestNotificationPermissions()
+                
+                // Try to get a fresh FCM token
+                if let fcmToken = try? await Messaging.messaging().token() {
+                    try? await updateFCMToken(fcmToken)
+                    Logger.log(level: .info, category: .userService, message: "Updated FCM token after auth state change")
+                }
                 
                 Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged in: \(nestUser)")
             } catch {
@@ -136,6 +146,40 @@ final class UserService {
         }
     }
     
+    // MARK: - Notification Permissions
+    func requestNotificationPermissions() async {
+        Logger.log(level: .info, category: .userService, message: "Requesting notification permissions")
+        
+        return await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                if settings.authorizationStatus == .notDetermined {
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                        if granted {
+                            DispatchQueue.main.async {
+                                UIApplication.shared.registerForRemoteNotifications()
+                                Logger.log(level: .info, category: .userService, message: "Notification permissions granted, registered for remote notifications")
+                            }
+                        } else if let error = error {
+                            Logger.log(level: .error, category: .userService, message: "Failed to request notification authorization: \(error.localizedDescription)")
+                        } else {
+                            Logger.log(level: .info, category: .userService, message: "Notification permissions denied by user")
+                        }
+                        continuation.resume()
+                    }
+                } else if settings.authorizationStatus == .authorized {
+                    DispatchQueue.main.async {
+                        UIApplication.shared.registerForRemoteNotifications()
+                        Logger.log(level: .info, category: .userService, message: "Already authorized for notifications, registered for remote notifications")
+                    }
+                    continuation.resume()
+                } else {
+                    Logger.log(level: .info, category: .userService, message: "Notification permissions not available (status: \(settings.authorizationStatus.rawValue))")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
     // MARK: - Authentication Methods
     func login(email: String, password: String) async throws -> AuthDataResult {
         Logger.log(level: .info, category: .userService, message: "Attempting login for email: \(email)")
@@ -143,6 +187,16 @@ final class UserService {
             // Only perform Firebase authentication
             let result = try await auth.signIn(withEmail: email, password: password)
             Logger.log(level: .debug, category: .userService, message: "Firebase auth successful")
+            
+            // Request notification permissions after successful login
+            await requestNotificationPermissions()
+            
+            // Try to get a fresh FCM token
+            if let fcmToken = try? await Messaging.messaging().token() {
+                try? await updateFCMToken(fcmToken)
+                Logger.log(level: .info, category: .userService, message: "Updated FCM token after login")
+            }
+            
             return result
             
         } catch let error as NSError {

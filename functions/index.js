@@ -39,8 +39,8 @@ async function sendSessionNotifications(sessionData, newStatus) {
     const usersToNotify = new Map(); // Changed to Map to store user role
 
     // Add the assigned sitter if present
-    if (sessionData.assignedSitter && sessionData.assignedSitter.id) {
-      usersToNotify.set(sessionData.assignedSitter.id, "sitter");
+    if (sessionData.assignedSitter && sessionData.assignedSitter.userID) {
+      usersToNotify.set(sessionData.assignedSitter.userID, "sitter");
     }
 
     // Use ownerID directly from session
