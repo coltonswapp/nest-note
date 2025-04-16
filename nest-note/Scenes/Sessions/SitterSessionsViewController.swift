@@ -46,6 +46,13 @@ class SitterSessionsViewController: NNViewController {
     }
     private var currentBucket: SessionService.SessionBucket = .inProgress
     
+    private lazy var loadingSpinner: UIActivityIndicatorView = {
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        return spinner
+    }()
+    
     private var filteredSessions: [SessionItem] {
         switch currentBucket {
         case .upcoming:
@@ -91,6 +98,13 @@ class SitterSessionsViewController: NNViewController {
         setupEmptyStateView()
         setupJoinSessionButton()
         configureDataSource()
+        
+        // Add loading spinner
+        view.addSubview(loadingSpinner)
+        NSLayoutConstraint.activate([
+            loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
     }
     
     private func setupFilterView() {
@@ -256,6 +270,7 @@ class SitterSessionsViewController: NNViewController {
     private func fetchSitterSessions() {
         Task {
             do {
+                loadingSpinner.startAnimating()
                 guard let userID = UserService.shared.currentUser?.id else { return }
                 
                 let collection = try await sessionService.fetchSitterSessions(userID: userID)
@@ -263,9 +278,13 @@ class SitterSessionsViewController: NNViewController {
                 await MainActor.run {
                     self.allSessions = collection.upcoming + collection.inProgress + collection.past
                     updateEmptyState()
+                    self.loadingSpinner.stopAnimating()
                 }
             } catch {
                 print("Error loading sitter sessions: \(error)")
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                }
             }
         }
     }
