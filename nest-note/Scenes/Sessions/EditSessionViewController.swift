@@ -143,9 +143,9 @@ class EditSessionViewController: NNViewController {
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
         self.originalSession = sessionItem
-        // A session is considered "new" if it's equal to a default session
-        // This is more reliable than checking nestID since some existing sessions might not have nestID set
-        self.isEditingSession = sessionItem != SessionItem()
+        
+        // A session is considered "new" if it doesn't exist in the SessionService's cache
+        self.isEditingSession = SessionService.shared.sessionExists(sessionId: sessionItem.id)
         
         // Create date range based on session type
         if sessionItem.isMultiDay {
@@ -181,6 +181,14 @@ class EditSessionViewController: NNViewController {
         if isEditingSession {
             fetchSessionEvents()
         }
+        
+        // Add observer for session status changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionStatusChange),
+            name: .sessionStatusDidChange,
+            object: nil
+        )
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -343,6 +351,7 @@ class EditSessionViewController: NNViewController {
                 sessionItem.endDate = endDate
                 sessionItem.isMultiDay = isMultiDay
                 sessionItem.visibilityLevel = visibilityLevel
+                sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
                 if isEditingSession {
                     try await updateSession()
@@ -621,7 +630,7 @@ class EditSessionViewController: NNViewController {
         snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
         snapshot.appendItems([.nestReview], toSection: .nestReview)
         snapshot.appendItems([.expenses], toSection: .expenses)
-        snapshot.appendItems([.dateSelection(startDate: initialDate.0, endDate: initialDate.1, isMultiDay: initialDate.2)], toSection: .date)
+        snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
         snapshot.appendItems([.events], toSection: .events)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
@@ -643,7 +652,7 @@ class EditSessionViewController: NNViewController {
     }
     
     private func inviteSitterButtonTapped() {
-        let inviteSitterVC = SitterListViewController(displayMode: .selectSitter, selectedSitter: selectedSitter, session: sessionItem)
+        let inviteSitterVC = SitterListViewController(displayMode: .selectSitter, selectedSitter: selectedSitter, session: sessionItem, isEditingSession: isEditingSession)
         inviteSitterVC.delegate = self
         let nav = UINavigationController(rootViewController: inviteSitterVC)
         present(nav, animated: true)
@@ -849,12 +858,6 @@ class EditSessionViewController: NNViewController {
             isValid = false
         }
         
-        // Check if sitter is assigned
-        if sessionItem.assignedSitter == nil {
-            errors.append("Please assign a sitter")
-            isValid = false
-        }
-        
         // Check if dates are valid
         if sessionItem.startDate >= sessionItem.endDate {
             errors.append("End date must be after start date")
@@ -892,6 +895,41 @@ class EditSessionViewController: NNViewController {
         
         delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
         dismiss(animated: true)
+    }
+    
+    @objc private func handleSessionStatusChange(_ notification: Notification) {
+        // Extract session ID and new status from notification
+        guard let userInfo = notification.userInfo,
+              let sessionId = userInfo["sessionId"] as? String,
+              let newStatusString = userInfo["newStatus"] as? String,
+              sessionId == sessionItem.id else {
+            return
+        }
+        
+        // Convert string to SessionStatus enum
+        let newStatus = SessionStatus(rawValue: newStatusString) ?? .upcoming
+        
+        // Update the session item
+        sessionItem.status = newStatus
+        
+        // Update the UI
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
+            snapshot.deleteItems([existingItem])
+            snapshot.appendItems([.sessionStatus(newStatus)], toSection: .status)
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
+        // Log the status change
+        Logger.log(
+            level: .info,
+            category: .sessionService,
+            message: "Session status updated to \(newStatus.displayName) via notification"
+        )
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
@@ -1143,6 +1181,8 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
                                               isMultiDay: currentMultiDayState)],
                               toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
+        
+        checkForChanges()
     }
 }
 

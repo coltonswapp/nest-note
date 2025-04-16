@@ -109,6 +109,46 @@ class SitterSessionsViewController: NNViewController {
     private func setupCollectionView() {
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.headerMode = .supplementary
+        config.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+            guard let self = self,
+                  case .session(let session) = self.dataSource.itemIdentifier(for: indexPath) else {
+                return nil
+            }
+            
+            let deleteAction = UIContextualAction(
+                style: .destructive,
+                title: "Remove"
+            ) { [weak self] _, _, completion in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                
+                let alert = UIAlertController(
+                    title: "Remove Session",
+                    message: "Are you sure you want to remove this session? You may need to be reinvited to see it again.",
+                    preferredStyle: .alert
+                )
+                
+                alert.addAction(UIAlertAction(
+                    title: "Cancel",
+                    style: .cancel
+                ) { _ in
+                    completion(false)
+                })
+                
+                alert.addAction(UIAlertAction(
+                    title: "Remove",
+                    style: .destructive
+                ) { _ in
+                    self.deleteSessionAction(session, completion: completion)
+                })
+                
+                self.present(alert, animated: true)
+            }
+            
+            return UISwipeActionsConfiguration(actions: [deleteAction])
+        }
         
         let layout = UICollectionViewCompositionalLayout.list(using: config)
         
@@ -144,7 +184,7 @@ class SitterSessionsViewController: NNViewController {
             switch item {
             case .session(let session):
                 // Configure with default nest name first
-                cell.configure(with: session, nestName: "Loading...")
+                cell.configure(with: session, nestName: "")
                 
                 // Then fetch the actual nest name
                 Task {
@@ -218,7 +258,6 @@ class SitterSessionsViewController: NNViewController {
             do {
                 guard let userID = UserService.shared.currentUser?.id else { return }
                 
-                // TODO: Implement fetchSitterSessions in SessionService
                 let collection = try await sessionService.fetchSitterSessions(userID: userID)
                 
                 await MainActor.run {
@@ -244,9 +283,28 @@ class SitterSessionsViewController: NNViewController {
         )
     }
     
+    private func deleteSessionAction(_ session: SessionItem, completion: @escaping (Bool) -> Void) {
+        Task {
+            do {
+                try await self.sessionService.deleteSitterSession(sessionID: session.id)
+                await MainActor.run {
+                    // Remove the session from the data source
+                    var snapshot = self.dataSource.snapshot()
+                    snapshot.deleteItems([.session(session)])
+                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                    completion(true)
+                }
+            } catch {
+                print("Error deleting session: \(error)")
+                completion(false)
+            }
+        }
+    }
+    
     @objc private func joinSessionTapped() {
         let vc = JoinSessionViewController()
-        navigationController?.pushViewController(vc, animated: true)
+        vc.delegate = self
+        present(vc, animated: true)
     }
     
     private func setupEmptyStateView() {
@@ -334,6 +392,17 @@ extension SitterSessionsViewController: CollectionViewLoadable {
             await MainActor.run {
                 loadingIndicator.stopAnimating()
                 Logger.log(level: .error, category: .sessionService, message: "Error loading sitter sessions: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+extension SitterSessionsViewController: JoinSessionViewControllerDelegate {
+    func joinSessionViewController(didAcceptInvite session: SitterSession) {
+        // Reload all sessions to include the newly accepted one
+        Task {
+            await MainActor.run {
+                self.fetchSitterSessions()
             }
         }
     }

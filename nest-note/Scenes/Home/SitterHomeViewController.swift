@@ -4,6 +4,7 @@ import Combine
 // MARK: - Notification Names
 extension Notification.Name {
     static let sessionDidChange = Notification.Name("SessionDidChange")
+    static let sessionStatusDidChange = Notification.Name("SessionStatusDidChange")
 }
 
 final class SitterHomeViewController: NNViewController, HomeViewControllerType {
@@ -29,7 +30,9 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         )
         view.translatesAutoresizingMaskIntoConstraints = false
         view.isHidden = true
+        view.isUserInteractionEnabled = true
         view.delegate = self
+        
         return view
     }()
     
@@ -66,14 +69,22 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         view.addSubview(loadingSpinner)
         view.addSubview(emptyStateView)
         
+        // Ensure the empty state view is on top of other views
+        view.bringSubviewToFront(emptyStateView)
+        
+        // Update constraints to ensure the empty state view covers the entire view
         NSLayoutConstraint.activate([
             loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             
-            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            emptyStateView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
+        
+        // Add a background color to the empty state view for debugging
+        emptyStateView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.9)
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -220,7 +231,15 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             .receive(on: DispatchQueue.main)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-//                self?.refreshData()
+                self?.refreshData()
+            }
+            .store(in: &cancellables)
+        
+        NotificationCenter.default.publisher(for: .sessionStatusDidChange)
+            .receive(on: DispatchQueue.main)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData()
             }
             .store(in: &cancellables)
         
@@ -250,6 +269,17 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             loadingSpinner.stopAnimating()
             collectionView.isHidden = true
             emptyStateView.isHidden = false
+            
+            // Bring the empty state view to the front
+            view.bringSubviewToFront(emptyStateView)
+            
+            // Ensure it's interactive
+            emptyStateView.isUserInteractionEnabled = true
+            
+            print("Empty state view is now visible and interactive: \(emptyStateView.isUserInteractionEnabled)")
+            print("Empty state view delegate: \(String(describing: emptyStateView.delegate))")
+            print("Empty state view frame: \(emptyStateView.frame)")
+            print("Empty state view is hidden: \(emptyStateView.isHidden)")
             
         case .error(let error):
             loadingSpinner.stopAnimating()
@@ -336,6 +366,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         // This is required for protocol conformance but we're using our own snapshot methods
         // Our view state handling takes care of applying snapshots
     }
+    
+    @objc private func emptyStateViewTapped() {
+        print("Empty state view tapped directly from SitterHomeViewController")
+        // Manually trigger the action button tap
+        emptyStateViewDidTapActionButton(emptyStateView)
+    }
 }
 
 // MARK: - UICollectionViewDelegate
@@ -375,8 +411,30 @@ extension SitterHomeViewController: UICollectionViewDelegate {
 extension SitterHomeViewController: NNEmptyStateViewDelegate {
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
         let joinVC = JoinSessionViewController()
+        joinVC.delegate = self
         let nav = UINavigationController(rootViewController: joinVC)
         nav.modalPresentationStyle = .formSheet
         present(nav, animated: true)
+    }
+}
+
+extension SitterHomeViewController: JoinSessionViewControllerDelegate {
+    func joinSessionViewController(didAcceptInvite session: SitterSession) {
+        // Check if the accepted session is in progress
+        Task {
+            do {
+                // Fetch the session to check its status
+                if let sessionItem = try await SessionService.shared.getSession(nestID: session.nestID, sessionID: session.id) {
+                    if sessionItem.status == .inProgress || sessionItem.status == .extended {
+                        // If it's in progress, refresh the data to show it
+                        await MainActor.run {
+                            self.refreshData()
+                        }
+                    }
+                }
+            } catch {
+                print("Error checking session status: \(error)")
+            }
+        }
     }
 } 

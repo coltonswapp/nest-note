@@ -25,6 +25,268 @@ function calculatePercentages(distribution, total) {
 }
 
 /**
+ * Sends notifications to users about session status changes
+ * @param {Object} sessionData - The session data including users and status
+ * @param {string} newStatus - The new status of the session
+ * @return {Promise<void>}
+ */
+async function sendSessionNotifications(sessionData, newStatus) {
+  const db = admin.firestore();
+
+  try {
+    // Get all users associated with the session
+    const usersRef = db.collection("users");
+    const usersToNotify = new Map(); // Changed to Map to store user role
+
+    // Add the assigned sitter if present
+    if (sessionData.assignedSitter && sessionData.assignedSitter.id) {
+      usersToNotify.set(sessionData.assignedSitter.id, "sitter");
+    }
+
+    // Use ownerID directly from session
+    if (sessionData.ownerID) {
+      usersToNotify.set(sessionData.ownerID, "owner");
+    } else {
+      logger.warn(
+          `[Session ${sessionData.id}] No ownerID found in session data`,
+      );
+    }
+
+    const sessionUsers = Array.from(usersToNotify.entries());
+    logger.info(
+        `[Session ${sessionData.id}] Found ${sessionUsers.length}` +
+      ` users to notify`,
+    );
+
+    if (sessionUsers.length === 0) {
+      logger.warn(`[Session ${sessionData.id}] No users found to notify`);
+      return;
+    }
+
+    // Fetch FCM tokens for all users
+    const userTokens = await Promise.all(
+        sessionUsers.map(async ([userId, userRole]) => {
+          try {
+            const userDoc = await usersRef.doc(userId).get();
+            const userData = userDoc.data();
+            if (!userData) {
+              logger.warn(
+                  `[Session ${sessionData.id}] User data` +
+              ` not found for ${userId}`,
+              );
+              return null;
+            }
+
+            // Check if user has enabled session notifications
+            const personalInfo = userData.personalInfo;
+            const notificationPrefs = personalInfo.notificationPreferences;
+            const sessionNotifsEnabled = notificationPrefs.sessionNotifications;
+            if (!userData.personalInfo ||
+               !notificationPrefs ||
+               !sessionNotifsEnabled) {
+              logger.info(
+                  `[Session ${sessionData.id}] User ${userId} has disabled` +
+                  ` session notifications`,
+              );
+              return null;
+            }
+
+            if (!userData.fcmTokens || !Array.isArray(userData.fcmTokens)) {
+              logger.warn(
+                  `[Session ${sessionData.id}] No FCM tokens` +
+              ` array for user ${userId}`,
+              );
+              return null;
+            }
+            // Filter out old tokens
+            const validTokens = userData.fcmTokens.filter((tokenObj) => {
+              const tokenAge = Date.now() - tokenObj.uploadedDate.toMillis();
+              return tokenAge <= 1000 * 60 * 60 * 24 * 30 * 4; // 4 months
+            }).map((tokenObj) => tokenObj.token);
+            return {tokens: validTokens, userId, userRole};
+          } catch (error) {
+            logger.error(
+                `[Session ${sessionData.id}] Error` +
+            ` fetching user ${userId}: ${error.message}`,
+            );
+            return null;
+          }
+        }),
+    );
+
+    // Filter out any null/undefined results
+    const validUserTokens = userTokens.filter((result) => result !== null);
+
+    // Flatten the array of arrays and filter out any null/undefined tokens
+    const validTokens = validUserTokens.flatMap((result) =>
+      result.tokens.map((token) => ({
+        token,
+        userId: result.userId,
+        userRole: result.userRole})),
+    );
+
+    if (validTokens.length === 0) {
+      logger.warn(
+          `[Session ${sessionData.id}] No valid FCM tokens found for any users`,
+      );
+      return;
+    }
+
+    logger.info(
+        `[Session ${sessionData.id}]` +
+        ` Found ${validTokens.length}/${sessionUsers.length}` +
+        ` valid FCM tokens`,
+    );
+
+    // Create notification messages based on user role and session status
+    const createNotificationMessage = (userRole) => {
+      let notificationTitle; let notificationBody;
+
+      switch (newStatus) {
+        case SessionStatus.IN_PROGRESS:
+          notificationTitle = "🏡 Session Starting";
+          notificationBody = `Your session "${sessionData.title}" is ` +
+          `starting now`;
+          break;
+        case SessionStatus.EXTENDED:
+          notificationTitle = "🕒 Session Extended";
+          notificationBody = `Your session "${sessionData.title}" has ` +
+          `been extended`;
+          break;
+        case SessionStatus.COMPLETED:
+          notificationTitle = "✅ Session Completed";
+          notificationBody = `Your session "${sessionData.title}" has ended`;
+          break;
+        default:
+          logger.warn(`[Session ${sessionData.id}] Unknown ` +
+            `status: ${newStatus}`);
+          return null;
+      }
+
+      return {
+        notification: {
+          title: notificationTitle,
+          body: notificationBody,
+        },
+        data: {
+          sessionId: sessionData.id || "",
+          newStatus: newStatus || "",
+          timestamp: new Date().toISOString(),
+          type: "session_status_change",
+          userRole: userRole,
+        },
+        android: {
+          priority: "high",
+        },
+        apns: {
+          payload: {
+            aps: {
+              "interruption-level": "time-sensitive",
+              "contentAvailable": true,
+              "sound": "default",
+            },
+            userInfo: {
+              sessionId: sessionData.id || "",
+              newStatus: newStatus || "",
+              timestamp: new Date().toISOString(),
+              type: "session_status_change",
+              userRole: userRole,
+            },
+          },
+        },
+      };
+    };
+
+    try {
+      // Send to each token individually with role-specific message
+      const sendPromises = validTokens.map(({token, userId, userRole}) => {
+        const message = createNotificationMessage(userRole);
+        if (!message) return Promise.resolve({error: new Error("Invalid msg")});
+
+        return admin.messaging().send({
+          ...message,
+          token: token,
+        }).catch((error) => {
+          if (error.code === "messaging/registration-token-not-registered" ||
+              error.code === "messaging/invalid-argument") {
+            // Find the user associated with this token
+            removeInvalidToken(userId, token);
+          }
+          return {error};
+        });
+      });
+
+      const results = await Promise.all(sendPromises);
+
+      const successes = results.filter((r) => !r.error).length;
+      const failures = results.filter((r) => r.error).length;
+
+      logger.info(
+          `[Session ${sessionData.id}] Notifications ` +
+           `sent: ${successes} successful, ${failures} failed`,
+      );
+
+      if (failures > 0) {
+        results.forEach((result, idx) => {
+          if (result.error) {
+            logger.error(
+                `[Session ${sessionData.id}] Failed to ` +
+                `send to token: ${result.error.message}`,
+            );
+          }
+        });
+      }
+    } catch (error) {
+      logger.error(
+          `[Session ${sessionData.id}] Error sending ` +
+          `notifications: ${error.message}`,
+      );
+      throw error;
+    }
+  } catch (error) {
+    logger.error(
+        `[Session ${sessionData.id}] Error in notification ` +
+        `process: ${error.message}`,
+    );
+    throw error;
+  }
+}
+
+/**
+ * Removes an invalid FCM token from a user's token array.
+ * @param {string} userId - The ID of the user.
+ * @param {string} invalidToken - The token to be removed.
+ */
+async function removeInvalidToken(userId, invalidToken) {
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(userId);
+
+  try {
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      logger.warn(`User ${userId} not found when` +
+        ` trying to remove invalid token`);
+      return;
+    }
+
+    const userData = userDoc.data();
+    let fcmTokens = userData.fcmTokens || [];
+
+    // Remove the invalid token
+    fcmTokens = fcmTokens.filter((tokenObj) => tokenObj.token !== invalidToken);
+
+    await userRef.update({
+      fcmTokens: fcmTokens,
+    });
+
+    logger.info(`Removed invalid token for user ${userId}`);
+  } catch (error) {
+    logger.error(`Failed to remove ` +
+      `invalid token for user ${userId}: ${error.message}`);
+  }
+}
+
+/**
  * Cloud function that triggers when a new survey response is added
  * Updates metrics for the specific survey type
  */
@@ -182,6 +444,8 @@ exports.updateSessionStatuses = onSchedule("*/15 * * * *", async (event) => {
   const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
 
   try {
+    logger.info("Starting session status update check...");
+
     // Get upcoming sessions about to start
     const upcomingQuery = db.collectionGroup("sessions")
         .where("status", "==", SessionStatus.UPCOMING)
@@ -207,56 +471,94 @@ exports.updateSessionStatuses = onSchedule("*/15 * * * *", async (event) => {
       extendedQuery.get(),
     ]);
 
+    // Log summary of sessions to be updated
+    logger.info(
+        "Sessions to update: " +
+      `${upcomingSnapshot.size} to in-progress, ` +
+      `${activeSnapshot.size} to extended, ` +
+      `${extendedSnapshot.size} to completed`,
+    );
+
     // Process updates in batches
     const batch = db.batch();
     let updateCount = 0;
+    let notificationCount = 0;
 
     // Handle upcoming sessions
     for (const doc of upcomingSnapshot.docs) {
+      const sessionData = doc.data();
       batch.update(doc.ref, {
         status: SessionStatus.IN_PROGRESS,
         lastStatusUpdate: admin.firestore.Timestamp.now(),
       });
       updateCount++;
-      logger.info(`Session ${doc.id} will be marked as in-progress`);
+
+      try {
+        await sendSessionNotifications(sessionData, SessionStatus.IN_PROGRESS);
+        notificationCount++;
+      } catch (error) {
+        logger.error(
+            `Failed to send notifications` +
+            ` for session ${doc.id}: ${error.message}`,
+        );
+      }
     }
 
     // Handle active sessions that have passed their end date
     for (const doc of activeSnapshot.docs) {
+      const sessionData = doc.data();
       batch.update(doc.ref, {
         status: SessionStatus.EXTENDED,
         lastStatusUpdate: admin.firestore.Timestamp.now(),
       });
       updateCount++;
-      logger.info(`Session ${doc.id} will be marked as extended`);
+
+      try {
+        await sendSessionNotifications(sessionData, SessionStatus.EXTENDED);
+        notificationCount++;
+      } catch (error) {
+        logger.error(
+            `Failed to send notifications` +
+            ` for session ${doc.id}: ${error.message}`,
+        );
+      }
     }
 
     // Handle extended sessions that have been extended for too long
     for (const doc of extendedSnapshot.docs) {
+      const sessionData = doc.data();
       batch.update(doc.ref, {
         status: SessionStatus.COMPLETED,
         lastStatusUpdate: admin.firestore.Timestamp.now(),
       });
       updateCount++;
-      logger.info(
-          `Session ${doc.id} will be marked as completed ` +
-          `(auto-complete after 2-hour extension)`,
-      );
+
+      try {
+        await sendSessionNotifications(sessionData, SessionStatus.COMPLETED);
+        notificationCount++;
+      } catch (error) {
+        logger.error(
+            `Failed to send notifications` +
+            ` for session ${doc.id}: ${error.message}`,
+        );
+      }
     }
 
     // Commit batch if we have updates
     if (updateCount > 0) {
       await batch.commit();
       logger.info(
-          `Successfully updated ${updateCount} session statuses`,
+          "Session updates complete: " +
+        `${updateCount} sessions updated, ` +
+        `${notificationCount} notification batches sent`,
       );
     } else {
-      logger.info("No session status updates needed");
+      logger.info("No session updates needed");
     }
 
     return null;
   } catch (error) {
-    logger.error("Error updating session statuses:", error);
+    logger.error(`Error updating session statuses: ${error.message}`);
     throw new Error(
         `Failed to update session statuses: ${error.message}`,
     );

@@ -16,6 +16,14 @@ class InviteDetailViewController: NNViewController {
     private var sessionID: String?
     private var inviteID: String?
     
+    private let bottomImageView: UIImageView = {
+        let view = UIImageView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NNAssetHelper.configureImageView(view, for: .halfMoonBottom)
+        view.alpha = 0.4
+        return view
+    }()
+    
     private let logoImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.image = UIImage(systemName: "bird")
@@ -147,6 +155,8 @@ class InviteDetailViewController: NNViewController {
     }
     
     override func addSubviews() {
+        view.addSubview(bottomImageView)
+        
         titleStack.addArrangedSubview(logoImageView)
         labelStack.addArrangedSubview(titleLabel)
         labelStack.addArrangedSubview(descriptionLabel)
@@ -167,6 +177,8 @@ class InviteDetailViewController: NNViewController {
     }
     
     override func constrainSubviews() {
+        bottomImageView.pinToBottom(of: view)
+        
         // Layout constraints
         NSLayoutConstraint.activate([
             

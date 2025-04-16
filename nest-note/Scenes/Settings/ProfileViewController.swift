@@ -11,11 +11,13 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var headerRegistration: UICollectionView.SupplementaryRegistration<NNSectionHeaderView>!
+    private var activityIndicator: UIActivityIndicatorView!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         configureCollectionView()
         configureDataSource()
+        configureActivityIndicator()
         applyInitialSnapshots()
         collectionView.delegate = self
         
@@ -30,6 +32,13 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
     
     override func setup() {
         navigationItem.title = "Profile"
+    }
+    
+    override func setupNavigationBarButtons() {
+        let closeButton = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(closeButtonTapped))
+        let buttons = [closeButton]
+        buttons.forEach { $0.tintColor = .label }
+        navigationItem.rightBarButtonItems = buttons
     }
     
     private func configureCollectionView() {
@@ -99,6 +108,18 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         }
     }
     
+    private func configureActivityIndicator() {
+        activityIndicator = UIActivityIndicatorView(style: .large)
+        activityIndicator.hidesWhenStopped = true
+        view.addSubview(activityIndicator)
+        
+        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.info, .actions, .danger])
@@ -115,6 +136,7 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
                 .info(title: "Primary Role", detail: user.primaryRole.rawValue.capitalized),
                 .info(title: "Member Since", detail: dateFormatter.string(from: creationDate)),
                 .info(title: "Phone", detail: user.personalInfo.phone ?? "--"),
+                .info(title: "User ID", detail: user.id ?? "--"),
                 .modeSwitch
             ]
             snapshot.appendItems(infoItems, toSection: .info)
@@ -169,6 +191,12 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         alert.addAction(UIAlertAction(title: "Sign Out", style: .destructive) { [weak self] _ in
             Task {
                 do {
+                    // Show activity indicator
+                    await MainActor.run {
+                        self?.activityIndicator.startAnimating()
+                        self?.collectionView.isUserInteractionEnabled = false
+                    }
+                    
                     // First reset the app state
                     await Launcher.shared.reset()
                     
@@ -182,6 +210,23 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
                             // After dismissal, the LaunchCoordinator will detect that the user is not signed in
                             // and present the LandingViewController with isModalInPresentation = true
                         }
+                    }
+                } catch {
+                    // Hide activity indicator in case of error
+                    await MainActor.run {
+                        self?.activityIndicator.stopAnimating()
+                        self?.collectionView.isUserInteractionEnabled = true
+                    }
+                    
+                    // Show error alert
+                    await MainActor.run {
+                        let errorAlert = UIAlertController(
+                            title: "Error",
+                            message: "Failed to sign out: \(error.localizedDescription)",
+                            preferredStyle: .alert
+                        )
+                        errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self?.present(errorAlert, animated: true)
                     }
                 }
             }

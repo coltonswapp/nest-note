@@ -36,6 +36,7 @@ class SessionService {
     private init() {}
     
     private var sessions: [SessionItem] = []
+    private var sitterSessionCollection: SessionCollection?
     
     // Add these types at the top of the file
     enum SessionBucket: Int {
@@ -48,6 +49,10 @@ class SessionService {
         var upcoming: [SessionItem]
         var inProgress: [SessionItem]
         var past: [SessionItem]
+    }
+    
+    func sessionExists(sessionId: String) -> Bool {
+        return sessions.contains(where: { $0.id == sessionId })
     }
     
     // MARK: - Create
@@ -129,7 +134,7 @@ class SessionService {
             .collection("sessions")
             .document(session.id)
         
-        try await sessionRef.setData(from: session)
+        try await sessionRef.setData(from: session, merge: true)
         
         // Update local cache
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
@@ -190,6 +195,8 @@ class SessionService {
         
         // Sort past sessions by end date (most recent first)
         let sortedPast = sorted.past.sorted { $0.endDate > $1.endDate }
+        
+        self.sessions = sessions
         
         Logger.log(level: .info, category: .sessionService, message: "Sessions organized: \(sessions.count) total (Upcoming: \(sortedUpcoming.count), In Progress: \(sortedInProgress.count), Past: \(sortedPast.count)) ✅")
         
@@ -425,11 +432,14 @@ class SessionService {
         }
         
         // Create or update the assigned sitter
+        // Preserve the userID if it exists in the current assigned sitter
+        let existingUserID = session.assignedSitter?.userID
+        
         let assignedSitter = AssignedSitter(
             id: sitter.id,
             name: sitter.name,
             email: sitter.email,
-            userID: nil,
+            userID: existingUserID,  // Preserve the existing userID
             inviteStatus: status,
             inviteID: inviteID
         )
@@ -467,6 +477,12 @@ class SessionService {
             throw SessionError.noCurrentNest
         }
         
+        // Check if the sitter already has a userID in the SavedSitter record
+        var sitterUserID: String? = nil
+        if let savedSitter = try? await NestService.shared.fetchSavedSitterById(sitter.id) {
+            sitterUserID = savedSitter.userID
+        }
+        
         // Generate unique code
         let code = try await generateUniqueInviteCode()
         let inviteID = "invite-\(code)"
@@ -489,7 +505,7 @@ class SessionService {
             id: sitter.id,
             name: sitter.name,
             email: sitter.email,
-            userID: nil,
+            userID: sitterUserID,  // Use the userID if available
             inviteStatus: .invited,
             inviteID: inviteID
         )
@@ -546,6 +562,8 @@ class SessionService {
             sessionStatus = .accepted
         case .expired, .cancelled:
             sessionStatus = .cancelled
+        case .rejected:
+            sessionStatus = .declined
         }
         
         // Get references
@@ -563,11 +581,14 @@ class SessionService {
         }
         
         // Create updated assigned sitter
+        // Preserve the userID if it exists in the current assigned sitter
+        let existingUserID = session.assignedSitter?.userID
+        
         let updatedSitter = AssignedSitter(
             id: session.assignedSitter?.id ?? UUID().uuidString,
             name: session.assignedSitter?.name ?? invite.sitterEmail,
             email: invite.sitterEmail,
-            userID: session.assignedSitter?.userID,
+            userID: existingUserID,  // Preserve the existing userID
             inviteStatus: sessionStatus,
             inviteID: inviteID
         )
@@ -725,7 +746,7 @@ class SessionService {
         if var session = sessions.first(where: { $0.id == sessionID }) {
             session.assignedSitter = nil
             if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[index] = session
+                sessions.remove(at: index)
             }
         }
         
@@ -775,8 +796,20 @@ class SessionService {
             inviteAcceptedAt: Date()
         )
         
-        // Encode the sitter data before transaction
-        let encodedSitter = try Firestore.Encoder().encode(session.assignedSitter)
+        // Update the assigned sitter with the user's ID
+        var updatedAssignedSitter = session.assignedSitter
+        updatedAssignedSitter?.userID = currentUserID
+        updatedAssignedSitter?.inviteStatus = .accepted
+        
+        // Update the saved sitter with the user's ID
+        try await updateSavedSitterWithUserID(
+            nestID: invite.nestID,
+            sitterEmail: invite.sitterEmail,
+            userID: currentUserID
+        )
+        
+        // Encode the updated sitter data before transaction
+        let encodedSitter = try Firestore.Encoder().encode(updatedAssignedSitter)
         let encodedSitterSession = try Firestore.Encoder().encode(sitterSession)
         
         // Update documents atomically
@@ -807,6 +840,20 @@ class SessionService {
         
         // Return the session and invite for UI purposes
         return sitterSession
+    }
+    
+    // Helper method to update a saved sitter with a user ID
+    private func updateSavedSitterWithUserID(nestID: String, sitterEmail: String, userID: String) async throws {
+        Logger.log(level: .info, category: .sessionService, message: "Updating saved sitter with user ID: \(userID)")
+        
+        // Find the saved sitter by email
+        if let savedSitter = try await NestService.shared.findSavedSitterByEmail(nestId: nestID, sitterEmail) {
+            // Update the saved sitter with the user ID
+            try await NestService.shared.updateSavedSitterWithUserID(nestId: nestID, savedSitter, userID: userID)
+            Logger.log(level: .info, category: .sessionService, message: "Saved sitter updated with user ID ✅")
+        } else {
+            Logger.log(level: .error, category: .sessionService, message: "No saved sitter found with email: \(sitterEmail)")
+        }
     }
     
     /// Validates an invite without accepting it
@@ -890,11 +937,84 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "Fetched \(allSessions.count) sitter sessions ✅")
         
-        return SessionCollection(
+        let collection = SessionCollection(
             upcoming: sortedUpcoming,
             inProgress: sortedInProgress,
             past: sortedPast
         )
+        
+        // Store the collection locally
+        self.sitterSessionCollection = collection
+        
+        return collection
+    }
+    
+    /// Deletes a sitter session from a user's collection
+    func deleteSitterSession(sessionID: String) async throws {
+        guard let userID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Deleting sitter session: \(sessionID)")
+        
+        // First, get the sitter session to find the nest ID
+        let sitterSessionRef = db.collection("users").document(userID)
+            .collection("sitterSessions").document(sessionID)
+        
+        let sitterSessionDoc = try await sitterSessionRef.getDocument()
+        guard let sitterSession = try? sitterSessionDoc.data(as: SitterSession.self) else {
+            throw SessionError.sessionNotFound
+        }
+        
+        // Get the session to find the invite ID
+        guard let session = try await getSession(nestID: sitterSession.nestID, sessionID: sessionID),
+              let inviteID = session.assignedSitter?.inviteID else {
+            throw SessionError.sessionNotFound
+        }
+        
+        // Create updated assigned sitter with declined status
+        var updatedAssignedSitter = session.assignedSitter
+        updatedAssignedSitter?.inviteStatus = .declined
+        
+        // Update both the invite status and session's assigned sitter
+        let inviteRef = db.collection("invites").document(inviteID)
+        let sessionRef = db.collection("nests").document(sitterSession.nestID)
+            .collection("sessions").document(sessionID)
+        
+        try await db.runTransaction { transaction, errorPointer in
+            // Update invite status
+            transaction.updateData([
+                "status": InviteStatus.rejected.rawValue
+            ], forDocument: inviteRef)
+            
+            // Update session's assigned sitter
+            if let encodedSitter = try? Firestore.Encoder().encode(updatedAssignedSitter) {
+                transaction.updateData([
+                    "assignedSitter": encodedSitter
+                ], forDocument: sessionRef)
+            }
+            
+            return nil
+        }
+        
+        // Delete the sitter session
+        try await sitterSessionRef.delete()
+        
+        // Update local collections
+        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions.remove(at: index)
+        }
+        
+        // Update the sitterSessionCollection if it exists
+        if var collection = sitterSessionCollection {
+            // Remove from all buckets
+            collection.upcoming.removeAll { $0.id == sessionID }
+            collection.inProgress.removeAll { $0.id == sessionID }
+            collection.past.removeAll { $0.id == sessionID }
+            self.sitterSessionCollection = collection
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Sitter session deleted and invite status updated to rejected ✅")
     }
     
     /// Fetches only the in-progress session for a sitter
@@ -928,6 +1048,7 @@ enum InviteStatus: String, Codable {
     case accepted
     case expired
     case cancelled
+    case rejected
 }
 
 // MARK: - Invite Model

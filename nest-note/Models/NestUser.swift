@@ -24,6 +24,16 @@ class NestUser: Codable {
         var name: String
         var email: String
         var phone: String?
+        var notificationPreferences: NotificationPreferences?
+    }
+    
+    struct NotificationPreferences: Codable {
+        var sessionNotifications: Bool
+        var otherNotifications: Bool
+        
+        static var `default`: NotificationPreferences {
+            NotificationPreferences(sessionNotifications: false, otherNotifications: false)
+        }
     }
     
     struct UserRoles: Codable {
@@ -73,7 +83,8 @@ extension NestUser.PersonalInfo: CustomStringConvertible {
         PersonalInfo(
             name: \(name),
             email: \(email),
-            phone: \(phone ?? "none")
+            phone: \(phone ?? "none"),
+            notificationPreferences: \(notificationPreferences)
         )
         """
     }

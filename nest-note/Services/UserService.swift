@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseMessaging
 
 final class UserService {
     
@@ -15,14 +16,57 @@ final class UserService {
     }
     private(set) var isAuthenticated: Bool = false
     
+    // Store pending FCM token
+    private var pendingFCMToken: String?
+    
+    // Flag to prevent duplicate profile fetches
+    private var isSettingUp: Bool = false
+    
     // MARK: - Initialization
     private init() {
+        setupAuthStateListener()
+    }
+    
+    // MARK: - Auth State Management
+    private func handleAuthStateChange(firebaseUser: User?) async {
+        if let firebaseUser = firebaseUser {
+            do {
+                let nestUser = try await fetchUserProfile(userId: firebaseUser.uid)
+                self.currentUser = nestUser
+                self.isAuthenticated = true
+                
+                // Try to save any pending FCM token
+//                if let token = pendingFCMToken {
+//                    try await updateFCMToken(token)
+//                    pendingFCMToken = nil
+//                }
+                
+                Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged in: \(nestUser)")
+            } catch {
+                self.currentUser = nil
+                self.isAuthenticated = false
+                Logger.log(level: .error, category: .userService, message: "Auth state changed - Failed to fetch profile: \(error.localizedDescription)")
+            }
+        } else {
+            self.currentUser = nil
+            self.isAuthenticated = false
+            Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged out")
+        }
     }
     
     /// Sets up the UserService and returns when initialization is complete
     /// - Returns: SetupResult containing authentication state
     func setup() async -> SetupResult {
         Logger.log(level: .info, category: .userService, message: "Beginning UserService setup...")
+        
+        // Prevent duplicate setup
+        guard !isSettingUp else {
+            Logger.log(level: .info, category: .userService, message: "UserService already setting up, returning current state")
+            return SetupResult(isSignedIn: isSignedIn)
+        }
+        
+        isSettingUp = true
+        defer { isSettingUp = false }
         
         // Check for current Firebase user
         guard let firebaseUser = auth.currentUser else {
@@ -32,20 +76,8 @@ final class UserService {
             return SetupResult(isSignedIn: false)
         }
         
-        do {
-            let nestUser = try await fetchUserProfile(userId: firebaseUser.uid)
-            self.currentUser = nestUser
-            self.isAuthenticated = true
-            
-            Logger.log(level: .info, category: .userService, message: "UserService setup complete with user: \(nestUser)")
-            return SetupResult(isSignedIn: true)
-            
-        } catch {
-            Logger.log(level: .error, category: .userService, message: "Failed to fetch user profile: \(error.localizedDescription)")
-            self.currentUser = nil
-            self.isAuthenticated = false
-            return SetupResult(isSignedIn: false)
-        }
+        await handleAuthStateChange(firebaseUser: firebaseUser)
+        return SetupResult(isSignedIn: isSignedIn)
     }
     
     // Add auth state change listener separately
@@ -54,23 +86,53 @@ final class UserService {
             guard let self = self else { return }
             
             Task {
-                if let firebaseUser = user {
-                    do {
-                        let nestUser = try await self.fetchUserProfile(userId: firebaseUser.uid)
-                        self.currentUser = nestUser
-                        self.isAuthenticated = true
-                        Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged in: \(nestUser)")
-                    } catch {
-                        self.currentUser = nil
-                        self.isAuthenticated = false
-                        Logger.log(level: .error, category: .userService, message: "Auth state changed - Failed to fetch profile: \(error.localizedDescription)")
-                    }
-                } else {
-                    self.currentUser = nil
-                    self.isAuthenticated = false
-                    Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged out")
+                // Skip if we're already setting up
+                guard !self.isSettingUp else {
+                    Logger.log(level: .info, category: .userService, message: "Skipping auth state change - setup in progress")
+                    return
                 }
+                
+                await self.handleAuthStateChange(firebaseUser: user)
             }
+        }
+    }
+    
+    // MARK: - FCM Token Management
+    func updateFCMToken(_ token: String?) async throws {
+        guard let token = token else {
+            Logger.log(level: .error, category: .userService, message: "Received nil FCM token")
+            return
+        }
+        
+        // If we don't have a current user, store the token for later
+        guard let currentUser = currentUser else {
+            Logger.log(level: .info, category: .userService, message: "No current user, storing FCM token for later")
+            pendingFCMToken = token
+            return
+        }
+        
+        Logger.log(level: .info, category: .userService, message: "Updating FCM token for user: \(currentUser.id)")
+        
+        // Update in Firestore
+        let docRef = db.collection("users").document(currentUser.id)
+        do {
+            let snapshot = try await docRef.getDocument()
+            var fcmTokens = snapshot.data()? ["fcmTokens"] as? [[String: Any]] ?? []
+            
+            // Check if the token already exists
+            if !fcmTokens.contains(where: { $0["token"] as? String == token }) {
+                fcmTokens.append(["token": token, "uploadedDate": Timestamp(date: Date())])
+            }
+            
+            try await docRef.updateData([
+                "fcmTokens": fcmTokens,
+                "updatedAt": Timestamp(date: Date())
+            ])
+            Logger.log(level: .info, category: .userService, message: "Successfully updated FCM tokens in Firestore")
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Failed to update FCM tokens in Firestore: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .userService, message: "Detailed error: \(error)")
+            throw error
         }
     }
     
@@ -126,7 +188,8 @@ final class UserService {
                 id: firebaseUser.uid,
                 personalInfo: .init(
                     name: info.fullName,
-                    email: info.email
+                    email: info.email,
+                    notificationPreferences: .default
                 ),
                 primaryRole: info.role,
                 roles: .init(nestAccess: [.init(nestId: defaultNest.id, accessLevel: .owner, grantedAt: Date())])
@@ -164,24 +227,54 @@ final class UserService {
     }
     
     // MARK: - Sign out & reset
-    func logout() async throws {
+    func logout(currentDeviceToken: String?) async throws {
         do {
+            // Delete the FCM token from Firebase Messaging
+            try await Messaging.messaging().deleteToken()
+            Logger.log(level: .info, category: .userService, message: "FCM token deleted from Firebase Messaging")
+            
+            // If we have a current user, remove the token from their Firestore document
+            if let currentDeviceToken {
+                if let currentUser = currentUser {
+                    let docRef = db.collection("users").document(currentUser.id)
+                    let snapshot = try await docRef.getDocument()
+                    
+                    if var fcmTokens = snapshot.data()?["fcmTokens"] as? [[String: Any]] {
+                        // Filter out the current token
+                        fcmTokens.removeAll { tokenData in
+                            return tokenData["token"] as? String == currentDeviceToken
+                        }
+                        
+                        // Update the document with the filtered tokens
+                        try await docRef.updateData([
+                            "fcmTokens": fcmTokens,
+                            "updatedAt": Timestamp(date: Date())
+                        ])
+                        
+                        Logger.log(level: .info, category: .userService, message: "FCM token removed from user document in Firestore")
+                    }
+                }
+            }
+            
+            // Sign out from Firebase Auth
             try auth.signOut()
             currentUser = nil
             isAuthenticated = false
             clearAuthState()
+            
+            Logger.log(level: .info, category: .userService, message: "User logged out successfully")
         } catch {
+            Logger.log(level: .error, category: .userService, message: "Logout failed: \(error.localizedDescription)")
             throw AuthError.unknown
         }
     }
     
-    func reset() async {
+    func reset() async throws {
         Logger.log(level: .info, category: .userService, message: "Resetting UserService...")
         do {
-            try! auth.signOut()
-            currentUser = nil
-            isAuthenticated = false
-            clearAuthState()
+            try await logout(currentDeviceToken: Messaging.messaging().fcmToken)
+        } catch {
+            throw error
         }
     }
     
@@ -253,6 +346,30 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "User name updated successfully to: \(newName)")
+    }
+    
+    func updateNotificationPreferences(_ preferences: NestUser.NotificationPreferences) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+        
+        // Update in Firestore
+        let docRef = db.collection("users").document(currentUser.id)
+        try await docRef.updateData([
+            "personalInfo.notificationPreferences": try Firestore.Encoder().encode(preferences),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        // Update local state
+        self.currentUser?.personalInfo.notificationPreferences = preferences
+        
+        // Save updated state
+        saveAuthState()
+        
+        // Post notification for UI updates
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .userService, message: "Notification preferences updated successfully")
     }
 }
 

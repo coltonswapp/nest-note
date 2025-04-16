@@ -31,7 +31,7 @@ enum SessionInviteStatus: String, Codable {
         case .accepted:
             return "checkmark.circle.fill"
         case .declined:
-            return "xmark.circle.fill"
+            return "hand.raised.palm.facing.fill"
         case .cancelled:
             return "xmark.circle"
         }
@@ -62,6 +62,7 @@ class SessionItem: Hashable, Codable {
     var status: SessionStatus
     var assignedSitter: AssignedSitter?
     var nestID: String
+    var ownerID: String?
     
     // Computed property to check if session has an active invite
     var hasActiveInvite: Bool {
@@ -72,14 +73,15 @@ class SessionItem: Hashable, Codable {
     init(
         id: String = UUID().uuidString,
         title: String = "",
-        startDate: Date = Date(),
-        endDate: Date = Date().addingTimeInterval(60 * 60 * 2), // 2 hours by default
+        startDate: Date = Date().roundedToNext15Minutes(), // 2:05PM becomes 2:15PM
+        endDate: Date = Date().addingTimeInterval(60 * 60 * 2).roundedToNext15Minutes(), // 2 hours by default
         isMultiDay: Bool = false,
         events: [SessionEvent] = [],
         visibilityLevel: VisibilityLevel = .standard,
         status: SessionStatus = .upcoming,
         assignedSitter: AssignedSitter? = nil,
-        nestID: String = NestService.shared.currentNest!.id 
+        nestID: String = NestService.shared.currentNest!.id,
+        ownerID: String? = NestService.shared.currentNest?.ownerId
     ) {
         self.id = id
         self.title = title
@@ -91,6 +93,7 @@ class SessionItem: Hashable, Codable {
         self.status = status
         self.assignedSitter = assignedSitter
         self.nestID = nestID
+        self.ownerID = ownerID
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -154,6 +157,7 @@ class SessionItem: Hashable, Codable {
         case status
         case assignedSitter
         case nestID
+        case ownerID
     }
     
     required init(from decoder: Decoder) throws {
@@ -168,6 +172,7 @@ class SessionItem: Hashable, Codable {
         visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
+        ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {

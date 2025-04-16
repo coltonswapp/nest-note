@@ -103,6 +103,14 @@ final class SitterSessionDetailViewController: NNViewController {
         
         // Fetch events for the session
         fetchSessionEvents()
+        
+        // Add observer for session status changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionStatusChange),
+            name: .sessionStatusDidChange,
+            object: nil
+        )
     }
     
     override func setup() {
@@ -454,6 +462,33 @@ final class SitterSessionDetailViewController: NNViewController {
         
         snapshot.reconfigureItems([.events])
         dataSource.apply(snapshot, animatingDifferences: true)
+    }
+    
+    @objc private func handleSessionStatusChange(_ notification: Notification) {
+        // Extract session ID and new status from notification
+        guard let userInfo = notification.userInfo,
+              let sessionId = userInfo["sessionId"] as? String,
+              let newStatusString = userInfo["newStatus"] as? String,
+              sessionId == session.id else {
+            return
+        }
+        
+        // Convert string to SessionStatus enum
+        let newStatus = SessionStatus(rawValue: newStatusString) ?? .upcoming
+        
+        // Update the session item
+        session.status = newStatus
+        
+        // Log the status change
+        Logger.log(
+            level: .info,
+            category: .sessionService,
+            message: "Session status updated to \(newStatus.displayName) via notification"
+        )
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
