@@ -8,14 +8,18 @@
 import UIKit
 import Foundation
 
+protocol JoinSessionViewControllerDelegate: AnyObject {
+    func joinSessionViewController(didAcceptInvite session: SitterSession)
+}
+
 class JoinSessionViewController: NNViewController {
     
-    private let logoImageView: UIImageView = {
+    weak var delegate: JoinSessionViewControllerDelegate?
+    
+    private let topImageView: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "bird")
-        imageView.tintColor = NNColors.primary
-        imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        NNAssetHelper.configureImageView(imageView, for: .rectanglePatternSmall)
         return imageView
     }()
     
@@ -114,7 +118,9 @@ class JoinSessionViewController: NNViewController {
     }
     
     override func addSubviews() {
-        titleStack.addArrangedSubview(logoImageView)
+        view.addSubview(topImageView)
+        topImageView.pinToTop(of: view)
+        
         labelStack.addArrangedSubview(titleLabel)
         labelStack.addArrangedSubview(descriptionLabel)
         titleStack.addArrangedSubview(labelStack)
@@ -129,10 +135,8 @@ class JoinSessionViewController: NNViewController {
         // Layout constraints
         NSLayoutConstraint.activate([
             // Title Stack
-            logoImageView.widthAnchor.constraint(equalToConstant: 40).with(priority: .defaultHigh),
-            logoImageView.heightAnchor.constraint(equalToConstant: 40).with(priority: .defaultHigh),
             
-            titleStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            titleStack.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 24),
             titleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
             titleStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
             
@@ -236,7 +240,7 @@ class JoinSessionViewController: NNViewController {
         
         Task {
             do {
-                let (session) = try await SessionService.shared.validateAndAcceptInvite(inviteID: code)
+                let sitterSession = try await SessionService.shared.validateAndAcceptInvite(inviteID: code)
                 
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
@@ -249,6 +253,8 @@ class JoinSessionViewController: NNViewController {
                     )
                     
                     alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+                        // Notify delegate
+                        self?.delegate?.joinSessionViewController(didAcceptInvite: sitterSession)
                         self?.dismiss(animated: true)
                     })
                     

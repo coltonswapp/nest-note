@@ -26,11 +26,13 @@ final class NestService: EntryRepository {
         let id: String  // Firestore document ID
         var name: String  // Sitter's name
         var email: String  // Sitter's email (primary identifier for matching)
+        var userID: String?  // Firebase Auth user ID (added when sitter accepts an invite)
         
-        init(id: String = UUID().uuidString, name: String, email: String) {
+        init(id: String = UUID().uuidString, name: String, email: String, userID: String? = nil) {
             self.id = id
             self.name = name
             self.email = email
+            self.userID = userID
         }
     }
     
@@ -463,6 +465,67 @@ extension NestService {
     func refreshSavedSitters() async throws -> [SavedSitter] {
         clearSavedSittersCache()
         return try await fetchSavedSitters()
+    }
+    
+    // Update a saved sitter with a userID
+    func updateSavedSitterWithUserID(nestId: String,_ sitter: SavedSitter, userID: String) async throws {
+        
+        
+        Logger.log(level: .info, category: .nestService, message: "Updating saved sitter with userID: \(userID)")
+        
+        // Create updated sitter with userID
+        let updatedSitter = SavedSitter(
+            id: sitter.id,
+            name: sitter.name,
+            email: sitter.email,
+            userID: userID
+        )
+        
+        // Update in Firestore
+        let docRef = db.collection("nests").document(nestId).collection("savedSitters").document(sitter.id)
+        try await docRef.setData(try Firestore.Encoder().encode(updatedSitter), merge: true)
+        
+        // Update cache if it exists
+        if var sitters = cachedSavedSitters {
+            if let index = sitters.firstIndex(where: { $0.id == sitter.id }) {
+                sitters[index] = updatedSitter
+                cachedSavedSitters = sitters
+            }
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Saved sitter updated with userID ✅")
+    }
+    
+    // Find a saved sitter by email
+    func findSavedSitterByEmail(nestId: String, _ email: String) async throws -> SavedSitter? {
+        // First check the cache
+        if let sitter = cachedSavedSitters?.first(where: { $0.email == email }) {
+            Logger.log(level: .info, category: .nestService, message: "Found sitter with email \(email) in cache")
+            return sitter
+        }
+        
+        // Query Firestore
+        let savedSittersRef = db.collection("nests").document(nestId).collection("savedSitters")
+        let query = savedSittersRef.whereField("email", isEqualTo: email)
+        let snapshot = try await query.getDocuments()
+        
+        if let document = snapshot.documents.first {
+            let sitter = try document.data(as: SavedSitter.self)
+            
+            // Update cache if it exists
+            if var sitters = cachedSavedSitters {
+                if let index = sitters.firstIndex(where: { $0.id == sitter.id }) {
+                    sitters[index] = sitter
+                } else {
+                    sitters.append(sitter)
+                }
+                cachedSavedSitters = sitters
+            }
+            
+            return sitter
+        }
+        
+        return nil
     }
 }
 

@@ -34,16 +34,17 @@ class AccountCell: UICollectionViewCell {
     
     private func setupViews() {
         // Set up the image view
-        imageView.backgroundColor = .systemGray6
-        imageView.layer.cornerRadius = 25 // Adjust this value as needed
+        imageView.image = UIImage(systemName: "bird.fill")
+        imageView.tintColor = .systemGray3
+//        imageView.backgroundColor = .systemGray4
         imageView.clipsToBounds = true
-        imageView.contentMode = .scaleAspectFill
+//        imageView.layer.cornerRadius = 25
         
         // Set up constraints for the image view
         imageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            imageView.widthAnchor.constraint(equalToConstant: 50),
-            imageView.heightAnchor.constraint(equalToConstant: 50)
+            imageView.widthAnchor.constraint(equalToConstant: 26),
+            imageView.heightAnchor.constraint(equalToConstant: 26)
         ])
         
         // Set up the vertical stack view for labels
@@ -61,7 +62,7 @@ class AccountCell: UICollectionViewCell {
         horizontalStackView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             horizontalStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            horizontalStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            horizontalStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             horizontalStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             horizontalStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
         ])

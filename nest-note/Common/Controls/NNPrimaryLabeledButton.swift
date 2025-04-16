@@ -12,6 +12,15 @@ class NNBaseControl: UIControl {
         case touchDown, touchCancel, touchUp
     }
     
+    override var isEnabled: Bool {
+        didSet {
+            UIView.animate(withDuration: 0.3) {
+                self.backgroundColor = self.isEnabled ? self.originalBackgroundColor : .systemGray4
+                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
+            }
+        }
+    }
+    
     // MARK: - Properties
     private var touchDownTimestamp: TimeInterval?
     private let hapticThreshold: TimeInterval = 0.15
@@ -256,6 +265,7 @@ class NNLoadingButton: NNBaseControl {
         didSet {
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.primaryBackgroundColor : .systemGray4
+                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
             }
         }
     }
@@ -270,6 +280,7 @@ class NNLoadingButton: NNBaseControl {
         self.transitionStyle = transitionStyle
         super.init(title: title)
         self.primaryBackgroundColor = fillStyle.backgroundColor
+        self.titleLabel.textColor = titleColor
         backgroundColor = primaryBackgroundColor
         setupSpinner()
     }
@@ -634,7 +645,7 @@ class NNSmallPrimaryButton: UIButton {
     override var backgroundColor: UIColor? {
         didSet {
             layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
-//            originalBackgroundColor = backgroundColor
+            originalBackgroundColor = backgroundColor
         }
     }
 }

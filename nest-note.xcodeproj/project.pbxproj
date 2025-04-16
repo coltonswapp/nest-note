@@ -17,6 +17,7 @@
 		F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */; };
 		F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29312CD077E900B90ABC /* FirebaseStorage */; };
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
+		F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = F6E9EE522DA596DF009113C6 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +59,7 @@
 				F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */,
 				F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */,
 				F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */,
+				F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */,
 				F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -119,6 +121,7 @@
 				F66E29312CD077E900B90ABC /* FirebaseStorage */,
 				F6B678292CDDED5700FDCAE4 /* Toast */,
 				F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */,
+				F6E9EE522DA596DF009113C6 /* FirebaseMessaging */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -194,6 +197,7 @@
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -222,6 +226,7 @@
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -450,6 +455,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */;
 			productName = Toast;
+		};
+		F6E9EE522DA596DF009113C6 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

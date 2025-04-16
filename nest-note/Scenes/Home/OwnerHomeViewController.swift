@@ -66,6 +66,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 self?.refreshData()
             }
             .store(in: &cancellables)
+        
+        NotificationCenter.default.publisher(for: .sessionStatusDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData()
+            }
+            .store(in: &cancellables)
             
         // Subscribe to user information updates
         NotificationCenter.default.publisher(for: .userInformationUpdated)
@@ -106,12 +113,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 let formatter = DateIntervalFormatter()
                 formatter.dateStyle = .medium
                 formatter.timeStyle = .none
-                let duration = formatter.string(from: session.startDate, to: session.endDate) ?? ""
+                let duration = formatter.string(from: session.startDate, to: session.endDate)
                 
                 // Get sitter name or email
-                let sitterInfo = session.assignedSitter?.name ?? session.assignedSitter?.email ?? "No sitter assigned"
+                let sitterInfo = session.assignedSitter?.name ?? session.assignedSitter?.email ?? session.title
                 
-                cell.configure(title: sitterInfo, duration: duration)
+                var durationText: String =  session.assignedSitter == nil ? "No sitter assigned • \(duration)" : duration
+                
+                cell.configure(title: sitterInfo, duration: durationText)
                 
                 // Configure the cell's background
                 var backgroundConfig = UIBackgroundConfiguration.listCell()

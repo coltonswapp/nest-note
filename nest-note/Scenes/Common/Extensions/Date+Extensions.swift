@@ -74,10 +74,41 @@ extension Date {
         return calendar.date(from: components) ?? self
     }
     
+    /// Rounds the date up to the next 15-minute mark
+    /// For example: 2:05 PM becomes 2:15 PM, 2:20 PM becomes 2:30 PM, 2:40 PM becomes 2:45 PM, 2:50 PM becomes 3:00 PM
+    func roundedToNext15Minutes() -> Date {
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: self)
+        
+        // Get current minute
+        let currentMinute = components.minute ?? 0
+        
+        // Calculate next 15-minute mark
+        let next15MinuteMark = ((currentMinute / 15) + 1) * 15
+        
+        // If we're already at a 15-minute mark, stay there
+        if currentMinute % 15 == 0 {
+            return self
+        }
+        
+        // Set to next 15-minute mark
+        components.minute = next15MinuteMark
+        components.second = 0
+        
+        // If we've gone past 60 minutes, increment the hour
+        if next15MinuteMark >= 60 {
+            components.hour = (components.hour ?? 0) + 1
+            components.minute = 0
+        }
+        
+        return calendar.date(from: components) ?? self
+    }
+    
     /// Example usage:
     /// ```
     /// let now = Date() // 2:45 PM
     /// let nextHour = now.roundedToNextHour() // 3:00 PM
+    /// let next15Min = now.roundedToNext15Minutes() // 3:00 PM
     /// ```
 }
 

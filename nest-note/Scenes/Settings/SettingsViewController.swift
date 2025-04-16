@@ -446,6 +446,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             // Handle nest selection
             let vc = NestDetailViewController()
             let nav = UINavigationController(rootViewController: vc)
+            nav.isModalInPresentation = true
             present(nav, animated: true)
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
@@ -487,7 +488,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 showSignInPrompt()
             }
         case .generalItem(let title, _):
-            print("Selected General item: \(title)")
+            switch title {
+            case "Notifications":
+                let vc = NotificationsViewController()
+                navigationController?.pushViewController(vc, animated: true)
+            default:
+                print("Selected General item: \(title)")
+            }
         #if DEBUG
         case .debugItem(let title, _):
             handleDebugItemSelection(title)
@@ -508,6 +515,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     func showUserProfile() {
         let vc = ProfileViewController()
         let nav = UINavigationController(rootViewController: vc)
+        nav.isModalInPresentation = true
         present(nav, animated: true)
     }
 

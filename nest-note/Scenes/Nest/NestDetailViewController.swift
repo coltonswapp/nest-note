@@ -26,6 +26,13 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
         navigationItem.title = "Nest Details"
     }
     
+    override func setupNavigationBarButtons() {
+        let closeButton = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(closeButtonTapped))
+        let buttons = [closeButton]
+        buttons.forEach { $0.tintColor = .label }
+        navigationItem.rightBarButtonItems = buttons
+    }
+    
     private func configureCollectionView() {
         let layout = createLayout()
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)

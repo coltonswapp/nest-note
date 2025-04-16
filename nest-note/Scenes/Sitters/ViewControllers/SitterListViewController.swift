@@ -86,13 +86,17 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     private var allSitters: [SitterItem] = []
     private var filteredSitters: [SitterItem] = []
     
+    // used to determine whether can or cannot send invite
+    private var isEditingSession: Bool
+    
     weak var delegate: SitterListViewControllerDelegate?
     
     // MARK: - Initialization
-    init(displayMode: SitterListDisplayMode = .default, selectedSitter: SitterItem? = nil, session: SessionItem? = nil) {
+    init(displayMode: SitterListDisplayMode = .default, selectedSitter: SitterItem? = nil, session: SessionItem? = nil, isEditingSession: Bool = true) {
         self.displayMode = displayMode
         self.initialSelectedSitter = selectedSitter
         self.currentSession = session
+        self.isEditingSession = isEditingSession
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -276,14 +280,27 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
                     // If we have an invite ID, include the code
                     if let inviteID = assignedSitter.inviteID,
                        let code = inviteID.split(separator: "-").last {
-                        cell.configure(with: selectedSitter.sitter, inviteStatus: assignedSitter.inviteStatus, inviteCode: String(code))
+                        cell.configure(
+                            with: selectedSitter.sitter,
+                            inviteStatus: assignedSitter.inviteStatus,
+                            inviteCode: String(code),
+                            isEditingSession: self?.isEditingSession ?? true
+                        )
                     } else {
                         // No invite yet, but we still have the assigned sitter status
-                        cell.configure(with: selectedSitter.sitter, inviteStatus: assignedSitter.inviteStatus)
+                        cell.configure(
+                            with: selectedSitter.sitter,
+                            inviteStatus: assignedSitter.inviteStatus,
+                            isEditingSession: self?.isEditingSession ?? true
+                        )
                     }
                 } else {
                     // No assigned sitter yet
-                    cell.configure(with: selectedSitter.sitter, inviteStatus: .none)
+                    cell.configure(
+                        with: selectedSitter.sitter,
+                        inviteStatus: .none,
+                        isEditingSession: self?.isEditingSession ?? true
+                    )
                 }
                 
                 return cell
@@ -634,12 +651,20 @@ extension SitterListViewController: UICollectionViewDelegate {
             selectedSitter = tappedSitter
         }
         
+        updateInviteButtonState()
+        
+        // If the session has an invite, delete it, so we can
+        // generate a new invite for the newly selected sitter
+        deleteSessionInvite()
+        currentSession?.assignedSitter = nil
+        
         // First update the cells in the current snapshot
         var currentSnapshot = dataSource.snapshot()
         
         // Reconfigure all sitters to ensure consistent selection state
         let sittersToReconfigure = currentSnapshot.itemIdentifiers(inSection: .sitters)
         currentSnapshot.reconfigureItems(sittersToReconfigure)
+        
         
         // Apply the current snapshot to update cell configurations
         dataSource.apply(currentSnapshot, animatingDifferences: true) {
@@ -652,11 +677,22 @@ extension SitterListViewController: UICollectionViewDelegate {
         // Always deselect the cell to remove the persistent highlight
         collectionView.deselectItem(at: indexPath, animated: true)
         
-        updateInviteButtonState()
+        
         
         // If in selectSitter mode, dismiss the search keyboard
         if displayMode == .selectSitter {
             searchBarView.searchBar.resignFirstResponder()
+        }
+    }
+    
+    func deleteSessionInvite() {
+        if currentSession?.assignedSitter != nil {
+            guard let sessionId = currentSession?.id,
+                  let inviteId = currentSession?.assignedSitter?.inviteID else { return }
+            
+            Task {
+                try await SessionService.shared.deleteInvite(inviteID: inviteId, sessionID: sessionId)
+            }
         }
     }
     
@@ -704,6 +740,7 @@ class InviteStatusCell: UICollectionViewListCell {
     
     weak var delegate: InviteStatusCellDelegate?
     private var inviteCode: String?
+    private var isEditingSession: Bool = true
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -754,9 +791,14 @@ class InviteStatusCell: UICollectionViewListCell {
         }
     }
     
-    func configure(with sitter: SitterItem, inviteStatus: SessionInviteStatus = .none, inviteCode: String? = nil) {
+    func configure(with sitter: SitterItem, inviteStatus: SessionInviteStatus = .none, inviteCode: String? = nil, isEditingSession: Bool = true) {
         nameLabel.text = sitter.name
         self.inviteCode = inviteCode
+        self.isEditingSession = isEditingSession
+        
+        // Hide the invite button if we're not editing an existing session
+        sendInviteButton.isHidden = !isEditingSession
+        sendInviteButton.isEnabled = true
         
         // Configure button based on invite status
         switch inviteStatus {
@@ -795,6 +837,7 @@ class InviteStatusCell: UICollectionViewListCell {
                 foregroundColor: UIColor.secondaryLabel
             )
             sendInviteButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
+            sendInviteButton.isEnabled = false
             
         case .cancelled:
             sendInviteButton.configureButton(

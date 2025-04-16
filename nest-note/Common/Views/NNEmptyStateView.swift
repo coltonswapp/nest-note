@@ -13,6 +13,7 @@ class NNEmptyStateView: UIView {
         stack.alignment = .center
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isUserInteractionEnabled = true
         return stack
     }()
     
@@ -20,6 +21,7 @@ class NNEmptyStateView: UIView {
         let imageView = UIImageView()
         imageView.contentMode = .scaleAspectFit
         imageView.tintColor = .label
+        imageView.isUserInteractionEnabled = false
         return imageView
     }()
     
@@ -28,6 +30,7 @@ class NNEmptyStateView: UIView {
         label.font = .systemFont(ofSize: 17, weight: .semibold)
         label.textColor = .label
         label.textAlignment = .center
+        label.isUserInteractionEnabled = false
         return label
     }()
     
@@ -37,14 +40,16 @@ class NNEmptyStateView: UIView {
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
+        label.isUserInteractionEnabled = false
         return label
     }()
     
     private lazy var actionButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: "", backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
+        let button = NNSmallPrimaryButton(title: "Test", backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
         button.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
-        button.isHidden = true
+        //button.isHidden = true
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.isUserInteractionEnabled = true
         return button
     }()
     
@@ -67,6 +72,9 @@ class NNEmptyStateView: UIView {
         stackView.addArrangedSubview(actionButton)
         
         stackView.setCustomSpacing(16, after: subtitleLabel)
+        
+        // Ensure the view itself is user interaction enabled
+        isUserInteractionEnabled = true
         
         NSLayoutConstraint.activate([
             stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -91,8 +99,10 @@ class NNEmptyStateView: UIView {
         if let buttonTitle = actionButtonTitle {
             actionButton.setTitle(buttonTitle, for: .normal)
             actionButton.isHidden = false
+            iconImageView.isHidden = true
         } else {
             actionButton.isHidden = true
+            iconImageView.isHidden = false
         }
     }
     

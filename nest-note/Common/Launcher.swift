@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import UserNotifications
 
 extension Notification.Name {
     static let appDidReset = Notification.Name("appDidReset")
@@ -36,6 +38,8 @@ final class Launcher {
             }
         }
         
+        requestNotificationPermissions()
+        
         Logger.log(level: .info, category: .launcher, message: "Service configuration complete ✅")
     }
     
@@ -50,7 +54,11 @@ final class Launcher {
         await NestService.shared.reset()
         
         // Reset UserService last
-        await UserService.shared.reset()
+        do {
+            try await UserService.shared.reset()
+        } catch {
+            Logger.log(level: .info, category: .launcher, message: "There was an issue resetting the UserService... ❌")
+        }
         
         // Post notification on main thread that app has reset
         await MainActor.run {
@@ -59,4 +67,25 @@ final class Launcher {
         
         Logger.log(level: .info, category: .launcher, message: "Service configuration reset complete ✅")
     }
-} 
+    
+    private func requestNotificationPermissions() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            // Only request if not determined yet
+            if settings.authorizationStatus == .notDetermined {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                    if granted {
+                        DispatchQueue.main.async {
+                            UIApplication.shared.registerForRemoteNotifications()
+                        }
+                    } else if let error = error {
+                        Logger.log(level: .error, category: .general, message: "Failed to request notification authorization: \(error.localizedDescription)")
+                    }
+                }
+            } else if settings.authorizationStatus == .authorized {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+        }
+    }
+}
