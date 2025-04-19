@@ -45,6 +45,17 @@ final class SessionStatusInfoViewController: NNViewController {
         return label
     }()
     
+    private let footnoteLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Sessions are automatically archived 7 days after completion. Archived sessions are read-only and associated events will no longer be visible."
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     private lazy var gotItButton: NNPrimaryLabeledButton = {
         let button = NNPrimaryLabeledButton(title: "Got It")
         button.addTarget(self, action: #selector(gotItTapped), for: .touchUpInside)
@@ -61,17 +72,17 @@ final class SessionStatusInfoViewController: NNViewController {
             ),
             NNBulletItem(
                 title: "In-Progress",
-                description: "Care is actively being provided during the scheduled time frame",
+                description: "Active care session. Automatically updates 10 minutes before scheduled start time",
                 iconName: "calendar.badge.checkmark"
             ),
             NNBulletItem(
                 title: "Extended",
-                description: "Session has continued beyond its originally scheduled end time",
+                description: "Session has continued past scheduled end time. Updates automatically when end time is reached & session is still `in-progress`",
                 iconName: "timer.circle.fill"
             ),
             NNBulletItem(
                 title: "Completed",
-                description: "Session has officially ended and all activities are finalized",
+                description: "Session has ended and is finalized. Automatically updates after session has been `extended` for 2 hours",
                 iconName: "checkmark.circle.fill"
             )
         ]
@@ -101,6 +112,7 @@ final class SessionStatusInfoViewController: NNViewController {
         containerView.addSubview(titleLabel)
         containerView.addSubview(subtitleLabel)
         containerView.addSubview(infoView)
+        containerView.addSubview(footnoteLabel)
         
         infoView.translatesAutoresizingMaskIntoConstraints = false
         
@@ -131,7 +143,11 @@ final class SessionStatusInfoViewController: NNViewController {
             infoView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 24),
             infoView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 36),
             infoView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -36),
-            infoView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20)
+            
+            footnoteLabel.topAnchor.constraint(equalTo: infoView.bottomAnchor, constant: 24),
+            footnoteLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            footnoteLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            footnoteLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20)
         ])
     }
     
