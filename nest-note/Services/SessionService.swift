@@ -31,11 +31,11 @@ enum SessionError: LocalizedError {
 
 class SessionService {
     static let shared = SessionService()
-    private let db = Firestore.firestore()
+    let db = Firestore.firestore()
     
     private init() {}
     
-    private var sessions: [SessionItem] = []
+    var sessions: [SessionItem] = []
     private var sitterSessionCollection: SessionCollection?
     
     // Add these types at the top of the file
@@ -182,7 +182,7 @@ class SessionService {
                 result.upcoming.append(session)
             case .inProgress, .extended:
                 result.inProgress.append(session)
-            case .completed:
+            case .completed, .archived:
                 result.past.append(session)
             }
         }
@@ -376,6 +376,8 @@ class SessionService {
             }
         case .extended:
             // Extended status should only be inferred, not manually set
+            throw ServiceError.invalidStatusTransition
+        case .archived:
             throw ServiceError.invalidStatusTransition
         }
         

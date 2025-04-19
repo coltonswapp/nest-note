@@ -36,6 +36,13 @@ final class NNDateTimeControl: UIStackView {
         }
     }
     
+    var isEnabled: Bool = true {
+        didSet {
+            dateControl.isEnabled = isEnabled
+            timeControl.isEnabled = isEnabled
+        }
+    }
+    
     private let controlType: DateTimeControlType
     
     private lazy var dateControl: DateTimeButton = {
@@ -208,6 +215,13 @@ private final class DateTimeButton: UIControl {
                 self.backgroundColor = self.isHighlighted ? .systemGray2 : NNColors.NNSystemBackground4
                 self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.95, y: 0.95) : .identity
             }
+        }
+    }
+    
+    override var isEnabled: Bool {
+        didSet {
+            label.textColor = isEnabled ? .label : .secondaryLabel
+            self.backgroundColor = isEnabled ? NNColors.NNSystemBackground4 : .systemGray4.withAlphaComponent(0.3)
         }
     }
     

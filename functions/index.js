@@ -564,3 +564,78 @@ exports.updateSessionStatuses = onSchedule("*/15 * * * *", async (event) => {
     );
   }
 });
+
+/**
+ * Scheduled function to archive completed
+ * sessions that are more than 7 days old.
+ * Runs daily at 3:00 AM.
+ */
+exports.archiveOldSessions = onSchedule("0 6 * * *", async (event) => {
+  const db = admin.firestore();
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  try {
+    logger.info("Starting session archiving process...");
+
+    // Get completed sessions older than 7 days
+    const completedSessionsQuery = db.collectionGroup("sessions")
+        .where("status", "==", SessionStatus.COMPLETED)
+        .where("endDate", "<=", sevenDaysAgo);
+
+    const completedSessionsSnapshot = await completedSessionsQuery.get();
+
+    logger.info(
+        `Found ${completedSessionsSnapshot.size} completed` +
+        ` sessions to archive`,
+    );
+
+    // Process archiving in batches
+    const batch = db.batch();
+    let archiveCount = 0;
+
+    for (const doc of completedSessionsSnapshot.docs) {
+      const sessionData = doc.data();
+
+      // Get the nest ID from the document path
+      const pathSegments = doc.ref.path.split("/");
+      // Path format: nests/nestId/sessions/sessionId
+      const nestId = pathSegments[1];
+
+      // Create archived session document in the correct nest location
+      const archivedSessionRef = db
+          .collection("nests")
+          .doc(nestId)
+          .collection("archivedSessions")
+          .doc(doc.id);
+
+      batch.set(archivedSessionRef, {
+        ...sessionData,
+        status: "archived", // Set status to archived
+        archivedDate: admin.firestore.Timestamp.now(),
+      });
+
+      // Delete original session
+      batch.delete(doc.ref);
+      archiveCount++;
+    }
+
+    // Commit batch if we have sessions to archive
+    if (archiveCount > 0) {
+      await batch.commit();
+      logger.info(
+          `Session archiving complete: ${archiveCount}` +
+          ` sessions archived`,
+      );
+    } else {
+      logger.info("No sessions needed archiving");
+    }
+
+    return null;
+  } catch (error) {
+    logger.error(`Error archiving sessions: ${error.message}`);
+    throw new Error(
+        `Failed to archive sessions: ${error.message}`,
+    );
+  }
+});

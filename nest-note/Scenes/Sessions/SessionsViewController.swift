@@ -27,8 +27,32 @@ class NestSessionsViewController: NNViewController {
     }
     
     enum Item: Hashable {
-        case session(SessionItem)
+        case session(any SessionDisplayable)
         case empty(Section)
+        
+        // Implement Equatable manually since we're using an existential type
+        static func == (lhs: Item, rhs: Item) -> Bool {
+            switch (lhs, rhs) {
+            case (.empty(let lhsSection), .empty(let rhsSection)):
+                return lhsSection == rhsSection
+            case (.session(let lhsSession), .session(let rhsSession)):
+                return lhsSession.id == rhsSession.id
+            default:
+                return false
+            }
+        }
+        
+        // Implement hash(into:) manually since we're using an existential type
+        func hash(into hasher: inout Hasher) {
+            switch self {
+            case .empty(let section):
+                hasher.combine(0) // Different value for empty case
+                hasher.combine(section)
+            case .session(let session):
+                hasher.combine(1) // Different value for session case
+                hasher.combine(session.id)
+            }
+        }
     }
     
     private var filterView: SessionFilterView!
@@ -44,22 +68,39 @@ class NestSessionsViewController: NNViewController {
             updateDisplayedSessions()
         }
     }
+    private var archivedSessions: [ArchivedSession] = [] {
+        didSet {
+            updateDisplayedSessions()
+        }
+    }
     private var currentBucket: SessionService.SessionBucket = .inProgress
     
-    private var filteredSessions: [SessionItem] {
+    private var filteredSessions: [any SessionDisplayable] {
         switch currentBucket {
         case .past:
-            return allSessions
+            // Combine completed sessions and archived sessions
+            let completedSessions = allSessions
                 .filter { $0.status == .completed }
                 .sorted { $0.endDate > $1.endDate }
+                .map { $0 as (any SessionDisplayable) }
+            
+            let sortedArchivedSessions = archivedSessions
+                .sorted { $0.endDate > $1.endDate }
+                .map { $0 as (any SessionDisplayable) }
+            
+            return completedSessions + sortedArchivedSessions
+            
         case .inProgress:
             return allSessions
                 .filter { $0.status == .inProgress || $0.status == .extended }
                 .sorted { $0.endDate < $1.endDate }
+                .map { $0 as (any SessionDisplayable) }
+                
         case .upcoming:
             return allSessions
                 .filter { $0.status == .upcoming }
                 .sorted { $0.startDate < $1.startDate }
+                .map { $0 as (any SessionDisplayable) }
         }
     }
     
@@ -122,6 +163,92 @@ class NestSessionsViewController: NNViewController {
     private func setupCollectionView() {
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.headerMode = .supplementary
+        config.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+            guard let self = self,
+                  case .session(let session) = self.dataSource.itemIdentifier(for: indexPath),
+                  let sessionItem = session as? SessionItem else {
+                return nil
+            }
+            
+            // Don't allow swipe actions for archived sessions
+//            if session is ArchivedSession {
+//                return nil
+//            }
+            
+            let deleteAction = UIContextualAction(
+                style: .destructive,
+                title: "Delete"
+            ) { [weak self] _, _, completion in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                
+                let alert = UIAlertController(
+                    title: "Delete Session",
+                    message: "Are you sure you want to delete this session? This action cannot be undone.",
+                    preferredStyle: .alert
+                )
+                
+                alert.addAction(UIAlertAction(
+                    title: "Cancel",
+                    style: .cancel
+                ) { _ in
+                    completion(false)
+                })
+                
+                alert.addAction(UIAlertAction(
+                    title: "Delete",
+                    style: .destructive
+                ) { _ in
+                    // We'll implement the delete functionality later
+                    print("Delete session: \(sessionItem.id)")
+                    completion(true)
+                })
+                
+                self.present(alert, animated: true)
+            }
+            
+            #if DEBUG
+            let archiveAction = UIContextualAction(
+                style: .normal,
+                title: "Archive"
+            ) { [weak self] _, _, completion in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                
+                let alert = UIAlertController(
+                    title: "Archive Session",
+                    message: "Are you sure you want to archive this session?",
+                    preferredStyle: .alert
+                )
+                
+                alert.addAction(UIAlertAction(
+                    title: "Cancel",
+                    style: .cancel
+                ) { _ in
+                    completion(false)
+                })
+                
+                alert.addAction(UIAlertAction(
+                    title: "Archive",
+                    style: .default
+                ) { _ in
+                    self.archiveSession(sessionItem)
+                    completion(true)
+                })
+                
+                self.present(alert, animated: true)
+            }
+            archiveAction.backgroundColor = .systemOrange
+            
+            return UISwipeActionsConfiguration(actions: [deleteAction, archiveAction])
+            #else
+            return UISwipeActionsConfiguration(actions: [deleteAction])
+            #endif
+        }
         
         let layout = UICollectionViewCompositionalLayout.list(using: config)
         
@@ -156,7 +283,13 @@ class NestSessionsViewController: NNViewController {
             
             switch item {
             case .session(let session):
-                cell.configure(with: session)
+                if let sessionItem = session as? SessionItem {
+                    cell.configure(with: sessionItem)
+                } else if let archivedSession = session as? ArchivedSession {
+                    // Configure cell for archived session
+                    cell.configure(with: archivedSession)
+                }
+                
             case .empty(let section):
                 cell.configureEmptyState(for: section)
             }
@@ -186,7 +319,7 @@ class NestSessionsViewController: NNViewController {
         // Group sessions by month for the current filter
         let calendar = Calendar.current
         let groupedSessions = Dictionary(grouping: filteredSessions) { session in
-            calendar.startOfMonth(for: session.startDate)
+            calendar.startOfMonth(for: session.endDate)
         }
         
         // Sort months and create sections
@@ -219,12 +352,14 @@ class NestSessionsViewController: NNViewController {
     private func fetchNestSessions() {
         Task {
             do {
+                filterView.isEnabled = false
                 emptyStateView.isHidden = true
                 loadingSpinner.startAnimating()
                 guard let nestID = NestService.shared.currentNest?.id else {
                     // Show error state for no current nest
                     await MainActor.run {
                         self.allSessions = []
+                        self.archivedSessions = []
                         self.emptyStateView.configure(
                             icon: UIImage(systemName: "house.slash"),
                             title: "No Current Nest",
@@ -236,16 +371,23 @@ class NestSessionsViewController: NNViewController {
                     return
                 }
                 
-                // Fetch all sessions once
-                let collection = try await sessionService.fetchSessions(nestID: nestID)
+                // Fetch all sessions and archived sessions in parallel
+                async let sessionsCollection = sessionService.fetchSessions(nestID: nestID)
+                async let archivedSessions = sessionService.fetchArchivedSessions(nestID: nestID)
+                
+                let (collection, archived) = try await (sessionsCollection, archivedSessions)
+                
                 await MainActor.run {
                     // Store all sessions
+                    filterView.isEnabled = true
                     self.allSessions = collection.upcoming + collection.inProgress + collection.past
+                    self.archivedSessions = archived
                     updateEmptyState()
                     self.loadingSpinner.stopAnimating()
                 }
             } catch {
                 // Handle error
+                filterView.isEnabled = false
                 print("Error loading sessions: \(error)")
                 await MainActor.run {
                     self.loadingSpinner.stopAnimating()
@@ -312,12 +454,38 @@ extension NestSessionsViewController: UICollectionViewDelegate {
             return
         }
         
-        let editVC = EditSessionViewController(sessionItem: session)
-        editVC.delegate = self
-        editVC.modalPresentationStyle = .pageSheet
-        present(editVC, animated: true)
+        // Handle both SessionItem and ArchivedSession
+        if let sessionItem = session as? SessionItem {
+            let editVC = EditSessionViewController(sessionItem: sessionItem)
+            editVC.delegate = self
+            editVC.modalPresentationStyle = .pageSheet
+            present(editVC, animated: true)
+        } else if let archivedSession = session as? ArchivedSession {
+            // Use the new initializer for ArchivedSession
+            let editVC = EditSessionViewController(archivedSession: archivedSession)
+            editVC.delegate = self
+            editVC.modalPresentationStyle = .pageSheet
+            present(editVC, animated: true)
+        }
         
         collectionView.deselectItem(at: indexPath, animated: true)
+    }
+    
+    // Helper method to archive a session
+    private func archiveSession(_ session: SessionItem) {
+        Task {
+            do {
+                // Call the service to archive the session
+                try await sessionService.archiveSession(session)
+                
+                // Refresh the sessions list
+                await MainActor.run {
+                    loadSessions()
+                }
+            } catch {
+                print("Error archiving session: \(error)")
+            }
+        }
     }
 }
 

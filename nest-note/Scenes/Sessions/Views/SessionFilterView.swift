@@ -16,6 +16,15 @@ class SessionFilterView: UIView {
         }
     }
     
+    var isEnabled: Bool = true {
+        didSet {
+            updateEnabledState()
+        }
+    }
+    
+    private var bottomButtons: [UIButton] = []
+    private var topButtons: [UIButton] = []
+    
     private lazy var bottomStackView: UIStackView = {
         let stack = UIStackView()
         stack.axis = .horizontal
@@ -72,11 +81,11 @@ class SessionFilterView: UIView {
         addSubview(topStackView)
         
         // Setup bottom stack (inactive state)
-        let bottomButtons = createFilterButtons(foregroundColor: .tertiaryLabel)
+        bottomButtons = createFilterButtons(foregroundColor: .tertiaryLabel)
         bottomButtons.forEach { bottomStackView.addArrangedSubview($0) }
         
         // Setup top stack (active state)
-        let topButtons = createFilterButtons(foregroundColor: NNColors.primary)
+        topButtons = createFilterButtons(foregroundColor: NNColors.primary)
         topButtons.forEach { topStackView.addArrangedSubview($0) }
         
         topStackView.mask = tagMaskView
@@ -155,6 +164,23 @@ class SessionFilterView: UIView {
     
     func selectBucket(_ bucket: SessionService.SessionBucket) {
         activeFilter = bucket
+    }
+    
+    private func updateEnabledState() {
+        UIView.animate(withDuration: 0.2) { [weak self] in
+            guard let self else { return }
+            if isEnabled {
+                backgroundView.backgroundColor = NNColors.primaryOpaque
+                backgroundView.layer.borderColor = NNColors.primary.cgColor
+                topButtons.forEach { $0.configuration?.baseForegroundColor = NNColors.primary }
+                topButtons.forEach { $0.isEnabled = true }
+            } else {
+                backgroundView.backgroundColor = UIColor.systemGray5
+                backgroundView.layer.borderColor = UIColor.systemGray4.cgColor
+                topButtons.forEach { $0.configuration?.baseForegroundColor = .tertiaryLabel }
+                topButtons.forEach { $0.isEnabled = false }
+            }
+        }
     }
 }
 

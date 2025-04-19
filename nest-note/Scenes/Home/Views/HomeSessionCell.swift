@@ -191,6 +191,8 @@ final class HomeSessionCell: UICollectionViewListCell {
         case .completed:
             statusLabel.textColor = .systemGreen
             statusImageView.tintColor = .systemGreen
+        case .archived:
+            break
         }
         
         // Configure date display

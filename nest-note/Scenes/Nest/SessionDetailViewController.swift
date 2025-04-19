@@ -9,6 +9,9 @@ final class SessionDetailViewController: NNSheetViewController {
     // MARK: - Properties
     weak var sessionDelegate: SessionDetailViewControllerDelegate?
     
+    private var session: (any SessionDisplayable)?
+    private var isArchived: Bool = false
+    
     private lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
         control.translatesAutoresizingMaskIntoConstraints = false
@@ -81,6 +84,53 @@ final class SessionDetailViewController: NNSheetViewController {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    // MARK: - Configuration
+    func configure(with session: any SessionDisplayable) {
+        self.session = session
+        self.isArchived = session.status == .archived
+        
+        // Update UI based on session data
+        titleLabel.text = isArchived ? "Archived Session" : "Session Details"
+        titleField.text = session.title
+        titleField.isEnabled = !isArchived
+        
+        // Set date controls
+        startControl.date = session.startDate
+        endControl.date = session.endDate
+        
+        // Format dates for display
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMM d, yyyy"
+        startControl.dateText = dateFormatter.string(from: session.startDate)
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        startControl.timeText = timeFormatter.string(from: session.startDate)
+        endControl.timeText = timeFormatter.string(from: session.endDate)
+        
+        // Set multi-day toggle
+        if let sessionItem = session as? SessionItem {
+            multiDayToggle.isOn = sessionItem.isMultiDay
+        } else {
+            // For archived sessions, we don't have isMultiDay, so we'll infer it
+            let calendar = Calendar.current
+            let startDay = calendar.startOfDay(for: session.startDate)
+            let endDay = calendar.startOfDay(for: session.endDate)
+            multiDayToggle.isOn = startDay != endDay
+        }
+        
+        // Update end control style based on multi-day
+        endControl.setStyle(multiDayToggle.isOn ? .both : .time, animated: false)
+        
+        // Disable controls for archived sessions
+        startControl.isUserInteractionEnabled = !isArchived
+        endControl.isUserInteractionEnabled = !isArchived
+        multiDayToggle.isEnabled = !isArchived
+        
+        // Hide save button for archived sessions
+        saveButton.isHidden = isArchived
     }
     
     // MARK: - Lifecycle

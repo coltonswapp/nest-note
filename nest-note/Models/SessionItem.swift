@@ -49,9 +49,14 @@ struct AssignedSitter: Identifiable, Hashable, Codable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
+    
+    func asSitterItem() -> SitterItem {
+        return SitterItem(id: self.id, name: self.name, email: self.email)
+    }
 }
 
-class SessionItem: Hashable, Codable {
+class SessionItem: Hashable, Codable, SessionDisplayable {
+    
     var id: String
     var title: String
     var startDate: Date
@@ -200,6 +205,7 @@ enum SessionStatus: String, Codable {
     case inProgress = "inProgress"
     case extended
     case completed
+    case archived
     
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -234,6 +240,8 @@ enum SessionStatus: String, Codable {
             return "timer.circle.fill"
         case .completed:
             return "checkmark.circle.fill"
+        case .archived:
+            return "archivebox.fill"
         }
     }
     

@@ -89,7 +89,7 @@ final class VisibilityCell: UICollectionViewListCell {
                 imagePlacement: .right,
                 foregroundColor: NNColors.primary
             )
-            visibilityButton.isUserInteractionEnabled = true
+            visibilityButton.isUserInteractionEnabled = false
         } else {
             visibilityButton.configureButton(
                 title: level.title,
