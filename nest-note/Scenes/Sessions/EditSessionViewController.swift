@@ -1459,8 +1459,8 @@ final class StatusCell: UICollectionViewListCell {
         NSLayoutConstraint.activate([
             iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             iconImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            iconImageView.widthAnchor.constraint(equalToConstant: 24),
-            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+            iconImageView.widthAnchor.constraint(equalToConstant: 24).with(priority: .defaultHigh),
+            iconImageView.heightAnchor.constraint(equalToConstant: 24).with(priority: .defaultHigh),
             
             titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -1492,12 +1492,10 @@ final class StatusCell: UICollectionViewListCell {
         
         statusButton.configuration?.attributedTitle = AttributedString(currentStatus.displayName, attributes: container)
         iconImageView.image = UIImage(systemName: currentStatus.icon)
-        
-        statusButton.isEnabled = !isReadOnly
     }
     
     private func setupStatusMenu(selectedStatus: SessionStatus) {
-        let infoAction = UIAction(title: "About Session Status", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+        let infoAction = UIAction(title: "About Session Statuses", image: UIImage(systemName: "info.circle")) { [weak self] _ in
             self?.showStatusInfo()
         }
         
@@ -1535,7 +1533,12 @@ final class StatusCell: UICollectionViewListCell {
         let statusSection = UIMenu(title: "Select Status", options: .displayInline, children: statusActions)
         let infoSection = UIMenu(title: "Learn More", options: .displayInline, children: [infoAction])
         
-        statusButton.menu = UIMenu(children: [statusSection, infoSection])
+        if !isReadOnly {
+            statusButton.menu = UIMenu(children: [statusSection, infoSection])
+        } else {
+            statusButton.menu = UIMenu(children: [infoSection])
+        }
+        
         statusButton.showsMenuAsPrimaryAction = true
     }
     
