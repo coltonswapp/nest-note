@@ -17,6 +17,8 @@ final class DateCell: UICollectionViewListCell {
     private var endDate: Date = Date()
     private var isMultiDay: Bool = false
     
+    private var isReadOnly: Bool = false
+    
     // Create labels
     let startLabel: UILabel = {
         let label = UILabel()
@@ -120,15 +122,20 @@ final class DateCell: UICollectionViewListCell {
         ])
     }
     
-    func configure(startDate: Date, endDate: Date, isMultiDay: Bool) {
+    func configure(startDate: Date, endDate: Date, isMultiDay: Bool, isReadOnly: Bool = false) {
         self.startDate = startDate
         self.endDate = endDate
         self.isMultiDay = isMultiDay
+        self.isReadOnly = isReadOnly
         
         startControl.date = startDate
         endControl.date = endDate
         multiDayToggle.isOn = isMultiDay
         endControl.setStyle(isMultiDay ? .both : .time, animated: false)
+        
+        startControl.isEnabled = !isReadOnly
+        endControl.isEnabled = !isReadOnly
+        multiDayToggle.isEnabled = !isReadOnly
         
         updateDateLabels()
     }

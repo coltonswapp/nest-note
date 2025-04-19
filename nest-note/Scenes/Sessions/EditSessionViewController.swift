@@ -99,6 +99,18 @@ class EditSessionViewController: NNViewController {
         return button
     }()
     
+    // Add property to track if this is an archived session
+    var isArchivedSession: Bool = false {
+        didSet {
+            if isArchivedSession {
+                // Disable editing for archived sessions
+                titleTextField.isEnabled = false
+                saveButton.isEnabled = false
+                saveButton.isHidden = true
+            }
+        }
+    }
+    
     // Add selectedSitter property
     private var selectedSitter: SitterItem? {
         didSet {
@@ -161,6 +173,57 @@ class EditSessionViewController: NNViewController {
         super.init(nibName: nil, bundle: nil)
     }
     
+    // Add initializer for ArchivedSession
+    init(archivedSession: ArchivedSession) {
+        // Convert ArchivedSession to SessionItem
+        let sessionItem = SessionItem()
+        sessionItem.id = archivedSession.id
+        sessionItem.title = archivedSession.title
+        sessionItem.startDate = archivedSession.startDate
+        sessionItem.endDate = archivedSession.endDate
+        sessionItem.isMultiDay = Calendar.current.dateComponents([.day], from: archivedSession.startDate, to: archivedSession.endDate).day ?? 0 > 0
+        sessionItem.visibilityLevel = archivedSession.visibilityLevel
+        sessionItem.status = archivedSession.status
+        
+        // Set assigned sitter if available
+        if let assignedSitter = archivedSession.assignedSitter {
+            sessionItem.assignedSitter = AssignedSitter(
+                id: assignedSitter.id,
+                name: assignedSitter.name,
+                email: assignedSitter.email,
+                userID: nil,
+                inviteStatus: .none,
+                inviteID: nil
+            )
+        }
+        
+        // Set nest and owner IDs
+        sessionItem.nestID = archivedSession.nestID
+        sessionItem.ownerID = archivedSession.ownerID
+        
+        self.sessionItem = sessionItem
+        self.originalSession = sessionItem
+        
+        // Archived sessions are always considered "existing"
+        self.isEditingSession = true
+        
+        // Create date range based on session type
+        if sessionItem.isMultiDay {
+            self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
+        } else {
+            // For single day, range is just that day
+            let calendar = Calendar.current
+            let startOfDay = calendar.middleOfDay(for: sessionItem.startDate)
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+            self.dateRange = DateInterval(start: startOfDay, end: endOfDay)
+        }
+        
+        super.init(nibName: nil, bundle: nil)
+        
+        // Mark as archived session
+        self.isArchivedSession = true
+    }
+    
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -177,8 +240,8 @@ class EditSessionViewController: NNViewController {
             sheetPresentationController.prefersGrabberVisible = false
         }
         
-        // Fetch events if we're editing an existing session
-        if isEditingSession {
+        // Fetch events if we're editing an existing session and it's not archived
+        if isEditingSession && !isArchivedSession {
             fetchSessionEvents()
         }
         
@@ -203,7 +266,12 @@ class EditSessionViewController: NNViewController {
         configureDataSource()
         applyInitialSnapshots()
         
-        saveButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        if !isArchivedSession {
+            saveButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        } else {
+            titleTextField.isEnabled = false
+            saveButton.isHidden = true
+        }
         
         // Update UI based on editing state
         titleTextField.text = sessionItem.title
@@ -415,33 +483,24 @@ class EditSessionViewController: NNViewController {
         let inviteSitterRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
             var content = cell.defaultContentConfiguration()
             
+            guard let self else { return }
+            
             switch item {
             case .inviteSitter:
-                if let sitter = self?.selectedSitter {
-                    // Show selected sitter
+                // Determine the sitter to display (selected or assigned)
+                let displaySitter = self.selectedSitter ?? (self.sessionItem.assignedSitter?.asSitterItem() ?? nil)
+                
+                if let sitter = displaySitter {
+                    // Show sitter information
                     content.text = sitter.name
-                    
-                    // Get invite status from session's assigned sitter
-                    if let assignedSitter = self?.sessionItem.assignedSitter {
-                        content.secondaryText = assignedSitter.inviteStatus.displayName
-                    } else {
-                        content.secondaryText = SessionInviteStatus.none.displayName
-                    }
-                    
-                    let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
-                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                    content.image = image
-                } else if let assignedSitter = self?.sessionItem.assignedSitter {
-                    // Show assigned sitter
-                    content.text = assignedSitter.name
-                    content.secondaryText = assignedSitter.inviteStatus.displayName
+                    content.secondaryText = self.sessionItem.assignedSitter?.inviteStatus.displayName ?? SessionInviteStatus.none.displayName
                     
                     let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
                         .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
                     content.image = image
                 } else {
                     // Show default state
-                    content.text = "Add a sitter"
+                    content.text = isArchivedSession ? "No sitter" : "Add a sitter"
                     content.secondaryText = nil
                     
                     let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
@@ -450,20 +509,28 @@ class EditSessionViewController: NNViewController {
                     content.image = image
                 }
                 
+                // Common styling
                 content.imageProperties.tintColor = NNColors.primary
                 content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
                 content.imageToTextPadding = 8
-                
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
-                
                 content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
                 
-                // Set secondary text color to secondaryLabel
+                // Handle archived session styling
+                if isArchivedSession {
+                    content.textProperties.color = .secondaryLabel
+                    content.secondaryText = nil
+                }
+                
                 content.secondaryTextProperties.font = .systemFont(ofSize: 14)
                 content.secondaryTextProperties.color = .secondaryLabel
                 
-                cell.accessories = [.disclosureIndicator()]
+                // Add disclosure indicator for non-archived sessions
+                if !self.isArchivedSession {
+                    cell.accessories = [.disclosureIndicator()]
+                }
+                
             default:
                 break
             }
@@ -472,6 +539,9 @@ class EditSessionViewController: NNViewController {
         }
         
         let expensesRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
+            
+            guard let self else { return }
+            
             var content = cell.defaultContentConfiguration()
             
             switch item {
@@ -504,15 +574,17 @@ class EditSessionViewController: NNViewController {
         }
         
         let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { [weak self] cell, indexPath, item in
+            guard let self else { return }
             if case let .visibilityLevel(level) = item {
-                cell.configure(with: level)
+                cell.configure(with: level, isReadOnly: isArchivedSession)
                 cell.delegate = self
             }
         }
         
         let statusRegistration = UICollectionView.CellRegistration<StatusCell, Item> { [weak self] cell, indexPath, item in
+            guard let self else { return }
             if case let .sessionStatus(status) = item {
-                cell.configure(with: status)
+                cell.configure(with: status, isReadOnly: isArchivedSession)
                 cell.delegate = self
             }
         }
@@ -524,9 +596,10 @@ class EditSessionViewController: NNViewController {
             }
         }
         
-        let dateRegistration = UICollectionView.CellRegistration<DateCell, Item> { cell, indexPath, item in
+        let dateRegistration = UICollectionView.CellRegistration<DateCell, Item> { [weak self] cell, indexPath, item in
+            guard let self else { return }
             if case let .dateSelection(startDate, endDate, isMultiDay) = item {
-                cell.configure(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay)
+                cell.configure(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay, isReadOnly: isArchivedSession)
                 cell.delegate = self
             }
         }
@@ -577,6 +650,11 @@ class EditSessionViewController: NNViewController {
             case .events:
                 configuration.text = "Add Nest-related events for this session."
                 configuration.textProperties.numberOfLines = 0
+            case .status:
+                if self.isArchivedSession {
+                    configuration.text = "This session has been archived, as such, it cannot be edited."
+                    configuration.textProperties.numberOfLines = 0
+                }
             default:
                 break
             }
@@ -624,14 +702,23 @@ class EditSessionViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .expenses, .events])
-        snapshot.appendItems([.inviteSitter], toSection: .sitter)
-        snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
-        snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-        snapshot.appendItems([.nestReview], toSection: .nestReview)
-        snapshot.appendItems([.expenses], toSection: .expenses)
-        snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
-        snapshot.appendItems([.events], toSection: .events)
+        
+        if !isArchivedSession {
+            snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .expenses, .events])
+            snapshot.appendItems([.inviteSitter], toSection: .sitter)
+            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
+            snapshot.appendItems([.nestReview], toSection: .nestReview)
+            snapshot.appendItems([.expenses], toSection: .expenses)
+            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
+            snapshot.appendItems([.events], toSection: .events)
+        } else {
+            snapshot.appendSections([.sitter, .date, .visibility, .status])
+            snapshot.appendItems([.inviteSitter], toSection: .sitter)
+            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
+            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
+        }
         dataSource.apply(snapshot, animatingDifferences: false)
     }
     
@@ -759,11 +846,12 @@ class EditSessionViewController: NNViewController {
     }
     
     private func fetchSessionEvents() {
-        // Only fetch events if we're editing an existing session
-        guard isEditingSession else { return }
+        // Only fetch events if we're editing an existing session and it's not archived
+        guard isEditingSession && !isArchivedSession else { return }
         
         Task {
             do {
+                guard sessionItem.nestID != nil else { return }
                 let events = try await SessionService.shared.getSessionEvents(for: sessionItem.id, nestID: sessionItem.nestID)
                 
                 await MainActor.run {
@@ -792,7 +880,7 @@ class EditSessionViewController: NNViewController {
     
     // Add a method to refresh events (useful after calendar updates)
     func refreshEvents() {
-        if isEditingSession {
+        if isEditingSession && !isArchivedSession {
             fetchSessionEvents()
         }
     }
@@ -1022,7 +1110,9 @@ extension EditSessionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
-        case .inviteSitter, .events, .visibilityLevel, .moreEvents, .expenses, .sessionEvent:
+        case .inviteSitter:
+            return !isArchivedSession
+        case .events, .moreEvents, .expenses, .sessionEvent:
             return true
         default:
             return false
@@ -1034,6 +1124,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         
         switch item {
         case .inviteSitter:
+            guard !isArchivedSession else { return }
             inviteSitterButtonTapped()
         case .visibilityLevel:
             break
@@ -1317,6 +1408,8 @@ final class StatusCell: UICollectionViewListCell {
     weak var delegate: StatusCellDelegate?
     private var currentStatus: SessionStatus = .upcoming
     
+    private var isReadOnly: Bool = false
+    
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1386,7 +1479,8 @@ final class StatusCell: UICollectionViewListCell {
         iconImageView.isUserInteractionEnabled = true
     }
     
-    func configure(with status: SessionStatus) {
+    func configure(with status: SessionStatus, isReadOnly: Bool = false) {
+        self.isReadOnly = isReadOnly
         currentStatus = status
         updateButtonAppearance()
         setupStatusMenu(selectedStatus: status)
@@ -1398,6 +1492,8 @@ final class StatusCell: UICollectionViewListCell {
         
         statusButton.configuration?.attributedTitle = AttributedString(currentStatus.displayName, attributes: container)
         iconImageView.image = UIImage(systemName: currentStatus.icon)
+        
+        statusButton.isEnabled = !isReadOnly
     }
     
     private func setupStatusMenu(selectedStatus: SessionStatus) {
