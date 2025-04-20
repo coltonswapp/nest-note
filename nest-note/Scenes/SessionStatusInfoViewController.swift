@@ -67,22 +67,22 @@ final class SessionStatusInfoViewController: NNViewController {
         let items = [
             NNBulletItem(
                 title: "Upcoming",
-                description: "Session is scheduled but hasn't begun yet",
+                description: "Scheduled session awaiting start",
                 iconName: "calendar.badge.clock"
             ),
             NNBulletItem(
                 title: "In-Progress",
-                description: "Active care session. Automatically updates 10 minutes before scheduled start time",
+                description: "Active care session (automatically marked as In-Progress when within 10 minutes of start time)",
                 iconName: "calendar.badge.checkmark"
             ),
             NNBulletItem(
                 title: "Extended",
-                description: "Session has continued past scheduled end time. Updates automatically when end time is reached & session is still `in-progress`",
+                description: "Session continuing beyond scheduled end time (automatically marked as Extended when end time passes)",
                 iconName: "timer.circle.fill"
             ),
             NNBulletItem(
                 title: "Completed",
-                description: "Session has ended and is finalized. Automatically updates after session has been `extended` for 2 hours",
+                description: "Finalized session with all activities concluded (automatically marked as Completed after 2 hours in Extended state)",
                 iconName: "checkmark.circle.fill"
             )
         ]
