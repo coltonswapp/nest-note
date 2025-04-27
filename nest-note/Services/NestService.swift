@@ -269,6 +269,25 @@ final class NestService: EntryRepository {
         }
         Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultEntries.count) default entries")
     }
+    
+    // Add this method to find entries older than a specified timeframe
+    func fetchOutdatedEntries(olderThan days: Int = 90) async throws -> [BaseEntry] {
+        // Fetch all entries first
+        let groupedEntries = try await fetchEntries()
+        let allEntries = groupedEntries.values.flatMap { $0 }
+        
+        // Calculate the date threshold (90 days ago by default)
+        let calendar = Calendar.current
+        let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        
+        // Filter entries that haven't been updated for the specified timeframe
+        let outdatedEntries = allEntries.filter { entry in
+            return entry.updatedAt < threshold
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Found \(outdatedEntries.count) entries older than \(days) days")
+        return outdatedEntries
+    }
 }
 
 // MARK: - Errors

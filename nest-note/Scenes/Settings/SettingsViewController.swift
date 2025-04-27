@@ -382,8 +382,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         case "Glassy Button Playground":
             navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
         case "Entry Review":
-            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
-            present(reviewVC, animated: true)
+            break
+//            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
+//            present(reviewVC, animated: true)
         case "Debug Card Stack":
             let reviewVC = DebugCardStackView()
             present(reviewVC, animated: true)

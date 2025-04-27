@@ -154,6 +154,21 @@ class EditSessionViewController: NNViewController {
     // Add a property to track if events are loading
     private var isLoadingEvents = false
     
+    // Add property for EntryRepository
+    private var entryRepository: EntryRepository {
+        return NestService.shared
+    }
+    
+    // Add property to track if we should show the nest review section
+    private var shouldShowNestReview: Bool = false
+    
+    // Add property to track when we last fetched entries to avoid duplicate calls
+    private var lastFetchTime: Date?
+    private let minimumFetchInterval: TimeInterval = 1.0 // Minimum time between fetches in seconds
+    
+    // Add property to store the last known outdated entries count
+    private var lastOutdatedCount: Int = 0
+    
     // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
@@ -259,6 +274,15 @@ class EditSessionViewController: NNViewController {
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        
+        // Refresh outdated entries count each time the view appears
+        if !isArchivedSession {
+            fetchOutdatedEntries()
+        }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
     }
     
     override func setup() {
@@ -592,9 +616,11 @@ class EditSessionViewController: NNViewController {
             }
         }
         
-        let nestReviewRegistration = UICollectionView.CellRegistration<NestReviewCell, Item> { cell, indexPath, item in
+        let nestReviewRegistration = UICollectionView.CellRegistration<NestReviewCell, Item> { [weak self] cell, indexPath, item in
+            guard let self = self else { return }
             if case .nestReview = item {
-                cell.configure(itemCount: 12) // You can make this dynamic later
+                // Start with just loading state (don't configure with 0)
+                cell.configure(itemCount: nil)
                 cell.delegate = self
             }
         }
@@ -713,14 +739,15 @@ class EditSessionViewController: NNViewController {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            snapshot.appendSections([.sitter, .date, .visibility, .status, .nestReview, .expenses, .events])
+            snapshot.appendSections([.sitter, .date, .visibility, .status, .expenses, .events])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.nestReview], toSection: .nestReview)
             snapshot.appendItems([.expenses], toSection: .expenses)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.events], toSection: .events)
+            
+            // We'll add the nest review section later after checking if entries need review
         } else {
             snapshot.appendSections([.sitter, .date, .visibility, .status])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
@@ -729,6 +756,8 @@ class EditSessionViewController: NNViewController {
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
+        
+        // The fetchOutdatedEntries will be called from viewWillAppear
     }
     
     private func showVisibilityLevelInfo() {
@@ -814,13 +843,21 @@ class EditSessionViewController: NNViewController {
     }
     
     private func presentEntryReview() {
-        let reviewVC = EntryReviewViewController()
+        // Create EntryReviewViewController with our entryRepository
+        let reviewVC = EntryReviewViewController(entryRepository: entryRepository)
+        
+        // Set ourselves as the delegate
+        reviewVC.reviewDelegate = self
+        
         let nav = UINavigationController(rootViewController: reviewVC)
         
         if let sheet = nav.sheetPresentationController {
             sheet.detents = [.large()]
             sheet.prefersGrabberVisible = true
         }
+        
+        reviewVC.modalPresentationStyle = .formSheet
+        reviewVC.isModalInPresentation = true
         
         present(nav, animated: true)
     }
@@ -1060,6 +1097,144 @@ class EditSessionViewController: NNViewController {
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
+    
+    // Update this method to use entryRepository and hide section if no entries need review
+    private func fetchOutdatedEntries() {
+        // Only fetch if we need to (not for archived sessions)
+        guard !isArchivedSession else { return }
+        
+        // Only show nest review for upcoming sessions
+        guard sessionItem.status == .upcoming else { 
+            // For non-upcoming sessions, make sure the review section is removed
+            if shouldShowNestReview {
+                shouldShowNestReview = false
+                var snapshot = dataSource.snapshot()
+                if snapshot.sectionIdentifiers.contains(.nestReview) {
+                    snapshot.deleteSections([.nestReview])
+                    dataSource.apply(snapshot, animatingDifferences: true)
+                }
+            }
+            return
+        }
+        
+        // Check if we've fetched recently to avoid duplicate calls
+        if let lastFetch = lastFetchTime, Date().timeIntervalSince(lastFetch) < minimumFetchInterval {
+            Logger.log(level: .debug, category: .nestService, message: "Skipping fetchOutdatedEntries - called too soon")
+            return
+        }
+        
+        // Update last fetch time
+        lastFetchTime = Date()
+        
+        Task {
+            do {
+                Logger.log(level: .debug, category: .nestService, message: "Fetching outdated entries...")
+                
+                // Use the entry repository to fetch outdated entries directly via the protocol
+                let outdatedEntries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
+                
+                // Add this additional logging to be explicit
+                if outdatedEntries.isEmpty {
+                    Logger.log(level: .debug, category: .nestService, message: "No outdated entries found")
+                } else {
+                    Logger.log(level: .debug, category: .nestService, message: "Fetched \(outdatedEntries.count) outdated entries: \(outdatedEntries.map { $0.title }.joined(separator: ", "))")
+                }
+                
+                // Store the count to help with race conditions
+                self.lastOutdatedCount = outdatedEntries.count
+                
+                await MainActor.run {
+                    // Only update if the view is still in the window hierarchy
+                    guard self.view.window != nil else { return }
+                    
+                    let hasOutdatedEntries = !outdatedEntries.isEmpty
+                    let outdatedCount = outdatedEntries.count
+                    
+                    // If we have outdated entries and the section doesn't exist yet, add it
+                    if hasOutdatedEntries {
+                        if !self.shouldShowNestReview {
+                            self.shouldShowNestReview = true
+                            var snapshot = dataSource.snapshot()
+                            
+                            // Check if the nestReview section already exists
+                            if !snapshot.sectionIdentifiers.contains(.nestReview) {
+                                // Simpler approach - just add the section and item
+                                snapshot.appendSections([.nestReview])
+                                snapshot.appendItems([.nestReview], toSection: .nestReview)
+                                
+                                // Apply the changes
+                                dataSource.apply(snapshot, animatingDifferences: true)
+                                
+                                // Important: configure the cell immediately after adding it
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                    self.updateNestReviewCell(with: outdatedCount)
+                                }
+                            } else {
+                                // The section exists but needs updating
+                                self.updateNestReviewCell(with: outdatedCount)
+                            }
+                        } else {
+                            // The section is already shown, just update the count
+                            self.updateNestReviewCell(with: outdatedCount)
+                        }
+                    } else {
+                        // If we have no outdated entries and the section exists, remove it
+                        if self.shouldShowNestReview {
+                            self.shouldShowNestReview = false
+                            var snapshot = dataSource.snapshot()
+                            
+                            if snapshot.sectionIdentifiers.contains(.nestReview) {
+                                snapshot.deleteSections([.nestReview])
+                                dataSource.apply(snapshot, animatingDifferences: true)
+                            }
+                        }
+                    }
+                }
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "Error fetching outdated entries: \(error.localizedDescription)")
+                
+                // Even on error, we should update the cell to not show the loading state
+                await MainActor.run {
+                    self.updateNestReviewCell(with: 0)
+                }
+            }
+        }
+    }
+    
+    // Add a dedicated method for updating the nest review cell
+    private func updateNestReviewCell(with count: Int) {
+        // Log the actual count we're trying to set
+        Logger.log(level: .debug, category: .general, message: "Updating NestReviewCell with count: \(count)")
+        
+        var currentSnapshot = dataSource.snapshot()
+        guard currentSnapshot.sectionIdentifiers.contains(.nestReview),
+              let nestReviewItem = currentSnapshot.itemIdentifiers(inSection: .nestReview).first else {
+            Logger.log(level: .debug, category: .general, message: "NestReviewCell not found in snapshot")
+            return
+        }
+        
+        // First, force a reconfiguration of the cell
+        currentSnapshot.reconfigureItems([nestReviewItem])
+        dataSource.apply(currentSnapshot, animatingDifferences: false)
+        
+        // Then try to find the cell and update it directly
+        if let indexPath = dataSource.indexPath(for: nestReviewItem),
+           let cell = collectionView.cellForItem(at: indexPath) as? NestReviewCell {
+            Logger.log(level: .debug, category: .general, message: "NestReviewCell found - updating with count \(count)")
+            
+            // IMPORTANT: Configure with the actual count passed in, not 0
+            cell.configure(itemCount: count)
+            
+            // Double-check if the cell was updated correctly
+            Logger.log(level: .debug, category: .general, message: "After update - cell button title: \(cell.reviewButton.titleLabel?.text ?? "nil")")
+        } else {
+            // The cell might not be visible yet, try to force a reload
+            Logger.log(level: .debug, category: .general, message: "NestReviewCell not visible - forcing reload")
+            if let indexPath = dataSource.indexPath(for: nestReviewItem) {
+                collectionView.reloadItems(at: [indexPath])
+            }
+        }
+    }
 }
 
 // MARK: - Types
@@ -1177,7 +1352,29 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .dateSelection:
             break
         case .nestReview:
-            break
+            // For NestReview cell, we want to:
+            // 1. If it's in a loading state, try to force an update
+            if let cell = collectionView.cellForItem(at: indexPath) as? NestReviewCell {
+                if cell.loadingIndicator.isAnimating {
+                    // Try to stop the loading state and trigger a re-fetch
+                    Logger.log(level: .debug, category: .general, message: "NestReview cell is loading, attempting recovery")
+                    cell.stopLoading()
+                    
+                    // If we have a non-zero lastOutdatedCount, use it 
+                    if lastOutdatedCount > 0 {
+                        Logger.log(level: .debug, category: .general, message: "Using cached count for recovery: \(lastOutdatedCount)")
+                        cell.configure(itemCount: lastOutdatedCount)
+                    } else {
+                        // Otherwise, fetch again
+                        fetchOutdatedEntries()
+                    }
+                } else {
+                    // Otherwise present the review controller normally
+                    presentEntryReview()
+                }
+            } else {
+                presentEntryReview()
+            }
         case .expenses:
             expenseButtonTapped()
         case .overview:
@@ -1670,6 +1867,24 @@ extension EditSessionViewController: InviteStatusCellDelegate {
         
         // Push it onto the navigation stack
         navigationController?.pushViewController(inviteSitterVC, animated: true)
+    }
+} 
+
+// Add the EntryReviewViewControllerDelegate conformance
+extension EditSessionViewController: EntryReviewViewControllerDelegate {
+    func entryReviewDidComplete() {
+        Logger.log(level: .debug, category: .general, message: "Entry review completed - removing nest review section")
+        
+        showToast(text: "Nest Review complete")
+        
+        // Remove the nest review section since review is complete
+        shouldShowNestReview = false
+        var snapshot = dataSource.snapshot()
+        
+        if snapshot.sectionIdentifiers.contains(.nestReview) {
+            snapshot.deleteSections([.nestReview])
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
     }
 } 
 

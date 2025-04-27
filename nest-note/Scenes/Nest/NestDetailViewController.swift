@@ -114,6 +114,7 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
         
         // Actions section
         snapshot.appendItems([
+            .action(title: "Nest Review", imageName: "rectangle.and.hand.point.up.left.fill", destructive: false),
             .action(title: "Add another Residence", imageName: "plus.circle", destructive: false)
         ], toSection: .actions)
         
@@ -147,6 +148,8 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
             }
         case .action(let title, _, _):
             switch title {
+            case "Nest Review":
+                presentEntryReview()
             case "Add another Residence":
                 let featureVC = NNFeaturePreviewViewController(feature: .multipleNests)
                 let nav = UINavigationController(rootViewController: featureVC)
@@ -175,6 +178,19 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
         })
         
         present(alert, animated: true)
+    }
+    
+    private func presentEntryReview() {
+        let reviewVC = EntryReviewViewController(entryRepository: NestService.shared)
+        
+        let nav = UINavigationController(rootViewController: reviewVC)
+        
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        
+        present(nav, animated: true)
     }
     
     @objc private func handleUserInformationUpdate() {

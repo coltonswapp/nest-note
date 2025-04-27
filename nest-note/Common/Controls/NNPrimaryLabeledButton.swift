@@ -645,7 +645,6 @@ class NNSmallPrimaryButton: UIButton {
     override var backgroundColor: UIColor? {
         didSet {
             layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
-            originalBackgroundColor = backgroundColor
         }
     }
 }
