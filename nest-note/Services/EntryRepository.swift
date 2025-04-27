@@ -24,4 +24,28 @@ protocol EntryRepository {
     
     /// Refreshes categories, clearing any cache
     func refreshCategories() async throws -> [NestCategory]
+    
+    /// Fetches entries that haven't been updated in a specified timeframe
+    /// Default implementation provided in extension
+    func fetchOutdatedEntries(olderThan days: Int) async throws -> [BaseEntry]
+} 
+
+// Default implementation for fetchOutdatedEntries
+extension EntryRepository {
+    func fetchOutdatedEntries(olderThan days: Int = 90) async throws -> [BaseEntry] {
+        // Fetch all entries first
+        let groupedEntries = try await fetchEntries()
+        let allEntries = groupedEntries.values.flatMap { $0 }
+        
+        // Calculate the date threshold (90 days ago by default)
+        let calendar = Calendar.current
+        let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        
+        // Filter entries that haven't been updated for the specified timeframe
+        let outdatedEntries = allEntries.filter { entry in
+            return entry.updatedAt < threshold
+        }
+        
+        return outdatedEntries
+    }
 } 

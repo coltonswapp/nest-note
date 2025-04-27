@@ -75,7 +75,7 @@ class CardStackView: UIView {
     }
     
     // Add progress label
-    private lazy var progressLabel: UILabel = {
+    public lazy var progressLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textColor = .secondaryLabel
@@ -189,6 +189,12 @@ class CardStackView: UIView {
         self.cardData = data
         currentIndex = 0  // This will trigger updateProgressLabel
         initializeVisibleCards()
+        
+        // Ensure progress label is visible
+        showProgressLabel()
+        
+        // Log the current progress for debugging
+        Logger.log(level: .debug, category: .general, message: "CardStackView: Set card data, progress: \(progressLabel.text ?? "nil"), count: \(data.count)")
     }
     
     private func initializeVisibleCards() {
@@ -506,6 +512,12 @@ class CardStackView: UIView {
     
     private func updateProgressLabel() {
         progressLabel.text = "\(currentIndex + 1)/\(cardData.count)"
+        
+        // Always make sure the label is visible when updating it
+        progressLabel.alpha = 1.0
+        
+        // Log the updated value
+        Logger.log(level: .debug, category: .general, message: "CardStackView: Updated progress label to \(progressLabel.text ?? "nil")")
     }
     
     private func showSuccessState() {
@@ -522,7 +534,7 @@ class CardStackView: UIView {
         guard let topCard = cards.first else { return }
         
         // Check if this is the last card
-        let isLastCard = currentIndex == cardData.count
+        let isLastCard = currentIndex == cardData.count - 1
         
         // Store swipe direction for potential restoration
         swipeDirections[topCard] = .right
@@ -533,6 +545,9 @@ class CardStackView: UIView {
         // Remove the card from the array immediately
         cards.removeFirst()
         currentIndex += 1
+        
+        // Keep progress label visible during the transition
+        showProgressLabel()
         
         // Create and add new card if needed
         if currentIndex + 2 < cardData.count {
@@ -574,7 +589,101 @@ class CardStackView: UIView {
             // If this was the last card, animate spinner success
             if isLastCard {
                 self.showSuccessState()
+            } else {
+                // Otherwise ensure progress label stays visible
+                self.showProgressLabel()
             }
         }
+    }
+    
+    // Add these methods to public interface
+    func showLoading() {
+        // Remove existing cards
+        cards.forEach { $0.removeFromSuperview() }
+        cards = []
+        reviewedCards = []
+    }
+    
+    func showError(message: String) {
+        // Remove loading indicator if it exists
+        viewWithTag(999)?.removeFromSuperview()
+        
+        // Create error view
+        let errorView = UIView()
+        errorView.translatesAutoresizingMaskIntoConstraints = false
+        errorView.tag = 998
+        addSubview(errorView)
+        
+        let imageView = UIImageView(image: UIImage(systemName: "exclamationmark.triangle.fill"))
+        imageView.tintColor = .systemRed
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        let messageLabel = UILabel()
+        messageLabel.text = message
+        messageLabel.textAlignment = .center
+        messageLabel.textColor = .secondaryLabel
+        messageLabel.font = .systemFont(ofSize: 16)
+        messageLabel.numberOfLines = 0
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        errorView.addSubview(imageView)
+        errorView.addSubview(messageLabel)
+        
+        NSLayoutConstraint.activate([
+            errorView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            errorView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            errorView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 40),
+            errorView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -40),
+            
+            imageView.centerXAnchor.constraint(equalTo: errorView.centerXAnchor),
+            imageView.topAnchor.constraint(equalTo: errorView.topAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 50),
+            imageView.heightAnchor.constraint(equalToConstant: 50),
+            
+            messageLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 16),
+            messageLabel.leadingAnchor.constraint(equalTo: errorView.leadingAnchor),
+            messageLabel.trailingAnchor.constraint(equalTo: errorView.trailingAnchor),
+            messageLabel.bottomAnchor.constraint(equalTo: errorView.bottomAnchor)
+        ])
+        
+        // Hide progress label
+        progressLabel.alpha = 0
+    }
+    
+    func showSuccess(message: String) {
+        // Remove any existing views
+        viewWithTag(999)?.removeFromSuperview()
+        viewWithTag(998)?.removeFromSuperview()
+        
+        // Remove all cards
+        cards.forEach { $0.removeFromSuperview() }
+        cards = []
+        reviewedCards = []
+        
+        // Update success label text
+        successLabel.text = message
+        
+        // Show success stack with animation
+        UIView.animate(withDuration: 0.3) {
+            self.successStack.alpha = 1.0
+        }
+        
+        // Hide progress label
+        progressLabel.alpha = 0
+    }
+    
+    // Fix the naming conflict
+    var topCardIndex: Int? {
+        // If we have no cards, return nil
+        guard !cards.isEmpty else { return nil }
+        
+        // Otherwise return the index in cardData for the top card
+        return currentIndex
+    }
+    
+    // Add method to make progress label visible
+    public func showProgressLabel() {
+        progressLabel.alpha = 1.0
     }
 } 
