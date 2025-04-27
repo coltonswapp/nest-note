@@ -863,15 +863,21 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: event.startDate)
         
-        // Update or add the event
-        if var existingEvents = eventsByDate[startOfDay] {
-            // If this event already exists (has same ID), replace it
-            if let existingIndex = existingEvents.firstIndex(where: { $0.id == event.id }) {
-                existingEvents[existingIndex] = event
-            } else {
-                // If it's a new event, append it
-                existingEvents.append(event)
+        // First, remove the event from all date entries to avoid duplication
+        // This ensures the event only exists at its new date
+        for (date, events) in eventsByDate {
+            if events.contains(where: { $0.id == event.id }) {
+                eventsByDate[date]?.removeAll(where: { $0.id == event.id })
+                // If this date now has no events, remove the date entry
+                if eventsByDate[date]?.isEmpty == true {
+                    eventsByDate.removeValue(forKey: date)
+                }
             }
+        }
+        
+        // Now add the event to its correct date
+        if var existingEvents = eventsByDate[startOfDay] {
+            existingEvents.append(event)
             // Sort events by start time
             existingEvents.sort { $0.startDate < $1.startDate }
             eventsByDate[startOfDay] = existingEvents

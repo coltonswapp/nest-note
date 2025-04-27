@@ -445,7 +445,7 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
             formatter.dateFormat = "MMM d, yyyy"
             startControl.dateText = formatter.string(from: date)
             startControl.date = date
-            endControl.date = date
+            endControl.date = date.addingTimeInterval(3600)
             
         case .startTime:
             formatter.dateFormat = "h:mm a"

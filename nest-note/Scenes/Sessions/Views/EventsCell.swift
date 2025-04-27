@@ -51,6 +51,14 @@ final class EventsCell: UICollectionViewListCell {
         return label
     }()
     
+    // Add activity indicator
+    private let loadingIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .medium)
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.hidesWhenStopped = true
+        return indicator
+    }()
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupCell()
@@ -65,6 +73,7 @@ final class EventsCell: UICollectionViewListCell {
         contentView.addSubview(titleLabel)
         contentView.addSubview(plusButton)
         contentView.addSubview(eventCountLabel)
+        contentView.addSubview(loadingIndicator)
         
         NSLayoutConstraint.activate([
             iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
@@ -83,10 +92,17 @@ final class EventsCell: UICollectionViewListCell {
             
             eventCountLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             eventCountLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            
+            // Add loading indicator constraints, put it where the plus button is
+            loadingIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            loadingIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
         ])
     }
     
     func configure(eventCount: Int, showPlusButton: Bool = true) {
+        loadingIndicator.stopAnimating()
+        isUserInteractionEnabled = true
+        
         if showPlusButton {
             plusButton.isHidden = eventCount > 0
             eventCountLabel.isHidden = eventCount == 0
@@ -102,6 +118,9 @@ final class EventsCell: UICollectionViewListCell {
     }
     
     func configure(eventCount: Int, customMessage: String, showPlusButton: Bool = true) {
+        loadingIndicator.stopAnimating()
+        isUserInteractionEnabled = true
+        
         if showPlusButton {
             plusButton.isHidden = eventCount > 0
             eventCountLabel.isHidden = eventCount == 0
@@ -115,6 +134,9 @@ final class EventsCell: UICollectionViewListCell {
     
     // Add a specific method for upcoming events
     func configureUpcoming(eventCount: Int, showPlusButton: Bool = true) {
+        loadingIndicator.stopAnimating()
+        isUserInteractionEnabled = true
+        
         if showPlusButton {
             plusButton.isHidden = eventCount > 0
             eventCountLabel.isHidden = eventCount == 0
@@ -128,5 +150,13 @@ final class EventsCell: UICollectionViewListCell {
         } else {
             eventCountLabel.text = "\(eventCount) upcoming"
         }
+    }
+    
+    // Add method to show loading state
+    func showLoading() {
+        plusButton.isHidden = true
+        eventCountLabel.isHidden = true
+        loadingIndicator.startAnimating()
+        isUserInteractionEnabled = false
     }
 } 

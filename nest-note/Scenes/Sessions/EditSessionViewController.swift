@@ -151,6 +151,9 @@ class EditSessionViewController: NNViewController {
     // Add dateRange property for consistency
     private let dateRange: DateInterval
     
+    // Add a property to track if events are loading
+    private var isLoadingEvents = false
+    
     // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
@@ -604,9 +607,15 @@ class EditSessionViewController: NNViewController {
             }
         }
         
-        let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
+        let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { [weak self] cell, indexPath, item in
+            guard let self = self else { return }
             if case .events = item {
-                cell.configure(eventCount: self.sessionEvents.count ?? 0)
+                // If we're still loading events and this is an existing session, show loading indicator
+                if self.sessionEvents.isEmpty && self.isEditingSession && !self.isArchivedSession {
+                    cell.showLoading()
+                } else {
+                    cell.configure(eventCount: self.sessionEvents.count)
+                }
             }
         }
         
@@ -849,6 +858,15 @@ class EditSessionViewController: NNViewController {
         // Only fetch events if we're editing an existing session and it's not archived
         guard isEditingSession && !isArchivedSession else { return }
         
+        // Set loading state
+        isLoadingEvents = true
+        
+        // Show loading indicator in the events cell
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
+           let eventsCell = collectionView.cellForItem(at: dataSource.indexPath(for: eventsItem)!) as? EventsCell {
+            eventsCell.showLoading()
+        }
+        
         Task {
             do {
                 guard sessionItem.nestID != nil else { return }
@@ -860,11 +878,17 @@ class EditSessionViewController: NNViewController {
                     
                     // Update the events section in the collection view
                     updateEventsSection(with: events)
+                    
+                    // Reset loading state
+                    isLoadingEvents = false
                 }
             } catch {
                 Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
                 
                 await MainActor.run {
+                    // Reset loading state
+                    isLoadingEvents = false
+                    
                     // Show error to user
                     let alert = UIAlertController(
                         title: "Error",
@@ -873,6 +897,9 @@ class EditSessionViewController: NNViewController {
                     )
                     alert.addAction(UIAlertAction(title: "OK", style: .default))
                     self.present(alert, animated: true)
+                    
+                    // Update events section with empty state
+                    updateEventsSection(with: [])
                 }
             }
         }
@@ -1126,7 +1153,10 @@ extension EditSessionViewController: UICollectionViewDelegate {
         switch item {
         case .inviteSitter:
             return !isArchivedSession
-        case .events, .moreEvents, .expenses, .sessionEvent:
+        case .events, .moreEvents:
+            // Don't allow highlighting events if they are currently loading
+            return !isLoadingEvents
+        case .expenses, .sessionEvent:
             return true
         default:
             return false
@@ -1153,6 +1183,9 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .overview:
             break
         case .events, .moreEvents:
+            // Skip handling events if we're still loading them
+            if isLoadingEvents { return }
+            
             // Get the current date range from the date cell
             guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
                   case let .dateSelection(startDate, endDate, _) = dateItem else {

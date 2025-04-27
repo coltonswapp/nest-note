@@ -255,7 +255,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         }
         
         // Then configure all services
-        Logger.log(level: .info, category: .signup, message: "Moving to configure launcher...")
+//        Logger.log(level: .info, category: .signup, message: "Moving to configure launcher...")
 //        try await Launcher.shared.configure()
         
         // Set onboarding completion flag
