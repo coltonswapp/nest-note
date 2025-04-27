@@ -81,7 +81,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
 
         footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionFooter) { (supplementaryView, string, indexPath) in
             var content = supplementaryView.defaultContentConfiguration()
-            content.text = "❤️ \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")"
+            content.text = "❤️ \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
             content.textProperties.alignment = .center
             content.textProperties.font = UIFont.preferredFont(forTextStyle: .footnote)
             content.textProperties.color = .secondaryLabel
