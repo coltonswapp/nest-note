@@ -201,9 +201,7 @@ class NestSessionsViewController: NNViewController {
                     title: "Delete",
                     style: .destructive
                 ) { _ in
-                    // We'll implement the delete functionality later
-                    print("Delete session: \(sessionItem.id)")
-                    completion(true)
+                    self.deleteSession(sessionItem, completion: completion)
                 })
                 
                 self.present(alert, animated: true)
@@ -445,6 +443,62 @@ class NestSessionsViewController: NNViewController {
         vc.modalPresentationStyle = .pageSheet
         present(vc, animated: true)
     }
+    
+    // Helper method to delete a session
+    private func deleteSession(_ session: SessionItem, completion: @escaping (Bool) -> Void) {
+        Task {
+            do {
+                guard let nestID = NestService.shared.currentNest?.id else {
+                    completion(false)
+                    return
+                }
+                
+                // Call the service to delete the session
+                try await sessionService.deleteSession(nestID: nestID, sessionID: session.id)
+                
+                await MainActor.run {
+                    // Update UI to reflect the deletion
+                    var snapshot = self.dataSource.snapshot()
+                    snapshot.deleteItems([.session(session)])
+                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                    
+                    // If this was the last session in a section, we need to reload everything
+                    if snapshot.numberOfItems == 0 {
+                        updateEmptyState()
+                    }
+                    
+                    // Log successful deletion
+                    Logger.log(level: .info, category: .sessionService, message: "Session deleted successfully ✅")
+                    showToast(text: "Session deleted")
+                    if session.status.contains([.inProgress, .extended]) {
+                        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+                    }
+                    completion(true)
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Error deleting session: \(error)")
+                showToast(text: "Something went wrong", sentiment: .negative)
+                completion(false)
+            }
+        }
+    }
+    
+    // Helper method to archive a session
+    private func archiveSession(_ session: SessionItem) {
+        Task {
+            do {
+                // Call the service to archive the session
+                try await sessionService.archiveSession(session)
+                
+                // Refresh the sessions list
+                await MainActor.run {
+                    loadSessions()
+                }
+            } catch {
+                print("Error archiving session: \(error)")
+            }
+        }
+    }
 }
 
 extension NestSessionsViewController: UICollectionViewDelegate {
@@ -469,23 +523,6 @@ extension NestSessionsViewController: UICollectionViewDelegate {
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
-    }
-    
-    // Helper method to archive a session
-    private func archiveSession(_ session: SessionItem) {
-        Task {
-            do {
-                // Call the service to archive the session
-                try await sessionService.archiveSession(session)
-                
-                // Refresh the sessions list
-                await MainActor.run {
-                    loadSessions()
-                }
-            } catch {
-                print("Error archiving session: \(error)")
-            }
-        }
     }
 }
 

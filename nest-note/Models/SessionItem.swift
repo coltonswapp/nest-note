@@ -201,7 +201,11 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     }
 }
 
-enum SessionStatus: String, Codable {
+protocol Containable {
+    func contains(_ elements: [Self]) -> Bool
+}
+
+enum SessionStatus: String, Codable, Containable {
     case upcoming
     case inProgress = "inProgress"
     case extended
@@ -253,6 +257,10 @@ enum SessionStatus: String, Codable {
         default:
             return self.rawValue.capitalized
         }
+    }
+    
+    func contains(_ elements: [SessionStatus]) -> Bool {
+        return elements.contains(self)
     }
 }
 
