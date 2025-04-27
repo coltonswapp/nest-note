@@ -67,9 +67,25 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             }
             .store(in: &cancellables)
         
+        // Handle session status changes specifically
         NotificationCenter.default.publisher(for: .sessionStatusDidChange)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] notification in
+                // Check if the status change affects the current session
+                if let sessionId = notification.userInfo?["sessionId"] as? String,
+                   let newStatus = notification.userInfo?["newStatus"] as? String,
+                   let currentSessionId = self?.currentSession?.id,
+                   sessionId == currentSessionId {
+                    Logger.log(level: .info, category: .sessionService, message: "Current session status changed to: \(newStatus)")
+                    
+                    // If the session is no longer in progress, immediately refresh
+                    if newStatus != SessionStatus.inProgress.rawValue {
+                        self?.currentSession = nil
+                        self?.applySnapshot(animatingDifferences: true)
+                    }
+                }
+                
+                // Refresh data from server to ensure UI is up-to-date
                 self?.refreshData()
             }
             .store(in: &cancellables)
@@ -239,6 +255,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     
     func refreshData() {
         guard let nestID = nestService.currentNest?.id else {
+            // No current nest, clear current session and update UI
+            currentSession = nil
             applySnapshot(animatingDifferences: true)
             return
         }
@@ -247,6 +265,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             do {
                 loadingSpinner.startAnimating()
                 let sessions = try await sessionService.fetchSessions(nestID: nestID)
+                
+                // Update the current session based on freshly fetched data
+                // Only show sessions with inProgress status in the current session section
                 self.currentSession = sessions.inProgress.first
                 
                 DispatchQueue.main.async { [weak self] in
@@ -256,6 +277,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             } catch {
                 DispatchQueue.main.async { [weak self] in
                     self?.loadingSpinner.stopAnimating()
+                    self?.currentSession = nil // Clear on error
+                    self?.applySnapshot(animatingDifferences: true)
                     self?.handleError(error)
                 }
             }

@@ -7,6 +7,7 @@
 
 import UIKit
 import FirebaseAuth
+import UserNotifications
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
@@ -43,6 +44,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if let urlContext = options.urlContexts.first {
             handleIncomingURL(urlContext.url)
         }
+        
+        // Handle notification if app was launched from a notification
+        if let notification = options.notificationResponse {
+            handleNotificationResponse(notification)
+        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
@@ -65,6 +71,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillEnterForeground(_ scene: UIScene) {
         // Called as the scene transitions from the background to the foreground.
         // Use this method to undo the changes made on entering the background.
+        
+        // Trigger data refresh when app enters foreground
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
@@ -100,6 +109,27 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     // Automatically start finding the session
                     joinSessionVC.findSessionButtonTapped()
                 }
+            }
+        }
+    }
+
+    // Handle notification response when app is launched via notification tap
+    func scene(_ scene: UIScene, willContinueUserActivityWithType userActivityType: String) {
+        // Trigger data refresh when app becomes active
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+    }
+
+    // Add a method to handle notification responses
+    private func handleNotificationResponse(_ response: UNNotificationResponse) {
+        let content = response.notification.request.content
+        let userInfo = content.userInfo
+        
+        // Handle session status change notification
+        if let type = userInfo["type"] as? String, type == "session_status_change" {
+            // Post notifications to refresh both home controllers
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+                NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
             }
         }
     }
