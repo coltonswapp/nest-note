@@ -101,10 +101,21 @@ class SessionService {
             .document(sessionID)
         
         let sessionDoc = try await sessionRef.getDocument()
-        let session = try sessionDoc.data(as: SessionItem.self)
         
-        Logger.log(level: .info, category: .sessionService, message: session != nil ? "Session fetched successfully ✅" : "Session not found ❌")
-        return session
+        guard sessionDoc.exists else {
+            Logger.log(level: .error, category: .sessionService, message: "Session document not found ❌ \n Ref:\(sessionRef.path)")
+            return nil
+        }
+        
+        do {
+            // Use the Firestore decoder which will now skip the events field
+            let session = try sessionDoc.data(as: SessionItem.self)
+            Logger.log(level: .info, category: .sessionService, message: "Session fetched successfully ✅")
+            return session
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Error decoding session: \(error)")
+            throw error
+        }
     }
     
     func getAllSessions(nestID: String) async throws -> [SessionItem] {
@@ -1035,6 +1046,7 @@ class SessionService {
             if let session = try await getSession(nestID: sitterSession.nestID, sessionID: sitterSession.id),
                session.status == .inProgress || session.status == .extended {
                 Logger.log(level: .info, category: .sessionService, message: "Found in-progress session ✅")
+                PlacesService.shared.selectedNestId = sitterSession.nestID
                 return session
             }
         }

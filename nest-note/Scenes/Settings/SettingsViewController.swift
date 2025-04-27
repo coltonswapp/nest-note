@@ -310,6 +310,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Visibility Levels", "eye.circle"),
             ("Toast Test", "text.bubble.fill"),
+            ("Test Schedule View", "calendar.day.timeline.left"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -419,6 +420,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             navigationController?.pushViewController(vc, animated: true)
         case "Survey Dashboard":
             let vc = SurveyDashboardViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
+        case "Test Schedule View":
+            let vc = CalendarViewController()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
         default:

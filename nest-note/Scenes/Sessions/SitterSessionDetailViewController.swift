@@ -101,8 +101,10 @@ final class SitterSessionDetailViewController: NNViewController {
             sheetPresentationController.prefersGrabberVisible = false
         }
         
-        // Fetch events for the session
-        fetchSessionEvents()
+        // Fetch events only for non-completed sessions
+        if session.status != .completed {
+            fetchSessionEvents()
+        }
         
         // Add observer for session status changes
         NotificationCenter.default.addObserver(
@@ -314,7 +316,7 @@ final class SitterSessionDetailViewController: NNViewController {
             
             // Configure footer based on section
             if self.dataSource.sectionIdentifier(for: indexPath.section) == .events {
-                configuration.text = "Tap to view the event"
+                configuration.text = "Tap for event details"
                 configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
                 configuration.textProperties.color = .tertiaryLabel
                 configuration.textProperties.alignment = .center
@@ -394,7 +396,13 @@ final class SitterSessionDetailViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
+        
+        // Add all sections except events for completed sessions
+        if session.status == .completed {
+            snapshot.appendSections([.name, .date, .visibility, .expenses])
+        } else {
+            snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
+        }
         
         snapshot.appendItems([.nestName(name: nestName)], toSection: .name)
         
@@ -411,8 +419,10 @@ final class SitterSessionDetailViewController: NNViewController {
         // Add expenses section
         snapshot.appendItems([.expenses], toSection: .expenses)
         
-        // Add events section
-        snapshot.appendItems([.events], toSection: .events)
+        // Add events section only for non-completed sessions
+        if session.status != .completed {
+            snapshot.appendItems([.events], toSection: .events)
+        }
         
         dataSource.apply(snapshot, animatingDifferences: false)
     }
@@ -439,10 +449,20 @@ final class SitterSessionDetailViewController: NNViewController {
     private func updateEventsSection(with events: [SessionEvent]) {
         var snapshot = dataSource.snapshot()
         
+        // Skip if events section doesn't exist (for completed sessions)
+        if !snapshot.sectionIdentifiers.contains(.events) {
+            return
+        }
+        
         // Remove any existing event items
         let existingItems = snapshot.itemIdentifiers(inSection: .events)
             .filter { if case .sessionEvent = $0 { return true } else { return false } }
         snapshot.deleteItems(existingItems)
+        
+        // Remove any existing "more events" items
+        let existingMoreItems = snapshot.itemIdentifiers(inSection: .events)
+            .filter { if case .moreEvents = $0 { return true } else { return false } }
+        snapshot.deleteItems(existingMoreItems)
         
         // Add new event items
         let sortedEvents = events.sorted { $0.startDate < $1.startDate }
@@ -479,6 +499,18 @@ final class SitterSessionDetailViewController: NNViewController {
         // Update the session item
         session.status = newStatus
         
+        // If the status changed to completed, update the UI accordingly
+        if newStatus == .completed {
+            Task { @MainActor in
+                // Reconfigure the snapshot to remove events section
+                var snapshot = dataSource.snapshot()
+                if snapshot.sectionIdentifiers.contains(.events) {
+                    snapshot.deleteSections([.events])
+                    dataSource.apply(snapshot, animatingDifferences: true)
+                }
+            }
+        }
+        
         // Log the status change
         Logger.log(
             level: .info,
@@ -512,6 +544,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             // Present event details in read-only mode
             let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
             present(eventVC, animated: true)
+            
         case .events, .moreEvents:
             // Get the current date range from the date cell
             guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
@@ -524,9 +557,11 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
             let nav = UINavigationController(rootViewController: calendarVC)
             present(nav, animated: true)
+            
         case .expenses:
             let vc = NNFeaturePreviewViewController(feature: .expenses)
             present(vc, animated: true)
+            
         default:
             break
         }
