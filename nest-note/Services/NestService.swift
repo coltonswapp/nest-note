@@ -71,12 +71,14 @@ final class NestService: EntryRepository {
         currentNest = nil
         isOwner = false
         clearEntriesCache()
+        PlacesService.shared.selectedNestId = nil
     }
     
     // MARK: - Current Nest Methods
     func setCurrentNest(_ nest: NestItem) {
         Logger.log(level: .info, category: .nestService, message: "Setting current nest to: \(nest.name)")
         self.currentNest = nest
+        PlacesService.shared.selectedNestId = nest.id
     }
     
     func fetchAndSetCurrentNest(nestId: String) async throws {

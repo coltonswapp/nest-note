@@ -157,7 +157,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case startDate
         case endDate
         case isMultiDay
-        case events
+        // Exclude 'events' from CodingKeys to prevent encoding/decoding
         case visibilityLevel
         case status
         case assignedSitter
@@ -173,7 +173,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         startDate = try container.decode(Date.self, forKey: .startDate)
         endDate = try container.decode(Date.self, forKey: .endDate)
         isMultiDay = try container.decode(Bool.self, forKey: .isMultiDay)
-        events = try container.decodeIfPresent([SessionEvent].self, forKey: .events) ?? []
+        // Initialize events as an empty array since we're not decoding it
+        events = []
         visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""

@@ -59,6 +59,8 @@ final class CurrentSessionCell: UICollectionViewListCell {
             // Label stack constraints
             labelStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             labelStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            labelStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            labelStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
             
             // Bird image constraints
             birdImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),

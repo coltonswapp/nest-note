@@ -55,6 +55,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     // Add delegate property
     weak var delegate: SessionCalendarViewControllerDelegate?
     
+    // Add property to track user role
+    private let isSitter: Bool
+    
     private lazy var emptyStateView: NNEmptyStateView = {
         let view = NNEmptyStateView(
             icon: UIImage(systemName: "calendar.badge.plus"),
@@ -76,9 +79,10 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, nestID: String, dateRange: DateInterval, events: [SessionEvent] = []) {
+    init(sessionID: String? = nil, nestID: String, dateRange: DateInterval, events: [SessionEvent] = [], isSitter: Bool = false) {
         self.sessionID = sessionID
         self.nestID = nestID
+        self.isSitter = isSitter
         let calendar = Calendar.current
         
         // Strip time components and get start of day for both dates
@@ -201,15 +205,17 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             action: #selector(debugButtonTapped)
         )
         
-        // Create add button
-        let addButton = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            style: .plain,
-            target: self,
-            action: #selector(addEventTapped)
-        )
+        // Only show add button for non-sitters
+        if !isSitter {
+            let addButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(addEventTapped)
+            )
+            navigationItem.rightBarButtonItems = [addButton]
+        }
         
-        navigationItem.rightBarButtonItems = [addButton]
         if sessionID == nil {
             navigationItem.rightBarButtonItems?.append(debugButton)
         }
@@ -466,23 +472,29 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     private func setupEmptyStateView() {
-        view.addSubview(emptyStateView)
-        
-        NSLayoutConstraint.activate([
-            emptyStateView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
-            emptyStateView.centerYAnchor.constraint(equalTo: collectionView.centerYAnchor),
-            emptyStateView.leadingAnchor.constraint(greaterThanOrEqualTo: collectionView.leadingAnchor, constant: 32),
-            emptyStateView.trailingAnchor.constraint(lessThanOrEqualTo: collectionView.trailingAnchor, constant: -32)
-        ])
+        // Only add empty state view for non-sitters
+        if !isSitter {
+            view.addSubview(emptyStateView)
+            
+            NSLayoutConstraint.activate([
+                emptyStateView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
+                emptyStateView.centerYAnchor.constraint(equalTo: collectionView.centerYAnchor),
+                emptyStateView.leadingAnchor.constraint(greaterThanOrEqualTo: collectionView.leadingAnchor, constant: 32),
+                emptyStateView.trailingAnchor.constraint(lessThanOrEqualTo: collectionView.trailingAnchor, constant: -32)
+            ])
+        }
     }
     
     private func updateEmptyState() {
-        let hasEvents = !eventsByDate.isEmpty
-        emptyStateView.isHidden = hasEvents
-        
-        if !hasEvents {
-            let (title, subtitle, icon) = emptyStateConfig(for: dateRange)
-            emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
+        // Only update empty state for non-sitters
+        if !isSitter {
+            let hasEvents = !eventsByDate.isEmpty
+            emptyStateView.isHidden = hasEvents
+            
+            if !hasEvents {
+                let (title, subtitle, icon) = emptyStateConfig(for: dateRange)
+                emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
+            }
         }
     }
     
@@ -712,8 +724,9 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
     }
     
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
-        // Only show context menu for event cells
-        guard let event = dataSource.itemIdentifier(for: indexPath) as? SessionEvent else { return nil }
+        // Only show context menu for event cells and non-sitters
+        guard !isSitter,
+              let event = dataSource.itemIdentifier(for: indexPath) as? SessionEvent else { return nil }
         
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
             let deleteAction = UIAction(

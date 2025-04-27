@@ -86,15 +86,47 @@ final class EventsCell: UICollectionViewListCell {
         ])
     }
     
-    func configure(eventCount: Int) {
-        plusButton.isHidden = eventCount > 0
-        eventCountLabel.isHidden = eventCount == 0
+    func configure(eventCount: Int, showPlusButton: Bool = true) {
+        if showPlusButton {
+            plusButton.isHidden = eventCount > 0
+            eventCountLabel.isHidden = eventCount == 0
+        } else {
+            plusButton.isHidden = true
+            eventCountLabel.isHidden = false
+        }
         
-        if eventCount > 0 {
-            let inflectedString = String(AttributedString(
-                localized: "^[\(eventCount) \("event")](inflect: true)"
-            ).characters)
-            eventCountLabel.text = inflectedString
+        let inflectedString = String(AttributedString(
+            localized: "^[\(eventCount) \("event")](inflect: true)"
+        ).characters)
+        eventCountLabel.text = inflectedString
+    }
+    
+    func configure(eventCount: Int, customMessage: String, showPlusButton: Bool = true) {
+        if showPlusButton {
+            plusButton.isHidden = eventCount > 0
+            eventCountLabel.isHidden = eventCount == 0
+        } else {
+            plusButton.isHidden = true
+            eventCountLabel.isHidden = false
+        }
+        
+        eventCountLabel.text = customMessage
+    }
+    
+    // Add a specific method for upcoming events
+    func configureUpcoming(eventCount: Int, showPlusButton: Bool = true) {
+        if showPlusButton {
+            plusButton.isHidden = eventCount > 0
+            eventCountLabel.isHidden = eventCount == 0
+        } else {
+            plusButton.isHidden = true
+            eventCountLabel.isHidden = false
+        }
+        
+        if eventCount == 0 {
+            eventCountLabel.text = "No upcoming events"
+        } else {
+            eventCountLabel.text = "\(eventCount) upcoming"
         }
     }
 } 

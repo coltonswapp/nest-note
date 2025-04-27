@@ -21,6 +21,8 @@ final class PlacesService {
     private(set) var places: [Place] = []
     private var imageAssets: [String: UIImageAsset] = [:] // Cache for image assets
     
+    var selectedNestId: String?
+    
     // MARK: - Initialization
     private init() {}
     
@@ -60,7 +62,7 @@ final class PlacesService {
     }
     
     func fetchPlaces(includeTemporary: Bool = true) async throws -> [Place] {
-        guard let nestId = NestService.shared.currentNest?.id else {
+        guard let nestId = selectedNestId else {
             throw ServiceError.noCurrentNest
         }
         
