@@ -928,6 +928,13 @@ class EditSessionViewController: NNViewController {
         }
         
         checkForChanges()
+        
+        // Post notification for status change to update the home screen
+        NotificationCenter.default.post(
+            name: .sessionStatusDidChange,
+            object: nil,
+            userInfo: ["sessionId": sessionItem.id, "newStatus": status.rawValue]
+        )
     }
     
     @objc private func showStatusInfo() {
@@ -973,6 +980,13 @@ class EditSessionViewController: NNViewController {
         
         // Update session in Firestore
         try await SessionService.shared.updateSession(sessionItem)
+        
+        // Post notification that session was updated with status change
+        NotificationCenter.default.post(
+            name: .sessionStatusDidChange,
+            object: nil,
+            userInfo: ["sessionId": sessionItem.id, "newStatus": sessionItem.status.rawValue]
+        )
         
         // Show success animation after delay
         try await Task.sleep(for: .seconds(1))

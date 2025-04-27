@@ -72,6 +72,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                               withCompletionHandler completionHandler: @escaping () -> Void) {
         // Handle notification response when app is in background
         handleNotificationContent(response.notification.request.content)
+        
+        // Always refresh data when app is opened via notification tap
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+            NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
+        }
+        
         completionHandler()
     }
     

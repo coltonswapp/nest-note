@@ -113,6 +113,14 @@ final class SitterSessionDetailViewController: NNViewController {
             name: .sessionStatusDidChange,
             object: nil
         )
+        
+        // Add observer for session changes to refresh data
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionChange),
+            name: .sessionDidChange,
+            object: nil
+        )
     }
     
     override func setup() {
@@ -517,6 +525,11 @@ final class SitterSessionDetailViewController: NNViewController {
             category: .sessionService,
             message: "Session status updated to \(newStatus.displayName) via notification"
         )
+    }
+    
+    @objc private func handleSessionChange(_ notification: Notification) {
+        // Refresh session data and events when app resumes or notification is received
+        dismiss(animated: true)
     }
     
     deinit {
