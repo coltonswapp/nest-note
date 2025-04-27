@@ -17,33 +17,6 @@
             "order": 1
         },
         {
-            "id": "sitter_variety",
-            "title": "Do you often use the same sitter?",
-            "subtitle": null,
-            "options": [
-                "Same sitter every time",
-                "2-3 different sitters",
-                "4-7 different sitters",
-                "Different sitter each time"
-            ],
-            "multi_select": false,
-            "category": "usage",
-            "order": 2
-        },
-        {
-            "id": "sitter_relation",
-            "title": "When leaving children with sitters, how often is the sitter related to you?",
-            "subtitle": "We know Grandmas are typically the best!",
-            "options": [
-                "Typically, sitter is kin",
-                "Kin never sits",
-                "Sometimes kin, sometimes not"
-            ],
-            "multi_select": false,
-            "category": "preferences",
-            "order": 3
-        },
-        {
             "id": "communication_methods",
             "title": "When communicating sitting information, what methods do you use?",
             "subtitle": "This can include instructions, routines, medications, events, etc.",
@@ -55,7 +28,7 @@
             ],
             "multi_select": true,
             "category": "communication",
-            "order": 4
+            "order": 2
         },
         {
             "id": "info_provided",
@@ -82,7 +55,7 @@
             ],
             "multi_select": true,
             "category": "information",
-            "order": 5
+            "order": 3
         },
         {
             "id": "discovery_method",
@@ -99,7 +72,7 @@
             ],
             "multi_select": false,
             "category": "discovery",
-            "order": 6
+            "order": 4
         }
     ]
 } 
