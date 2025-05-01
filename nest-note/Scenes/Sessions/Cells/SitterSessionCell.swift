@@ -131,4 +131,43 @@ class SitterSessionCell: UICollectionViewListCell {
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
     }
+    
+    /// Configures the cell to display an archived sitter session
+    /// - Parameters:
+    ///   - title: The title to display
+    ///   - date: The date to display (usually the date when the session occurred)
+    ///   - isArchived: Whether this is an archived session (adds visual indicators)
+    func configureArchived(title: String, date: Date, isArchived: Bool = true) {
+        // Hide empty state stack
+        emptyStateStack.isHidden = true
+        
+        var content = defaultContentConfiguration()
+        
+        // Configure text style
+        content.text = title
+        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        
+        // Format date
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMM d, yyyy"
+        let dateString = dateFormatter.string(from: date)
+        
+        // Add archived indicator to secondary text
+        content.secondaryText = isArchived ? "Completed • \(dateString)" : dateString
+        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.color = .secondaryLabel
+        
+        // Apply standard system margins
+        content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
+        
+        // Add a faded appearance for archived items
+        var bgConfig = backgroundConfiguration ?? UIBackgroundConfiguration.listCell()
+        bgConfig.backgroundColor = isArchived ? 
+            .secondarySystemGroupedBackground.withAlphaComponent(0.8) : 
+            .secondarySystemGroupedBackground
+        backgroundConfiguration = bgConfig
+        
+        contentConfiguration = content
+        accessories = [.disclosureIndicator()]
+    }
 } 

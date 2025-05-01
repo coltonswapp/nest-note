@@ -593,9 +593,11 @@ exports.archiveOldSessions = onSchedule("0 6 * * *", async (event) => {
     // Process archiving in batches
     const batch = db.batch();
     let archiveCount = 0;
+    let sitterSessionsArchived = 0;
 
     for (const doc of completedSessionsSnapshot.docs) {
       const sessionData = doc.data();
+      const sessionId = doc.id;
 
       // Get the nest ID from the document path
       const pathSegments = doc.ref.path.split("/");
@@ -607,7 +609,7 @@ exports.archiveOldSessions = onSchedule("0 6 * * *", async (event) => {
           .collection("nests")
           .doc(nestId)
           .collection("archivedSessions")
-          .doc(doc.id);
+          .doc(sessionId);
 
       batch.set(archivedSessionRef, {
         ...sessionData,
@@ -615,27 +617,217 @@ exports.archiveOldSessions = onSchedule("0 6 * * *", async (event) => {
         archivedDate: admin.firestore.Timestamp.now(),
       });
 
+      // Archive corresponding sitterSession if it exists
+      if (sessionData.assignedSitter && sessionData.assignedSitter.userID) {
+        try {
+          const sitterId = sessionData.assignedSitter.userID;
+
+          // Check if the sitterSession exists
+          const sitterSessionRef = db
+              .collection("users")
+              .doc(sitterId)
+              .collection("sitterSessions")
+              .doc(sessionId);
+
+          const sitterSessionDoc = await sitterSessionRef.get();
+
+          if (sitterSessionDoc.exists) {
+            // Create the archived sitter session document
+            const archivedSitterRef = db
+                .collection("users")
+                .doc(sitterId)
+                .collection("archivedSitterSessions")
+                .doc(sessionId);
+
+            // Copy all data and add archivedDate
+            batch.set(archivedSitterRef, {
+              ...sitterSessionDoc.data(),
+              archivedDate: admin.firestore.Timestamp.now(),
+            });
+
+            // Delete original sitter session
+            batch.delete(sitterSessionRef);
+            sitterSessionsArchived++;
+          }
+        } catch (error) {
+          logger.error(
+              `Error archiving sitter session` +
+              ` for session ${sessionId}: ${error.message}`,
+          );
+        }
+      }
+
       // Delete original session
       batch.delete(doc.ref);
       archiveCount++;
     }
 
-    // Commit batch if we have sessions to archive
+    // Commit batch if we have updates
     if (archiveCount > 0) {
       await batch.commit();
       logger.info(
-          `Session archiving complete: ${archiveCount}` +
-          ` sessions archived`,
+          `Session archiving complete: ${archiveCount} sessions archived, ` +
+          `${sitterSessionsArchived} sitter sessions archived`,
       );
     } else {
-      logger.info("No sessions needed archiving");
+      logger.info("No session updates needed");
     }
 
     return null;
   } catch (error) {
-    logger.error(`Error archiving sessions: ${error.message}`);
+    logger.error(`Error updating session statuses: ${error.message}`);
     throw new Error(
-        `Failed to archive sessions: ${error.message}`,
+        `Failed to update session statuses: ${error.message}`,
     );
+  }
+});
+
+/**
+ * Function that automatically archives a sitterSession
+ * when its parent session status changes to COMPLETED.
+ */
+exports.archiveSitterSessionOnComplete = functions.firestore
+    .onDocumentUpdated("nests/{nestId}/sessions/{sessionId}", async (event) => {
+      const beforeData = event.data.before.data();
+      const afterData = event.data.after.data();
+      const {sessionId} = event.params;
+
+      // Only continue if the status changed to COMPLETED
+      if (beforeData.status !== SessionStatus.COMPLETED &&
+          afterData.status === SessionStatus.COMPLETED) {
+        try {
+          const db = admin.firestore();
+          logger.info(`Session ${sessionId} status` +
+              ` changed to COMPLETED. Checking for sitterSession to archive.`);
+
+          // Check if this session has an assigned sitter
+          if (afterData.assignedSitter && afterData.assignedSitter.userID) {
+            const sitterId = afterData.assignedSitter.userID;
+
+            // Check if the sitterSession exists
+            const sitterSessionRef = db
+                .collection("users")
+                .doc(sitterId)
+                .collection("sitterSessions")
+                .doc(sessionId);
+
+            const sitterSessionDoc = await sitterSessionRef.get();
+
+            if (sitterSessionDoc.exists) {
+              // Create the archived sitter session
+              const archivedSitterRef = db
+                  .collection("users")
+                  .doc(sitterId)
+                  .collection("archivedSitterSessions")
+                  .doc(sessionId);
+
+              // Copy all data and add archivedDate
+              await archivedSitterRef.set({
+                ...sitterSessionDoc.data(),
+                archivedDate: admin.firestore.Timestamp.now(),
+              });
+
+              // Delete original sitter session
+              await sitterSessionRef.delete();
+
+              logger.info(`Successfully archived sitterSession for` +
+                  ` user ${sitterId} and session ${sessionId}`);
+            } else {
+              logger.warn(`No sitterSession found for` +
+                  ` user ${sitterId} and session ${sessionId}`);
+            }
+
+            // Delete invite document if it exists
+            if (afterData.assignedSitter.inviteID) {
+              const inviteID = afterData.assignedSitter.inviteID;
+              const inviteRef = db.collection("invites").doc(inviteID);
+
+              try {
+                await inviteRef.delete();
+                logger.info(`Successfully deleted invite ${inviteID}` +
+                   ` for session ${sessionId}`);
+              } catch (error) {
+                logger.error(`Error deleting invite` +
+                  ` ${inviteID}: ${error.message}`);
+              }
+            }
+          } else {
+            logger.info(`Session ${sessionId} has no` +
+                ` assigned sitter with userID, skipping archiving`);
+          }
+        } catch (error) {
+          logger.error(`Error archiving sitterSession: ${error.message}`);
+        }
+      }
+
+      return null;
+    });
+
+/**
+ * Scheduled function to delete old invite documents
+ * that are more than 30 days old.
+ * Runs every 7 days.
+ */
+exports.cleanupOldInvites = onSchedule("0 0 */7 * *", async (event) => {
+  const db = admin.firestore();
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  try {
+    logger.info("Starting cleanup of old" +
+      " invite documents...");
+
+    // Query for invites older than 30 days
+    const oldInvitesQuery = db.collection("invites")
+        .where("createdAt", "<=", thirtyDaysAgo);
+
+    const oldInvitesSnapshot = await oldInvitesQuery.get();
+
+    logger.info(
+        `Found ${oldInvitesSnapshot.size} old invite` +
+        ` documents to delete`,
+    );
+
+    if (oldInvitesSnapshot.size === 0) {
+      logger.info("No old invites to delete");
+      return null;
+    }
+
+    // Process deletions in batches (Firestore allows max 500
+    // operations per batch)
+    const batchSize = 500;
+    const batches = [];
+    let currentBatch = db.batch();
+    let operationCount = 0;
+    let totalDeleted = 0;
+
+    for (const doc of oldInvitesSnapshot.docs) {
+      currentBatch.delete(doc.ref);
+      operationCount++;
+      totalDeleted++;
+
+      // If we reach batch limit, commit and create a new batch
+      if (operationCount >= batchSize) {
+        batches.push(currentBatch.commit());
+        currentBatch = db.batch();
+        operationCount = 0;
+      }
+    }
+
+    // Commit any remaining operations in the current batch
+    if (operationCount > 0) {
+      batches.push(currentBatch.commit());
+    }
+
+    // Wait for all batches to complete
+    await Promise.all(batches);
+
+    logger.info(`Successfully deleted ${totalDeleted}` +
+      ` old invite documents`);
+    return null;
+  } catch (error) {
+    logger.error(`Error cleaning up old` +
+      ` invites: ${error.message}`);
+    throw new Error(`Failed to clean up old invites: ${error.message}`);
   }
 });

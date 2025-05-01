@@ -28,6 +28,7 @@ class SitterSessionsViewController: NNViewController {
     
     enum Item: Hashable {
         case session(SessionItem)
+        case archivedSession(ArchivedSitterSession)
         case empty(Section)
     }
     
@@ -39,7 +40,7 @@ class SitterSessionsViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<MonthSection, Item>!
     
     private let sessionService = SessionService.shared
-    private var allSessions: [SessionItem] = [] {
+    private var allSessions: [Any] = [] {
         didSet {
             updateDisplayedSessions()
         }
@@ -53,20 +54,38 @@ class SitterSessionsViewController: NNViewController {
         return spinner
     }()
     
-    private var filteredSessions: [SessionItem] {
+    private var filteredSessions: [Any] {
         switch currentBucket {
         case .upcoming:
             return allSessions
+                .compactMap { $0 as? SessionItem }
                 .filter { $0.status == .upcoming }
                 .sorted { $0.startDate < $1.startDate }
         case .inProgress:
             return allSessions
+                .compactMap { $0 as? SessionItem }
                 .filter { $0.status == .inProgress || $0.status == .extended }
                 .sorted { $0.endDate < $1.endDate }
         case .past:
-            return allSessions
+            // Include both completed sessions and archived sitter sessions
+            let completedSessions = allSessions
+                .compactMap { $0 as? SessionItem }
                 .filter { $0.status == .completed }
-                .sorted { $0.endDate > $1.endDate }
+            
+            let archivedSessions = allSessions
+                .compactMap { $0 as? ArchivedSitterSession }
+            
+            // Convert both arrays to a common type (Any) before concatenating
+            let allPastSessions: [Any] = completedSessions + archivedSessions
+            
+            // Sort all of them by end date (for sessions) or archivedDate (for archivedSessions)
+            return allPastSessions.sorted { 
+                let date1 = ($0 as? SessionItem)?.endDate ?? 
+                           ($0 as? ArchivedSitterSession)?.archivedDate ?? Date()
+                let date2 = ($1 as? SessionItem)?.endDate ?? 
+                           ($1 as? ArchivedSitterSession)?.archivedDate ?? Date()
+                return date1 > date2 // Sort by most recent first
+            }
         }
     }
     
@@ -208,6 +227,15 @@ class SitterSessionsViewController: NNViewController {
                         }
                     }
                 }
+                
+            case .archivedSession(let archivedSession):
+                // Configure cell for archived session
+                cell.configureArchived(
+                    title: "Session at \(archivedSession.nestName)", 
+                    date: archivedSession.inviteAcceptedAt,
+                    isArchived: true
+                )
+                
             case .empty(let section):
                 cell.configureEmptyState(for: section)
             }
@@ -234,10 +262,18 @@ class SitterSessionsViewController: NNViewController {
         let now = Date()
         var snapshot = NSDiffableDataSourceSnapshot<MonthSection, Item>()
         
+        // Process filtered sessions
+        let filtered = filteredSessions
+        
         // Group sessions by month for the current filter
         let calendar = Calendar.current
-        let groupedSessions = Dictionary(grouping: filteredSessions) { session in
-            calendar.startOfMonth(for: session.startDate)
+        let groupedSessions = Dictionary(grouping: filtered) { session in
+            if let regularSession = session as? SessionItem {
+                return calendar.startOfMonth(for: regularSession.startDate)
+            } else if let archivedSession = session as? ArchivedSitterSession {
+                return calendar.startOfMonth(for: archivedSession.inviteAcceptedAt)
+            }
+            return Date() // Fallback - should never happen
         }
         
         // Sort months and create sections
@@ -255,7 +291,15 @@ class SitterSessionsViewController: NNViewController {
             snapshot.appendSections([section])
             
             if let monthSessions = groupedSessions[month] {
-                snapshot.appendItems(monthSessions.map { .session($0) }, toSection: section)
+                let items = monthSessions.map { session -> Item in 
+                    if let regularSession = session as? SessionItem {
+                        return .session(regularSession)
+                    } else if let archivedSession = session as? ArchivedSitterSession {
+                        return .archivedSession(archivedSession)
+                    }
+                    return .empty(Section.past) // Fallback
+                }
+                snapshot.appendItems(items, toSection: section)
             }
         }
         
@@ -270,19 +314,33 @@ class SitterSessionsViewController: NNViewController {
     private func fetchSitterSessions() {
         Task {
             do {
+                filterView.isEnabled = false
+                emptyStateView.isHidden = true
                 loadingSpinner.startAnimating()
                 guard let userID = UserService.shared.currentUser?.id else { return }
                 
-                let collection = try await sessionService.fetchSitterSessions(userID: userID)
+                // Fetch both active sitter sessions and archived ones
+                async let regularSessionsTask = sessionService.fetchSitterSessions(userID: userID)
+                async let archivedSessionsTask = sessionService.fetchArchivedSitterSessions(userID: userID)
+                
+                let (collection, archivedSessions) = try await (regularSessionsTask, archivedSessionsTask)
                 
                 await MainActor.run {
-                    self.allSessions = collection.upcoming + collection.inProgress + collection.past
+                    filterView.isEnabled = true
+                    var allSessionItems: [Any] = []
+                    allSessionItems.append(contentsOf: collection.upcoming)
+                    allSessionItems.append(contentsOf: collection.inProgress)
+                    allSessionItems.append(contentsOf: collection.past)
+                    allSessionItems.append(contentsOf: archivedSessions)
+                    
+                    self.allSessions = allSessionItems
                     updateEmptyState()
                     self.loadingSpinner.stopAnimating()
                 }
             } catch {
                 print("Error loading sitter sessions: \(error)")
                 await MainActor.run {
+                    filterView.isEnabled = false
                     self.loadingSpinner.stopAnimating()
                 }
             }
@@ -354,28 +412,50 @@ class SitterSessionsViewController: NNViewController {
 
 extension SitterSessionsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard case .session(let session) = dataSource.itemIdentifier(for: indexPath) else {
-            collectionView.deselectItem(at: indexPath, animated: true)
-            return
-        }
+        collectionView.deselectItem(at: indexPath, animated: true)
         
-        // Get the nest name from the sitter session
-        Task {
-            if let sitterSession = try? await sessionService.getSitterSession(sessionID: session.id) {
-                await MainActor.run {
-                    // Present the detail view modally
-                    let detailVC = SitterSessionDetailViewController(session: session, nestName: sitterSession.nestName)
-                    detailVC.modalPresentationStyle = .pageSheet
-                    present(detailVC, animated: true)
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        
+        switch item {
+        case .session(let session):
+            // Get the nest name from the sitter session
+            Task {
+                if let sitterSession = try? await sessionService.getSitterSession(sessionID: session.id) {
+                    await MainActor.run {
+                        // Present the detail view modally
+                        let detailVC = SitterSessionDetailViewController(session: session, nestName: sitterSession.nestName)
+                        detailVC.modalPresentationStyle = .pageSheet
+                        present(detailVC, animated: true)
+                    }
                 }
             }
+            
+        case .archivedSession(let archivedSession):
+            // Display archived session details
+            let alert = UIAlertController(
+                title: "Completed Session",
+                message: "This session was completed on \(formatDate(archivedSession.archivedDate)).\n\nNest: \(archivedSession.nestName)",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            
+        case .empty:
+            // Do nothing for empty state cells
+            break
         }
-        
-        collectionView.deselectItem(at: indexPath, animated: true)
     }
     
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         return true
+    }
+    
+    // Helper to format dates for display
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 
@@ -400,10 +480,21 @@ extension SitterSessionsViewController: CollectionViewLoadable {
             }
             
             guard let userID = UserService.shared.currentUser?.id else { return }
-            let collection = try await sessionService.fetchSitterSessions(userID: userID)
+            
+            // Fetch both active and archived sessions
+            async let regularSessionsTask = sessionService.fetchSitterSessions(userID: userID)
+            async let archivedSessionsTask = sessionService.fetchArchivedSitterSessions(userID: userID)
+            
+            let (collection, archivedSessions) = try await (regularSessionsTask, archivedSessionsTask)
             
             await MainActor.run {
-                self.allSessions = collection.upcoming + collection.inProgress + collection.past
+                var allSessionItems: [Any] = []
+                allSessionItems.append(contentsOf: collection.upcoming)
+                allSessionItems.append(contentsOf: collection.inProgress)
+                allSessionItems.append(contentsOf: collection.past)
+                allSessionItems.append(contentsOf: archivedSessions)
+                
+                self.allSessions = allSessionItems
                 loadingIndicator.stopAnimating()
             }
             

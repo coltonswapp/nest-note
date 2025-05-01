@@ -906,18 +906,45 @@ class EditSessionViewController: NNViewController {
         
         Task {
             do {
-                guard sessionItem.nestID != nil else { return }
+                guard sessionItem.nestID != nil else { 
+                    await MainActor.run {
+                        isLoadingEvents = false
+                        if let eventsCell = collectionView.cellForItem(at: dataSource.indexPath(for: .events)!) as? EventsCell {
+                            eventsCell.configure(eventCount: 0)
+                        }
+                    }
+                    return 
+                }
+                
                 let events = try await SessionService.shared.getSessionEvents(for: sessionItem.id, nestID: sessionItem.nestID)
                 
                 await MainActor.run {
+                    // Reset loading state
+                    isLoadingEvents = false
+                    
                     // Update local events array
                     self.sessionEvents = events
                     
                     // Update the events section in the collection view
-                    updateEventsSection(with: events)
-                    
-                    // Reset loading state
-                    isLoadingEvents = false
+                    if events.isEmpty {
+                        // If no events, just show the add button
+                        var snapshot = dataSource.snapshot()
+                        let currentItems = snapshot.itemIdentifiers(inSection: .events)
+                        let itemsToRemove = currentItems.filter { item in
+                            if case .events = item { return false }
+                            return true
+                        }
+                        snapshot.deleteItems(itemsToRemove)
+                        snapshot.reconfigureItems([.events])
+                        dataSource.apply(snapshot, animatingDifferences: true)
+                        
+                        // Configure the events cell to show zero events
+                        if let eventsCell = collectionView.cellForItem(at: dataSource.indexPath(for: .events)!) as? EventsCell {
+                            eventsCell.configure(eventCount: 0)
+                        }
+                    } else {
+                        updateEventsSection(with: events)
+                    }
                 }
             } catch {
                 Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
@@ -936,7 +963,20 @@ class EditSessionViewController: NNViewController {
                     self.present(alert, animated: true)
                     
                     // Update events section with empty state
-                    updateEventsSection(with: [])
+                    var snapshot = dataSource.snapshot()
+                    let currentItems = snapshot.itemIdentifiers(inSection: .events)
+                    let itemsToRemove = currentItems.filter { item in
+                        if case .events = item { return false }
+                        return true
+                    }
+                    snapshot.deleteItems(itemsToRemove)
+                    snapshot.reconfigureItems([.events])
+                    dataSource.apply(snapshot, animatingDifferences: true)
+                    
+                    // Configure the events cell to show zero events
+                    if let eventsCell = collectionView.cellForItem(at: dataSource.indexPath(for: .events)!) as? EventsCell {
+                        eventsCell.configure(eventCount: 0)
+                    }
                 }
             }
         }
@@ -982,6 +1022,48 @@ class EditSessionViewController: NNViewController {
     }
     
     private func updateSessionStatus(_ status: SessionStatus) {
+        // If we're marking a session as completed, show a warning alert
+        if status == .completed {
+            let alert = UIAlertController(
+                title: "Complete Session",
+                message: "When a session is marked as completed, any invited sitters will need to be reinvited to access the session again. Are you sure you want to continue?",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(
+                title: "Cancel",
+                style: .cancel
+            ))
+            
+            alert.addAction(UIAlertAction(
+                title: "Complete Session",
+                style: .destructive
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                self.sessionItem.status = status
+                
+                var snapshot = self.dataSource.snapshot()
+                if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
+                    snapshot.deleteItems([existingItem])
+                    snapshot.appendItems([.sessionStatus(status)], toSection: .status)
+                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                }
+                
+                self.checkForChanges()
+                
+                // Post notification for status change to update the home screen
+                NotificationCenter.default.post(
+                    name: .sessionStatusDidChange,
+                    object: nil,
+                    userInfo: ["sessionId": self.sessionItem.id, "newStatus": status.rawValue]
+                )
+            })
+            
+            present(alert, animated: true)
+            return
+        }
+        
+        // For non-completed status changes, proceed as normal
         sessionItem.status = status
         
         var snapshot = dataSource.snapshot()

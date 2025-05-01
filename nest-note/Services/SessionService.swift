@@ -298,14 +298,38 @@ class SessionService {
             .collection("sessions").document(sessionID)
             .collection("events")
         
-        let snapshot = try await eventsRef.getDocuments()
-        
-        let events = try snapshot.documents.map { document -> SessionEvent in
-            try document.data(as: SessionEvent.self)
-        }
-        
-        return events.sorted { (event1: SessionEvent, event2: SessionEvent) in
-            event1.startDate < event2.startDate
+        do {
+            let snapshot = try await eventsRef.getDocuments()
+            
+            // Log the number of documents found
+            Logger.log(level: .info, category: .sessionService, message: "Found \(snapshot.documents.count) events for session \(sessionID)")
+            
+            if snapshot.documents.isEmpty {
+                Logger.log(level: .info, category: .sessionService, message: "No events found for session \(sessionID)")
+                return []
+            }
+            
+            let events = try snapshot.documents.map { document -> SessionEvent in
+                do {
+                    let event = try document.data(as: SessionEvent.self)
+                    Logger.log(level: .debug, category: .sessionService, message: "Successfully parsed event: \(event.id)")
+                    return event
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to parse event document \(document.documentID): \(error.localizedDescription)")
+                    throw error
+                }
+            }
+            
+            let sortedEvents = events.sorted { (event1: SessionEvent, event2: SessionEvent) in
+                event1.startDate < event2.startDate
+            }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Successfully fetched and sorted \(sortedEvents.count) events for session \(sessionID)")
+            return sortedEvents
+            
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Error fetching events for session \(sessionID): \(error.localizedDescription)")
+            throw error
         }
     }
     
@@ -1034,9 +1058,11 @@ class SessionService {
     func fetchInProgressSitterSession(userID: String) async throws -> SessionItem? {
         Logger.log(level: .info, category: .sessionService, message: "Fetching sitter sessions...")
         
-        // First get all sitter sessions for this user
+        // First get all sitter sessions - limit to 20 most recent
         let sitterSessionsRef = db.collection("users").document(userID)
             .collection("sitterSessions")
+            .order(by: "inviteAcceptedAt", descending: true)
+            .limit(to: 20)
         
         let sitterSessionsSnapshot = try await sitterSessionsRef.getDocuments()
         let sitterSessions = try sitterSessionsSnapshot.documents.compactMap { try $0.data(as: SitterSession.self) }
@@ -1053,6 +1079,50 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "No in-progress sessions found")
         return nil
+    }
+    
+    /// Fetches archived sitter sessions for a user
+    func fetchArchivedSitterSessions(userID: String, limit: Int = 20) async throws -> [ArchivedSitterSession] {
+        Logger.log(level: .info, category: .sessionService, message: "Fetching archived sitter sessions...")
+        
+        let archivedSessionsRef = db.collection("users").document(userID)
+            .collection("archivedSitterSessions")
+            .order(by: "archivedDate", descending: true)
+            .limit(to: limit)
+        
+        let snapshot = try await archivedSessionsRef.getDocuments()
+        let archivedSessions = try snapshot.documents.compactMap { try $0.data(as: ArchivedSitterSession.self) }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Fetched \(archivedSessions.count) archived sitter sessions ✅")
+        return archivedSessions
+    }
+    
+    /// Combines active and archived sitter sessions for history view
+    func fetchSitterSessionHistory(userID: String, limit: Int = 50) async throws -> [Any] {
+        Logger.log(level: .info, category: .sessionService, message: "Fetching sitter session history...")
+        
+        // Get active sitter sessions (with corresponding full session data)
+        let sessionCollection = try await fetchSitterSessions(userID: userID)
+        
+        // Get archived sessions
+        let archivedSessions = try await fetchArchivedSitterSessions(userID: userID)
+        
+        // Combine all sessions (only keep past completed ones from active sessions)
+        var allHistory: [Any] = []
+        
+        // Add completed sessions from the active set
+        allHistory.append(contentsOf: sessionCollection.past)
+        
+        // Add archived sessions
+        allHistory.append(contentsOf: archivedSessions)
+        
+        // If we need to limit the results
+        if allHistory.count > limit {
+            allHistory = Array(allHistory.prefix(limit))
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Fetched \(allHistory.count) sitter session history items ✅")
+        return allHistory
     }
 }
 

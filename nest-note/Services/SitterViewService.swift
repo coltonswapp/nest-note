@@ -105,7 +105,7 @@ final class SitterViewService: EntryRepository {
         Logger.log(level: .info, category: .sitterViewService, message: "Fetching current session for sitter: \(userID)")
         
         do {
-            // Try to get the current session
+            // Try to get the current session - updated to use optimized query
             guard let session = try await sessionService.fetchInProgressSitterSession(userID: userID) else {
                 await MainActor.run {
                     self.viewState = .noSession
