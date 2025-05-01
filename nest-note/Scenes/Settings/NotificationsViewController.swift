@@ -3,13 +3,6 @@ import UserNotifications
 
 class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
-    private let bottomImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(imageView, for: .halfMoonBottom)
-        return imageView
-    }()
-    
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var headerRegistration: UICollectionView.SupplementaryRegistration<NNSectionHeaderView>!
@@ -56,9 +49,6 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(collectionView)
-        view.addSubview(bottomImageView)
-
-        bottomImageView.pinToBottom(of: view)
     }
     
     private func createLayout() -> UICollectionViewLayout {
