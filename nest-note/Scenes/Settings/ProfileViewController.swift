@@ -28,6 +28,14 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             name: .userInformationUpdated,
             object: nil
         )
+        
+        // Add observer for mode changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleModeChange),
+            name: ModeManager.modeDidChangeNotification,
+            object: nil
+        )
     }
     
     override func setup() {
@@ -88,8 +96,9 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
-        let modeSwitchCellRegistration = UICollectionView.CellRegistration<ModeSwitchCell, Item> { cell, indexPath, _ in
+        let modeSwitchCellRegistration = UICollectionView.CellRegistration<ModeSwitchCell, Item> { [weak self] cell, indexPath, _ in
             cell.configure()
+            cell.delegate = self
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
@@ -255,6 +264,11 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         applyInitialSnapshots()
     }
     
+    @objc private func handleModeChange() {
+        // Update the UI when the mode changes (but not when we trigger it)
+        applyInitialSnapshots()
+    }
+    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
@@ -278,63 +292,101 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         case action(title: String, imageName: String, destructive: Bool = false)
         case modeSwitch
     }
+    
+    // MARK: - Mode Switching
+    
+    func confirmModeSwitch(from currentMode: AppMode, to newMode: AppMode) {
+        // Show confirmation alert
+        let alert = UIAlertController(
+            title: "Switch to \(newMode.rawValue) Mode?",
+            message: "Are you sure you want to switch from \(currentMode.rawValue) to \(newMode.rawValue) mode? This will refresh the app.",
+            preferredStyle: .alert
+        )
+        
+        // Cancel action
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            // Revert UI by refreshing collection view
+            self?.applyInitialSnapshots()
+        })
+        
+        // Confirm action
+        alert.addAction(UIAlertAction(title: "Switch", style: .default) { [weak self] _ in
+            self?.performModeSwitch(to: newMode)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func performModeSwitch(to newMode: AppMode) {
+        // 1. Update the mode first
+        ModeManager.shared.currentMode = newMode
+        Logger.log(level: .info, message: "Saving new AppMode: \(newMode.rawValue)")
+        
+        // 2. Provide haptic feedback
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+
+        // 3. Get shared LaunchCoordinator
+        guard let launchCoordinator = LaunchCoordinator.shared else {
+            Logger.log(level: .error, message: "LaunchCoordinator shared instance not available")
+            return
+        }
+        
+        // 4. First dismiss all modals
+        dismissAllViewControllers() {
+            NotificationCenter.default.post(name: .modeDidChange, object: nil)
+
+            Task {
+                do {
+                    try await Task.sleep(for: .seconds(2.0)) // TODO: Remove for prod
+                    Logger.log(level: .info, message: "Using shared LaunchCoordinator to switch modes...")
+                    try await launchCoordinator.switchMode(to: newMode)
+
+                } catch {
+                    Logger.log(level: .error, message: "Failed to complete mode transition: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // Helper to recursively dismiss all presented view controllers
+    func dismissAllViewControllers(animated: Bool = true, completion: (() -> Void)? = nil) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+              let rootViewController = keyWindow.rootViewController else {
+            completion?()
+            return
+        }
+        
+        if let presentedVC = rootViewController.presentedViewController {
+            // Dismiss all presented view controllers
+            rootViewController.dismiss(animated: animated, completion: completion)
+        } else {
+            completion?()
+        }
+    }
 }
 
-private class ActionCell: UICollectionViewListCell {
-    private let titleLabel: UILabel = {
-        let label = UILabel()
-        label.font = .systemFont(ofSize: 17)
-        return label
-    }()
-    
-    private let iconImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = .systemGray3
-        imageView.setContentHuggingPriority(.required, for: .horizontal)
-        imageView.widthAnchor.constraint(equalToConstant: 20).isActive = true
-        return imageView
-    }()
-    
-    private lazy var stackView: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [titleLabel, iconImageView])
-        stack.axis = .horizontal
-        stack.spacing = 8
-        stack.alignment = .center
-        return stack
-    }()
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupViews()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupViews() {
-        contentView.addSubview(stackView)
-        stackView.translatesAutoresizingMaskIntoConstraints = false
+// MARK: - ModeSwitchCellDelegate
+extension ProfileViewController: ModeSwitchCellDelegate {
+    func modeSwitchCell(didSelectMode newMode: AppMode) {
+        let currentMode = ModeManager.shared.currentMode
         
-        NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 8),
-            stackView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -8)
-        ])
+        // Only show confirmation if mode is actually changing
+        if currentMode != newMode {
+            confirmModeSwitch(from: currentMode, to: newMode)
+        }
     }
-    
-    func configure(title: String, imageName: String, destructive: Bool = false) {
-        titleLabel.text = title
-        titleLabel.textColor = destructive ? .systemRed : .label
-        
-        iconImageView.image = UIImage(systemName: imageName)
-        iconImageView.tintColor = destructive ? .systemRed : .systemGray3
-    }
+}
+
+// MARK: - ModeSwitchCellDelegate
+protocol ModeSwitchCellDelegate: AnyObject {
+    func modeSwitchCell(didSelectMode mode: AppMode)
 }
 
 private class ModeSwitchCell: UICollectionViewListCell {
+    weak var delegate: ModeSwitchCellDelegate?
+    
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -385,9 +437,7 @@ private class ModeSwitchCell: UICollectionViewListCell {
     
     @objc private func modeChanged() {
         let newMode: AppMode = segmentedControl.selectedSegmentIndex == 0 ? .nestOwner : .sitter
-        ModeManager.shared.currentMode = newMode
-        let generator = UISelectionFeedbackGenerator()
-        generator.selectionChanged()
+        delegate?.modeSwitchCell(didSelectMode: newMode)
     }
     
     func configure() {

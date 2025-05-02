@@ -13,10 +13,15 @@ final class LaunchCoordinator {
     private weak var navigationController: UINavigationController?
     private var userType: UserType?
     
+    // MARK: - Shared Instance
+    static private(set) var shared: LaunchCoordinator?
+    
     // MARK: - Initialization
     init(window: UIWindow) {
         self.window = window
         setupObservers()
+        // Make this instance available as shared instance
+        LaunchCoordinator.shared = self
     }
     
     deinit {
@@ -28,6 +33,13 @@ final class LaunchCoordinator {
             self,
             selector: #selector(handleAppReset),
             name: .appDidReset,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleModeChange),
+            name: .modeDidChange,
             object: nil
         )
     }
@@ -44,6 +56,18 @@ final class LaunchCoordinator {
         }) { _ in
             self.showAuthenticationFlow()
         }
+    }
+    
+    @objc private func handleModeChange() {
+        guard let navigationController = self.navigationController else { return }
+        
+        // Set loading placeholder before showing auth flow
+        UIView.transition(with: navigationController.view,
+                         duration: 0.3,
+                         options: .transitionCrossDissolve,
+                         animations: {
+            navigationController.setViewControllers([LoadingViewController()], animated: false)
+        })
     }
     
     // MARK: - Public Methods
@@ -97,16 +121,14 @@ final class LaunchCoordinator {
     private func configureForCurrentUser() async throws {
         // Determine user type from UserService's currentUser
         let userType: UserType
-        if let primaryRole = UserService.shared.currentUser?.primaryRole {
-            switch primaryRole {
-            case .nestOwner:
-                userType = .owner
-            case .sitter:
-                userType = .sitter
-            }
-        } else {
-            userType = .none
+        let savedMode = ModeManager.shared.currentMode
+        switch savedMode {
+        case .nestOwner:
+            userType = .owner
+        case .sitter:
+            userType = .sitter
         }
+        
         self.userType = userType
         
         await MainActor.run {
@@ -142,11 +164,29 @@ final class LaunchCoordinator {
     }
     
     private func reconfigureAfterAuthentication() async throws {
-        // Reconfigure services with the new user
-        try await Launcher.shared.configure()
+        do {
+            // Reconfigure services with the new user
+            try await Launcher.shared.configure()
+            
+            // Configure for the current user type
+            try await configureForCurrentUser()
+        } catch {
+            print("Errors! reconfigureAfterAuthentication: \(error)")
+            throw error
+        }
+    }
+    
+    // MARK: - Mode Switching
+    func switchMode(to newMode: AppMode) async throws {
+        // Log the operation
+        Logger.log(level: .info, category: .launcher, message: "Switching to mode: \(newMode.rawValue)")
         
-        // Configure for the current user type
-        try await configureForCurrentUser()
+        do {
+            // Reconfigure services with the new mode (same as after authentication)
+            try await reconfigureAfterAuthentication()
+        } catch {
+            throw error
+        }
     }
 }
 
@@ -230,28 +270,3 @@ extension LaunchCoordinator: OnboardingContainerDelegate {
         }
     }
 }
-
-// MARK: - Loading Placeholder
-private class LoadingViewController: UIViewController {
-    private let birdImageView: UIImageView = {
-        let imageView = UIImageView(image: UIImage(systemName: "bird.fill"))
-        imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = .label
-        imageView.preferredSymbolConfiguration = .init(pointSize: 80, weight: .regular)
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        return imageView
-    }()
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        
-        view.addSubview(birdImageView)
-        NSLayoutConstraint.activate([
-            birdImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            birdImageView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            birdImageView.widthAnchor.constraint(equalToConstant: 120),
-            birdImageView.heightAnchor.constraint(equalTo: birdImageView.widthAnchor)
-        ])
-    }
-} 
