@@ -275,7 +275,7 @@ class InfoCell: UICollectionViewListCell {
     }
 }
 
-private class ActionCell: UICollectionViewListCell {
+class ActionCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 17)

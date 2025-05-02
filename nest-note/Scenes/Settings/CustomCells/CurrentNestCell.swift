@@ -69,8 +69,19 @@ class CurrentNestCell: UICollectionViewCell {
         addressLabel.textColor = .secondaryLabel
     }
     
-    func configure(name: String, address: String) {
+    func configure(name: String, address: String, isNoNest: Bool = false) {
         nameLabel.text = name
         addressLabel.text = address
+        
+        if isNoNest {
+            // Style for "no nest" state
+            addressLabel.textColor = NNColors.primary
+            addressLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+            chevronImageView.image = UIImage(systemName: "arrow.up.right")
+        } else {
+            // Normal style
+            addressLabel.textColor = .secondaryLabel
+            addressLabel.font = UIFont.preferredFont(forTextStyle: .body)
+        }
     }
 }

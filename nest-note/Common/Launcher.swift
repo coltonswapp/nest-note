@@ -4,6 +4,7 @@ import UserNotifications
 
 extension Notification.Name {
     static let appDidReset = Notification.Name("appDidReset")
+    static let modeDidChange = Notification.Name("modeDidChange")
 }
 
 /// Responsible for launching and configuring core app services
@@ -35,6 +36,7 @@ final class Launcher {
                 Logger.log(level: .error, category: .launcher, message: "Failed to setup NestService: \(error)")
                 // We might want to handle this differently depending on the error
                 // For now, we'll only log it and not throw
+                throw error
             }
         }
         

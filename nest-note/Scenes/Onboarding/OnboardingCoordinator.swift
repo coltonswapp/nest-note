@@ -58,12 +58,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         var email: String = ""
         var password: String = ""
         var role: NestUser.UserType = .nestOwner
-        var nestInfo = NestInfo()
+        var nestInfo: NestInfo?
         var surveyResponses: [String: [String]] = [:]
         
         struct NestInfo {
-            var name: String = ""
-            var address: String = ""
+            var name: String?
+            var address: String?
         }
     }
     
@@ -326,8 +326,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     }
     
     func updateNestInfo(name: String, address: String) {
-        userInfo.nestInfo.name = name
-        userInfo.nestInfo.address = address
+        userInfo.nestInfo = UserOnboardingInfo.NestInfo(name: name, address: address)
     }
     
     func updateSurveyResponses(_ responses: [String: [String]]) {
@@ -403,8 +402,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         nestValidationSubject.send(isValid)
         
         if isValid {
-            userInfo.nestInfo.name = trimmedName
-            userInfo.nestInfo.address = trimmedAddress
+            userInfo.nestInfo = UserOnboardingInfo.NestInfo(name: trimmedName, address: trimmedAddress)
         }
     }
     

@@ -230,12 +230,19 @@ final class UserService {
             try await changeRequest.commitChanges()
             Logger.log(level: .debug, category: .userService, message: "Display name set successfully")
             
-            // Create default nest for user
-            let defaultNest = try await NestService.shared.createNest(
-                ownerId: firebaseUser.uid,
-                name: info.nestInfo.name,
-                address: info.nestInfo.address
-            )
+            var defaultNest: NestItem?
+            
+            if let nestName = info.nestInfo?.name,
+               let nestAddress = info.nestInfo?.address {
+                // Create default nest for user
+                let placeHolderNest = try await NestService.shared.createNest(
+                    ownerId: firebaseUser.uid,
+                    name: nestName,
+                    address: nestAddress
+                )
+                
+                defaultNest = placeHolderNest
+            }
             
             // Create NestUser with access to their nest
             let user = NestUser(
@@ -246,8 +253,12 @@ final class UserService {
                     notificationPreferences: .default
                 ),
                 primaryRole: info.role,
-                roles: .init(nestAccess: [.init(nestId: defaultNest.id, accessLevel: .owner, grantedAt: Date())])
+                roles: .init(nestAccess: [])
             )
+            
+            if let defaultNest {
+                user.roles = .init(nestAccess: [.init(nestId: defaultNest.id, accessLevel: .owner, grantedAt: Date())])
+            }
             
             // Save user profile to Firestore
             try await saveUserProfile(user)

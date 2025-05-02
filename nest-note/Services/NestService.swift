@@ -46,16 +46,6 @@ final class NestService: EntryRepository {
             return
         }
         
-        // Set isOwner based on user's primary role
-        isOwner = currentUser.primaryRole == .nestOwner
-        Logger.log(level: .info, category: .nestService, message: "User role set: \(isOwner ? "Owner" : "Sitter")")
-        
-        // Only setup nest if user is an owner
-        guard isOwner else {
-            Logger.log(level: .info, category: .nestService, message: "User is not an owner, skipping nest setup")
-            return
-        }
-        
         // Find first nest where user is the owner
         guard let primaryNestId = currentUser.roles.nestAccess.first(where: { $0.accessLevel == .owner })?.nestId else {
             Logger.log(level: .info, category: .nestService, message: "Owner has no owned nests")

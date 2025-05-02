@@ -41,6 +41,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             name: .userInformationUpdated,
             object: nil
         )
+        
+        // Add observer for mode changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleModeChange),
+            name: ModeManager.modeDidChangeNotification,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -147,7 +155,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
-        let listCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+        let listCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
             var content = cell.defaultContentConfiguration()
             
             switch item {
@@ -169,6 +177,17 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
 
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
+                
+                // Check if this is a myNest cell and apply disabled style if there's no current nest
+                let section = self?.dataSource.snapshot().sectionIdentifiers[indexPath.section]
+                let hasCurrentNest = NestService.shared.currentNest != nil
+                
+                if section == .myNest && !hasCurrentNest && UserService.shared.isSignedIn {
+                    // Apply disabled appearance
+                    cell.alpha = 0.6
+                } else {
+                    cell.alpha = 1.0
+                }
             default:
                 break
             }
@@ -179,7 +198,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         
         let currentNestCellRegistration = UICollectionView.CellRegistration<CurrentNestCell, Item> { cell, indexPath, item in
             if case let .currentNest(name, address) = item {
-                cell.configure(name: name, address: address)
+                // Check if this is the "no nest" placeholder
+                let isNoNest = name.contains("Let's Setup")
+                cell.configure(name: name, address: address, isNoNest: isNoNest)
             }
         }
         
@@ -209,10 +230,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
-        // Determine sections based on role
+        // Determine sections based on app mode
         let sections: [Section]
         if UserService.shared.isSignedIn {
-            if UserService.shared.currentUser?.primaryRole == .sitter {
+            if ModeManager.shared.isSitterMode {
                 sections = [.account, .mySitting, .general]
             } else {
                 sections = [.account, .currentNest, .myNest, .general]
@@ -229,28 +250,26 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                                      name: currentUser?.personalInfo.name ?? "Tap to sign in")],
                            toSection: .account)
         
-        // Current Nest section - only if user is signed in and is not a sitter
-        if UserService.shared.isSignedIn && UserService.shared.currentUser?.primaryRole != .sitter {
+        // Current Nest section - only if user is signed in and is not in sitter mode
+        if UserService.shared.isSignedIn && ModeManager.shared.isNestOwnerMode {
             if let currentNest = NestService.shared.currentNest {
                 snapshot.appendItems([.currentNest(name: currentNest.name, address: currentNest.address)],
                                    toSection: .currentNest)
             } else {
-                snapshot.appendItems([.currentNest(name: "No Current Nest", address: "Tap to select a nest")],
+                snapshot.appendItems([.currentNest(name: "Let's Setup Your Nest", address: "Tap here to create your nest")],
                                    toSection: .currentNest)
             }
         }
         
         // My Nest and My Sitting sections
-        if let currentUser = UserService.shared.currentUser {
-            switch currentUser.primaryRole {
-            case .sitter:
+        if UserService.shared.isSignedIn {
+            if ModeManager.shared.isSitterMode {
                 let sittingItems = [
                     ("Saved Nests", "heart"),
                     ("Sessions", "calendar"),
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
-                
-            case .nestOwner:
+            } else {
                 let nestItems = [
                     ("Nest Members", "person.2.fill"),
                     ("Permanent Access", "person.badge.key.fill"),
@@ -448,14 +467,28 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             } else {
                 showUserSignIn()
             }
-        case .currentNest(_, _):
-            // Handle nest selection
-            let vc = NestDetailViewController()
-            let nav = UINavigationController(rootViewController: vc)
-            nav.isModalInPresentation = true
-            present(nav, animated: true)
+        case .currentNest(let name, _):
+            // Check if this is the "no nest" placeholder
+            if name.contains("Let's Setup") {
+                showNestSetup()
+            } else {
+                // Regular nest detail flow
+                let vc = NestDetailViewController()
+                let nav = UINavigationController(rootViewController: vc)
+                nav.isModalInPresentation = true
+                present(nav, animated: true)
+            }
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
+                // Check if there's a current nest
+                let hasCurrentNest = NestService.shared.currentNest != nil
+                if !hasCurrentNest {
+                    // Show prompt to set up nest first
+                    showNestSetupPrompt()
+                    collectionView.deselectItem(at: indexPath, animated: true)
+                    return
+                }
+                
                 switch title {
                 case "Sessions":
                     if ModeManager.shared.isNestOwnerMode {
@@ -540,7 +573,50 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         present(alert, animated: true)
     }
 
+    private func showNestSetupPrompt() {
+        let alert = UIAlertController(
+            title: "Nest Setup Required",
+            message: "Please set up your nest before accessing this feature",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Set Up Nest", style: .default) { [weak self] _ in
+            self?.showNestSetup()
+        })
+        
+        present(alert, animated: true)
+    }
+
+    private func showNestSetup() {
+        // TODO: Present a nest setup flow when implemented
+        let emptyVC = UIViewController()
+        emptyVC.view.backgroundColor = .systemBackground
+        emptyVC.title = "Create Nest"
+        
+        // Add placeholder label
+        let label = UILabel()
+        label.text = "Nest creation coming soon"
+        label.textAlignment = .center
+        label.font = UIFont.systemFont(ofSize: 18, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        emptyVC.view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: emptyVC.view.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: emptyVC.view.centerYAnchor)
+        ])
+        
+        let nav = UINavigationController(rootViewController: emptyVC)
+        present(nav, animated: true)
+    }
+
     @objc private func handleUserInformationUpdate() {
+        applyInitialSnapshots()
+    }
+    
+    @objc private func handleModeChange() {
         applyInitialSnapshots()
     }
     

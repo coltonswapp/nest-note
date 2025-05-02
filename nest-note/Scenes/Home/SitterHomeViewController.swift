@@ -27,7 +27,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         let view = NNEmptyStateView(
             icon: nil,
             title: "No Active Session",
-            subtitle: "Your next session details will appear here",
+            subtitle: "Active session details will appear here.",
             actionButtonTitle: "Join a Session"
         )
         view.translatesAutoresizingMaskIntoConstraints = false
