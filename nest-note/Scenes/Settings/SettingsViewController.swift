@@ -14,6 +14,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     private var headerRegistration: UICollectionView.SupplementaryRegistration<NNSectionHeaderView>!
     private var footerRegistration: UICollectionView.SupplementaryRegistration<UICollectionViewListCell>!
     
+    private var nestCreationCoordinator: NestCreationCoordinator?
+    
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
     }
@@ -182,7 +184,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 let section = self?.dataSource.snapshot().sectionIdentifiers[indexPath.section]
                 let hasCurrentNest = NestService.shared.currentNest != nil
                 
-                if section == .myNest && !hasCurrentNest && UserService.shared.isSignedIn {
+                // Don't disable Sessions cell in sitter mode
+                let isSitterModeSessionsCell = ModeManager.shared.isSitterMode && title == "Sessions" && section == .mySitting
+                
+                if section == .myNest && !hasCurrentNest && UserService.shared.isSignedIn && !isSitterModeSessionsCell {
                     // Apply disabled appearance
                     cell.alpha = 0.6
                 } else {
@@ -480,9 +485,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             }
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
-                // Check if there's a current nest
+                // Check if there's a current nest (skip check for Sessions in sitter mode)
                 let hasCurrentNest = NestService.shared.currentNest != nil
-                if !hasCurrentNest {
+                if !hasCurrentNest && !(ModeManager.shared.isSitterMode && title == "Sessions") {
                     // Show prompt to set up nest first
                     showNestSetupPrompt()
                     collectionView.deselectItem(at: indexPath, animated: true)
@@ -589,27 +594,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     }
 
     private func showNestSetup() {
-        // TODO: Present a nest setup flow when implemented
-        let emptyVC = UIViewController()
-        emptyVC.view.backgroundColor = .systemBackground
-        emptyVC.title = "Create Nest"
         
-        // Add placeholder label
-        let label = UILabel()
-        label.text = "Nest creation coming soon"
-        label.textAlignment = .center
-        label.font = UIFont.systemFont(ofSize: 18, weight: .medium)
-        label.textColor = .secondaryLabel
-        label.translatesAutoresizingMaskIntoConstraints = false
-        
-        emptyVC.view.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: emptyVC.view.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: emptyVC.view.centerYAnchor)
-        ])
-        
-        let nav = UINavigationController(rootViewController: emptyVC)
-        present(nav, animated: true)
+        nestCreationCoordinator = NestCreationCoordinator()
+        guard let nestCreationCoordinator else { return }
+        present(nestCreationCoordinator.start(), animated: true)
     }
 
     @objc private func handleUserInformationUpdate() {

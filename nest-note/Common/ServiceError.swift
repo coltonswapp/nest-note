@@ -2,6 +2,7 @@ import Foundation
 
 enum ServiceError: LocalizedError {
     case noCurrentNest
+    case noCurrentUser
     case invalidData
     case unauthorized
     case networkError(Error)
@@ -17,6 +18,8 @@ enum ServiceError: LocalizedError {
         switch self {
         case .noCurrentNest:
             return "No active nest selected"
+        case .noCurrentUser:
+            return "No current user"
         case .invalidData:
             return "The data appears to be invalid or corrupted"
         case .unauthorized:
@@ -44,6 +47,8 @@ enum ServiceError: LocalizedError {
         switch self {
         case .noCurrentNest:
             return "Please select or create a nest before performing this action"
+        case .noCurrentUser:
+            return "Please sign in before performing this action"
         case .invalidData:
             return "The data structure doesn't match what was expected"
         case .unauthorized:
@@ -71,6 +76,8 @@ enum ServiceError: LocalizedError {
         switch self {
         case .noCurrentNest:
             return "Go to settings to select or create a nest"
+        case .noCurrentUser:
+            return "Please sign in before performing this action"
         case .invalidData:
             return "Try refreshing the data or contact support if the problem persists"
         case .unauthorized:

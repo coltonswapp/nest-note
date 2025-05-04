@@ -46,7 +46,7 @@ class OBSurveyViewController: NNOnboardingViewController {
     private func showCurrentQuestion() {
         guard currentQuestionIndex < questions.count else {
             // We're done with all questions, proceed with onboarding
-            coordinator?.next()
+            (coordinator as? OnboardingCoordinator)?.next()
             return
         }
         
@@ -77,7 +77,7 @@ class OBSurveyViewController: NNOnboardingViewController {
         // Update progress
         if let coordinator = coordinator {
             let progress = Float(currentQuestionIndex) / Float(questions.count)
-            coordinator.updateProgressTo(progress)
+            (coordinator as? OnboardingCoordinator)?.updateProgressTo(progress)
         }
     }
     
@@ -107,7 +107,7 @@ class OBSurveyViewController: NNOnboardingViewController {
             if let coordinator = coordinator as? OnboardingCoordinator {
                 coordinator.updateSurveyResponses(surveyResponses)
             }
-            coordinator?.next()
+            (coordinator as? OnboardingCoordinator)?.next()
         }
     }
     

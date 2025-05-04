@@ -325,7 +325,12 @@ extension NNOnboardingSurveyViewController: UICollectionViewDataSource, UICollec
         
         HapticsHelper.lightHaptic()
         
-        // Enable the Next button if at least one option is selected
-        nextButton.isEnabled = !getSelectedOptions().isEmpty
+        // Check the current state of selected options
+        let hasSelectedOptions = !getSelectedOptions().isEmpty
+        
+        // Only update isEnabled if the state is different from current state
+        if nextButton.isEnabled != hasSelectedOptions {
+            nextButton.isEnabled = hasSelectedOptions
+        }
     }
 } 
