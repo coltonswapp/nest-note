@@ -40,8 +40,8 @@ final class OBNameViewController: NNOnboardingViewController {
     
     @objc private func nextButtonTapped() {
         guard let name = nameTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-        coordinator?.updateUserName(name)
-        coordinator?.next()
+        (coordinator as? OnboardingCoordinator)?.updateUserName(name)
+        (coordinator as? OnboardingCoordinator)?.next()
     }
     
     // MARK: - Setup
@@ -63,7 +63,7 @@ final class OBNameViewController: NNOnboardingViewController {
     }
     
     private func setupValidation() {
-        coordinator?.nameValidation
+        (coordinator as? OnboardingCoordinator)?.nameValidation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isValid in
                 self?.ctaButton?.isEnabled = isValid
@@ -74,14 +74,14 @@ final class OBNameViewController: NNOnboardingViewController {
     }
     
     @objc private func textFieldDidChange() {
-        coordinator?.validateName(nameTextField.text ?? "")
+        (coordinator as? OnboardingCoordinator)?.validateName(nameTextField.text ?? "")
     }
 }
 
 // MARK: - UITextFieldDelegate
 extension OBNameViewController: UITextFieldDelegate {
     func textFieldDidEndEditing(_ textField: UITextField) {
-        coordinator?.validateName(nameTextField.text ?? "")
+        (coordinator as? OnboardingCoordinator)?.validateName(nameTextField.text ?? "")
     }
 }
 
@@ -126,7 +126,7 @@ final class OBEmailViewController: NNOnboardingViewController {
     }
     
     private func setupValidation() {
-        coordinator?.emailValidation
+        (coordinator as? OnboardingCoordinator)?.emailValidation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isValid in
                 self?.ctaButton?.isEnabled = isValid
@@ -139,7 +139,7 @@ final class OBEmailViewController: NNOnboardingViewController {
     }
     
     @objc private func textFieldDidChange() {
-        coordinator?.validateEmail(
+        (coordinator as? OnboardingCoordinator)?.validateEmail(
             email: emailTextField.text ?? "",
             confirmEmail: confirmEmailTextField.text ?? ""
         )
@@ -160,7 +160,7 @@ final class OBEmailViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
-        coordinator?.next()
+        (coordinator as? OnboardingCoordinator)?.next()
     }
     
     // MARK: - Setup
@@ -296,7 +296,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
-        coordinator?.next()
+        (coordinator as? OnboardingCoordinator)?.next()
     }
     
     // MARK: - Setup
@@ -330,7 +330,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
     }
     
     private func setupValidation() {
-        coordinator?.passwordValidation
+        (coordinator as? OnboardingCoordinator)?.passwordValidation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] validation in
                 self?.ctaButton?.isEnabled = validation.isValid
@@ -348,7 +348,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
     }
     
     @objc private func textFieldDidChange() {
-        coordinator?.validatePassword(
+        (coordinator as? OnboardingCoordinator)?.validatePassword(
             password: passwordTextField.text ?? "",
             confirmPassword: confirmPasswordTextField.text ?? ""
         )
@@ -456,7 +456,7 @@ final class OBRoleViewController: NNOnboardingViewController {
     }
     
     private func setupValidation() {
-        coordinator?.roleValidation
+        (coordinator as? OnboardingCoordinator)?.roleValidation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isValid in
                 self?.ctaButton?.isEnabled = isValid
@@ -471,12 +471,12 @@ final class OBRoleViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
-        coordinator?.next()
+        (coordinator as? OnboardingCoordinator)?.next()
     }
     
     @objc private func roleButtonTapped(_ sender: UIButton) {
         let role: NestUser.UserType = sender == parentButton ? .nestOwner : .sitter
-        coordinator?.validateRole(role)
+        (coordinator as? OnboardingCoordinator)?.validateRole(role)
         updateSelection(role)
     }
     
@@ -530,26 +530,24 @@ final class OBRoleViewController: NNOnboardingViewController {
 }
 
 class OBCreateNestViewController: NNOnboardingViewController {
-    private let nestNameField: UITextField = {
-        let field = UITextField()
+    private let nestNameField: NNTextField = {
+        let field = NNTextField()
         field.translatesAutoresizingMaskIntoConstraints = false
         field.placeholder = "Smith Nest"
-        field.borderStyle = .roundedRect
         return field
     }()
     
-    private let addressField: UITextField = {
-        let field = UITextField()
+    private let addressField: NNTextField = {
+        let field = NNTextField()
         field.translatesAutoresizingMaskIntoConstraints = false
         field.placeholder = "321 Eagle Nest Ct, Birdsville CA"
-        field.borderStyle = .roundedRect
         return field
     }()
     
     private let addressFootnoteLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Your address is only shared with sitters during their sessions."
+        label.text = "Your address is only shared with sitters during sessions."
         label.textColor = .secondaryLabel
         label.font = .preferredFont(forTextStyle: .caption1)
         label.numberOfLines = 0
@@ -577,7 +575,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
     }
     
     private func setupValidation() {
-        coordinator?.nestValidation
+        (coordinator as? OnboardingCoordinator)?.nestValidation
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isValid in
                 self?.ctaButton?.isEnabled = isValid
@@ -590,7 +588,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
     }
     
     @objc private func textFieldDidChange() {
-        coordinator?.validateNest(
+        (coordinator as? OnboardingCoordinator)?.validateNest(
             name: nestNameField.text ?? "",
             address: addressField.text ?? ""
         )
@@ -606,7 +604,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
-        coordinator?.next()
+        (coordinator as? OnboardingCoordinator)?.next()
     }
     
     // MARK: - Setup
@@ -649,6 +647,7 @@ final class OBFinishViewController: NNOnboardingViewController {
     
     private lazy var activityIndicator: NNLoadingSpinner = {
         let indicator = NNLoadingSpinner()
+        indicator.configure(with: NNColors.primaryAlt)
         indicator.translatesAutoresizingMaskIntoConstraints = false
         return indicator
     }()
@@ -684,17 +683,17 @@ final class OBFinishViewController: NNOnboardingViewController {
         Task {
             do {
                 // Signal to coordinator we're ready to finish
-                try await coordinator?.finishSetup()
+                try await (coordinator as? OnboardingCoordinator)?.finishSetup()
                 
                 // If we get here, signup was successful
                 activityIndicator.animateState(success: true) {
-                    self.coordinator?.updateProgressTo(1.0)
+                    (self.coordinator as? OnboardingCoordinator)?.updateProgressTo(1.0)
                     self.playSuccessTransition()
                 }
             } catch {
                 // Hide loading state
                 activityIndicator.animateState(success: false)
-                coordinator?.handleErrorNavigation(error)
+                (coordinator as? OnboardingCoordinator)?.handleErrorNavigation(error)
             }
         }
     }
@@ -721,7 +720,7 @@ final class OBFinishViewController: NNOnboardingViewController {
     
     private func playSuccessTransition() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            self.coordinator?.completeOnboarding()
+            (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
         }
     }
 }

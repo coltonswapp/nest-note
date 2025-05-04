@@ -235,13 +235,7 @@ final class UserService {
             if let nestName = info.nestInfo?.name,
                let nestAddress = info.nestInfo?.address {
                 // Create default nest for user
-                let placeHolderNest = try await NestService.shared.createNest(
-                    ownerId: firebaseUser.uid,
-                    name: nestName,
-                    address: nestAddress
-                )
-                
-                defaultNest = placeHolderNest
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
             }
             
             // Create NestUser with access to their nest
@@ -288,6 +282,106 @@ final class UserService {
             default:
                 throw AuthError.unknown
             }
+        }
+    }
+    
+    /// Creates a nest for the specified user
+    /// - Parameters:
+    ///   - userId: The ID of the user who will own the nest
+    ///   - nestName: The name for the new nest
+    ///   - nestAddress: The address for the new nest
+    ///   - updateCurrentUser: If true and the user is the current user, updates their roles
+    /// - Returns: The created NestItem
+    func setupNestForUser(userId: String, nestName: String, nestAddress: String, updateCurrentUser: Bool = false) async throws -> NestItem {
+        
+        Logger.log(level: .info, category: .userService, message: "Setting up nest for user: \(userId)")
+        
+        // Create nest for user
+        let nest = try await NestService.shared.createNest(
+            ownerId: userId,
+            name: nestName,
+            address: nestAddress
+        )
+        
+        Logger.log(level: .info, category: .userService, message: "Successfully created nest: \(nest.name)")
+        
+        return nest
+    }
+    
+    /// Adds nest access to a user's roles
+    /// - Parameters:
+    ///   - userId: The ID of the user to update
+    ///   - nestId: The ID of the nest to add access to
+    ///   - accessLevel: The level of access to grant (default: .owner)
+    func addNestAccessToUser(nestId: String, accessLevel: NestUser.NestAccess.AccessLevel = .owner) async throws {
+        guard let userId = currentUser?.id else {
+            throw ServiceError.noCurrentUser
+        }
+        
+        Logger.log(level: .info, category: .userService, message: "Adding \(accessLevel) access to nest \(nestId) for user \(userId)")
+        
+        // Update in Firestore first
+        let docRef = db.collection("users").document(userId)
+        let snapshot = try await docRef.getDocument()
+        
+        if snapshot.exists {
+            // Create the new access object
+            let nestAccess = NestUser.NestAccess(
+                nestId: nestId,
+                accessLevel: accessLevel,
+                grantedAt: Date()
+            )
+            
+            // Check if user already has this nest in their access list
+            if let data = snapshot.data(),
+               let rolesData = data["roles"] as? [String: Any],
+               var nestAccessArray = rolesData["nestAccess"] as? [[String: Any]] {
+                
+                // Remove any existing access to this nest to avoid duplicates
+                nestAccessArray.removeAll { ($0["nestId"] as? String) == nestId }
+                
+                // Add the new access
+                let encoder = Firestore.Encoder()
+                if let encodedAccess = try? encoder.encode(nestAccess),
+                   let accessDict = encodedAccess as? [String: Any] {
+                    nestAccessArray.append(accessDict)
+                }
+                
+                // Update Firestore
+                try await docRef.updateData([
+                    "roles.nestAccess": nestAccessArray,
+                    "updatedAt": FieldValue.serverTimestamp()
+                ])
+            } else {
+                // User doesn't have existing roles, create new ones
+                let roles = NestUser.UserRoles(nestAccess: [nestAccess])
+                try await docRef.updateData([
+                    "roles": try Firestore.Encoder().encode(roles),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ])
+            }
+            
+            // If this is the current user, update local state
+            if userId == currentUser?.id {
+                // Check if current user already has access to this nest
+                if let index = currentUser?.roles.nestAccess.firstIndex(where: { $0.nestId == nestId }) {
+                    currentUser?.roles.nestAccess[index].accessLevel = accessLevel
+                } else {
+                    // Add new access
+                    currentUser?.roles.nestAccess.append(nestAccess)
+                }
+                
+                // Save updated state
+                saveAuthState()
+                
+                // Post notification for UI updates
+                NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+            }
+            
+            Logger.log(level: .info, category: .userService, message: "Successfully added nest access for user")
+        } else {
+            Logger.log(level: .error, category: .userService, message: "User document not found")
+            throw AuthError.invalidUserData
         }
     }
     

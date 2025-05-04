@@ -38,10 +38,10 @@ class NNOnboardingViewController: UIViewController {
         return label
     }()
     
-    var ctaButton: NNPrimaryLabeledButton?
-    private var buttonBottomConstraint: NSLayoutConstraint?
+    var ctaButton: NNBaseControl?
+    var buttonBottomConstraint: NSLayoutConstraint?
     
-    var coordinator: OnboardingCoordinator?
+    var coordinator: NSObject?
     var cancellables = Set<AnyCancellable>()
     
     var shouldHandleKeyboard: Bool = true
