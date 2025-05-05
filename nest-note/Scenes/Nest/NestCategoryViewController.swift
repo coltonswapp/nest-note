@@ -21,6 +21,7 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
     var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, BaseEntry>!
     private var suggestionButton: NNPrimaryLabeledButton!
+    private var emptyStateView: NNEmptyStateView!
     
     enum Section: Int, CaseIterable {
         case codes, other
@@ -55,7 +56,7 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
         setupNavigationBar()
         setupSuggestionButton()
         configureDataSource()
-        
+        setupEmptyStateView()
         collectionView.delegate = self
     }
     
@@ -71,6 +72,18 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
     // Implement NestLoadable requirement
     func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]]) {
         self.entries = groupedEntries[category] ?? []
+        
+        refreshEmptyState()
+    }
+    
+    func refreshEmptyState() {
+        // Show or hide empty state view based on entries count
+        if entries.isEmpty {
+            emptyStateView.isHidden = false
+            view.bringSubviewToFront(emptyStateView)
+        } else {
+            emptyStateView.isHidden = true
+        }
     }
     
     // MARK: - CollectionViewLoadable Implementation
@@ -154,7 +167,7 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
         let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(90))
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 4, bottom: 12, trailing: 4)
         
         return section
     }
@@ -182,7 +195,7 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
         
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
         section.interGroupSpacing = 8  // Reduce this value to decrease spacing between items
         
         return section
@@ -293,8 +306,21 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
     }
     
     @objc private func suggestionButtonTapped() {
-        // Handle the suggestion button tap here
-        print("Suggestion button tapped")
+        // Present CommonEntriesViewController as a sheet with medium and large detents
+        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository, sessionVisibilityLevel: sessionVisibilityLevel)
+        let navController = UINavigationController(rootViewController: commonEntriesVC)
+        
+        // Set this view controller as the delegate
+        commonEntriesVC.delegate = self
+        
+        if let sheet = navController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+            sheet.prefersEdgeAttachedInCompactHeight = true
+        }
+        
+        present(navController, animated: true)
     }
     
     private func flashCell(for entry: BaseEntry) {
@@ -397,6 +423,27 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
             }
         }
     }
+    
+    private func setupEmptyStateView() {
+        emptyStateView = NNEmptyStateView(
+            icon: UIImage(systemName: "moon.zzz.fill"),
+            title: "It's a little quiet in here",
+            subtitle: "Entries for this category will appear here.",
+            actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
+        )
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateView.isHidden = true
+        emptyStateView.isUserInteractionEnabled = true
+        emptyStateView.delegate = self
+        
+        view.addSubview(emptyStateView)
+        
+        NSLayoutConstraint.activate([
+            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
 }
 
 extension NestCategoryViewController: UICollectionViewDelegate {
@@ -436,7 +483,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
 
 // Add delegate conformance
 extension NestCategoryViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(_ controller: EntryDetailViewController, didSaveEntry entry: BaseEntry?) {
+    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
         if let entry = entry {
             // Handle save/update
             Logger.log(level: .info, category: .nestService, message: "Delegate received saved entry: \(entry.title)")
@@ -445,24 +492,27 @@ extension NestCategoryViewController: EntryDetailViewControllerDelegate {
                 updateLocalEntry(entry)
             } else {
                 addLocalEntry(entry)
+                refreshEmptyState()
             }
-        } else {
-            // Handle deletion
-            Logger.log(level: .info, category: .nestService, message: "Delegate received deletion")
+        }
+    }
+    
+    func entryDetailViewController(didDeleteEntry entry: BaseEntry) {
+        Logger.log(level: .info, category: .nestService, message: "Delegate received deletion")
+        
+        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+            entries.remove(at: index)
             
-            if let editingEntry = controller.entry,
-               let index = entries.firstIndex(where: { $0.id == editingEntry.id }) {
-                entries.remove(at: index)
-                
-                DispatchQueue.main.async {
-                    guard let dataSource = self.dataSource else { return }
-                    var snapshot = dataSource.snapshot()
-                    snapshot.deleteItems([editingEntry])
-                    dataSource.apply(snapshot, animatingDifferences: true)
-                }
-                
-                showToast(text: "Entry Deleted")
+            DispatchQueue.main.async {
+                guard let dataSource = self.dataSource else { return }
+                var snapshot = dataSource.snapshot()
+                snapshot.deleteItems([entry])
+                dataSource.apply(snapshot, animatingDifferences: true)
             }
+            
+            showToast(text: "Entry Deleted")
+            
+            refreshEmptyState()
         }
     }
 }
@@ -482,6 +532,37 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
             Logger.log(level: .info, category: .nestService, message: "New category created: \(categoryName)")
             showToast(text: "Category Created: \(categoryName)")
         }
+    }
+}
+
+// Add delegate conformance for empty state view
+extension NestCategoryViewController: NNEmptyStateViewDelegate {
+    func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
+        
+        print("Empty state tapped:")
+        // Only allow adding entries for nest owners
+        guard entryRepository is NestService else { return }
+        
+        // Use the same action as the add button
+        addButtonTapped()
+    }
+}
+
+// Add extension to implement the CommonEntriesViewControllerDelegate
+extension NestCategoryViewController: CommonEntriesViewControllerDelegate {
+    func commonEntriesViewController(_ controller: CommonEntriesViewController, didSelectEntry entry: BaseEntry) {
+        // Show the entry detail with this controller as the delegate
+        let cellFrame = view.frame  // We don't have a cell frame since we're coming from a different view
+        let isReadOnly = !(entryRepository is NestService)
+        
+        let editEntryVC = EntryDetailViewController(
+            category: entry.category,
+            entry: entry,
+            sourceFrame: cellFrame,
+            isReadOnly: isReadOnly
+        )
+        editEntryVC.entryDelegate = self
+        present(editEntryVC, animated: true)
     }
 }
 

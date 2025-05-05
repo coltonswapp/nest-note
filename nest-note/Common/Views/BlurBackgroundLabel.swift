@@ -9,14 +9,7 @@ class BlurBackgroundLabel: UIView {
         return label
     }()
     
-    private let blurView: UIVisualEffectView = {
-        let blur = UIBlurEffect(style: .systemUltraThinMaterial)
-        let view = UIVisualEffectView(effect: blur)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.layer.cornerRadius = 12
-        view.clipsToBounds = true
-        return view
-    }()
+    private var blurView: UIVisualEffectView!
     
     var onClearTapped: (() -> Void)?
     
@@ -40,13 +33,22 @@ class BlurBackgroundLabel: UIView {
         set { blurView.alpha = newValue }
     }
     
-    init() {
+    init(with effect: UIBlurEffect.Style = .systemUltraThinMaterial) {
         super.init(frame: .zero)
+        configureBlurView(with: effect)
         setupViews()
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func configureBlurView(with effect: UIBlurEffect.Style) {
+        let blur = UIBlurEffect(style: effect)
+        blurView = UIVisualEffectView(effect: blur)
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.layer.cornerRadius = 12
+        blurView.clipsToBounds = true
     }
     
     private func setupViews() {

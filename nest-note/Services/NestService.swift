@@ -98,13 +98,10 @@ final class NestService: EntryRepository {
         let docRef = db.collection("nests").document(nest.id)
         try await docRef.setData(try Firestore.Encoder().encode(nest))
         
-        // Create default categories first
+        // Create default categories
         try await createDefaultCategories(for: nest.id)
         
-        // Then create default entries
-        try await createDefaultEntries(for: nest.id)
-        
-        Logger.log(level: .info, category: .nestService, message: "Nest created successfully with default categories and entries ✅")
+        Logger.log(level: .info, category: .nestService, message: "Nest created successfully with default categories ✅")
         
         // Set as current nest after creation
         setCurrentNest(nest)
@@ -251,15 +248,6 @@ final class NestService: EntryRepository {
         cachedEntries = nil
     }
     
-    // Creates default entries for a new nest
-    func createDefaultEntries(for nestId: String) async throws {
-        for entry in Self.defaultEntries {
-            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-            try await docRef.setData(try Firestore.Encoder().encode(entry))
-        }
-        Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultEntries.count) default entries")
-    }
-    
     // Add this method to find entries older than a specified timeframe
     func fetchOutdatedEntries(olderThan days: Int = 90) async throws -> [BaseEntry] {
         // Fetch all entries first
@@ -295,50 +283,6 @@ extension NestService {
             }
         }
     }
-}
-
-// MARK: - Default Entries
-extension NestService {
-    static let defaultEntries: [BaseEntry] = [
-        // Household
-        BaseEntry(title: "Garage Code", content: "--", visibilityLevel: .essential, category: "Household"),
-        BaseEntry(title: "Alarm Code", content: "--", visibilityLevel: .essential, category: "Household"),
-        BaseEntry(title: "WiFi Setup", content: "--", visibilityLevel: .essential, category: "Household"),
-        BaseEntry(title: "Appliance Guide", content: "--", visibilityLevel: .standard, category: "Household"),
-        BaseEntry(title: "Trash Schedule", content: "--", visibilityLevel: .standard, category: "Household"),
-        
-        // Emergency
-        BaseEntry(title: "Medical Info", content: "--", visibilityLevel: .essential, category: "Emergency"),
-        BaseEntry(title: "First Aid Location", content: "--", visibilityLevel: .essential, category: "Emergency"),
-        BaseEntry(title: "Emergency Shutoffs", content: "--", visibilityLevel: .essential, category: "Emergency"),
-        BaseEntry(title: "Nearest Hospital", content: "--", visibilityLevel: .essential, category: "Emergency"),
-        
-        // Rules & Guidelines
-        BaseEntry(title: "House Rules", content: "--", visibilityLevel: .essential, category: "Rules & Guidelines"),
-        BaseEntry(title: "Screen Time", content: "--", visibilityLevel: .essential, category: "Rules & Guidelines"),
-        BaseEntry(title: "Approved Media", content: "--", visibilityLevel: .standard, category: "Rules & Guidelines"),
-        BaseEntry(title: "Food Rules", content: "--", visibilityLevel: .essential, category: "Rules & Guidelines"),
-        BaseEntry(title: "Off-Limits Areas", content: "--", visibilityLevel: .essential, category: "Rules & Guidelines"),
-        
-        // Pets
-        BaseEntry(title: "Schedule", content: "--", visibilityLevel: .essential, category: "Pets"),
-        BaseEntry(title: "Vet Info", content: "--", visibilityLevel: .standard, category: "Pets"),
-        BaseEntry(title: "Behavior", content: "--", visibilityLevel: .essential, category: "Pets"),
-        BaseEntry(title: "Medications", content: "--", visibilityLevel: .essential, category: "Pets"),
-        BaseEntry(title: "Exercise Routine", content: "--", visibilityLevel: .standard, category: "Pets"),
-        
-        // School & Education
-        BaseEntry(title: "School Details", content: "--", visibilityLevel: .standard, category: "School & Education"),
-        BaseEntry(title: "Transportation", content: "--", visibilityLevel: .standard, category: "School & Education"),
-        BaseEntry(title: "Homework Rules", content: "--", visibilityLevel: .standard, category: "School & Education"),
-        
-        // Social & Interpersonal
-        BaseEntry(title: "Approved Friends", content: "--", visibilityLevel: .standard, category: "Social & Interpersonal"),
-        BaseEntry(title: "Playdate Contacts", content: "--", visibilityLevel: .extended, category: "Social & Interpersonal"),
-        BaseEntry(title: "Behavior Guide", content: "--", visibilityLevel: .standard, category: "Social & Interpersonal"),
-        BaseEntry(title: "Comfort Routines", content: "--", visibilityLevel: .standard, category: "Social & Interpersonal"),
-        BaseEntry(title: "Cultural Notes", content: "--", visibilityLevel: .standard, category: "Social & Interpersonal")
-    ]
 }
 
 // MARK: - Default Categories

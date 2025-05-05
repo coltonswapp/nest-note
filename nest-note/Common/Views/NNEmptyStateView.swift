@@ -67,6 +67,8 @@ class NNEmptyStateView: UIView {
         addSubview(stackView)
         
         stackView.addArrangedSubview(iconImageView)
+        stackView.setCustomSpacing(16, after: iconImageView)
+
         stackView.addArrangedSubview(titleLabel)
         stackView.addArrangedSubview(subtitleLabel)
         stackView.addArrangedSubview(actionButton)
@@ -77,6 +79,8 @@ class NNEmptyStateView: UIView {
         isUserInteractionEnabled = true
         
         NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
             stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
             stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 32),
@@ -99,10 +103,14 @@ class NNEmptyStateView: UIView {
         if let buttonTitle = actionButtonTitle {
             actionButton.setTitle(buttonTitle, for: .normal)
             actionButton.isHidden = false
-            iconImageView.isHidden = true
         } else {
             actionButton.isHidden = true
-            iconImageView.isHidden = false
+        }
+
+        if let icon {
+            iconImageView.isHidden = false  
+        } else {
+            iconImageView.isHidden = true
         }
     }
     

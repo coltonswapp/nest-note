@@ -13,6 +13,8 @@ class HalfWidthCell: UICollectionViewCell {
     private let keyLabel = UILabel()
     private let valueLabel = UILabel()
     
+    var valueContainerBackgroundColor: UIColor = NNColors.groupedBackground
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
@@ -53,7 +55,7 @@ class HalfWidthCell: UICollectionViewCell {
         keyLabel.textColor = .secondaryLabel
         
         valueContainer.clipsToBounds = true
-        valueContainer.backgroundColor = NNColors.groupedBackground
+        valueContainer.backgroundColor = valueContainerBackgroundColor
         valueContainer.layer.cornerRadius = 10
         
         valueLabel.font = UIFont.systemFont(ofSize: 22)
@@ -72,12 +74,14 @@ class HalfWidthCell: UICollectionViewCell {
             valueLabel.text = "****"
             valueLabel.textColor = .label
         }
+        
+        valueContainer.backgroundColor = valueContainerBackgroundColor
     }
     
     override var isHighlighted: Bool {
         didSet {
             UIView.animate(withDuration: 0.1) {
-                self.valueContainer.backgroundColor = self.isHighlighted ? .systemGray4 : NNColors.groupedBackground
+                self.valueContainer.backgroundColor = self.isHighlighted ? .systemGray4 : self.valueContainerBackgroundColor
             }
         }
     }
@@ -87,7 +91,7 @@ class HalfWidthCell: UICollectionViewCell {
             self.valueContainer.backgroundColor = NNColors.primary.withAlphaComponent(0.3)
         }) { _ in
             UIView.animate(withDuration: 0.3) {
-                self.valueContainer.backgroundColor = NNColors.groupedBackground
+                self.valueContainer.backgroundColor = self.valueContainerBackgroundColor
             }
         }
     }

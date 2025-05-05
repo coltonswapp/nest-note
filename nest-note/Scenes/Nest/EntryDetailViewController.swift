@@ -1,7 +1,8 @@
 import UIKit
 
 protocol EntryDetailViewControllerDelegate: AnyObject {
-    func entryDetailViewController(_ controller: EntryDetailViewController, didSaveEntry entry: BaseEntry?)
+    func entryDetailViewController(didSaveEntry entry: BaseEntry?)
+    func entryDetailViewController(didDeleteEntry entry: BaseEntry)
 }
 
 final class EntryDetailViewController: NNSheetViewController {
@@ -73,6 +74,17 @@ final class EntryDetailViewController: NNSheetViewController {
         self.visibilityLevel = entry?.visibility ?? .standard
         self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
+    }
+    
+    init(category: String, title: String, content: String, sourceFrame: CGRect? = nil) {
+        self.category = category
+        self.entry = nil
+        self.visibilityLevel = .standard
+        self.isReadOnly = false
+        super.init(sourceFrame: sourceFrame)
+        
+        titleField.text = title
+        contentTextView.text = content
     }
     
     required init?(coder: NSCoder) {
@@ -245,7 +257,7 @@ final class EntryDetailViewController: NNSheetViewController {
             do {
                 try await NestService.shared.deleteEntry(entry)
                 await MainActor.run {
-                    entryDelegate?.entryDetailViewController(self, didSaveEntry: nil)
+                    entryDelegate?.entryDetailViewController(didDeleteEntry: entry)
                     HapticsHelper.lightHaptic()
                     dismiss(animated: true)
                 }
@@ -332,7 +344,7 @@ final class EntryDetailViewController: NNSheetViewController {
                 }
                 
                 HapticsHelper.lightHaptic()
-                entryDelegate?.entryDetailViewController(self, didSaveEntry: savedEntry)
+                entryDelegate?.entryDetailViewController(didSaveEntry: savedEntry)
                 dismiss(animated: true)
             }
         }
