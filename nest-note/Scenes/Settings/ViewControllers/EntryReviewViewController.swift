@@ -366,11 +366,11 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
 
 // Add this extension to handle entry updates
 extension EntryReviewViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(_ controller: EntryDetailViewController, didSaveEntry entry: BaseEntry?) {
+    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
         guard let entry = entry else {
             // Handle deletion - just show a toast, no need to refresh the entire stack
             // We can keep the card in the visual stack but mark it as deleted if needed
-            if let editingEntry = controller.entry {
+            if let editingEntry = entry {
                 showToast(text: "Entry deleted")
                 Logger.log(level: .info, category: .nestService, message: "Entry deleted: \(editingEntry.id)")
             }
@@ -394,5 +394,9 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
                 }
             }
         }
+    }
+    
+    func entryDetailViewController(didDeleteEntry entry: BaseEntry) {
+        //
     }
 }

@@ -644,12 +644,12 @@ extension SettingsViewController: CategoryDetailViewControllerDelegate {
 }
 
 extension SettingsViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(_ controller: EntryDetailViewController, didSaveEntry entry: BaseEntry?) {
-        if let entry = entry {
-            showToast(text: "Entry saved: \(entry.title)")
-        } else {
-            showToast(text: "Entry deleted")
-        }
+    func entryDetailViewController(didDeleteEntry: BaseEntry) {
+        showToast(text: "Entry saved: \(didDeleteEntry.title)")
+    }
+    
+    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
+        //
     }
 }
 
