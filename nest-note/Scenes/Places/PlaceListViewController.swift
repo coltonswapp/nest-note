@@ -22,6 +22,12 @@ final class PlaceListViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Place>!
     private var showTemporaryPlaces: Bool = false
     private var chooseOnMapButton: NNPrimaryLabeledButton?
+    private var loadingIndicator: UIActivityIndicatorView!
+    private var isLoading = false {
+        didSet {
+            updateLoadingState()
+        }
+    }
     
     enum LayoutStyle {
         case grid, list
@@ -64,6 +70,7 @@ final class PlaceListViewController: NNViewController {
         title = "Places"
         
         setupCollectionView()
+        setupLoadingIndicator()
         configureDataSource()
         setupNavigationBarButtons()
         setupEmptyState()
@@ -71,6 +78,33 @@ final class PlaceListViewController: NNViewController {
         // Only show the "Choose on Map" button when in selection mode
         if isSelecting {
             setupChooseOnMapButton()
+        }
+    }
+    
+    private func setupLoadingIndicator() {
+        loadingIndicator = UIActivityIndicatorView(style: .medium)
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        loadingIndicator.hidesWhenStopped = true
+        view.addSubview(loadingIndicator)
+        
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
+    private func updateLoadingState() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if self.isLoading {
+                self.loadingIndicator.startAnimating()
+                self.collectionView.isHidden = true
+                self.emptyStateView?.isHidden = true
+            } else {
+                self.loadingIndicator.stopAnimating()
+                self.updateEmptyState()
+            }
         }
     }
     
@@ -208,6 +242,8 @@ final class PlaceListViewController: NNViewController {
     
     // MARK: - Data Loading
     private func fetchPlaces() {
+        isLoading = true
+        
         Task {
             do {
                 // Fetch all places including temporary ones
@@ -216,7 +252,14 @@ final class PlaceListViewController: NNViewController {
             } catch {
                 Logger.log(level: .error, category: .placesService, 
                     message: "Failed to fetch places: \(error.localizedDescription)")
+                
+                // Show error state in the UI
+                DispatchQueue.main.async { [weak self] in
+                    self?.showToast(text: "Failed to load places", sentiment: .negative)
+                }
             }
+            
+            isLoading = false
         }
     }
     
@@ -274,8 +317,15 @@ final class PlaceListViewController: NNViewController {
     }
     
     private func updateEmptyState() {
-        emptyStateView?.isHidden = !PlacesService.shared.places.isEmpty
-        collectionView.isHidden = PlacesService.shared.places.isEmpty
+        if isLoading {
+            emptyStateView?.isHidden = true
+            collectionView.isHidden = true
+            return
+        }
+        
+        let isEmpty = PlacesService.shared.places.isEmpty
+        emptyStateView?.isHidden = !isEmpty
+        collectionView.isHidden = isEmpty
     }
     
     private func setupChooseOnMapButton() {
