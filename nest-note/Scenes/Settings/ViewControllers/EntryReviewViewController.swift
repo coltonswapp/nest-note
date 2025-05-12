@@ -81,6 +81,13 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         return button
     }()
     
+    private var loadingIndicator: UIActivityIndicatorView!
+    private var isLoading = false {
+        didSet {
+            updateLoadingState()
+        }
+    }
+    
     // Add property for entry repository
     private let entryRepository: EntryRepository
     
@@ -107,6 +114,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     }
     
     override func setup() {
+        setupLoadingIndicator()
         navigationItem.title = "Review Entries"
         navigationController?.navigationBar.prefersLargeTitles = false
     }
@@ -162,17 +170,32 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         cardStackView.showLoading()
     }
     
+    private func setupLoadingIndicator() {
+        loadingIndicator = UIActivityIndicatorView(style: .medium)
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        loadingIndicator.hidesWhenStopped = true
+        view.addSubview(loadingIndicator)
+        
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
     private func loadOutdatedEntries() {
         Task {
             do {
+                isLoading = true
                 // Fetch entries older than 90 days using the protocol method
                 let entries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
                 
                 await MainActor.run {
                     outdatedEntries = entries
+                    
+                    isLoading = false
                     if entries.isEmpty {
-                        // Show success state with better message
-                        cardStackView.showSuccess(message: "Great job! 🎉\nYour Nest is up to date.")
+                        // Show success state with better message - format with title and subtitle separated by double newline
+                        cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if entries need updating the next time you create a session.")
                         
                         // Hide the button stack since there are no entries to review
                         buttonStack.isHidden = true
@@ -183,10 +206,8 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
                         
                         // Add haptic feedback for positive reinforcement
                         HapticsHelper.successHaptic()
-                        
-                        // Update subtitle to reflect the successful state
-                        subtitleLabel.text = "All your entries are current. Check back later to maintain your Nest."
                     } else {
+                        isLoading = false
                         // Show button stack since there are entries to review
                         buttonStack.isHidden = false
                         
@@ -208,6 +229,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
                 }
             } catch {
                 await MainActor.run {
+                    isLoading = false
                     // Handle error
                     Logger.log(level: .error, category: .nestService, message: "Error loading outdated entries: \(error.localizedDescription)")
                     cardStackView.showError(message: "Failed to load entries")
@@ -285,6 +307,22 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         
         nextButton.isEnabled = cardStackView.canGoNext
         nextButton.setTitleColor(cardStackView.canGoNext ? .systemBlue : .secondaryLabel, for: .normal)
+    }
+    
+    private func updateLoadingState() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if self.isLoading {
+                self.loadingIndicator.startAnimating()
+                self.buttonStack.isHidden = true
+                self.cardStackView.isHidden = true
+            } else {
+                self.loadingIndicator.stopAnimating()
+                self.buttonStack.isHidden = false
+                self.cardStackView.isHidden = false
+            }
+        }
     }
     
     @objc private func doneButtonTapped() {
@@ -368,12 +406,8 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
 extension EntryReviewViewController: EntryDetailViewControllerDelegate {
     func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
         guard let entry = entry else {
-            // Handle deletion - just show a toast, no need to refresh the entire stack
-            // We can keep the card in the visual stack but mark it as deleted if needed
-            if let editingEntry = entry {
-                showToast(text: "Entry deleted")
-                Logger.log(level: .info, category: .nestService, message: "Entry deleted: \(editingEntry.id)")
-            }
+            // Entry was deleted through the edit screen
+            // The didDeleteEntry delegate method will handle this case
             return
         }
         
@@ -386,6 +420,26 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
             Task {
                 do {
                     try await entryRepository.updateEntry(entry)
+                    
+                    await MainActor.run {
+                        // Show a success toast
+                        showToast(text: "Entry updated")
+                        
+                        // Automatically advance to the next card since this one is now updated
+                        if cardStackView.canGoNext {
+                            // Add a slight delay to ensure the toast is visible first
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                self.cardStackView.approveCard()
+                                self.updateButtonStates()
+                                
+                                // Give haptic feedback for the automatic advance
+                                HapticsHelper.lightHaptic()
+                            }
+                        } else {
+                            // If this was the last card, make sure the done button is enabled
+                            doneButton.isEnabled = true
+                        }
+                    }
                 } catch {
                     await MainActor.run {
                         showToast(text: "Error updating entry", sentiment: .negative)
@@ -397,6 +451,33 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
     }
     
     func entryDetailViewController(didDeleteEntry entry: BaseEntry) {
-        //
+        // Show toast for user feedback
+        showToast(text: "Entry deleted")
+        Logger.log(level: .info, category: .nestService, message: "Entry deleted: \(entry.id)")
+        
+        // Remove the entry from our local array
+        if let index = outdatedEntries.firstIndex(where: { $0.id == entry.id }) {
+            outdatedEntries.remove(at: index)
+            
+            // Automatically advance to the next card after deletion
+            if cardStackView.canGoNext {
+                // Add a slight delay to ensure the toast is visible first
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.cardStackView.approveCard()
+                    self.updateButtonStates()
+                    
+                    // Give haptic feedback for the automatic advance
+                    HapticsHelper.lightHaptic()
+                }
+            } else {
+                // If this was the last card, make sure the done button is enabled
+                doneButton.isEnabled = true
+                
+                // If we deleted all entries, show success state
+                if outdatedEntries.isEmpty {
+                    cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if entries need updating the next time you create a session.")
+                }
+            }
+        }
     }
 }

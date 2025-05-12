@@ -23,6 +23,9 @@ class SelectPlaceViewController: NNViewController {
     weak var locationDelegate: SelectPlaceLocationDelegate?
     weak var temporaryPlaceDelegate: TemporaryPlaceSelectionDelegate?
     
+    // Property to store initial location if available
+    var initialLocation: CLLocation?
+    
     private let searchBarView: NNSearchBarView = {
         let view = NNSearchBarView(placeholder: "1 Infinite Loop, Cupertino, CA",
                                    keyboardType: .default)
@@ -285,7 +288,62 @@ class SelectPlaceViewController: NNViewController {
             mapView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
-        // Set initial region to Salt Lake City
+        // Set initial region based on priority:
+        // 1. Existing place being edited
+        // 2. User's current location
+        // 3. Current Nest address
+        // 4. Default Salt Lake City
+        if let existingPlace = existingPlace {
+            // If editing an existing place, center on that place's location
+            let region = MKCoordinateRegion(
+                center: existingPlace.locationCoordinate,
+                latitudinalMeters: 500,
+                longitudinalMeters: 500
+            )
+            mapView.setRegion(region, animated: false)
+        } else if let initialLocation = initialLocation {
+            // If we have an initial location (from user's location), use that
+            let region = MKCoordinateRegion(
+                center: initialLocation.coordinate,
+                latitudinalMeters: 1000,
+                longitudinalMeters: 1000
+            )
+            mapView.setRegion(region, animated: false)
+        } else if let nestAddress = NestService.shared.currentNest?.address, !nestAddress.isEmpty {
+            // Try using the Nest address as fallback
+            geocodeNestAddress(nestAddress)
+        } else {
+            // Default to Salt Lake City
+            setDefaultRegion()
+        }
+    }
+    
+    private func geocodeNestAddress(_ address: String) {
+        geocoder.geocodeAddressString(address) { [weak self] placemarks, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("Error geocoding Nest address: \(error.localizedDescription)")
+                self.setDefaultRegion()
+                return
+            }
+            
+            if let location = placemarks?.first?.location {
+                let region = MKCoordinateRegion(
+                    center: location.coordinate,
+                    latitudinalMeters: 1000,
+                    longitudinalMeters: 1000
+                )
+                self.mapView.setRegion(region, animated: false)
+            } else {
+                // Fall back to default if geocoding failed
+                self.setDefaultRegion()
+            }
+        }
+    }
+    
+    private func setDefaultRegion() {
+        // Default to Salt Lake City
         let saltLakeCity = CLLocationCoordinate2D(latitude: 40.7608, longitude: -111.8910)
         let region = MKCoordinateRegion(
             center: saltLakeCity,

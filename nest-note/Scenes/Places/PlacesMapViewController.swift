@@ -11,6 +11,8 @@ final class PlacesMapViewController: NNViewController {
     private var currentPlacemark: CLPlacemark?
     private var selectedAnnotation: MKPointAnnotation?
     private let geocoder = CLGeocoder()
+    private let locationManager = CLLocationManager()
+    private var hasRequestedLocation = false
     
     // Remove timer and movement tracking properties
     private var hasSelectedPlace = false
@@ -33,11 +35,37 @@ final class PlacesMapViewController: NNViewController {
         title = "Places"
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Only request location once when the view appears
+        if !hasRequestedLocation {
+            setupLocationManager()
+            hasRequestedLocation = true
+        }
+    }
+    
     override func setup() {
         setupMap()
         setupAddPlaceButton()
         setupClearButton()
         setupNavigationBarButtons()
+    }
+    
+    private func setupLocationManager() {
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer // Rough accuracy is fine
+        
+        // Check current authorization status and request if needed
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            locationManager.requestLocation()
+        default:
+            // User has denied or restricted location access, use default region
+            break
+        }
     }
     
     override func setupNavigationBarButtons() {
@@ -66,6 +94,11 @@ final class PlacesMapViewController: NNViewController {
             mapView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
+        // Set initial region to Salt Lake City (will be updated with user location if available)
+        setDefaultRegion()
+    }
+    
+    private func setDefaultRegion() {
         // Set initial region to Salt Lake City
         let saltLakeCity = CLLocationCoordinate2D(latitude: 40.7608, longitude: -111.8910)
         let region = MKCoordinateRegion(
@@ -74,6 +107,15 @@ final class PlacesMapViewController: NNViewController {
             longitudinalMeters: 10000
         )
         mapView.setRegion(region, animated: false)
+    }
+    
+    private func setRegionToUserLocation(_ location: CLLocation) {
+        let region = MKCoordinateRegion(
+            center: location.coordinate,
+            latitudinalMeters: 10000,
+            longitudinalMeters: 10000
+        )
+        mapView.setRegion(region, animated: true)
     }
     
     private func setupAddPlaceButton() {
@@ -157,6 +199,10 @@ final class PlacesMapViewController: NNViewController {
     // MARK: - Actions
     @objc private func addPlaceButtonTapped() {
         let selectPlaceVC = SelectPlaceViewController()
+        
+        // Pass user's current location if available
+        selectPlaceVC.initialLocation = locationManager.location
+        
         let nav = UINavigationController(rootViewController: selectPlaceVC)
         present(nav, animated: true)
     }
@@ -304,4 +350,35 @@ final class PlacesMapViewController: NNViewController {
 // MARK: - MKMapViewDelegate
 extension PlacesMapViewController: MKMapViewDelegate {
     // ... Map delegate methods from SelectPlaceViewController ...
+}
+
+// MARK: - CLLocationManagerDelegate
+extension PlacesMapViewController: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // Use the most recent location
+        guard let location = locations.last else { return }
+        
+        // Set the map region to the user's location
+        setRegionToUserLocation(location)
+        
+        // Stop updating location since we only need it once
+        locationManager.stopUpdatingLocation()
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location manager failed with error: \(error.localizedDescription)")
+        // Fall back to default region if there's an error getting location
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            locationManager.requestLocation()
+        case .denied, .restricted:
+            // User denied location access, use default region
+            break
+        default:
+            break
+        }
+    }
 }

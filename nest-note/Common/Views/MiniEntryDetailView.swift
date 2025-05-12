@@ -20,6 +20,7 @@ class MiniEntryDetailView: UIView {
         let label = UILabel()
         label.font = .systemFont(ofSize: 18, weight: .semibold)
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.numberOfLines = 0
         return label
     }()
     
@@ -77,6 +78,7 @@ class MiniEntryDetailView: UIView {
             valueLabel.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 20),
             valueLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            valueLabel.bottomAnchor.constraint(lessThanOrEqualTo: visibilityLabel.topAnchor, constant: -20),
             
             visibilityLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             visibilityLabel.bottomAnchor.constraint(equalTo: timestampLabel.topAnchor, constant: -4),
