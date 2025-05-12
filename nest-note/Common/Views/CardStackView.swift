@@ -84,33 +84,16 @@ class CardStackView: UIView {
         return label
     }()
     
-    // Replace activity indicator with success stack
-    private lazy var successStack: UIStackView = {
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 16
-        stack.alpha = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
-    }()
-    
-    private lazy var successImageView: UIImageView = {
-        let config = UIImage.SymbolConfiguration(pointSize: 100, weight: .medium)
-        let image = UIImage(systemName: "checkmark.circle.fill", withConfiguration: config)?
-            .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-        let imageView = UIImageView(image: image)
-        imageView.contentMode = .scaleAspectFit
-        return imageView
-    }()
-    
-    private lazy var successLabel: UILabel = {
-        let label = UILabel()
-        label.text = "Your nest is up to date!"
-        label.font = .systemFont(ofSize: 18, weight: .medium)
-        label.textColor = .label
-        label.textAlignment = .center
-        return label
+    // Replace success stack with an NNEmptyStateView
+    private lazy var emptyStateView: NNEmptyStateView = {
+        let view = NNEmptyStateView(
+            icon: UIImage(systemName: "party.popper.fill"),
+            title: "Everything looks up-to-date!",
+            subtitle: "We'll let you know if entries need updating the next time you create a session."
+        )
+        view.alpha = 0
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
     }()
     
     // MARK: - Transform Helpers
@@ -163,11 +146,8 @@ class CardStackView: UIView {
         backgroundColor = .clear
         clipsToBounds = false
         
-        // Configure success stack
-        successStack.addArrangedSubview(successImageView)
-        successStack.addArrangedSubview(successLabel)
-        
-        [progressLabel, successStack].forEach { addSubview($0) }
+        // Add our views
+        [progressLabel, emptyStateView].forEach { addSubview($0) }
         
         NSLayoutConstraint.activate([
             progressLabel.topAnchor.constraint(equalTo: topAnchor, constant: 0),
@@ -176,11 +156,11 @@ class CardStackView: UIView {
             progressLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
             progressLabel.heightAnchor.constraint(equalToConstant: 20),
             
-            // Center success stack
-            successStack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            successStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            successImageView.widthAnchor.constraint(equalToConstant: 100),
-            successImageView.heightAnchor.constraint(equalToConstant: 100)
+            // Center empty state view
+            emptyStateView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            emptyStateView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            emptyStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20)
         ])
     }
     
@@ -233,7 +213,7 @@ class CardStackView: UIView {
     }
     
     var canGoNext: Bool {
-        return currentIndex < cardData.count - 1
+        return currentIndex < cardData.count
     }
     
     var canGoPrevious: Bool {
@@ -272,11 +252,13 @@ class CardStackView: UIView {
     private func cycleToNextCard(withDirection direction: SwipeDirection? = nil) {
         guard !cards.isEmpty else { return }
         
-        let cardToRemove = cards.removeFirst()
-        currentIndex += 1
-        
         // Check if this is the last card
         let isLastCard = currentIndex == cardData.count
+        let cardToRemove = cards.removeFirst()
+        
+        if !isLastCard {   
+            currentIndex += 1
+        }
         
         // Create and add new card if there's more data
         if currentIndex + 2 < cardData.count {
@@ -313,7 +295,7 @@ class CardStackView: UIView {
             
             // Show spinner if this is the last card
             if isLastCard {
-                self.successStack.alpha = 1
+                self.emptyStateView.alpha = 1
             }
         }) { _ in
             cardToRemove.removeFromSuperview()
@@ -521,12 +503,10 @@ class CardStackView: UIView {
     }
     
     private func showSuccessState() {
-        UIView.animate(withDuration: 0.1) {
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut) {
             self.progressLabel.alpha = 0
-            self.successStack.alpha = 1
+            self.emptyStateView.alpha = 1
         }
-        
-        self.successImageView.bounce(height: 40)
     }
     
     // Add public method for programmatic right swipe
@@ -580,13 +560,15 @@ class CardStackView: UIView {
                 card.alpha = 1
                 card.layer.zPosition = CGFloat(self.cards.count - index)
             }
-        }) { _ in
+        }) { [weak self] _ in
+            guard let self = self else { return }
+            
             topCard.removeFromSuperview()
             self.reviewedCards.append(topCard)
             self.delegate?.cardStackView(self, didRemoveCard: topCard)
             self.setupGesturesForTopCard()
             
-            // If this was the last card, animate spinner success
+            // If this was the last card, animate success state
             if isLastCard {
                 self.showSuccessState()
             } else {
@@ -661,12 +643,21 @@ class CardStackView: UIView {
         cards = []
         reviewedCards = []
         
-        // Update success label text
-        successLabel.text = message
+        // Split the message into title and subtitle at the first newline
+        let components = message.components(separatedBy: "\n\n")
+        let title = components.first ?? message
+        let subtitle = components.count > 1 ? components.dropFirst().joined(separator: "\n\n") : ""
         
-        // Show success stack with animation
+        // Update empty state view content
+        emptyStateView.configure(
+            icon: UIImage(systemName: "party.popper.fill"),
+            title: title,
+            subtitle: subtitle
+        )
+        
+        // Show empty state view with animation
         UIView.animate(withDuration: 0.3) {
-            self.successStack.alpha = 1.0
+            self.emptyStateView.alpha = 1.0
         }
         
         // Hide progress label
