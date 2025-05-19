@@ -69,7 +69,7 @@ class NestViewController: NNViewController, NestLoadable {
     
     private let sectionHeaders = ["", "Information Categories", "Routines", "Misc"]
     
-    private var newCategoryButton: NNPrimaryLabeledButton!
+    private var newCategoryButton: NNPrimaryLabeledButton?
     
     private let entryRepository: EntryRepository
     
@@ -87,10 +87,10 @@ class NestViewController: NNViewController, NestLoadable {
         title = entryRepository is NestService ? "My Nest" : "The Nest"
         configureCollectionView()
         setupLoadingIndicator()
+        setupNewCategoryButton()
         setupRefreshControl()
         configureDataSource()
         setupNavigationBar()
-        setupNewCategoryButton()
         collectionView.delegate = self
     }
     
@@ -276,7 +276,7 @@ class NestViewController: NNViewController, NestLoadable {
     }
     
     @objc private func addButtonTapped() {
-        let buttonFrame = newCategoryButton.convert(newCategoryButton.bounds, to: nil)
+        let buttonFrame = newCategoryButton!.convert(newCategoryButton!.bounds, to: nil)
         let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
         categoryVC.categoryDelegate = self
         present(categoryVC, animated: true)
@@ -309,9 +309,9 @@ class NestViewController: NNViewController, NestLoadable {
         guard entryRepository is NestService else { return }
         
         newCategoryButton = NNPrimaryLabeledButton(title: "New Category", image: UIImage(systemName: "plus"))
-        newCategoryButton.isEnabled = false
-        newCategoryButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        newCategoryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+        newCategoryButton?.isEnabled = false
+        newCategoryButton?.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        newCategoryButton?.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
         
         let buttonHeight: CGFloat = 55
         let buttonPadding: CGFloat = 10
@@ -336,7 +336,7 @@ class NestViewController: NNViewController, NestLoadable {
             self.categories = categories
             
             await MainActor.run {
-                self.newCategoryButton.isEnabled = true
+                self.newCategoryButton?.isEnabled = true
                 self.hasLoadedInitialData = true
                 self.handleLoadedEntries(groupedEntries)
                 self.loadingIndicator.stopAnimating()
@@ -344,7 +344,7 @@ class NestViewController: NNViewController, NestLoadable {
         } catch {
             Logger.log(level: .error, category: .general, message: "Failed to load entries and categories: \(error)")
             await MainActor.run {
-                self.newCategoryButton.isEnabled = false
+                self.newCategoryButton?.isEnabled = false
                 self.loadingIndicator.stopAnimating()
                 self.showError(error.localizedDescription)
             }

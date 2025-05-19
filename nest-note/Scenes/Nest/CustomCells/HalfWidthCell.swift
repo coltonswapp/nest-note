@@ -14,6 +14,7 @@ class HalfWidthCell: UICollectionViewCell {
     private let valueLabel = UILabel()
     
     var valueContainerBackgroundColor: UIColor = NNColors.groupedBackground
+    var valueLabelBackgroundColor: UIColor = .label
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -59,7 +60,7 @@ class HalfWidthCell: UICollectionViewCell {
         valueContainer.layer.cornerRadius = 10
         
         valueLabel.font = UIFont.systemFont(ofSize: 22)
-        valueLabel.textColor = .label
+        valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 1
     }
     
@@ -69,12 +70,11 @@ class HalfWidthCell: UICollectionViewCell {
         // Show actual value or asterisks based on access level
         if sessionVisibility.hasAccess(to: entryVisibility) {
             valueLabel.text = value
-            valueLabel.textColor = .label
         } else {
             valueLabel.text = "****"
-            valueLabel.textColor = .label
         }
         
+        valueLabel.textColor = valueLabelBackgroundColor
         valueContainer.backgroundColor = valueContainerBackgroundColor
     }
     

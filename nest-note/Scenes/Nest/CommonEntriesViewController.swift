@@ -357,6 +357,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
             case .codes:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: HalfWidthCell.reuseIdentifier, for: indexPath) as! HalfWidthCell
                 cell.valueContainerBackgroundColor = NNColors.NNSystemBackground6
+                cell.valueLabelBackgroundColor = .tertiaryLabel
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
@@ -368,6 +369,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
             case .other:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
                 cell.valueContainerBackgroundColor = NNColors.NNSystemBackground6
+                cell.valueLabelBackgroundColor = .tertiaryLabel
                 cell.configure(
                     key: entry.title,
                     value: entry.content,

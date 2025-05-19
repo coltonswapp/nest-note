@@ -14,6 +14,7 @@ class FullWidthCell: UICollectionViewCell {
     private let valueLabel = UILabel()
     
     var valueContainerBackgroundColor: UIColor = NNColors.groupedBackground
+    var valueLabelBackgroundColor: UIColor = .label
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -60,7 +61,7 @@ class FullWidthCell: UICollectionViewCell {
         keyLabel.textColor = .secondaryLabel
 
         valueLabel.font = UIFont.systemFont(ofSize: 17)
-        valueLabel.textColor = .label
+        valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 2
     }
     
@@ -70,13 +71,12 @@ class FullWidthCell: UICollectionViewCell {
         // Show actual value or asterisks based on access level
         if sessionVisibility.hasAccess(to: entryVisibility) {
             valueLabel.text = value
-            valueLabel.textColor = .label
         } else {
             // For full width cells, we'll show multiple lines of asterisks to indicate more content
             valueLabel.text = "********"
-            valueLabel.textColor = .label
         }
         
+        valueLabel.textColor = valueLabelBackgroundColor
         containerView.backgroundColor = valueContainerBackgroundColor
     }
     
