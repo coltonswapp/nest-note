@@ -182,7 +182,7 @@ class DebugCardStackView: UIViewController {
     private func makeSliderLabel(text: String) -> UILabel {
         let label = UILabel()
         label.text = text
-        label.font = .systemFont(ofSize: 12)
+        label.font = .bodyS
         return label
     }
     

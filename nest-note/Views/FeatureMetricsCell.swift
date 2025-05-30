@@ -24,7 +24,7 @@ class FeatureMetricsCell: UICollectionViewCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -32,7 +32,7 @@ class FeatureMetricsCell: UICollectionViewCell {
     
     private let votePercentageLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         label.textColor = NNColors.primary
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

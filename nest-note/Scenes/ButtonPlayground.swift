@@ -62,7 +62,7 @@ class ButtonPlayground: UIViewController {
         button.setTitle("Send", for: .normal)
         button.setTitleColor(NNColors.primary.darken(by: 0.5), for: .normal)
         button.backgroundColor = NNColors.primary
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        button.titleLabel?.font = UIFont.bodyL
         return button
     }()
     

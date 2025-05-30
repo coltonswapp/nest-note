@@ -40,7 +40,7 @@ final class Launcher {
             }
         }
         
-        requestNotificationPermissions()
+        // requestNotificationPermissions()
         
         Logger.log(level: .info, category: .launcher, message: "Service configuration complete ✅")
     }

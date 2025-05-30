@@ -7,7 +7,7 @@ class NNCircularIconButtonWithLabel: UIView {
     
     private let label: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false

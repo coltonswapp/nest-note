@@ -30,7 +30,7 @@ class SurveyOptionCell: UICollectionViewCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.numberOfLines = 0
         label.textAlignment = .center
         return label

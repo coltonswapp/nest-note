@@ -224,7 +224,7 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
 class InfoCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.font = .captionBold
         label.textColor = .secondaryLabel
         label.textAlignment = .left
         return label
@@ -232,7 +232,7 @@ class InfoCell: UICollectionViewListCell {
     
     private let detailLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .regular)
+        label.font = .bodyL
         label.textColor = .label
         label.textAlignment = .left
         label.numberOfLines = 0
@@ -278,7 +278,7 @@ class InfoCell: UICollectionViewListCell {
 class ActionCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17)
+        label.font = .bodyL
         return label
     }()
     

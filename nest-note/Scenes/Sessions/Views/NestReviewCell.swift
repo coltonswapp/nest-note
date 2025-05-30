@@ -43,7 +43,7 @@ final class NestReviewCell: UICollectionViewListCell {
             foregroundColor: NNColors.primary
         )
         var container = AttributeContainer()
-        container.font = .systemFont(ofSize: 16, weight: .bold)
+        container.font = .h4
         button.configuration?.attributedTitle = AttributedString("Review Nest", attributes: container)
         button.addTarget(self, action: #selector(reviewButtonTapped), for: .touchUpInside)
         return button

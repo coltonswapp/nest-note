@@ -62,7 +62,7 @@ class GlassyButtonPlayground: UIViewController {
         // Configure button
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setTitle("Glassy Button", for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        button.titleLabel?.font = .h4
         button.backgroundColor = NNColors.primary
         
         // Add subviews

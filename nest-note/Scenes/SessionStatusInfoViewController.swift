@@ -28,7 +28,7 @@ final class SessionStatusInfoViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Session Statuses"
-        label.font = .systemFont(ofSize: 22, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -37,7 +37,7 @@ final class SessionStatusInfoViewController: NNViewController {
     private let subtitleLabel: UILabel = {
         let label = UILabel()
         label.text = "Understand the different states a caregiving session can be in, from scheduling to completion."
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -48,7 +48,7 @@ final class SessionStatusInfoViewController: NNViewController {
     private let footnoteLabel: UILabel = {
         let label = UILabel()
         label.text = "Sessions are automatically archived 7 days after completion. Archived sessions are read-only and associated events will no longer be visible."
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

@@ -98,7 +98,7 @@ class SelectPlaceViewController: NNViewController {
         let image = UIImage(systemName: "xmark.circle.fill", withConfiguration: config)
         button.setImage(image, for: .normal)
         button.setTitle("Clear Selection", for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        button.titleLabel?.font = .h4
         
         // Add spacing between image and text
         button.imageEdgeInsets = UIEdgeInsets(top: 0, left: -8, bottom: 0, right: 0)
@@ -610,7 +610,7 @@ class SelectPlaceViewController: NNViewController {
         instructionLabel = BlurBackgroundLabel()
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionLabel.text = "Drag & Zoom the map to set\nthe pin for your place"
-        instructionLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        instructionLabel.font = .bodyL
         instructionLabel.textColor = .secondaryLabel
         
         view.addSubview(instructionLabel)

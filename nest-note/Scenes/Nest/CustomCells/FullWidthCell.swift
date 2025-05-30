@@ -57,10 +57,10 @@ class FullWidthCell: UICollectionViewCell {
         containerView.backgroundColor = valueContainerBackgroundColor
         containerView.layer.cornerRadius = 10
 
-        keyLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        keyLabel.font = .bodyM
         keyLabel.textColor = .secondaryLabel
 
-        valueLabel.font = UIFont.systemFont(ofSize: 17)
+        valueLabel.font = UIFont.systemFont(ofSize: 17, weight: .medium)
         valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 2
     }

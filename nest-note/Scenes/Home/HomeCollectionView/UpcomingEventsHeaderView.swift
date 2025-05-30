@@ -21,12 +21,12 @@ class UpcomingEventsHeaderView: UICollectionReusableView {
     }
     
     private func setupViews() {
-        titleLabel.font = UIFont.systemFont(ofSize: 16.0, weight: .semibold)
+        titleLabel.font = .h4
         titleLabel.text = "Upcoming Events"
         titleLabel.textColor = .secondaryLabel
         
         fullScheduleButton.setTitle("Full Schedule", for: .normal)
-        fullScheduleButton.titleLabel?.font = UIFont.systemFont(ofSize: 14.0, weight: .semibold)
+        fullScheduleButton.titleLabel?.font = .h5
         fullScheduleButton.setTitleColor(NNColors.primary, for: .normal)
         
         // Underline the button text

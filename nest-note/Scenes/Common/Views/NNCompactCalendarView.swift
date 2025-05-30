@@ -28,7 +28,7 @@ final class NNCompactCalendarView: UIView {
     private let monthLabel: UILabel = {
         let label = UILabel()
         label.textColor = .label
-        label.font = UIFont.systemFont(ofSize: 12)
+        label.font = .bodyS
         label.textAlignment = .center
         label.text = "DEC"
         return label
@@ -37,7 +37,7 @@ final class NNCompactCalendarView: UIView {
     private let yearLabel: UILabel = {
         let label = UILabel()
         label.textColor = .secondaryLabel
-        label.font = UIFont.systemFont(ofSize: 14, weight: .bold)
+        label.font = UIFont.h5
         label.textAlignment = .center
         label.text = "2025"
         return label
@@ -285,7 +285,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
     private let dayLabel: UILabel = {
         let label = UILabel()
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.font = .captionBold
         label.textColor = .secondaryLabel
         return label
     }()
@@ -293,7 +293,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
     private let dateLabel: UILabel = {
         let label = UILabel()
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         return label
     }()
     
@@ -367,7 +367,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
             // Selected state styling
             dateLabel.textColor = .systemBackground
             dayLabel.textColor = .systemBackground
-            dateLabel.font = .systemFont(ofSize: 16, weight: .bold)
+            dateLabel.font = .h4
             contentView.backgroundColor = .label.withAlphaComponent(0.8)
             
             if isStartDate {
@@ -380,7 +380,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
             
         } else {
             // Normal state styling
-            dateLabel.font = .systemFont(ofSize: 16, weight: .regular)
+            dateLabel.font = .bodyL
             
             if isInRange {
                 contentView.backgroundColor = NNColors.paletteGray
@@ -404,7 +404,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
             }
             
             if isToday {
-                dateLabel.font = .systemFont(ofSize: 16, weight: .bold)
+                dateLabel.font = .h4
             }
         }
     }

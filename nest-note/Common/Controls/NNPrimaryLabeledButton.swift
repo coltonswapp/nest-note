@@ -32,7 +32,7 @@ class NNBaseControl: UIControl {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
         label.textColor = .white
-        label.font = .systemFont(ofSize: 16, weight: .bold)
+        label.font = .h4
         label.isUserInteractionEnabled = false
         return label
     }()
@@ -525,6 +525,20 @@ class NNSmallPrimaryButton: UIButton {
         configureButton(title: title, image: image, imagePlacement: imagePlacement, foregroundColor: foregroundColor)
     }
     
+    init(image: UIImage,
+         backgroundColor: UIColor = NNColors.primary,
+         foregroundColor: UIColor = .white) {
+        self.title = ""
+        self.image = image
+        self.foregroundColor = foregroundColor
+        super.init(frame: .zero)
+        self.backgroundColor = backgroundColor
+        self.originalBackgroundColor = backgroundColor
+        self.foregroundColor = foregroundColor
+        self.imagePlacement = .left
+        configureButton(title: title, image: image, imagePlacement: self.imagePlacement ?? .left, foregroundColor: foregroundColor)
+    }
+    
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -537,7 +551,7 @@ class NNSmallPrimaryButton: UIButton {
     override func setTitle(_ title: String?, for state: UIControl.State) {
         guard let title else { return }
         var container = AttributeContainer()
-        container.font = .systemFont(ofSize: 16, weight: .semibold)
+        container.font = .h4
         configuration?.attributedTitle = AttributedString(title, attributes: container)
     }
     
@@ -553,7 +567,7 @@ class NNSmallPrimaryButton: UIButton {
         
         // Configure text attributes with explicit bold weight
         var container = AttributeContainer()
-        container.font = UIFont.boldSystemFont(ofSize: 16)
+        container.font = .h4
         container.foregroundColor = foregroundColor
         config.attributedTitle = AttributedString(title, attributes: container)
         
@@ -562,13 +576,13 @@ class NNSmallPrimaryButton: UIButton {
             config.image = image.withRenderingMode(.alwaysTemplate)
             config.imagePlacement = imagePlacement == .left ? .leading : .trailing
             config.imagePadding = 6
-            config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+            config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 12, weight: .bold)
             var container = AttributeContainer()
-            container.font = UIFont.boldSystemFont(ofSize: 16)
+            container.font = .h4
             config.attributedTitle = AttributedString(title, attributes: container)
         }
         
-        container.font = UIFont.boldSystemFont(ofSize: 16)
+        container.font = .h4
         container.foregroundColor = foregroundColor
         config.attributedTitle = AttributedString(title, attributes: container)
         

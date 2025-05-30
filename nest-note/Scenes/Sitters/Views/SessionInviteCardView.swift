@@ -30,7 +30,7 @@ class SessionInviteCardView: UIView {
     
     private let nestNameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.font = .h3
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .left
         label.text = "Debug Text"
@@ -46,7 +46,7 @@ class SessionInviteCardView: UIView {
     
     private let sessionDateLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.font = .h3
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .left
         label.numberOfLines = 0
@@ -65,7 +65,7 @@ class SessionInviteCardView: UIView {
     
     private let footnoteLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.text = "Session Invite"  // Default text
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -74,7 +74,7 @@ class SessionInviteCardView: UIView {
     
     private let dateInvitedLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .right

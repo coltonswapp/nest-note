@@ -66,7 +66,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         label.text = "Ensure that your Nest information is current. Swipe left to skip, swipe right to mark as up-to-date, tap to edit."
         label.textAlignment = .center
         label.textColor = .secondaryLabel
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

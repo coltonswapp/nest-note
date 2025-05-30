@@ -247,13 +247,13 @@ class NotificationCell: UICollectionViewListCell {
     
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17)
+        label.font = .bodyL
         return label
     }()
     
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.numberOfLines = 0
         return label
@@ -322,7 +322,7 @@ class NotificationCell: UICollectionViewListCell {
 class NotificationFooterView: UICollectionReusableView {
     private let messageLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

@@ -24,7 +24,7 @@ class NestCell: UICollectionViewCell {
     
     private func setupViews() {
         // Configure title label
-        titleLabel.font = UIFont.systemFont(ofSize: 20.0, weight: .bold)
+        titleLabel.font = .h2
         
         // Configure subtitle label
         subtitleLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)

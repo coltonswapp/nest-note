@@ -87,7 +87,7 @@ final class CategoryDetailViewController: NNSheetViewController {
     private let selectedIconLabel: UILabel = {
         let label = UILabel()
         label.text = "Select an icon"
-        label.font = .systemFont(ofSize: 18, weight: .medium)
+        label.font = .bodyL
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

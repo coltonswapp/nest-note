@@ -12,7 +12,7 @@ extension UIViewController {
         label.textColor = .white
         label.numberOfLines = 0
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         
         errorView.addSubview(label)
         view.addSubview(errorView)

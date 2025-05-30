@@ -8,7 +8,7 @@
 import UIKit
 
 // Add a delegate protocol at the top of the file before class declaration
-protocol CommonEntriesViewControllerDelegate: AnyObject {
+protocol CommonEntriesViewControllerDelegate: EntryDetailViewControllerDelegate {
     func commonEntriesViewController(_ controller: CommonEntriesViewController, didSelectEntry entry: BaseEntry)
 }
 
@@ -19,7 +19,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
     private let sessionVisibilityLevel: VisibilityLevel
     
     // Add delegate property
-    weak var delegate: EntryDetailViewControllerDelegate?
+    weak var delegate: CommonEntriesViewControllerDelegate?
     
     // Required by CollectionViewLoadable
     var loadingIndicator: UIActivityIndicatorView!
@@ -112,7 +112,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
         instructionLabel = BlurBackgroundLabel(with: .systemThinMaterial)
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionLabel.text = "These are example entries. Select \none to make it your own."
-        instructionLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        instructionLabel.font = .bodyL
         instructionLabel.textColor = .secondaryLabel
         
         view.addSubview(instructionLabel)

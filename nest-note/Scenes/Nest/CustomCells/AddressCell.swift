@@ -39,7 +39,7 @@ class AddressCell: UICollectionViewCell {
             addressLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8)
         ])
 
-        addressLabel.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        addressLabel.font = UIFont.h1
         addressLabel.textColor = .label
         addressLabel.numberOfLines = 0
         addressLabel.textAlignment = .left
@@ -58,7 +58,7 @@ class AddressCell: UICollectionViewCell {
         // Set the text with underline
         let attributedString = NSAttributedString(string: address, attributes: [
             .underlineStyle: NSUnderlineStyle.single.rawValue,
-            .font: UIFont.systemFont(ofSize: 24, weight: .bold),
+            .font: UIFont.h1,
             .foregroundColor: UIColor.label
         ])
         addressLabel.attributedText = attributedString

@@ -25,7 +25,7 @@ final class PlaceCell: UICollectionViewCell {
     private let aliasLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         label.textColor = .label
         return label
     }()
@@ -33,7 +33,7 @@ final class PlaceCell: UICollectionViewCell {
     private let addressLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 12)
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         label.numberOfLines = 2
         return label

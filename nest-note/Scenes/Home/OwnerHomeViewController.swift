@@ -8,7 +8,20 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     private var cancellables = Set<AnyCancellable>()
     private let nestService = NestService.shared
     private let sessionService = SessionService.shared
+    private let setupService = SetupService.shared
     private var currentSession: SessionItem?
+    
+    // Track whether we've checked if setup should be shown
+    private var hasCheckedSetupStatus = false
+    
+    private var hasCompletedSetup: Bool {
+        return setupService.hasCompletedSetup
+    }
+    
+    private var setupProgress: Int {
+        // Count the number of completed steps
+        return SetupStepType.allCases.filter { setupService.isStepComplete($0) }.count
+    }
     
     private lazy var loadingSpinner: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -23,6 +36,10 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         super.viewDidLoad()
         configureDataSource()
         setupObservers()
+        Logger.log(level: .info, category: .general, message: "Setup completion status: \(hasCompletedSetup ? "Completed" : "Not Completed"), Steps completed: \(setupProgress)/\(SetupStepType.allCases.count)")
+        
+        // Check setup status when the view loads
+        checkSetupStatus()
     }
     
     override func setup() {
@@ -97,6 +114,15 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 self?.refreshData()
             }
             .store(in: &cancellables)
+        
+        // Subscribe to setup step completion updates
+        NotificationCenter.default.publisher(for: .setupStepDidComplete)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                // Update the setup progress immediately
+                self?.applySnapshot(animatingDifferences: true)
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -146,6 +172,21 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             }
         }
         
+        // Setup progress registration
+        let setupProgressCellRegistration = UICollectionView.CellRegistration<SetupProgressCell, HomeItem> { cell, indexPath, item in
+            if case let .setupProgress(current, total) = item {
+                cell.configure(title: "Finish Setting Up", current: current, total: total)
+                
+                // Configure the cell's background
+                var backgroundConfig = UIBackgroundConfiguration.listCell()
+                backgroundConfig.backgroundColor = NNColors.EventColors.blue.border
+                backgroundConfig.cornerRadius = 12
+                cell.subtitleLabel.textColor = NNColors.EventColors.blue.fill
+                cell.progressLabel.textColor = .white
+                cell.backgroundConfiguration = backgroundConfig
+            }
+        }
+        
         // Quick access registration
         let quickAccessCellRegistration = UICollectionView.CellRegistration<QuickAccessCell, HomeItem> { cell, indexPath, item in
             if case let .quickAccess(type) = item {
@@ -174,7 +215,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         
         // Configure data source
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
-            switch item {
+            switch item { 
             case .nest:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: nestCellRegistration,
@@ -190,6 +231,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             case .currentSession:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: currentSessionCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .setupProgress:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: setupProgressCellRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -212,6 +259,10 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             case .nest:
                 title = "Your Nest"
                 headerView.configure(title: title)
+            case .setupProgress:
+                // No header for setup progress section
+                headerView.configure(title: "")
+                headerView.isHidden = true
             case .quickAccess, .upcomingSessions, .events:
                 return
             }
@@ -229,28 +280,56 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     func applySnapshot(animatingDifferences: Bool = true) {
         var snapshot = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
         
+        // Only check if setup flow should be shown if we've already checked the setup status
+        if hasCheckedSetupStatus && !hasCompletedSetup {
+            Task {
+                // Determine if setup flow should be shown based on entry count
+                let shouldShowSetup = await setupService.shouldShowSetupFlow()
+                
+                await MainActor.run {
+                    if shouldShowSetup {
+                        // Add the setup progress section only if we should show setup
+                        var updatedSnapshot = snapshot
+                        updatedSnapshot.appendSections([.setupProgress])
+                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 7)], toSection: .setupProgress)
+                        snapshot = updatedSnapshot
+                    }
+                    
+                    // Continue with the rest of the snapshot
+                    continueSnapshot(snapshot: snapshot, animatingDifferences: animatingDifferences)
+                }
+            }
+        } else {
+            // Continue with snapshot without checking setup status
+            continueSnapshot(snapshot: snapshot, animatingDifferences: animatingDifferences)
+        }
+    }
+    
+    private func continueSnapshot(snapshot: NSDiffableDataSourceSnapshot<HomeSection, HomeItem>, animatingDifferences: Bool) {
+        var updatedSnapshot = snapshot
+        
         // Current session section if available
         if let session = currentSession {
-            snapshot.appendSections([.currentSession])
-            snapshot.appendItems([.currentSession(session)], toSection: .currentSession)
+            updatedSnapshot.appendSections([.currentSession])
+            updatedSnapshot.appendItems([.currentSession(session)], toSection: .currentSession)
         }
         
         // Nest section
-        snapshot.appendSections([.nest])
+        updatedSnapshot.appendSections([.nest])
         if let currentNest = nestService.currentNest {
-            snapshot.appendItems([.nest(name: currentNest.name, address: currentNest.address)], toSection: .nest)
+            updatedSnapshot.appendItems([.nest(name: currentNest.name, address: currentNest.address)], toSection: .nest)
         } else {
-            snapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
+            updatedSnapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
         }
         
         // Quick access section
-        snapshot.appendSections([.quickAccess])
-        snapshot.appendItems([
+        updatedSnapshot.appendSections([.quickAccess])
+        updatedSnapshot.appendItems([
             .quickAccess(.ownerHousehold),
             .quickAccess(.ownerEmergency)
         ], toSection: .quickAccess)
         
-        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+        dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
     }
     
     func refreshData() {
@@ -302,6 +381,16 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         let nav = UINavigationController(rootViewController: settingsVC)
         present(nav, animated: true)
     }
+    
+    private func checkSetupStatus() {
+        Task {
+            let shouldShow = await setupService.shouldShowSetupFlow()
+            await MainActor.run {
+                hasCheckedSetupStatus = true
+                applySnapshot(animatingDifferences: true)
+            }
+        }
+    }
 }
 
 // MARK: - UICollectionViewDelegate
@@ -325,10 +414,61 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
             let vc = EditSessionViewController(sessionItem: session)
             vc.modalPresentationStyle = .pageSheet
             present(vc, animated: true)
+        case .setupProgress:
+            presentSetupFlow()
         default:
             break
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
+    }
+}
+
+// MARK: - Setup Flow
+extension OwnerHomeViewController {
+    private func presentSetupFlow() {
+        Task {
+            // Check if we should show the setup flow based on entries
+            let shouldShowSetup = await setupService.shouldShowSetupFlow()
+            
+            if shouldShowSetup {
+                // Present the setup flow view controller
+                await MainActor.run {
+                    let setupVC = SetupFlowViewController()
+                    setupVC.delegate = self
+                    let navController = UINavigationController(rootViewController: setupVC)
+                    present(navController, animated: true)
+                }
+            } else {
+                // If the user already has entries, just mark setup as complete
+                setupService.hasCompletedSetup = true
+                refreshData()
+                
+                await MainActor.run {
+                    showToast(text: "Setup already completed")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - SetupFlowDelegate
+extension OwnerHomeViewController: SetupFlowDelegate {
+    func setupFlowDidComplete() {
+        // Log completion
+        Logger.log(level: .info, category: .general, message: "Setup flow completed by user")
+        
+        // Mark setup as completed
+        setupService.hasCompletedSetup = true
+        refreshData()
+    }
+    
+    func setupFlowDidUpdateStepStatus() {
+        // Log step update
+        let completedSteps = SetupStepType.allCases.filter { setupService.isStepComplete($0) }
+        Logger.log(level: .info, category: .general, message: "Setup step status updated - \(completedSteps.count)/\(SetupStepType.allCases.count) steps completed")
+        
+        // Refresh the UI to reflect updated step status
+        refreshData()
     }
 } 

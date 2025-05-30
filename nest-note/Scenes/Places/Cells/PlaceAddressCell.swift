@@ -74,7 +74,7 @@ final class PlaceAddressCell: UICollectionViewListCell {
             string: address,
             attributes: [
                 .underlineStyle: NSUnderlineStyle.single.rawValue,
-                .font: UIFont.systemFont(ofSize: 16)
+                .font: UIFont.bodyL
             ]
         )
         addressLabel.attributedText = attributedString

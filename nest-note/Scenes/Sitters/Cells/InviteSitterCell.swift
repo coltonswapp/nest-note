@@ -10,10 +10,10 @@ class InviteSitterCell: UICollectionViewListCell {
         
         // Configure text style
         content.text = name
-        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.font = .bodyL
         
         content.secondaryText = email
-        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Apply standard system margins

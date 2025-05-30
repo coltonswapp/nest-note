@@ -6,7 +6,7 @@ final class CurrentSessionCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.textColor = .white
-        label.font = .systemFont(ofSize: 16, weight: .bold)
+        label.font = .h4
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -14,7 +14,7 @@ final class CurrentSessionCell: UICollectionViewListCell {
     private let durationLabel: UILabel = {
         let label = UILabel()
         label.textColor = NNColors.primaryLighter
-        label.font = .systemFont(ofSize: 14, weight: .regular)
+        label.font = .bodyM
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()

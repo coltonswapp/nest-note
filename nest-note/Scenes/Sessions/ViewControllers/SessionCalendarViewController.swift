@@ -561,7 +561,7 @@ class SessionEventCell: UICollectionViewListCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()

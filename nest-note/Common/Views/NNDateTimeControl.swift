@@ -197,7 +197,7 @@ final class NNDateTimeControl: UIStackView {
 private final class DateTimeButton: UIControl {
     private let label: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .regular)
+        label.font = .bodyL
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center

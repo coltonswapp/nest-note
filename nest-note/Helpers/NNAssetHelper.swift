@@ -49,12 +49,12 @@ enum NNAssetType: String {
 }
 
 class NNAssetHelper {
-    static func configureImageView(_ imageView: UIImageView, for assetType: NNAssetType) {
+    static func configureImageView(_ imageView: UIImageView, for assetType: NNAssetType, with tint: UIColor? = nil) {
         imageView.image = UIImage(named: assetType.rawValue)
         imageView.contentMode = assetType.contentMode
         imageView.alpha = assetType.defaultAlpha
         imageView.image?.accessibilityIdentifier = assetType.rawValue
-        imageView.tintColor = assetType.tintColor
+        imageView.tintColor = tint ?? assetType.tintColor
     }
     
     static func constrainImageView(_ imageView: UIImageView, in view: UIView, to edge: UIRectEdge = .top) {

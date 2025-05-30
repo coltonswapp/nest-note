@@ -49,7 +49,7 @@ class EditSessionViewController: NNViewController {
     private let titleTextField: UITextField = {
         let field = UITextField()
         field.placeholder = "Session Title"
-        field.font = .systemFont(ofSize: 20, weight: .semibold)
+        field.font = .h2
         field.borderStyle = .none
         field.returnKeyType = .done
         field.placeholder = "Session Title"
@@ -542,7 +542,7 @@ class EditSessionViewController: NNViewController {
                 content.imageToTextPadding = 8
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
-                content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+                content.textProperties.font = .bodyL
                 
                 // Handle archived session styling
                 if isArchivedSession {
@@ -550,7 +550,7 @@ class EditSessionViewController: NNViewController {
                     content.secondaryText = nil
                 }
                 
-                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.font = .bodyM
                 content.secondaryTextProperties.color = .secondaryLabel
                 
                 // Add disclosure indicator for non-archived sessions
@@ -589,7 +589,7 @@ class EditSessionViewController: NNViewController {
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
                 // Set secondary text color to secondaryLabel
-                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.font = .bodyM
                 content.secondaryTextProperties.color = .secondaryLabel
                 
                 cell.accessories = [.disclosureIndicator()]
@@ -1763,7 +1763,7 @@ final class StatusCell: UICollectionViewListCell {
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
             foregroundColor: NNColors.primary
         )
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        button.titleLabel?.font = .h4
         return button
     }()
     
@@ -1814,7 +1814,7 @@ final class StatusCell: UICollectionViewListCell {
     
     private func updateButtonAppearance() {
         var container = AttributeContainer()
-        container.font = UIFont.boldSystemFont(ofSize: 16)
+        container.font = .h4
         
         statusButton.configuration?.attributedTitle = AttributedString(currentStatus.displayName, attributes: container)
         iconImageView.image = UIImage(systemName: currentStatus.icon)

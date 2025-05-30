@@ -37,7 +37,7 @@ class FeatureDetailViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.font = .h1.rounded()
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -45,7 +45,7 @@ class FeatureDetailViewController: NNViewController {
     
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -64,7 +64,7 @@ class FeatureDetailViewController: NNViewController {
     
     private let votePercentageLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 36, weight: .bold)
+        label.font = UIFont.systemFont(ofSize: 36, weight: .bold)
         label.textColor = NNColors.primary
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -73,7 +73,7 @@ class FeatureDetailViewController: NNViewController {
     
     private let voteCountLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -92,7 +92,7 @@ class FeatureDetailViewController: NNViewController {
     
     private let lastUpdatedLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .tertiaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false

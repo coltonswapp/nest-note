@@ -29,7 +29,7 @@ class SurveyDetailViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.font = .h1
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -149,7 +149,7 @@ class SurveyDetailViewController: NNViewController {
         
         // Add question text
         let questionLabel = UILabel()
-        questionLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        questionLabel.font = .h4
         questionLabel.textColor = .label
         questionLabel.numberOfLines = 0
         questionLabel.text = getQuestionText(for: questionId)

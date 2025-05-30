@@ -17,7 +17,7 @@
 //    
 //    private let titleLabel: UILabel = {
 //        let label = UILabel()
-//        label.font = .systemFont(ofSize: 24, weight: .bold)
+//        label.font = .h1
 //        label.textColor = .label
 //        label.numberOfLines = 0
 //        label.translatesAutoresizingMaskIntoConstraints = false
@@ -26,7 +26,7 @@
 //    
 //    private let dateLabel: UILabel = {
 //        let label = UILabel()
-//        label.font = .systemFont(ofSize: 17)
+//        label.font = .bodyL
 //        label.textColor = .secondaryLabel
 //        label.numberOfLines = 0
 //        label.translatesAutoresizingMaskIntoConstraints = false

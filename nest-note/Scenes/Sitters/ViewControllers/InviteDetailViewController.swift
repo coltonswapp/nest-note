@@ -36,7 +36,7 @@ class InviteDetailViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Invite Created"
-        label.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.textColor = .label
         return label
@@ -45,7 +45,7 @@ class InviteDetailViewController: NNViewController {
     private let descriptionLabel: UILabel = {
         let label = UILabel()
         label.text = "Instruct your sitter to enter this unique code to be able to accept the invite for this session.\n(Settings -> Sessions -> Enter Code)"
-        label.font = UIFont.systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -71,7 +71,7 @@ class InviteDetailViewController: NNViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Invite Code".uppercased()
-        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         label.textColor = .lightGray
         return label
     }()
@@ -79,7 +79,7 @@ class InviteDetailViewController: NNViewController {
     private let codeTextField: RoundedTextField = {
         let field = RoundedTextField(placeholder: "000-000")
         field.textField.keyboardType = .emailAddress
-        field.textField.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        field.textField.font = .h1
         field.textField.textAlignment = .center
         field.translatesAutoresizingMaskIntoConstraints = false
         field.isUserInteractionEnabled = false

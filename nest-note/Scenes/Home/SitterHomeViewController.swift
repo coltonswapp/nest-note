@@ -320,6 +320,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 return
             case .quickAccess, .upcomingSessions:
                 return
+            case .setupProgress:
+                return
             }
         }
         

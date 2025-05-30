@@ -2,6 +2,74 @@ import Foundation
 import FirebaseFirestore
 import Combine
 
+// MARK: - Feedback Model
+struct Feedback: Hashable {
+    let id: String
+    let userId: String
+    let email: String
+    let nestId: String
+    let title: String
+    let body: String
+    let timestamp: Date
+    
+    init(userId: String, email: String, nestId: String, title: String, body: String) {
+        self.id = UUID().uuidString
+        self.userId = userId
+        self.email = email
+        self.nestId = nestId
+        self.title = title
+        self.body = body
+        self.timestamp = Date()
+    }
+    
+    init(id: String, userId: String, email: String, nestId: String, title: String, body: String, timestamp: Date) {
+        self.id = id
+        self.userId = userId
+        self.email = email
+        self.nestId = nestId
+        self.title = title
+        self.body = body
+        self.timestamp = timestamp
+    }
+    
+    var asDictionary: [String: Any] {
+        return [
+            "id": id,
+            "userId": userId,
+            "email": email,
+            "nestId": nestId,
+            "title": title,
+            "body": body,
+            "timestamp": Timestamp(date: timestamp)
+        ]
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(timestamp)
+    }
+    
+    static func == (lhs: Feedback, rhs: Feedback) -> Bool {
+        return lhs.id == rhs.id
+    }
+}
+
+// MARK: - Feedback Metrics Model
+struct FeedbackMetrics: Hashable {
+    let totalSubmissions: Int
+    let lastUpdated: Date
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(totalSubmissions)
+        hasher.combine(lastUpdated)
+    }
+    
+    static func == (lhs: FeedbackMetrics, rhs: FeedbackMetrics) -> Bool {
+        return lhs.totalSubmissions == rhs.totalSubmissions &&
+               lhs.lastUpdated == rhs.lastUpdated
+    }
+}
+
 final class SurveyService {
     // MARK: - Feature Definitions
     enum Feature: String, CaseIterable {
@@ -121,6 +189,72 @@ final class SurveyService {
                 metadata: metadata
             )
         }
+    }
+    
+    // MARK: - Feedback Methods
+    func submitFeedback(_ feedback: Feedback) async throws {
+        let docRef = db.collection("surveyData").document("feedback").collection("submissions").document(feedback.id)
+        try await docRef.setData(feedback.asDictionary)
+    }
+    
+    func getFeedbackSubmissions(limit: Int = 50) async throws -> [Feedback] {
+        let query = db.collection("surveyData")
+            .document("feedback")
+            .collection("submissions")
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+        
+        let snapshot = try await query.getDocuments()
+        return snapshot.documents.compactMap { document -> Feedback? in
+            guard let timestamp = (document.data()["timestamp"] as? Timestamp)?.dateValue(),
+                  let userId = document.data()["userId"] as? String,
+                  let email = document.data()["email"] as? String,
+                  let nestId = document.data()["nestId"] as? String,
+                  let title = document.data()["title"] as? String,
+                  let body = document.data()["body"] as? String else {
+                return nil
+            }
+            
+            return Feedback(
+                id: document.documentID,
+                userId: userId,
+                email: email,
+                nestId: nestId,
+                title: title,
+                body: body,
+                timestamp: timestamp
+            )
+        }
+    }
+    
+    func getFeedbackMetrics() async throws -> FeedbackMetrics {
+        let docRef = db.collection("surveyData")
+            .document("feedback")
+            .collection("metrics")
+            .document("overview")
+        
+        let document = try await docRef.getDocument()
+        
+        if let data = document.data(),
+           let totalSubmissions = data["totalSubmissions"] as? Int,
+           let lastUpdated = (data["lastUpdated"] as? Timestamp)?.dateValue() {
+            return FeedbackMetrics(
+                totalSubmissions: totalSubmissions,
+                lastUpdated: lastUpdated
+            )
+        } else {
+            // If metrics don't exist, calculate them from submissions
+            let submissions = try await getFeedbackSubmissions(limit: 1000) // Get all for counting
+            return FeedbackMetrics(
+                totalSubmissions: submissions.count,
+                lastUpdated: submissions.first?.timestamp ?? Date()
+            )
+        }
+    }
+    
+    func deleteFeedback(_ feedback: Feedback) async throws {
+        let docRef = db.collection("surveyData").document("feedback").collection("submissions").document(feedback.id)
+        try await docRef.delete()
     }
     
     // MARK: - Feature Vote Methods
