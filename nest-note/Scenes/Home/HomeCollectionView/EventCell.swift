@@ -23,7 +23,7 @@ class EventCell: UICollectionViewListCell {
     }
     
     private func setupViews() {
-        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.font = .h4
         titleLabel.numberOfLines = 0
         titleLabel.textColor = .label
         

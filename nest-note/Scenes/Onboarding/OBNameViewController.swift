@@ -257,7 +257,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let label = UILabel()
         label.text = text
         label.textColor = .systemGray
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         
         stack.addArrangedSubview(imageView)
         stack.addArrangedSubview(label)
@@ -390,7 +390,7 @@ final class OBRoleViewController: NNOnboardingViewController {
         let button = UIButton()
         button.setTitle("Parent", for: .normal)
         button.setTitleColor(.systemGray, for: .normal)
-        button.titleLabel?.font = .boldSystemFont(ofSize: 18)
+        button.titleLabel?.font = .h3
         button.layer.borderWidth = 1
         button.layer.borderColor = UIColor.tertiarySystemFill.cgColor
         button.backgroundColor = UIColor.tertiarySystemFill
@@ -405,7 +405,7 @@ final class OBRoleViewController: NNOnboardingViewController {
         let button = UIButton()
         button.setTitle("Sitter", for: .normal)
         button.setTitleColor(.systemGray, for: .normal)
-        button.titleLabel?.font = .boldSystemFont(ofSize: 18)
+        button.titleLabel?.font = .h3
         button.layer.borderWidth = 1
         button.layer.borderColor = UIColor.tertiarySystemFill.cgColor
         button.backgroundColor = UIColor.tertiarySystemFill

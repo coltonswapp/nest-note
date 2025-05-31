@@ -20,7 +20,7 @@ class NNSheetViewController: NNViewController {
     
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .bold)
+        label.font = .h3
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -29,7 +29,7 @@ class NNSheetViewController: NNViewController {
     let closeButton: UIButton = {
         let button = UIButton(type: .system)
         button.setImage(UIImage(systemName: "xmark"), for: .normal)
-        button.tintColor = .quaternaryLabel
+        button.tintColor = .secondaryLabel
         button.backgroundColor = .clear
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -37,7 +37,7 @@ class NNSheetViewController: NNViewController {
     
     let titleField: UITextField = {
         let field = UITextField()
-        field.font = .systemFont(ofSize: 18, weight: .medium)
+        field.font = .bodyXL
         field.returnKeyType = .done
         field.translatesAutoresizingMaskIntoConstraints = false
         return field
@@ -87,7 +87,6 @@ class NNSheetViewController: NNViewController {
         view.backgroundColor = .black.withAlphaComponent(0.5)
         setupPanGestureRecognizer()
         setupKeyboardObservers()
-        titleField.delegate = self
     }
     
     // MARK: - Setup Methods
@@ -230,11 +229,5 @@ class NNSheetViewController: NNViewController {
         animation.values = [-20.0, 20.0, -20.0, 20.0, -10.0, 10.0, -5.0, 5.0, 0.0]
         containerView.layer.add(animation, forKey: "shake")
         HapticsHelper.mediumHaptic()
-    }
-}
-
-extension NNSheetViewController: UITextFieldDelegate {
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        textField.resignFirstResponder()
     }
 }

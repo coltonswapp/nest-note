@@ -59,7 +59,7 @@ final class HomeNestCell: UICollectionViewCell {
     // MARK: - UI Elements
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 20, weight: .bold)
+        label.font = .h2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()

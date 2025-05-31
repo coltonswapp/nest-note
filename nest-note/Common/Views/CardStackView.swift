@@ -80,7 +80,7 @@ class CardStackView: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textColor = .secondaryLabel
         label.textAlignment = .center
-        label.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        label.font = .bodyM
         return label
     }()
     
@@ -605,7 +605,7 @@ class CardStackView: UIView {
         messageLabel.text = message
         messageLabel.textAlignment = .center
         messageLabel.textColor = .secondaryLabel
-        messageLabel.font = .systemFont(ofSize: 16)
+        messageLabel.font = .bodyL
         messageLabel.numberOfLines = 0
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         

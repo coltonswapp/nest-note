@@ -336,7 +336,7 @@ class CalendarContentView: UIView {
 class EventView: UIControl {
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.font = .captionBold
         label.textColor = .white
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -363,7 +363,7 @@ class EventView: UIControl {
         
         titleLabel.text = title
         titleLabel.textColor = .init(red: 0/255, green: 84/255, blue: 175/255, alpha: 1.0)
-        titleLabel.font = UIFont.systemFont(ofSize: 14.0, weight: .bold)
+        titleLabel.font = .h5
         setupView()
         
         // Add this line to enable user interaction

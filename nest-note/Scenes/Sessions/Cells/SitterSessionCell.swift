@@ -14,7 +14,7 @@ class SitterSessionCell: UICollectionViewListCell {
     
     private lazy var emptyStateLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         return label
     }()
@@ -97,7 +97,7 @@ class SitterSessionCell: UICollectionViewListCell {
         
         // Configure text style
         content.text = session.title
-        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.font = .bodyL
         
         // Configure date and nest name display
         let dateFormatter = DateFormatter()
@@ -122,7 +122,7 @@ class SitterSessionCell: UICollectionViewListCell {
         
         // Add nest name to secondary text
         content.secondaryText = "\(nestName) • \(dateString)"
-        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Apply standard system margins
@@ -145,7 +145,7 @@ class SitterSessionCell: UICollectionViewListCell {
         
         // Configure text style
         content.text = title
-        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.font = .bodyL
         
         // Format date
         let dateFormatter = DateFormatter()
@@ -154,7 +154,7 @@ class SitterSessionCell: UICollectionViewListCell {
         
         // Add archived indicator to secondary text
         content.secondaryText = isArchived ? "Completed • \(dateString)" : dateString
-        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Apply standard system margins

@@ -29,6 +29,7 @@ enum HomeSection: Int {
     case currentSession
     case upcomingSessions
     case events
+    case setupProgress
 }
 
 enum HomeItem: Hashable {
@@ -39,6 +40,7 @@ enum HomeItem: Hashable {
     case events
     case sessionEvent(SessionEvent)
     case moreEvents(Int)
+    case setupProgress(current: Int, total: Int)
     
     func hash(into hasher: inout Hasher) {
         switch self {
@@ -63,6 +65,10 @@ enum HomeItem: Hashable {
         case .moreEvents(let count):
             hasher.combine(6)
             hasher.combine(count)
+        case .setupProgress(let current, let total):
+            hasher.combine(7)
+            hasher.combine(current)
+            hasher.combine(total)
         }
     }
     
@@ -82,6 +88,8 @@ enum HomeItem: Hashable {
             return e1 == e2
         case let (.moreEvents(c1), .moreEvents(c2)):
             return c1 == c2
+        case let (.setupProgress(c1, t1), .setupProgress(c2, t2)):
+            return c1 == c2 && t1 == t2
         default:
             return false
         }
@@ -117,6 +125,16 @@ extension HomeViewControllerType {
                 let section = NSCollectionLayoutSection(group: group)
                 section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
                 section.boundarySupplementaryItems = [header]
+                return section
+                
+            case .setupProgress:
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
+                // No header for setup progress section
                 return section
                 
             case .nest:

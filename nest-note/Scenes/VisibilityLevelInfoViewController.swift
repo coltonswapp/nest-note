@@ -6,7 +6,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(view, for: .rectanglePattern)
+        NNAssetHelper.configureImageView(view, for: .rectanglePatternSmall, with: NNColors.primary)
         view.alpha = 0.4
         return view
     }()
@@ -52,7 +52,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Visibility Levels"
-        label.font = .systemFont(ofSize: 22, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -60,8 +60,8 @@ final class VisibilityLevelInfoViewController: NNViewController {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Organize information into 4 visibility levels, each building on the previous to provide sitters the right details for their specific caregiving session."
-        label.font = .systemFont(ofSize: 14)
+        label.text = "Organize information into 4 visibility levels, giving sitters exactly what they need for their session length. Short visits focus on essentials, longer stays include comprehensive details."
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

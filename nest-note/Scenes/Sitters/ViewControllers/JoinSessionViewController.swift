@@ -26,7 +26,7 @@ class JoinSessionViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Join a Session"
-        label.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.textColor = .label
         return label
@@ -35,7 +35,7 @@ class JoinSessionViewController: NNViewController {
     private let descriptionLabel: UILabel = {
         let label = UILabel()
         label.text = "If you've been invited to a session, enter your 6-digit invite code below to be connected to your session."
-        label.font = UIFont.systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -61,7 +61,7 @@ class JoinSessionViewController: NNViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Invite Code".uppercased()
-        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         label.textColor = .lightGray
         return label
     }()
@@ -69,7 +69,7 @@ class JoinSessionViewController: NNViewController {
     let codeTextField: RoundedTextField = {
         let field = RoundedTextField(placeholder: "000-000")
         field.textField.keyboardType = .numberPad
-        field.textField.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        field.textField.font = .h1
         field.textField.textAlignment = .center
         field.translatesAutoresizingMaskIntoConstraints = false
         field.isUserInteractionEnabled = true

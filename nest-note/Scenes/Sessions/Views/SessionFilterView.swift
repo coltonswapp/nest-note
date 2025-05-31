@@ -113,7 +113,7 @@ class SessionFilterView: UIView {
             
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                 var outgoing = incoming
-                outgoing.font = .systemFont(ofSize: 14, weight: .bold)
+                outgoing.font = .h5
                 return outgoing
             }
             

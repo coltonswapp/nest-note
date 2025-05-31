@@ -4,7 +4,7 @@ class MiniEntryDetailView: UIView {
     // MARK: - Properties
     private let keyLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.font = .h3
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -18,7 +18,7 @@ class MiniEntryDetailView: UIView {
     
     private let valueLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.font = .h3
         label.translatesAutoresizingMaskIntoConstraints = false
         label.numberOfLines = 0
         return label
@@ -26,7 +26,7 @@ class MiniEntryDetailView: UIView {
     
     private let visibilityLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         label.text = "Comprehensive"  // Default text
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -34,7 +34,7 @@ class MiniEntryDetailView: UIView {
     
     private let timestampLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

@@ -25,7 +25,7 @@ class NNFeaturePreviewViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -34,7 +34,7 @@ class NNFeaturePreviewViewController: NNViewController {
     
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textAlignment = .center
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -44,7 +44,7 @@ class NNFeaturePreviewViewController: NNViewController {
     private let instructionLabel: UILabel = {
         let label = UILabel()
         label.text = "If that sounds like something you'd like to see added to NestNote sometime in the future, let us know below."
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textAlignment = .center
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false

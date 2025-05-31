@@ -312,6 +312,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         let debugItems = [
             ("Reset App State", "arrow.counterclockwise"),
             ("View Logs", "text.alignleft"),
+            ("UserDefaults Viewer", "externaldrive.fill"),
             ("Survey Dashboard", "chart.bar.fill"),
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
@@ -369,6 +370,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             // Show logs view
             print("Showing logs...")
             showLogs()
+        case "UserDefaults Viewer":
+            let vc = UserDefaultsViewerViewController()
+            navigationController?.pushViewController(vc, animated: true)
         case "Test Crash":
             fatalError("Forced crash from debug menu")
         case "Button Playground":

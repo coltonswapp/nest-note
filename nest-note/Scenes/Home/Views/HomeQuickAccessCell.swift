@@ -86,7 +86,7 @@ final class HomeQuickAccessCell: UICollectionViewCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         return label
     }()
     

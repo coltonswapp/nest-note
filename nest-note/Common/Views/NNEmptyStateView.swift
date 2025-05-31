@@ -27,7 +27,7 @@ class NNEmptyStateView: UIView {
     
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.font = .h3
         label.textColor = .label
         label.textAlignment = .center
         label.isUserInteractionEnabled = false
@@ -36,7 +36,7 @@ class NNEmptyStateView: UIView {
     
     private lazy var subtitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 15)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

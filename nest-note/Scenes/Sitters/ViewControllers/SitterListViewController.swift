@@ -724,7 +724,7 @@ class InviteStatusCell: UICollectionViewListCell {
     
     private let nameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyL
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

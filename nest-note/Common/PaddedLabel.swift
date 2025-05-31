@@ -22,7 +22,7 @@ class PaddedLabel: UILabel {
     private func setupLabel() {
         backgroundColor = NNColors.NNSystemBackground6
         textColor = .tertiaryLabel
-        font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        font = .captionBold
         textAlignment = .center
         layer.cornerRadius = 4
         clipsToBounds = true

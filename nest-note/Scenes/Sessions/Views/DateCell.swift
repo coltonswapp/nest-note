@@ -23,7 +23,7 @@ final class DateCell: UICollectionViewListCell {
     let startLabel: UILabel = {
         let label = UILabel()
         label.text = "Starts"
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -32,7 +32,7 @@ final class DateCell: UICollectionViewListCell {
     let endLabel: UILabel = {
         let label = UILabel()
         label.text = "Ends"
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -42,7 +42,7 @@ final class DateCell: UICollectionViewListCell {
     let multiDayLabel: UILabel = {
         let label = UILabel()
         label.text = "Multi-day session"
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

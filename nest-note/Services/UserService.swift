@@ -43,7 +43,7 @@ final class UserService {
                 }
                 
                 // Request notification permissions when user logs in
-                await requestNotificationPermissions()
+//                await requestNotificationPermissions()
                 
                 // Try to get a fresh FCM token
                 if let fcmToken = try? await Messaging.messaging().token() {
@@ -189,7 +189,7 @@ final class UserService {
             Logger.log(level: .debug, category: .userService, message: "Firebase auth successful")
             
             // Request notification permissions after successful login
-            await requestNotificationPermissions()
+//            await requestNotificationPermissions()
             
             // Try to get a fresh FCM token
             if let fcmToken = try? await Messaging.messaging().token() {

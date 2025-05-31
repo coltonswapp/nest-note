@@ -51,7 +51,7 @@ final class LandingViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Welcome to NestNote"
-        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.font = .h1
         label.textColor = .label
         label.textAlignment = .center
         return label
@@ -60,7 +60,7 @@ final class LandingViewController: NNViewController {
     private let subtitleLabel: UILabel = {
         let label = UILabel()
         label.text = "All Your Caregiving Needs, One Secure App"
-        label.font = .systemFont(ofSize: 16, weight: .regular)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0

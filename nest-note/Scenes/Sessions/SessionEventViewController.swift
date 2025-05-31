@@ -161,13 +161,13 @@ final class SessionEventViewController: NNSheetViewController {
         // Create labels
         let startLabel = UILabel()
         startLabel.text = "Starts"
-        startLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        startLabel.font = .bodyXL
         startLabel.textColor = .secondaryLabel
         startLabel.translatesAutoresizingMaskIntoConstraints = false
         
         let endLabel = UILabel()
         endLabel.text = "Ends"
-        endLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        endLabel.font = .bodyXL
         endLabel.textColor = .secondaryLabel
         endLabel.translatesAutoresizingMaskIntoConstraints = false
         
@@ -510,7 +510,7 @@ class SessionEventLocationView: UIView {
     let emptyLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyXL
         label.textColor = .secondaryLabel
         label.textAlignment = .justified
         label.numberOfLines = 1
@@ -523,7 +523,7 @@ class SessionEventLocationView: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         var configuration = UIButton.Configuration.gray()
         configuration.cornerStyle = .capsule
-        configuration.buttonSize = .small
+        configuration.buttonSize = .medium
         button.configuration = configuration
         button.setTitle("Edit", for: .normal)
         return button
@@ -550,7 +550,7 @@ class SessionEventLocationView: UIView {
     private let aliasLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         label.textColor = .label
         return label
     }()
@@ -558,7 +558,7 @@ class SessionEventLocationView: UIView {
     private let addressLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.numberOfLines = 2
         return label
@@ -619,7 +619,7 @@ class SessionEventLocationView: UIView {
                 string: place.address,
                 attributes: [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .font: UIFont.systemFont(ofSize: 16)
+                    .font: UIFont.bodyXL
                 ]
             )
             

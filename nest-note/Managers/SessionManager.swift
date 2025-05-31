@@ -23,7 +23,7 @@ final class SessionManager {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.textColor = .label
-        label.font = .systemFont(ofSize: 16, weight: .bold)
+        label.font = .h4
         label.text = "Finch Family Session"
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -32,7 +32,7 @@ final class SessionManager {
     private let durationLabel: UILabel = {
         let label = UILabel()
         label.textColor = .secondaryLabel
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.font = .h5
         label.text = "Dec. 4-6"
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

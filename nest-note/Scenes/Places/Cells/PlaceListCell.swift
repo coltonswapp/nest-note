@@ -23,13 +23,13 @@ final class PlaceListCell: UICollectionViewCell {
     
     private let aliasLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.font = .h4
         return label
     }()
     
     private let addressLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = .bodyM
         label.textColor = .secondaryLabel
         label.numberOfLines = 0
         return label

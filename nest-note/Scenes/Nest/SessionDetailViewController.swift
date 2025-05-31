@@ -47,7 +47,7 @@ final class SessionDetailViewController: NNSheetViewController {
     private let multiDayLabel: UILabel = {
         let label = UILabel()
         label.text = "Multi-day session"
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -147,13 +147,13 @@ final class SessionDetailViewController: NNSheetViewController {
         // Create labels
         let startLabel = UILabel()
         startLabel.text = "Starts"
-        startLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        startLabel.font = .bodyL
         startLabel.textColor = .secondaryLabel
         startLabel.translatesAutoresizingMaskIntoConstraints = false
         
         let endLabel = UILabel()
         endLabel.text = "Ends"
-        endLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        endLabel.font = .bodyL
         endLabel.textColor = .secondaryLabel
         endLabel.translatesAutoresizingMaskIntoConstraints = false
         

@@ -15,7 +15,7 @@ class InviteSitterViewController: NNViewController {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Invite by Code"
-        label.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        label.font = .h1
         label.textAlignment = .center
         label.textColor = .label
         return label
@@ -24,7 +24,7 @@ class InviteSitterViewController: NNViewController {
     private let descriptionLabel: UILabel = {
         let label = UILabel()
         label.text = "They'll have everything they need—from emergency contacts to bedtime routines—ensuring consistent care while you're away"
-        label.font = UIFont.systemFont(ofSize: 16)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -50,7 +50,7 @@ class InviteSitterViewController: NNViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Sitter Email".uppercased()
-        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         label.textColor = .lightGray
         return label
     }()

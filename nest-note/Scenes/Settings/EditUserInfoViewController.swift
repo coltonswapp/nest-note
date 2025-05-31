@@ -56,7 +56,7 @@ class EditUserInfoViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        label.font = .h2
         label.textAlignment = .center
         label.textColor = .label
         return label
@@ -64,7 +64,7 @@ class EditUserInfoViewController: NNViewController {
     
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: 16)
+        label.font = UIFont.bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -82,7 +82,7 @@ class EditUserInfoViewController: NNViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Invite Code".uppercased()
-        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        label.font = .bodyM
         label.textColor = .lightGray
         return label
     }()

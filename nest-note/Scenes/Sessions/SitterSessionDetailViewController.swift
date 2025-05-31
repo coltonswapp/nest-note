@@ -150,7 +150,7 @@ final class SitterSessionDetailViewController: NNViewController {
         // Configure title label
         let titleLabel = UILabel()
         titleLabel.text = session.title
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.font = .h3
         titleLabel.textAlignment = .left
         
         // Add labels to stack view
@@ -308,7 +308,7 @@ final class SitterSessionDetailViewController: NNViewController {
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
-                content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+                content.secondaryTextProperties.font = .bodyM
                 content.secondaryTextProperties.color = .secondaryLabel
                 
                 cell.accessories = [.disclosureIndicator()]

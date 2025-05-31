@@ -52,14 +52,14 @@ class HalfWidthCell: UICollectionViewCell {
             valueLabel.bottomAnchor.constraint(equalTo: valueContainer.bottomAnchor, constant: -16)
         ])
 
-        keyLabel.font = UIFont.systemFont(ofSize: 12)
+        keyLabel.font = .bodyM
         keyLabel.textColor = .secondaryLabel
         
         valueContainer.clipsToBounds = true
         valueContainer.backgroundColor = valueContainerBackgroundColor
         valueContainer.layer.cornerRadius = 10
         
-        valueLabel.font = UIFont.systemFont(ofSize: 22)
+        valueLabel.font = UIFont.systemFont(ofSize: 22, weight: .medium)
         valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 1
     }

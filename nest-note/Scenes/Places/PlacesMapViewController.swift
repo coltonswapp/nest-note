@@ -133,7 +133,7 @@ final class PlacesMapViewController: NNViewController {
         let image = UIImage(systemName: "xmark.circle.fill", withConfiguration: config)
         clearButton.setImage(image, for: .normal)
         clearButton.setTitle("Clear Selection", for: .normal)
-        clearButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        clearButton.titleLabel?.font = .h4
         
         // Add spacing between image and text
         clearButton.imageEdgeInsets = UIEdgeInsets(top: 0, left: -8, bottom: 0, right: 0)

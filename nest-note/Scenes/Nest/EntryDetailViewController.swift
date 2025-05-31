@@ -13,7 +13,7 @@ final class EntryDetailViewController: NNSheetViewController {
     
     private let contentTextView: UITextView = {
         let textView = UITextView()
-        textView.font = .systemFont(ofSize: 18, weight: .medium)
+        textView.font = .bodyXL
         textView.backgroundColor = .clear
         let placeholder = NSAttributedString(string: "Content")
         textView.perform(NSSelectorFromString("setAttributedPlaceholder:"), with: placeholder)
@@ -39,7 +39,7 @@ final class EntryDetailViewController: NNSheetViewController {
             imagePlacement: .right,
             backgroundColor: NNColors.offBlack
         )
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        button.titleLabel?.font = .h4
         return button
     }()
     
@@ -208,7 +208,7 @@ final class EntryDetailViewController: NNSheetViewController {
     private func updateVisibilityButton() {
         
         var container = AttributeContainer()
-        container.font = UIFont.boldSystemFont(ofSize: 16)
+        container.font = .h4
         visibilityButton.configuration?.attributedTitle = AttributedString(visibilityLevel.title, attributes: container)
         
         if let menu = visibilityButton.menu {
@@ -344,8 +344,16 @@ final class EntryDetailViewController: NNSheetViewController {
                 }
                 
                 HapticsHelper.lightHaptic()
-                entryDelegate?.entryDetailViewController(didSaveEntry: savedEntry)
-                dismiss(animated: true)
+                
+                // Notify delegate
+                await MainActor.run {
+                    self.entryDelegate?.entryDetailViewController(didSaveEntry: savedEntry)
+                    
+                    // Post notification that an entry was saved
+                    NotificationCenter.default.post(name: .entryDidSave, object: nil, userInfo: ["entry": savedEntry])
+                    
+                    self.dismiss(animated: true)
+                }
             }
         }
     }

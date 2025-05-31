@@ -39,7 +39,7 @@ final class VisibilityCell: UICollectionViewListCell {
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
             foregroundColor: NNColors.primary
         )
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        button.titleLabel?.font = .h4
         return button
     }()
     
@@ -78,7 +78,7 @@ final class VisibilityCell: UICollectionViewListCell {
         self.isReadOnly = isReadOnly
         
         var container = AttributeContainer()
-        container.font = UIFont.boldSystemFont(ofSize: 16)
+        container.font = .h4
         visibilityButton.configuration?.attributedTitle = AttributedString(level.title, attributes: container)
         
         // Configure button based on read-only state
@@ -121,7 +121,7 @@ final class VisibilityCell: UICollectionViewListCell {
                 
                 // Update button title
                 var container = AttributeContainer()
-                container.font = UIFont.boldSystemFont(ofSize: 16)
+                container.font = .h4
                 self.visibilityButton.configuration?.attributedTitle = AttributedString(level.title, attributes: container)    
                 
                 // Notify delegate

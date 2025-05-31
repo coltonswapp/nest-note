@@ -28,7 +28,7 @@ final class PlaceNameCell: UICollectionViewListCell {
         ]
         let field = FlashingPlaceholderTextField(placeholders: placeholders)
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.font = .systemFont(ofSize: 16)
+        field.font = .bodyL
         field.returnKeyType = .done
         return field
     }()

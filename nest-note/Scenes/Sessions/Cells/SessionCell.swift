@@ -14,7 +14,7 @@ class SessionCell: UICollectionViewListCell {
     
     private lazy var emptyStateLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         return label
     }()
@@ -105,10 +105,10 @@ class SessionCell: UICollectionViewListCell {
         
         // Configure text style
         content.text = session.title
-        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.font = .bodyL
         
         content.secondaryText = formatDate(startDate: session.startDate, endDate: session.endDate)
-        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Apply standard system margins
@@ -133,10 +133,10 @@ class SessionCell: UICollectionViewListCell {
         
         // Configure text style
         content.text = session.title
-        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.font = .bodyL
         
         content.secondaryText = formatDate(startDate: session.startDate, endDate: session.endDate)
-        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Apply standard system margins

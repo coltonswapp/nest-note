@@ -17,6 +17,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Override point for customization after application launch.
         FirebaseApp.configure()
         
+        // Configure global navigation bar appearance with SF Rounded font
+        configureNavigationBarAppearance()
+        
         // Set notification delegate
         UNUserNotificationCenter.current().delegate = self
         
@@ -24,6 +27,35 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         Messaging.messaging().delegate = self
         
         return true
+    }
+    
+    // MARK: - UI Configuration
+    private func configureNavigationBarAppearance() {
+        // Configure navigation bar appearance with SF Rounded font
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        
+        // Set title font to SF Rounded
+        if let roundedFont = UIFont(name: "SFRounded-Semibold", size: 17) {
+            appearance.titleTextAttributes = [.font: roundedFont]
+        } else {
+            // Fallback to system rounded font if SFRounded-Semibold is not available
+            let roundedFont = UIFont.systemFont(ofSize: 17, weight: .semibold).rounded()
+            appearance.titleTextAttributes = [.font: roundedFont]
+        }
+        
+        // Set large title font to SF Rounded
+        if let largeTitleFont = UIFont(name: "SFRounded-Bold", size: 34) {
+            appearance.largeTitleTextAttributes = [.font: largeTitleFont]
+        } else {
+            // Fallback to system rounded font if SFRounded-Bold is not available
+            let largeTitleFont = UIFont.systemFont(ofSize: 34, weight: .bold).rounded()
+            appearance.largeTitleTextAttributes = [.font: largeTitleFont]
+        }
+        
+        // Apply the appearance to all navigation bars
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
     }
     
     // MARK: - APNs Registration

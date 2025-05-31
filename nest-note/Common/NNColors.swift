@@ -21,6 +21,11 @@ class NNColors {
     /// Light is the same as .systemGray6, dark is slightly lighter than .systemGray6
     static let NNSystemBackground6 = UIColor(named: "NNSystemBackground6")!
     
+    // Faux Colors
+    static let fauxPlaceholder = UIColor(named: "FauxPlaceholder")!
+    static let fauxSystemGrouped = UIColor(named: "FauxSystemGrouped")!
+    static let fauxSystemGroupedBackground = UIColor(named: "FauxSystemGroupedBackground")!
+    
     struct NNColorPair: Hashable {
         let fill: UIColor
         let border: UIColor

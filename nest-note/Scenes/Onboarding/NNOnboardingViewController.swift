@@ -22,7 +22,7 @@ class NNOnboardingViewController: UIViewController {
     
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.font = .h1
         label.textColor = .label
         label.numberOfLines = 0
         label.textAlignment = .center
@@ -31,7 +31,7 @@ class NNOnboardingViewController: UIViewController {
     
     let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .regular)
+        label.font = .bodyL
         label.textColor = .secondaryLabel
         label.numberOfLines = 0
         label.textAlignment = .center

@@ -6,6 +6,7 @@ class SurveyDashboardViewController: NNViewController {
     private let surveyService = SurveyService.shared
     private var surveyMetrics: [SurveyResponse.SurveyType: SurveyMetrics] = [:]
     private var featureMetrics: [SurveyService.Feature: FeatureMetrics] = [:]
+    private var feedbackMetrics: FeedbackMetrics?
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -120,12 +121,34 @@ class SurveyDashboardViewController: NNViewController {
             }
         }
         
+        let feedbackCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case let .feedback(metrics) = item {
+                var content = cell.defaultContentConfiguration()
+                content.text = "User Feedback"
+                
+                // Add a secondary text for the number of submissions
+                let submissionsString = String(AttributedString(
+                    localized: "^[\(metrics.totalSubmissions) \("submission")](inflect: true)"
+                ).characters)
+                content.secondaryText = submissionsString
+                
+                // Set layout margins
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+                
+                cell.contentConfiguration = content
+                cell.accessories = [.disclosureIndicator()]
+            }
+        }
+        
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .surveyResult:
                 return collectionView.dequeueConfiguredReusableCell(using: surveyCellRegistration, for: indexPath, item: item)
             case .featureVote:
                 return collectionView.dequeueConfiguredReusableCell(using: featureCellRegistration, for: indexPath, item: item)
+            case .feedback:
+                return collectionView.dequeueConfiguredReusableCell(using: feedbackCellRegistration, for: indexPath, item: item)
             }
         }
         
@@ -136,7 +159,7 @@ class SurveyDashboardViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.surveyResults, .featureVotes])
+        snapshot.appendSections([.surveyResults, .featureVotes, .feedback])
         
         // Add survey results
         let surveyItems = surveyMetrics.map { Item.surveyResult(type: $0.key, metrics: $0.value) }
@@ -145,6 +168,12 @@ class SurveyDashboardViewController: NNViewController {
         // Add feature votes
         let featureItems = featureMetrics.map { Item.featureVote(feature: $0.key, metrics: $0.value) }
         snapshot.appendItems(featureItems, toSection: .featureVotes)
+        
+        // Add feedback
+        if let feedbackMetrics = feedbackMetrics {
+            let feedbackItems = [Item.feedback(metrics: feedbackMetrics)]
+            snapshot.appendItems(feedbackItems, toSection: .feedback)
+        }
         
         dataSource.apply(snapshot, animatingDifferences: false)
     }
@@ -165,6 +194,9 @@ class SurveyDashboardViewController: NNViewController {
             // Fetch feature metrics
             let nestMembersMetrics = try await surveyService.getFeatureMetrics(featureId: SurveyService.Feature.nestMembers.rawValue)
             
+            // Fetch feedback metrics
+            let feedbackMetrics = try await surveyService.getFeedbackMetrics()
+            
             await MainActor.run {
                 // Update survey metrics
                 surveyMetrics[.parentSurvey] = parentMetrics
@@ -172,6 +204,9 @@ class SurveyDashboardViewController: NNViewController {
                 
                 // Update feature metrics
                 featureMetrics[.nestMembers] = nestMembersMetrics
+                
+                // Update feedback metrics
+                self.feedbackMetrics = feedbackMetrics
                 
                 // Apply new snapshot
                 applyInitialSnapshots()
@@ -198,6 +233,10 @@ extension SurveyDashboardViewController: UICollectionViewDelegate {
         case .featureVote(let feature, let metrics):
             let vc = FeatureDetailViewController(feature: feature, metrics: metrics)
             navigationController?.pushViewController(vc, animated: true)
+            
+        case .feedback(let metrics):
+            let vc = FeedbackDetailViewController(metrics: metrics)
+            navigationController?.pushViewController(vc, animated: true)
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
@@ -209,11 +248,13 @@ extension SurveyDashboardViewController {
     enum Section: Hashable {
         case surveyResults
         case featureVotes
+        case feedback
         
         var title: String {
             switch self {
             case .surveyResults: return "Survey Results"
             case .featureVotes: return "Feature Votes"
+            case .feedback: return "User Feedback"
             }
         }
     }
@@ -221,6 +262,7 @@ extension SurveyDashboardViewController {
     enum Item: Hashable {
         case surveyResult(type: SurveyResponse.SurveyType, metrics: SurveyMetrics)
         case featureVote(feature: SurveyService.Feature, metrics: FeatureMetrics)
+        case feedback(metrics: FeedbackMetrics)
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -232,6 +274,9 @@ extension SurveyDashboardViewController {
                 hasher.combine(1) // Discriminator for featureVote case
                 hasher.combine(feature)
                 hasher.combine(metrics)
+            case .feedback(let metrics):
+                hasher.combine(2) // Discriminator for feedback case
+                hasher.combine(metrics)
             }
         }
         
@@ -241,6 +286,8 @@ extension SurveyDashboardViewController {
                 return type1 == type2 && metrics1 == metrics2
             case let (.featureVote(feature1, metrics1), .featureVote(feature2, metrics2)):
                 return feature1 == feature2 && metrics1 == metrics2
+            case let (.feedback(metrics1), .feedback(metrics2)):
+                return metrics1 == metrics2
             default:
                 return false
             }
@@ -255,13 +302,13 @@ private class FeatureCell: UICollectionViewListCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.font = .bodyL
         return label
     }()
     
     private let percentageLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17)
+        label.font = .bodyL
         label.textColor = NNColors.primary
         label.textAlignment = .right
         return label

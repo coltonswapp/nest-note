@@ -152,7 +152,8 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         }
         
         // Actions section
-        snapshot.appendItems([.action(title: "Sign Out", imageName: "rectangle.portrait.and.arrow.right")], toSection: .actions)
+        snapshot.appendItems([.action(title: "Sign Out", imageName: "rectangle.portrait.and.arrow.right"),
+                              .action(title: "Give Feedback", imageName: "paperplane.fill")], toSection: .actions)
         
         // Danger section
         snapshot.appendItems([.action(title: "Delete Account", imageName: "trash", destructive: true)], toSection: .danger)
@@ -177,6 +178,8 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             switch title {
             case "Sign Out":
                 handleSignOut()
+            case "Give Feedback":
+                handleFeedback()
             case "Delete Account":
                 handleDeleteAccount()
             default:
@@ -242,6 +245,10 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         })
         
         present(alert, animated: true)
+    }
+    
+    private func handleFeedback() {
+        present(NNFeedbackViewController(), animated: true)
     }
     
     private func handleDeleteAccount() {
@@ -372,7 +379,7 @@ private class ModeSwitchCell: UICollectionViewListCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         label.text = "CURRENT MODE"
         return label

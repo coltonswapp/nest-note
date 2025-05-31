@@ -63,7 +63,7 @@ final class NNBulletStack: UIView {
         
         let titleLabel = UILabel()
         titleLabel.text = title
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.font = .h3
         titleLabel.textColor = .label
         
         titleStack.addArrangedSubview(iconImageView)
@@ -71,7 +71,7 @@ final class NNBulletStack: UIView {
         
         let descriptionLabel = UILabel()
         descriptionLabel.text = description
-        descriptionLabel.font = .systemFont(ofSize: 14)
+        descriptionLabel.font = .bodyM
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
