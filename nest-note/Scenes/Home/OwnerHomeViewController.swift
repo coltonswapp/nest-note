@@ -434,7 +434,7 @@ extension OwnerHomeViewController {
             if shouldShowSetup {
                 // Present the setup flow view controller
                 await MainActor.run {
-                    let setupVC = SetupFlowViewController()
+                    let setupVC = StickyOwnerSetupFlowViewController()
                     setupVC.delegate = self
                     let navController = UINavigationController(rootViewController: setupVC)
                     present(navController, animated: true)
