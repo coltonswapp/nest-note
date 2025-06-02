@@ -63,13 +63,23 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "Creating new session: \(session.title)")
         
-        try await saveSession(session, nestID: nestID)
-        
-        // Update local cache
-        sessions.append(session)
-        
-        Logger.log(level: .info, category: .sessionService, message: "Session created successfully ✅")
-        return session
+        do {
+            try await saveSession(session, nestID: nestID)
+            
+            // Update local cache
+            sessions.append(session)
+            
+            Logger.log(level: .info, category: .sessionService, message: "Session created successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.sessionCreated)
+            
+            return session
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionCreated, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
     
     // MARK: - Save (private helper)
@@ -140,19 +150,28 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "Updating session: \(session.id)")
         
-        let sessionRef = db.collection("nests")
-            .document(nestID)
-            .collection("sessions")
-            .document(session.id)
-        
-        try await sessionRef.setData(from: session, merge: true)
-        
-        // Update local cache
-        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[index] = session
+        do {
+            let sessionRef = db.collection("nests")
+                .document(nestID)
+                .collection("sessions")
+                .document(session.id)
+            
+            try await sessionRef.setData(from: session, merge: true)
+            
+            // Update local cache
+            if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+                sessions[index] = session
+            }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Session updated successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.sessionUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionUpdated, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .sessionService, message: "Session updated successfully ✅")
     }
     
     // MARK: - Delete
@@ -240,25 +259,34 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "Updating event: \(event.id) for session: \(sessionID)")
         
-        let eventRef = db.collection("nests")
-            .document(nestID)
-            .collection("sessions")
-            .document(sessionID)
-            .collection("events")
-            .document(event.id)
-        
-        try await eventRef.setData(from: event)
-        
-        // Update local cache
-        if let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) {
-            if let eventIndex = sessions[sessionIndex].events.firstIndex(where: { $0.id == event.id }) {
-                sessions[sessionIndex].events[eventIndex] = event
-            } else {
-                sessions[sessionIndex].events.append(event)
+        do {
+            let eventRef = db.collection("nests")
+                .document(nestID)
+                .collection("sessions")
+                .document(sessionID)
+                .collection("events")
+                .document(event.id)
+            
+            try await eventRef.setData(from: event)
+            
+            // Update local cache
+            if let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) {
+                if let eventIndex = sessions[sessionIndex].events.firstIndex(where: { $0.id == event.id }) {
+                    sessions[sessionIndex].events[eventIndex] = event
+                } else {
+                    sessions[sessionIndex].events.append(event)
+                }
             }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Event updated successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.sessionEventAdded)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionEventAdded, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .sessionService, message: "Event updated successfully ✅")
     }
     
     /// Updates multiple events in a session using a batch write
@@ -341,21 +369,30 @@ class SessionService {
         
         Logger.log(level: .info, category: .sessionService, message: "Deleting event: \(eventID) from session: \(sessionID)")
         
-        let eventRef = db.collection("nests")
-            .document(nestID)
-            .collection("sessions")
-            .document(sessionID)
-            .collection("events")
-            .document(eventID)
-        
-        try await eventRef.delete()
-        
-        // Update local cache
-        if let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) {
-            sessions[sessionIndex].events.removeAll { $0.id == eventID }
+        do {
+            let eventRef = db.collection("nests")
+                .document(nestID)
+                .collection("sessions")
+                .document(sessionID)
+                .collection("events")
+                .document(eventID)
+            
+            try await eventRef.delete()
+            
+            // Update local cache
+            if let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[sessionIndex].events.removeAll { $0.id == eventID }
+            }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Event deleted successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.sessionEventDeleted)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionEventDeleted, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .sessionService, message: "Event deleted successfully ✅")
     }
     
     /// Deletes all events from a session
@@ -514,70 +551,80 @@ class SessionService {
             throw SessionError.noCurrentNest
         }
         
-        // Check if the sitter already has a userID in the SavedSitter record
-        var sitterUserID: String? = nil
-        if let savedSitter = try? await NestService.shared.fetchSavedSitterById(sitter.id) {
-            sitterUserID = savedSitter.userID
-        }
-        
-        // Generate unique code
-        let code = try await generateUniqueInviteCode()
-        let inviteID = "invite-\(code)"
-        
-        Logger.log(level: .info, category: .sessionService, message: "Creating invite... \(inviteID)")
-        
-        // Create invite object
-        let invite = Invite(
-            id: inviteID,
-            nestID: nestID,
-            nestName: nestName,  // Include nest name
-            sessionID: sessionID,
-            sitterEmail: sitter.email,
-            status: .pending,
-            createdBy: currentUserID
-        )
-        
-        // Create assigned sitter
-        let assignedSitter = AssignedSitter(
-            id: sitter.id,
-            name: sitter.name,
-            email: sitter.email,
-            userID: sitterUserID,  // Use the userID if available
-            inviteStatus: .invited,
-            inviteID: inviteID
-        )
-        
-        // Get references
-        let inviteRef = db.collection("invites").document(inviteID)
-        let sessionRef = db.collection("nests").document(nestID)
-            .collection("sessions").document(sessionID)
-        
-        // Encode data before transaction
-        let encodedInvite = try Firestore.Encoder().encode(invite)
-        let encodedSitter = try Firestore.Encoder().encode(assignedSitter)
-        
-        try await db.runTransaction { transaction, errorPointer in
-            // Create invite document
-            transaction.setData(encodedInvite, forDocument: inviteRef)
-            
-            // Update session with assigned sitter
-            transaction.updateData([
-                "assignedSitter": encodedSitter
-            ], forDocument: sessionRef)
-            
-            return nil
-        }
-        
-        // Update local cache if available
-        if var session = sessions.first(where: { $0.id == sessionID }) {
-            session.assignedSitter = assignedSitter
-            if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
-                sessions[index] = session
+        do {
+            // Check if the sitter already has a userID in the SavedSitter record
+            var sitterUserID: String? = nil
+            if let savedSitter = try? await NestService.shared.fetchSavedSitterById(sitter.id) {
+                sitterUserID = savedSitter.userID
             }
+            
+            // Generate unique code
+            let code = try await generateUniqueInviteCode()
+            let inviteID = "invite-\(code)"
+            
+            Logger.log(level: .info, category: .sessionService, message: "Creating invite... \(inviteID)")
+            
+            // Create invite object
+            let invite = Invite(
+                id: inviteID,
+                nestID: nestID,
+                nestName: nestName,  // Include nest name
+                sessionID: sessionID,
+                sitterEmail: sitter.email,
+                status: .pending,
+                createdBy: currentUserID
+            )
+            
+            // Create assigned sitter
+            let assignedSitter = AssignedSitter(
+                id: sitter.id,
+                name: sitter.name,
+                email: sitter.email,
+                userID: sitterUserID,  // Use the userID if available
+                inviteStatus: .invited,
+                inviteID: inviteID
+            )
+            
+            // Get references
+            let inviteRef = db.collection("invites").document(inviteID)
+            let sessionRef = db.collection("nests").document(nestID)
+                .collection("sessions").document(sessionID)
+            
+            // Encode data before transaction
+            let encodedInvite = try Firestore.Encoder().encode(invite)
+            let encodedSitter = try Firestore.Encoder().encode(assignedSitter)
+            
+            try await db.runTransaction { transaction, errorPointer in
+                // Create invite document
+                transaction.setData(encodedInvite, forDocument: inviteRef)
+                
+                // Update session with assigned sitter
+                transaction.updateData([
+                    "assignedSitter": encodedSitter
+                ], forDocument: sessionRef)
+                
+                return nil
+            }
+            
+            // Update local cache if available
+            if var session = sessions.first(where: { $0.id == sessionID }) {
+                session.assignedSitter = assignedSitter
+                if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+                    sessions[index] = session
+                }
+            }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Invite created successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.sessionInviteCreated)
+            
+            return code
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionInviteCreated, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .sessionService, message: "Invite created successfully ✅")
-        return code
     }
     
     /// Updates both the invite and session's sitter status atomically
@@ -794,89 +841,98 @@ class SessionService {
     func validateAndAcceptInvite(inviteID: String) async throws -> SitterSession {
         Logger.log(level: .info, category: .sessionService, message: "Locating session invite for \(inviteID)")
         
-        let formattedInviteCode: String = "invite-\(inviteID)"
-        
-        let inviteRef = db.collection("invites").document(formattedInviteCode)
-        
-        // Get the invite document
-        let inviteDoc = try await inviteRef.getDocument()
-        guard inviteDoc.exists,
-              let invite = try? inviteDoc.data(as: Invite.self) else {
-            throw SessionError.invalidInviteCode
-        }
-        
-        // Validate expiration
-        if invite.expiresAt < Date() {
-            throw SessionError.inviteExpired
-        }
-        
-        // Validate status
-        guard invite.status == .pending else {
-            throw SessionError.inviteAlreadyUsed
-        }
-        
-        // Get the session
-        guard let session = try await getSession(nestID: invite.nestID, sessionID: invite.sessionID) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // Get current user ID if available
-        guard let currentUserID = Auth.auth().currentUser?.uid else {
-            throw SessionError.userNotAuthenticated
-        }
-        
-        // Create a new SitterSession
-        let sitterSession = SitterSession(
-            id: invite.sessionID,
-            nestID: invite.nestID,
-            nestName: invite.nestName,
-            inviteAcceptedAt: Date()
-        )
-        
-        // Update the assigned sitter with the user's ID
-        var updatedAssignedSitter = session.assignedSitter
-        updatedAssignedSitter?.userID = currentUserID
-        updatedAssignedSitter?.inviteStatus = .accepted
-        
-        // Update the saved sitter with the user's ID
-        try await updateSavedSitterWithUserID(
-            nestID: invite.nestID,
-            sitterEmail: invite.sitterEmail,
-            userID: currentUserID
-        )
-        
-        // Encode the updated sitter data before transaction
-        let encodedSitter = try Firestore.Encoder().encode(updatedAssignedSitter)
-        let encodedSitterSession = try Firestore.Encoder().encode(sitterSession)
-        
-        // Update documents atomically
-        try await self.db.runTransaction { transaction, errorPointer in
-            // Update invite status
-            transaction.updateData([
-                "status": InviteStatus.accepted.rawValue,
-                "acceptedAt": FieldValue.serverTimestamp(),
-                "acceptedBy": currentUserID
-            ], forDocument: inviteRef)
+        do {
+            let formattedInviteCode: String = "invite-\(inviteID)"
             
-            // Update session's assigned sitter
-            transaction.updateData([
-                "assignedSitter": encodedSitter
-            ], forDocument: self.db.collection("nests").document(invite.nestID)
-                .collection("sessions").document(invite.sessionID))
+            let inviteRef = db.collection("invites").document(formattedInviteCode)
             
-            // Create SitterSession document
-            let sitterSessionRef = self.db.collection("users").document(currentUserID)
-                .collection("sitterSessions").document(invite.sessionID)
-            transaction.setData(encodedSitterSession, forDocument: sitterSessionRef)
+            // Get the invite document
+            let inviteDoc = try await inviteRef.getDocument()
+            guard inviteDoc.exists,
+                  let invite = try? inviteDoc.data(as: Invite.self) else {
+                throw SessionError.invalidInviteCode
+            }
             
-            return nil
+            // Validate expiration
+            if invite.expiresAt < Date() {
+                throw SessionError.inviteExpired
+            }
+            
+            // Validate status
+            guard invite.status == .pending else {
+                throw SessionError.inviteAlreadyUsed
+            }
+            
+            // Get the session
+            guard let session = try await getSession(nestID: invite.nestID, sessionID: invite.sessionID) else {
+                throw SessionError.sessionNotFound
+            }
+            
+            // Get current user ID if available
+            guard let currentUserID = Auth.auth().currentUser?.uid else {
+                throw SessionError.userNotAuthenticated
+            }
+            
+            // Create a new SitterSession
+            let sitterSession = SitterSession(
+                id: invite.sessionID,
+                nestID: invite.nestID,
+                nestName: invite.nestName,
+                inviteAcceptedAt: Date()
+            )
+            
+            // Update the assigned sitter with the user's ID
+            var updatedAssignedSitter = session.assignedSitter
+            updatedAssignedSitter?.userID = currentUserID
+            updatedAssignedSitter?.inviteStatus = .accepted
+            
+            // Update the saved sitter with the user's ID
+            try await updateSavedSitterWithUserID(
+                nestID: invite.nestID,
+                sitterEmail: invite.sitterEmail,
+                userID: currentUserID
+            )
+            
+            // Encode the updated sitter data before transaction
+            let encodedSitter = try Firestore.Encoder().encode(updatedAssignedSitter)
+            let encodedSitterSession = try Firestore.Encoder().encode(sitterSession)
+            
+            // Update documents atomically
+            try await self.db.runTransaction { transaction, errorPointer in
+                // Update invite status
+                transaction.updateData([
+                    "status": InviteStatus.accepted.rawValue,
+                    "acceptedAt": FieldValue.serverTimestamp(),
+                    "acceptedBy": currentUserID
+                ], forDocument: inviteRef)
+                
+                // Update session's assigned sitter
+                transaction.updateData([
+                    "assignedSitter": encodedSitter
+                ], forDocument: self.db.collection("nests").document(invite.nestID)
+                    .collection("sessions").document(invite.sessionID))
+                
+                // Create SitterSession document
+                let sitterSessionRef = self.db.collection("users").document(currentUserID)
+                    .collection("sitterSessions").document(invite.sessionID)
+                transaction.setData(encodedSitterSession, forDocument: sitterSessionRef)
+                
+                return nil
+            }
+            
+            // Log the acceptance
+            Logger.log(level: .info, category: .sessionService, message: "Invite \(inviteID) accepted by user \(currentUserID)")
+            
+            // Log success event
+            Tracker.shared.track(.sessionInviteAccepted)
+            
+            // Return the session and invite for UI purposes
+            return sitterSession
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.sessionInviteAccepted, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        // Log the acceptance
-        Logger.log(level: .info, category: .sessionService, message: "Invite \(inviteID) accepted by user \(currentUserID)")
-        
-        // Return the session and invite for UI purposes
-        return sitterSession
     }
     
     // Helper method to update a saved sitter with a user ID

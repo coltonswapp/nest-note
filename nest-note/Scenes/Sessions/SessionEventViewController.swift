@@ -479,6 +479,7 @@ extension SessionEventViewController: PlaceSelectionDelegate {
     func didSelectPlace(_ place: Place) {
         locationView.configureWith(place)
         locationView.thumbnailImageView.bounce()
+        Tracker.shared.track(.sessionEventPlaceAttached)
     }
 }
 
