@@ -89,23 +89,33 @@ final class NestService: EntryRepository {
     func createNest(ownerId: String, name: String, address: String) async throws -> NestItem {
         Logger.log(level: .info, category: .nestService, message: "Creating new nest for user: \(ownerId)")
         
-        let nest = NestItem(
-            ownerId: ownerId,
-            name: name,
-            address: address
-        )
-        
-        let docRef = db.collection("nests").document(nest.id)
-        try await docRef.setData(try Firestore.Encoder().encode(nest))
-        
-        // Create default categories
-        try await createDefaultCategories(for: nest.id)
-        
-        Logger.log(level: .info, category: .nestService, message: "Nest created successfully with default categories ✅")
-        
-        // Set as current nest after creation
-        setCurrentNest(nest)
-        return nest
+        do {
+            let nest = NestItem(
+                ownerId: ownerId,
+                name: name,
+                address: address
+            )
+            
+            let docRef = db.collection("nests").document(nest.id)
+            try await docRef.setData(try Firestore.Encoder().encode(nest))
+            
+            // Create default categories
+            try await createDefaultCategories(for: nest.id)
+            
+            Logger.log(level: .info, category: .nestService, message: "Nest created successfully with default categories ✅")
+            
+            // Set as current nest after creation
+            setCurrentNest(nest)
+            
+            // Log success event
+            Tracker.shared.track(.nestCreated)
+            
+            return nest
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.nestCreated, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
     
     // MARK: - EntryRepository Implementation
@@ -184,23 +194,32 @@ final class NestService: EntryRepository {
             throw NestError.noCurrentNest
         }
         
-        let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-        try await docRef.setData(try Firestore.Encoder().encode(entry))
-        
-        // Update cache if it exists
-        if var cachedEntries = cachedEntries {
-            if var categoryEntries = cachedEntries[entry.category] {
-                categoryEntries.append(entry)
-                cachedEntries[entry.category] = categoryEntries
-                self.cachedEntries = cachedEntries
-            } else {
-                // If category doesn't exist yet, create it
-                cachedEntries[entry.category] = [entry]
-                self.cachedEntries = cachedEntries
+        do {
+            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
+            try await docRef.setData(try Firestore.Encoder().encode(entry))
+            
+            // Update cache if it exists
+            if var cachedEntries = cachedEntries {
+                if var categoryEntries = cachedEntries[entry.category] {
+                    categoryEntries.append(entry)
+                    cachedEntries[entry.category] = categoryEntries
+                    self.cachedEntries = cachedEntries
+                } else {
+                    // If category doesn't exist yet, create it
+                    cachedEntries[entry.category] = [entry]
+                    self.cachedEntries = cachedEntries
+                }
             }
+            
+            Logger.log(level: .info, category: .nestService, message: "Entry created successfully: \(entry.title)")
+            
+            // Log success event
+            Tracker.shared.track(.entryCreated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.entryCreated, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .nestService, message: "Entry created successfully: \(entry.title)")
     }
     
     func updateEntry(_ entry: BaseEntry) async throws {
@@ -208,21 +227,30 @@ final class NestService: EntryRepository {
             throw NestError.noCurrentNest
         }
         
-        let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-        try await docRef.setData(try Firestore.Encoder().encode(entry))
-        
-        // Update cache if it exists
-        if var cachedEntries = cachedEntries {
-            if var categoryEntries = cachedEntries[entry.category] {
-                if let index = categoryEntries.firstIndex(where: { $0.id == entry.id }) {
-                    categoryEntries[index] = entry
-                    cachedEntries[entry.category] = categoryEntries
-                    self.cachedEntries = cachedEntries
+        do {
+            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
+            try await docRef.setData(try Firestore.Encoder().encode(entry))
+            
+            // Update cache if it exists
+            if var cachedEntries = cachedEntries {
+                if var categoryEntries = cachedEntries[entry.category] {
+                    if let index = categoryEntries.firstIndex(where: { $0.id == entry.id }) {
+                        categoryEntries[index] = entry
+                        cachedEntries[entry.category] = categoryEntries
+                        self.cachedEntries = cachedEntries
+                    }
                 }
             }
+            
+            Logger.log(level: .info, category: .nestService, message: "Entry updated successfully in Firestore: \(entry.title)")
+            
+            // Log success event
+            Tracker.shared.track(.entryUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.entryUpdated, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .nestService, message: "Entry updated successfully in Firestore: \(entry.title)")
     }
     
     func deleteEntry(_ entry: BaseEntry) async throws {
@@ -230,16 +258,25 @@ final class NestService: EntryRepository {
             throw NestError.noCurrentNest
         }
         
-        let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-        try await docRef.delete()
-        
-        // Update cache if it exists
-        if var updatedNest = currentNest {
-            updatedNest.entries?.removeAll { $0.id == entry.id }
-            currentNest = updatedNest
+        do {
+            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
+            try await docRef.delete()
+            
+            // Update cache if it exists
+            if var updatedNest = currentNest {
+                updatedNest.entries?.removeAll { $0.id == entry.id }
+                currentNest = updatedNest
+            }
+            
+            clearEntriesCache()
+            
+            // Log success event
+            Tracker.shared.track(.entryDeleted)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.entryDeleted, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        clearEntriesCache()
     }
     
     // Add method to clear cache
@@ -315,19 +352,28 @@ extension NestService {
             throw NestError.noCurrentNest
         }
         
-        let docRef = db.collection("nests").document(nestId).collection("nestCategories").document(category.id)
-        try await docRef.setData(try Firestore.Encoder().encode(category))
-        
-        // Update current nest's categories
-        if var updatedNest = currentNest {
-            if updatedNest.categories == nil {
-                updatedNest.categories = []
+        do {
+            let docRef = db.collection("nests").document(nestId).collection("nestCategories").document(category.id)
+            try await docRef.setData(try Firestore.Encoder().encode(category))
+            
+            // Update current nest's categories
+            if var updatedNest = currentNest {
+                if updatedNest.categories == nil {
+                    updatedNest.categories = []
+                }
+                updatedNest.categories?.append(category)
+                currentNest = updatedNest
             }
-            updatedNest.categories?.append(category)
-            currentNest = updatedNest
+            
+            Logger.log(level: .info, category: .nestService, message: "Category created successfully: \(category.name)")
+            
+            // Log success event
+            Tracker.shared.track(.nestCategoryAdded)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.nestCategoryAdded, result: false, error: error.localizedDescription)
+            throw error
         }
-        
-        Logger.log(level: .info, category: .nestService, message: "Category created successfully: \(category.name)")
     }
 }
 
@@ -491,19 +537,28 @@ extension NestService {
             throw NestError.noCurrentNest
         }
         
-        // Update in Firestore
-        let docRef = db.collection("nests").document(nestId)
-        try await docRef.updateData([
-            "name": newName,
-            "updatedAt": FieldValue.serverTimestamp()
-        ])
-        
-        self.currentNest?.name = newName
-        
-        // Post notification for UI updates
-        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
-        
-        Logger.log(level: .info, category: .nestService, message: "Nest name updated successfully to: \(newName)")
+        do {
+            // Update in Firestore
+            let docRef = db.collection("nests").document(nestId)
+            try await docRef.updateData([
+                "name": newName,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+            
+            self.currentNest?.name = newName
+            
+            // Post notification for UI updates
+            NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+            
+            Logger.log(level: .info, category: .nestService, message: "Nest name updated successfully to: \(newName)")
+            
+            // Log success event
+            Tracker.shared.track(.nestNameUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.nestNameUpdated, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
     
     func updateNestAddress(_ nestId: String, _ newAddress: String) async throws {
@@ -511,19 +566,28 @@ extension NestService {
             throw NestError.noCurrentNest
         }
         
-        // Update in Firestore
-        let docRef = db.collection("nests").document(nestId)
-        try await docRef.updateData([
-            "address": newAddress,
-            "updatedAt": FieldValue.serverTimestamp()
-        ])
-        
-        self.currentNest?.address = newAddress
-        
-        // Post notification for UI updates
-        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
-        
-        Logger.log(level: .info, category: .nestService, message: "Nest address updated successfully to: \(newAddress)")
+        do {
+            // Update in Firestore
+            let docRef = db.collection("nests").document(nestId)
+            try await docRef.updateData([
+                "address": newAddress,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+            
+            self.currentNest?.address = newAddress
+            
+            // Post notification for UI updates
+            NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+            
+            Logger.log(level: .info, category: .nestService, message: "Nest address updated successfully to: \(newAddress)")
+            
+            // Log success event
+            Tracker.shared.track(.nestAddressUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.nestAddressUpdated, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
 } 
 

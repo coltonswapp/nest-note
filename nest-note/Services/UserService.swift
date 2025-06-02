@@ -36,6 +36,9 @@ final class UserService {
                 self.currentUser = nestUser
                 self.isAuthenticated = true
                 
+                // Set user context in Events service
+                Tracker.shared.setUserContext(email: nestUser.personalInfo.email, userID: nestUser.id)
+                
                 // Try to save any pending FCM token
                 if let token = pendingFCMToken {
                     try await updateFCMToken(token)
@@ -55,11 +58,13 @@ final class UserService {
             } catch {
                 self.currentUser = nil
                 self.isAuthenticated = false
+                Tracker.shared.clearUserContext()
                 Logger.log(level: .error, category: .userService, message: "Auth state changed - Failed to fetch profile: \(error.localizedDescription)")
             }
         } else {
             self.currentUser = nil
             self.isAuthenticated = false
+            Tracker.shared.clearUserContext()
             Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged out")
         }
     }
@@ -432,6 +437,7 @@ final class UserService {
         Logger.log(level: .info, category: .userService, message: "Resetting UserService...")
         do {
             try await logout(currentDeviceToken: Messaging.messaging().fcmToken)
+            Tracker.shared.clearUserContext()
         } catch {
             throw error
         }

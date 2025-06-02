@@ -37,28 +37,38 @@ final class PlacesService {
         
         Logger.log(level: .info, category: .placesService, message: "Creating new place: \(alias)")
         
-        let placeID: String = UUID().uuidString
-        
-        // 1. Upload thumbnails to Storage
-        let thumbnailURLs = try await uploadThumbnails(placeID: placeID, from: thumbnailAsset)
-        
-        // 2. Create and save place document
-        let place = Place(
-            id: placeID,
-            nestId: nestId,
-            alias: alias,
-            address: address,
-            coordinate: coordinate,
-            thumbnailURLs: thumbnailURLs
-        )
-        
-        try await savePlaceDocument(place)
-        
-        // 3. Update local cache
-        places.append(place)
-        
-        Logger.log(level: .info, category: .placesService, message: "Place created successfully ✅")
-        return place
+        do {
+            let placeID: String = UUID().uuidString
+            
+            // 1. Upload thumbnails to Storage
+            let thumbnailURLs = try await uploadThumbnails(placeID: placeID, from: thumbnailAsset)
+            
+            // 2. Create and save place document
+            let place = Place(
+                id: placeID,
+                nestId: nestId,
+                alias: alias,
+                address: address,
+                coordinate: coordinate,
+                thumbnailURLs: thumbnailURLs
+            )
+            
+            try await savePlaceDocument(place)
+            
+            // 3. Update local cache
+            places.append(place)
+            
+            Logger.log(level: .info, category: .placesService, message: "Place created successfully ✅")
+            
+            // Log success event
+            Tracker.shared.track(.nestPlaceAdded)
+            
+            return place
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.nestPlaceAdded, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
     
     func fetchPlaces(includeTemporary: Bool = true) async throws -> [Place] {
