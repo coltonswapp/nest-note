@@ -26,7 +26,7 @@ class InviteDetailViewController: NNViewController {
     
     private let logoImageView: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "bird")
+        imageView.image = NNImage.primaryLogo
         imageView.tintColor = NNColors.primary
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false

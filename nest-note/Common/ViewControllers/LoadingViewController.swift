@@ -8,7 +8,7 @@ import UIKit
 
 class LoadingViewController: UIViewController {
     private let birdImageView: UIImageView = {
-        let imageView = UIImageView(image: UIImage(systemName: "bird.fill"))
+        let imageView = UIImageView(image: NNImage.primaryLogo)
         imageView.contentMode = .scaleAspectFit
         imageView.tintColor = .label
         imageView.preferredSymbolConfiguration = .init(pointSize: 80, weight: .regular)

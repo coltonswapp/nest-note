@@ -540,6 +540,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             case "Notifications":
                 let vc = NotificationsViewController()
                 navigationController?.pushViewController(vc, animated: true)
+            case "App Icon":
+                let vc = AppIconViewController()
+                let nav = UINavigationController(rootViewController: vc)
+                present(nav, animated: true)
             default:
                 print("Selected General item: \(title)")
             }

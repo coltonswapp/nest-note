@@ -40,7 +40,7 @@ final class SessionManager {
     
     private let birdImageView: UIImageView = {    
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "bird")
+        imageView.image = NNImage.primaryLogo
         imageView.tintColor = .secondaryLabel
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
