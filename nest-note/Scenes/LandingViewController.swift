@@ -42,7 +42,7 @@ final class LandingViewController: NNViewController {
     
     private let titleImage: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "bird.fill")
+        imageView.image = NNImage.primaryLogo
         imageView.tintColor = .label
         imageView.contentMode = .scaleAspectFit
         return imageView

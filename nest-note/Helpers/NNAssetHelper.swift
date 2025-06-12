@@ -1,5 +1,9 @@
 import UIKit
 
+class NNImage {
+    static let primaryLogo = UIImage(named: "NNprimaryLogo")
+}
+
 enum NNAssetType: String {
     case rectanglePattern = "rectangle_pattern"
     case halfMoonTop = "half_moon_top"

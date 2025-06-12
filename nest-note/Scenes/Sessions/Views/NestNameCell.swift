@@ -15,8 +15,8 @@ final class NestNameCell: UICollectionViewCell {
         imageView.contentMode = .scaleAspectFit
         imageView.tintColor = NNColors.primary
         
-        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
-        imageView.image = UIImage(systemName: "bird.fill", withConfiguration: symbolConfig)
+//        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
+        imageView.image = NNImage.primaryLogo
         return imageView
     }()
     
