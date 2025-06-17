@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
 import UserNotifications
+import RevenueCat
 
 final class UserService {
     
@@ -39,6 +40,19 @@ final class UserService {
                 // Set user context in Events service
                 Tracker.shared.setUserContext(email: nestUser.personalInfo.email, userID: nestUser.id)
                 
+                // Log in to RevenueCat with user ID
+                Purchases.shared.logIn(nestUser.id) { (customerInfo, created, error) in
+                    if let error = error {
+                        Logger.log(level: .error, category: .userService, message: "RevenueCat login error: \(error.localizedDescription)")
+                    } else {
+                        Logger.log(level: .info, category: .userService, message: "RevenueCat login successful for user: \(nestUser.id)")
+                        // Refresh subscription info after successful login
+                        Task {
+                            await SubscriptionService.shared.refreshCustomerInfo()
+                        }
+                    }
+                }
+                
                 // Try to save any pending FCM token
                 if let token = pendingFCMToken {
                     try await updateFCMToken(token)
@@ -65,6 +79,18 @@ final class UserService {
             self.currentUser = nil
             self.isAuthenticated = false
             Tracker.shared.clearUserContext()
+            
+            // Log out from RevenueCat
+            Purchases.shared.logOut { (customerInfo, error) in
+                if let error = error {
+                    Logger.log(level: .error, category: .userService, message: "RevenueCat logout error: \(error.localizedDescription)")
+                } else {
+                    Logger.log(level: .info, category: .userService, message: "RevenueCat logout successful")
+                }
+                // Clear subscription cache on logout
+                SubscriptionService.shared.clearCache()
+            }
+            
             Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged out")
         }
     }

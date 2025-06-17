@@ -177,10 +177,13 @@ final class DateCell: UICollectionViewListCell {
     }
     
     @objc private func multiDayToggleTapped() {
-        isMultiDay = multiDayToggle.isOn
-        endControl.setStyle(isMultiDay ? .both : .time, animated: true)
+        let newMultiDayState = multiDayToggle.isOn
         
-        if !isMultiDay {
+        if !newMultiDayState {
+            // Toggling OFF multi-day - allow immediately
+            isMultiDay = false
+            endControl.setStyle(.time, animated: true)
+            
             // Sync end date with start date
             let calendar = Calendar.current
             let startComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
@@ -197,8 +200,9 @@ final class DateCell: UICollectionViewListCell {
                 updateDates(newEndDate: newDate)
             }
         } else {
-            // Just notify delegate of the toggle change
-            delegate?.didToggleMultiDay(isMultiDay, startDate: startDate, endDate: endDate)
+            // Toggling ON multi-day - let delegate validate first
+            // Don't update isMultiDay yet - let the delegate decide
+            delegate?.didToggleMultiDay(newMultiDayState, startDate: startDate, endDate: endDate)
         }
     }
     
@@ -215,5 +219,23 @@ final class DateCell: UICollectionViewListCell {
         
         // Notify delegate of the change
         delegate?.didToggleMultiDay(isMultiDay, startDate: startDate, endDate: endDate)
+    }
+    
+    // Method to revert the multi-day toggle when subscription check fails
+    func revertMultiDayToggle() {
+        // Revert the switch to previous state
+        multiDayToggle.isOn = false
+        isMultiDay = false
+        
+        // Revert the UI state
+        endControl.setStyle(.time, animated: true)
+        updateDateLabels()
+    }
+    
+    // Method to enable multi-day when subscription check passes
+    func enableMultiDay() {
+        isMultiDay = true
+        endControl.setStyle(.both, animated: true)
+        updateDateLabels()
     }
 }

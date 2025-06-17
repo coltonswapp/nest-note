@@ -9,6 +9,7 @@ import UIKit
 import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
+import RevenueCat
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
@@ -25,6 +26,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Set messaging delegate
         Messaging.messaging().delegate = self
+        
+        Purchases.logLevel = .debug
+        Purchases.configure(withAPIKey: "appl_YZcLiFmgCpJbtEmWLRyDmuMuZsY")
         
         return true
     }

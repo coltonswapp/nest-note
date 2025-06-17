@@ -6,8 +6,10 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
-class NestViewController: NNViewController, NestLoadable {
+class NestViewController: NNViewController, NestLoadable, PaywallPresentable, PaywallViewControllerDelegate {
     var loadingIndicator: UIActivityIndicatorView!
     var hasLoadedInitialData: Bool = false
     var refreshControl: UIRefreshControl!
@@ -72,6 +74,11 @@ class NestViewController: NNViewController, NestLoadable {
     private var newCategoryButton: NNPrimaryLabeledButton?
     
     private let entryRepository: EntryRepository
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .customCategories
+    }
     
     init(entryRepository: EntryRepository) {
         self.entryRepository = entryRepository
@@ -276,10 +283,23 @@ class NestViewController: NNViewController, NestLoadable {
     }
     
     @objc private func addButtonTapped() {
-        let buttonFrame = newCategoryButton!.convert(newCategoryButton!.bounds, to: nil)
-        let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
-        categoryVC.categoryDelegate = self
-        present(categoryVC, animated: true)
+        Task {
+            // Check if user has unlimited categories feature (Pro subscription)
+            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
+            if !hasUnlimitedCategories {
+                await MainActor.run {
+                    self.showCategoryLimitUpgradePrompt()
+                }
+                return
+            }
+            
+            await MainActor.run {
+                let buttonFrame = self.newCategoryButton!.convert(self.newCategoryButton!.bounds, to: nil)
+                let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
+                categoryVC.categoryDelegate = self
+                self.present(categoryVC, animated: true)
+            }
+        }
     }
     
     private func applyInitialSnapshots() {
@@ -439,6 +459,13 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
             }
         }
     }
+    
+    // MARK: - Category Limit Handling
+    
+    private func showCategoryLimitUpgradePrompt() {
+        showUpgradePrompt(for: proFeature)
+    }
+    
 }
 
 extension NestViewController: AddressCellDelegate {
@@ -461,3 +488,4 @@ extension NestViewController {
         return
     }
 }
+

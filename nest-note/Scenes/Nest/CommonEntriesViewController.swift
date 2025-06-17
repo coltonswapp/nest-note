@@ -6,17 +6,25 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 // Add a delegate protocol at the top of the file before class declaration
 protocol CommonEntriesViewControllerDelegate: EntryDetailViewControllerDelegate {
     func commonEntriesViewController(_ controller: CommonEntriesViewController, didSelectEntry entry: BaseEntry)
+    func showUpgradePrompt()
 }
 
-class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
+class CommonEntriesViewController: UIViewController, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
     private let entryRepository: EntryRepository
     private let category: String
     private let sessionVisibilityLevel: VisibilityLevel
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .unlimitedEntries
+    }
     
     // Add delegate property
     weak var delegate: CommonEntriesViewControllerDelegate?
@@ -108,10 +116,9 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable {
     }
     
     private func setupInstructionLabel() {
-        pinBottomBlur(blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        instructionLabel = BlurBackgroundLabel(with: .systemThinMaterial)
+        instructionLabel = BlurBackgroundLabel(with: .systemThickMaterial)
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
-        instructionLabel.text = "These are example entries. Select \none to make it your own."
+        instructionLabel.text = "These are example entries. Tap \none to make it your own."
         instructionLabel.font = .bodyL
         instructionLabel.textColor = .secondaryLabel
         
@@ -435,22 +442,43 @@ extension CommonEntriesViewController: UICollectionViewDelegate {
         guard let selectedEntry = dataSource.itemIdentifier(for: indexPath),
               let cell = collectionView.cellForItem(at: indexPath) else { return }
         
+        // Only allow adding entries for nest owners
+        guard entryRepository is NestService else { return }
+        
         Logger.log(level: .info, category: .nestService, message: "Selected common entry: \(selectedEntry.title)")
         
-        // Create a BaseEntry from the CommonEntry
-        let baseEntry = selectedEntry.toBaseEntry()
-        
-        let cellFrame = collectionView.convert(cell.frame, to: nil)
-        let isReadOnly = !(entryRepository is NestService)
-        
-        let editEntryVC = EntryDetailViewController(
-            category: selectedEntry.category,
-            title: selectedEntry.title,
-            content: selectedEntry.content,
-            sourceFrame: cellFrame
-        )
-        editEntryVC.entryDelegate = self
-        present(editEntryVC, animated: true)
+        Task {
+            // Check entry limit for free tier users
+            let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+            if !hasUnlimitedEntries {
+                do {
+                    let currentCount = try await (entryRepository as! NestService).getCurrentEntryCount()
+                    if currentCount >= 10 {
+                        await MainActor.run {
+                            self.dismiss(animated: true) {
+                                self.delegate?.showUpgradePrompt()
+                            }
+                        }
+                        return
+                    }
+                } catch {
+                    Logger.log(level: .error, category: .nestService, message: "Failed to check entry count: \(error.localizedDescription)")
+                }
+            }
+            
+            await MainActor.run {
+                let cellFrame = collectionView.convert(cell.frame, to: nil)
+                
+                let editEntryVC = EntryDetailViewController(
+                    category: selectedEntry.category,
+                    title: selectedEntry.title,
+                    content: selectedEntry.content,
+                    sourceFrame: cellFrame
+                )
+                editEntryVC.entryDelegate = self
+                self.present(editEntryVC, animated: true)
+            }
+        }
     }
 }
 

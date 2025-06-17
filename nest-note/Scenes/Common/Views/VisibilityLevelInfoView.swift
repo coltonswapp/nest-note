@@ -63,7 +63,7 @@ final class NNBulletStack: UIView {
         
         let titleLabel = UILabel()
         titleLabel.text = title
-        titleLabel.font = .h3
+        titleLabel.font = .h4
         titleLabel.textColor = .label
         
         titleStack.addArrangedSubview(iconImageView)

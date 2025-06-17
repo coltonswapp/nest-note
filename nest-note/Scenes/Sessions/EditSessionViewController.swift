@@ -1,5 +1,7 @@
 import UIKit
 import Foundation
+import RevenueCat
+import RevenueCatUI
 
 // MARK: - Protocols
 protocol DatePresentationDelegate: AnyObject {
@@ -38,7 +40,7 @@ protocol InviteStatusCellDelegate: AnyObject {
 }
 
 // MARK: - EditSessionViewController
-class EditSessionViewController: NNViewController {
+class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -124,6 +126,11 @@ class EditSessionViewController: NNViewController {
     }
     
     weak var delegate: EditSessionViewControllerDelegate?
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .multiDaySessions  // Default to multi-day, but this will be context-specific
+    }
     
     private let isEditingSession: Bool
     
@@ -1465,26 +1472,52 @@ extension EditSessionViewController: UICollectionViewDelegate {
             // Skip handling events if we're still loading them
             if isLoadingEvents { return }
             
-            // Get the current date range from the date cell
-            guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
-                  case let .dateSelection(startDate, endDate, _) = dateItem else {
-                return
-            }
-            
-            // Check if session duration is less than 24 hours
-            let duration = Calendar.current.dateComponents([.hour], from: startDate, to: endDate)
-            if let hours = duration.hour, hours < 24 {
-                // For sessions less than 24 hours, directly present SessionEventViewController
-                presentSessionEventViewController()
-            } else {
-                // For longer sessions, show the calendar view
-                presentCalendarViewController()
+            // Check if user has session events feature (Pro subscription)
+            Task {
+                let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+                if !hasSessionEvents {
+                    await MainActor.run {
+                        self.showSessionEventsUpgradePrompt()
+                    }
+                    return
+                }
+                
+                await MainActor.run {
+                    // Get the current date range from the date cell
+                    guard let dateItem = self.dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+                          case let .dateSelection(startDate, endDate, _) = dateItem else {
+                        return
+                    }
+                    
+                    // Check if session duration is less than 24 hours
+                    let duration = Calendar.current.dateComponents([.hour], from: startDate, to: endDate)
+                    if let hours = duration.hour, hours < 24 {
+                        // For sessions less than 24 hours, directly present SessionEventViewController
+                        self.presentSessionEventViewController()
+                    } else {
+                        // For longer sessions, show the calendar view
+                        self.presentCalendarViewController()
+                    }
+                }
             }
         case .sessionEvent(let event):
-            // Present event details
-            let eventVC = SessionEventViewController(sessionID: sessionItem.id, event: event)
-            eventVC.eventDelegate = self
-            present(eventVC, animated: true)
+            // Check if user has session events feature (Pro subscription)
+            Task {
+                let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+                if !hasSessionEvents {
+                    await MainActor.run {
+                        self.showSessionEventsUpgradePrompt()
+                    }
+                    return
+                }
+                
+                await MainActor.run {
+                    // Present event details
+                    let eventVC = SessionEventViewController(sessionID: self.sessionItem.id, event: event)
+                    eventVC.eventDelegate = self
+                    self.present(eventVC, animated: true)
+                }
+            }
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
@@ -1534,6 +1567,32 @@ extension EditSessionViewController: DatePresentationDelegate {
     }
     
     func didToggleMultiDay(_ isMultiDay: Bool, startDate: Date, endDate: Date) {
+        // If user is trying to enable multi-day, check if they have pro subscription
+        if isMultiDay {
+            Task {
+                let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                if !hasMultiDaySessions {
+                    await MainActor.run {
+                        // Revert the switch state in the DateCell
+                        self.revertDateCellMultiDayToggle()
+                        self.showMultiDayUpgradePrompt()
+                    }
+                    return
+                }
+                
+                await MainActor.run {
+                    // Enable multi-day in the DateCell and update data
+                    self.enableDateCellMultiDay()
+                    self.updateMultiDaySelection(isMultiDay, startDate: startDate, endDate: endDate)
+                }
+            }
+        } else {
+            // Allow toggling off multi-day without restriction
+            updateMultiDaySelection(isMultiDay, startDate: startDate, endDate: endDate)
+        }
+    }
+    
+    private func updateMultiDaySelection(_ isMultiDay: Bool, startDate: Date, endDate: Date) {
         // Update the data source with the new multi-day state
         guard let snapshot = dataSource.snapshot().itemIdentifiers(inSection: .date).first else { return }
         
@@ -1545,6 +1604,36 @@ extension EditSessionViewController: DatePresentationDelegate {
                               toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
         checkForChanges()
+    }
+    
+    private func showMultiDayUpgradePrompt() {
+        showUpgradePrompt(for: .multiDaySessions)
+    }
+    
+    private func showSessionEventsUpgradePrompt() {
+        showUpgradePrompt(for: .sessionEvents)
+    }
+    
+    // Helper methods to interact with DateCell
+    private func revertDateCellMultiDayToggle() {
+        if let dateCell = getDateCell() {
+            dateCell.revertMultiDayToggle()
+        }
+    }
+    
+    private func enableDateCellMultiDay() {
+        if let dateCell = getDateCell() {
+            dateCell.enableMultiDay()
+        }
+    }
+    
+    private func getDateCell() -> DateCell? {
+        guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+              let indexPath = dataSource.indexPath(for: dateItem),
+              let cell = collectionView.cellForItem(at: indexPath) as? DateCell else {
+            return nil
+        }
+        return cell
     }
 }
 

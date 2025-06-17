@@ -11,6 +11,7 @@ class AppIconViewController: NNViewController {
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, AppIcon>!
+    private var headerRegistration: UICollectionView.SupplementaryRegistration<NNSectionHeaderView>!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -40,10 +41,24 @@ class AppIconViewController: NNViewController {
     }
     
     private func createLayout() -> UICollectionViewLayout {
-        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-        config.showsSeparators = false
-        config.headerMode = .supplementary
-        return UICollectionViewCompositionalLayout.list(using: config)
+        let layout = UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
+            var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            config.showsSeparators = false
+            config.headerMode = .supplementary
+            let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
+            
+            // Standardize header size to match SettingsViewController
+            let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
+            let header = NSCollectionLayoutBoundarySupplementaryItem(
+                layoutSize: headerSize,
+                elementKind: UICollectionView.elementKindSectionHeader,
+                alignment: .top
+            )
+            section.boundarySupplementaryItems = [header]
+            
+            return section
+        }
+        return layout
     }
     
     private func configureDataSource() {
@@ -67,23 +82,20 @@ class AppIconViewController: NNViewController {
             }
         }
         
-        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+        headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(
             elementKind: UICollectionView.elementKindSectionHeader
-        ) { supplementaryView, elementKind, indexPath in
-            var content = supplementaryView.defaultContentConfiguration()
-            content.text = "Choose your icon"
-            content.textProperties.font = UIFont.preferredFont(forTextStyle: .subheadline)
-            content.textProperties.color = .secondaryLabel
-            supplementaryView.contentConfiguration = content
+        ) { (headerView, string, indexPath) in
+            headerView.configure(title: "Choose your icon")
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, AppIcon>(collectionView: collectionView) { collectionView, indexPath, appIcon in
             collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: appIcon)
         }
         
-        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+        dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
+            guard let self = self else { return nil }
             if kind == UICollectionView.elementKindSectionHeader {
-                return collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+                return collectionView.dequeueConfiguredReusableSupplementary(using: self.headerRegistration, for: indexPath)
             }
             return nil
         }

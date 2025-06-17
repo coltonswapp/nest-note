@@ -6,12 +6,19 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
-class NestCategoryViewController: UIViewController, NestLoadable, CollectionViewLoadable {
+class NestCategoryViewController: UIViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
     private let entryRepository: EntryRepository
     private let category: String
     private let sessionVisibilityLevel: VisibilityLevel
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .unlimitedEntries
+    }
     
     // Required by NestLoadable
     var loadingIndicator: UIActivityIndicatorView!
@@ -291,9 +298,35 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
         // Only allow adding entries for nest owners
         guard entryRepository is NestService else { return }
         
-        let newEntryVC = EntryDetailViewController(category: category)
-        newEntryVC.entryDelegate = self
-        present(newEntryVC, animated: true)
+        Task {
+            // Check entry limit for free tier users
+            let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+            if !hasUnlimitedEntries {
+                do {
+                    let currentCount = try await (entryRepository as! NestService).getCurrentEntryCount()
+                    if currentCount >= 10 {
+                        await MainActor.run {
+                            self.showEntryLimitUpgradePrompt()
+                        }
+                        return
+                    }
+                } catch {
+                    Logger.log(level: .error, category: .nestService, message: "Failed to check entry count: \(error.localizedDescription)")
+                }
+            }
+            
+            await MainActor.run {
+                let newEntryVC = EntryDetailViewController(category: self.category)
+                newEntryVC.entryDelegate = self
+                self.present(newEntryVC, animated: true)
+            }
+        }
+    }
+    
+    // MARK: - Entry Limit Handling
+    
+    internal func showEntryLimitUpgradePrompt() {
+        showUpgradePrompt(for: proFeature)
     }
     
     private func setupSuggestionButton() {
@@ -564,5 +597,10 @@ extension NestCategoryViewController: CommonEntriesViewControllerDelegate {
         editEntryVC.entryDelegate = self
         present(editEntryVC, animated: true)
     }
+    
+    func showUpgradePrompt() {
+        showEntryLimitUpgradePrompt()
+    }
 }
+
 
