@@ -1,4 +1,6 @@
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 protocol EntryDetailViewControllerDelegate: AnyObject {
     func entryDetailViewController(didSaveEntry entry: BaseEntry?)
@@ -317,13 +319,7 @@ final class EntryDetailViewController: NNSheetViewController {
                     existingEntry.visibility = visibilityLevel
                     existingEntry.updatedAt = Date()
                     
-                    Task.detached {
-                        do {
-                            try await NestService.shared.updateEntry(existingEntry)
-                        } catch {
-                            Logger.log(level: .error, category: .nestService, message: "Background update failed: \(error.localizedDescription)")
-                        }
-                    }
+                    try await NestService.shared.updateEntry(existingEntry)
                     savedEntry = existingEntry
                 } else {
                     let newEntry = BaseEntry(
@@ -333,13 +329,8 @@ final class EntryDetailViewController: NNSheetViewController {
                         category: category
                     )
                     
-                    Task.detached {
-                        do {
-                            try await NestService.shared.createEntry(newEntry)
-                        } catch {
-                            Logger.log(level: .error, category: .nestService, message: "Background creation failed: \(error.localizedDescription)")
-                        }
-                    }
+                    // Create entry (limit check is done before showing this VC)
+                    try await NestService.shared.createEntry(newEntry)
                     savedEntry = newEntry
                 }
                 
@@ -354,8 +345,26 @@ final class EntryDetailViewController: NNSheetViewController {
                     
                     self.dismiss(animated: true)
                 }
+            } catch {
+                await MainActor.run {
+                    // Handle errors (entry limit is checked before showing this VC)
+                    self.showErrorAlert(message: error.localizedDescription)
+                }
             }
         }
+    }
+    
+    // MARK: - Error Handling
+    
+    private func showErrorAlert(message: String) {
+        let alert = UIAlertController(
+            title: "Error",
+            message: message,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 
@@ -379,4 +388,6 @@ extension EntryDetailViewController: UITextViewDelegate {
     func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         return true
     }
-} 
+}
+
+ 

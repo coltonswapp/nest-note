@@ -16,12 +16,20 @@
 		F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292D2CD077E900B90ABC /* FirebaseFirestore */; };
 		F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = F66E292F2CD077E900B90ABC /* FirebaseRemoteConfig */; };
 		F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29312CD077E900B90ABC /* FirebaseStorage */; };
+		F670377F2DFCA5DD000D897E /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = F670377E2DFCA5DD000D897E /* RevenueCat */; };
+		F67037812DFCA5DD000D897E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = F67037802DFCA5DD000D897E /* RevenueCatUI */; };
+		F67037832DFCA686000D897E /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F67037822DFCA686000D897E /* StoreKit.framework */; };
+		F670378D2DFCEA8E000D897E /* nn-storekit-config.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */; };
+		F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */ = {isa = PBXBuildFile; fileRef = F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */; };
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
 		F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = F6E9EE522DA596DF009113C6 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		F64DE3E92CB1C893006D21FC /* nest-note.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nest-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		F67037822DFCA686000D897E /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
+		F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nn-storekit-config.storekit"; sourceTree = "<group>"; };
+		F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */ = {isa = PBXFileReference; lastKnownFileType = file; name = StoreKitTestCertificate.cer; path = ../Downloads/StoreKitTestCertificate.cer; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -51,6 +59,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F66E292C2CD077E900B90ABC /* FirebaseDatabase in Frameworks */,
+				F67037832DFCA686000D897E /* StoreKit.framework in Frameworks */,
+				F67037812DFCA5DD000D897E /* RevenueCatUI in Frameworks */,
 				F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */,
 				F66E292A2CD077E900B90ABC /* FirebaseCrashlytics in Frameworks */,
 				F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */,
@@ -58,6 +68,7 @@
 				F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */,
 				F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */,
 				F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */,
+				F670377F2DFCA5DD000D897E /* RevenueCat in Frameworks */,
 				F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */,
 				F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */,
 				F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */,
@@ -70,6 +81,7 @@
 		F62DB7E92D6EC32800712D4B /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				F67037822DFCA686000D897E /* StoreKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -77,6 +89,8 @@
 		F64DE3E02CB1C893006D21FC = {
 			isa = PBXGroup;
 			children = (
+				F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */,
+				F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */,
 				F64DE3EB2CB1C893006D21FC /* nest-note */,
 				F62DB7E92D6EC32800712D4B /* Frameworks */,
 				F64DE3EA2CB1C893006D21FC /* Products */,
@@ -122,6 +136,8 @@
 				F6B678292CDDED5700FDCAE4 /* Toast */,
 				F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */,
 				F6E9EE522DA596DF009113C6 /* FirebaseMessaging */,
+				F670377E2DFCA5DD000D897E /* RevenueCat */,
+				F67037802DFCA5DD000D897E /* RevenueCatUI */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -154,6 +170,7 @@
 			packageReferences = (
 				F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */,
+				F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F64DE3EA2CB1C893006D21FC /* Products */;
@@ -170,6 +187,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */,
+				F670378D2DFCEA8E000D897E /* nn-storekit-config.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,6 +418,14 @@
 				minimumVersion = 11.4.0;
 			};
 		};
+		F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.28.1;
+			};
+		};
 		F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/BastiaanJansen/toast-swift";
@@ -454,6 +481,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseStorage;
+		};
+		F670377E2DFCA5DD000D897E /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		F67037802DFCA5DD000D897E /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
 		};
 		F6B678292CDDED5700FDCAE4 /* Toast */ = {
 			isa = XCSwiftPackageProductDependency;

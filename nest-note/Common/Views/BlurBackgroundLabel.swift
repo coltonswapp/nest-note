@@ -10,6 +10,9 @@ class BlurBackgroundLabel: UIView {
     }()
     
     private var blurView: UIVisualEffectView!
+    private var shimmerTimer: Timer?
+    private let shimmerLayer = CAGradientLayer()
+    private let borderShapeLayer = CAShapeLayer()
     
     var onClearTapped: (() -> Void)?
     
@@ -49,6 +52,9 @@ class BlurBackgroundLabel: UIView {
         blurView.translatesAutoresizingMaskIntoConstraints = false
         blurView.layer.cornerRadius = 12
         blurView.clipsToBounds = true
+        
+        blurView.layer.borderWidth = 1.5
+        blurView.layer.borderColor = UIColor.systemBackground.cgColor
     }
     
     private func setupViews() {

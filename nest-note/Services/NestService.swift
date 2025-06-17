@@ -146,6 +146,13 @@ final class NestService: EntryRepository {
         return try await fetchEntries()
     }
     
+    /// Gets the current count of entries across all categories
+    /// - Returns: Total number of entries in the current nest
+    func getCurrentEntryCount() async throws -> Int {
+        let groupedEntries = try await fetchEntries()
+        return groupedEntries.values.flatMap { $0 }.count
+    }
+    
     // MARK: - Category Methods
     private var cachedCategories: [NestCategory]?
     
@@ -192,6 +199,15 @@ final class NestService: EntryRepository {
     func createEntry(_ entry: BaseEntry) async throws {
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
+        }
+        
+        // Check entry limit for free tier users
+        let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+        if !hasUnlimitedEntries {
+            let currentCount = try await getCurrentEntryCount()
+            if currentCount >= 10 {
+                throw NestError.entryLimitReached
+            }
         }
         
         do {
@@ -310,6 +326,7 @@ extension NestService {
     enum NestError: LocalizedError {
         case nestNotFound
         case noCurrentNest
+        case entryLimitReached
         
         var errorDescription: String? {
             switch self {
@@ -317,6 +334,8 @@ extension NestService {
                 return "The requested nest could not be found"
             case .noCurrentNest:
                 return "No nest is currently selected"
+            case .entryLimitReached:
+                return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries."
             }
         }
     }

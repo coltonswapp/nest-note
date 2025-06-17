@@ -6,6 +6,8 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 class SettingsViewController: NNViewController, UICollectionViewDelegate {
     
@@ -529,6 +531,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                     )
                     featurePreviewVC.modalPresentationStyle = .formSheet
                     present(featurePreviewVC, animated: true)
+                case "Subscription":
+                    showRevenueCatPaywall()
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -607,6 +611,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         guard let nestCreationCoordinator else { return }
         present(nestCreationCoordinator.start(), animated: true)
     }
+    
+    private func showRevenueCatPaywall() {
+        let paywallViewController = PaywallViewController()
+        
+        paywallViewController.delegate = self
+        present(paywallViewController, animated: true)
+    }
 
     @objc private func handleUserInformationUpdate() {
         applyInitialSnapshots()
@@ -666,5 +677,41 @@ extension SettingsViewController: SessionEventViewControllerDelegate {
         if let event = event {
             showToast(text: "Event created: \(event.title)")
         }
+    }
+}
+
+extension SettingsViewController: PaywallViewControllerDelegate {
+    func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        controller.dismiss(animated: true) {
+            self.showToast(text: "Subscription activated!")
+            Logger.log(level: .info, category: .purchases, message: "Subscription purchase completed")
+            
+            // Refresh subscription status after purchase
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+            }
+        }
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFailPurchasingWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription purchase failed: \(error.localizedDescription)")
+        showToast(text: "Purchase failed. Please try again.")
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        controller.dismiss(animated: true) {
+            self.showToast(text: "Subscription restored!")
+            Logger.log(level: .info, category: .purchases, message: "Subscription restored successfully")
+            
+            // Refresh subscription status after restore
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+            }
+        }
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFailRestoringWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription restore failed: \(error.localizedDescription)")
+        showToast(text: "Restore failed. Please try again.")
     }
 }

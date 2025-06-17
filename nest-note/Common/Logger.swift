@@ -112,6 +112,7 @@ public extension Logger {
         case cachedImageController = "🗾 CachedImageController"
 
         case purchases = "💰 Purchases"
+        case subscription = "💵 Subscriptions"
         case migration = "🦣 Migrations"
 
         case testing = "🧪 Testing"
@@ -142,7 +143,6 @@ final class SystemProvider: LogProvider {
     func log(level: Logger.Level, category: Logger.Category?, message: String) {
         os_log("%{public}@", type: level.osLogType, "LinusLog: \(dateString) \(message)")
     }
-
 }
 
 private extension Logger.Level {
