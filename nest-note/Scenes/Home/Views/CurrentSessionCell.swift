@@ -21,8 +21,7 @@ final class CurrentSessionCell: UICollectionViewListCell {
     
     private let birdImageView: UIImageView = {    
         let imageView = UIImageView()
-        let imageConfig = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
-        imageView.image = UIImage(systemName: "bird", withConfiguration: imageConfig)
+        imageView.image = NNImage.primaryLogo
         imageView.tintColor = NNColors.primaryLighter
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false

@@ -89,7 +89,7 @@ final class SubscriptionService {
         
         // Check specifically for pro entitlement
         // You'll need to configure this entitlement identifier in RevenueCat dashboard
-        if customerInfo.entitlements.active["pro"] != nil {
+        if customerInfo.entitlements.active["Pro"] != nil {
             return .pro
         }
         
