@@ -84,13 +84,14 @@ final class EventsCell: UICollectionViewListCell {
             titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: plusButton.leadingAnchor, constant: -8),
             
             plusButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             plusButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             plusButton.widthAnchor.constraint(equalToConstant: 28),
             plusButton.heightAnchor.constraint(equalToConstant: 28),
             
-            eventCountLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            eventCountLabel.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -8),
             eventCountLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             
             // Add loading indicator constraints, put it where the plus button is
@@ -103,33 +104,18 @@ final class EventsCell: UICollectionViewListCell {
         loadingIndicator.stopAnimating()
         isUserInteractionEnabled = true
         
-        if showPlusButton {
-            plusButton.isHidden = eventCount > 0
-            eventCountLabel.isHidden = eventCount == 0
+        // Always show the plus button when showPlusButton is true
+        plusButton.isHidden = !showPlusButton
+        
+        // Update title label to show count if there are events
+        if eventCount > 0 {
+            titleLabel.text = "Events (\(eventCount))"
+            eventCountLabel.isHidden = true
         } else {
-            plusButton.isHidden = true
+            titleLabel.text = "Events"
             eventCountLabel.isHidden = false
+            eventCountLabel.text = "No events"
         }
-        
-        let inflectedString = String(AttributedString(
-            localized: "^[\(eventCount) \("event")](inflect: true)"
-        ).characters)
-        eventCountLabel.text = inflectedString
-    }
-    
-    func configure(eventCount: Int, customMessage: String, showPlusButton: Bool = true) {
-        loadingIndicator.stopAnimating()
-        isUserInteractionEnabled = true
-        
-        if showPlusButton {
-            plusButton.isHidden = eventCount > 0
-            eventCountLabel.isHidden = eventCount == 0
-        } else {
-            plusButton.isHidden = true
-            eventCountLabel.isHidden = false
-        }
-        
-        eventCountLabel.text = customMessage
     }
     
     // Add a specific method for upcoming events

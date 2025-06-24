@@ -158,11 +158,11 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 let duration = formatter.string(from: session.startDate, to: session.endDate)
                 
                 // Get sitter name or email
-                let sitterInfo = session.assignedSitter?.name ?? session.assignedSitter?.email ?? session.title
+                let sitterInfo: String? = session.assignedSitter?.name ?? session.assignedSitter?.email
                 
-                var durationText: String =  session.assignedSitter == nil ? "No sitter assigned • \(duration)" : duration
+                let durationText: String = sitterInfo == nil ? "No sitter assigned • \(duration)" : "\(sitterInfo!) • \(duration)"
                 
-                cell.configure(title: sitterInfo, duration: durationText)
+                cell.configure(title: session.title, duration: durationText)
                 
                 // Configure the cell's background
                 var backgroundConfig = UIBackgroundConfiguration.listCell()

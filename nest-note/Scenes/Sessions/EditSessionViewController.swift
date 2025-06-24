@@ -415,6 +415,76 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         dismiss(animated: true)
     }
     
+    @objc private func shareButtonTapped() {
+        // Create alert with PDF export warning
+        let alert = UIAlertController(
+            title: "Export Session as PDF", 
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Export PDF", style: .default) { [weak self] _ in
+            self?.exportToPDF()
+        })
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        present(alert, animated: true)
+    }
+    
+    private func exportToPDF() {
+        Task {
+            do {
+                // Get the current nest
+                guard let nest = NestService.shared.currentNest else {
+                    await showError(message: "Unable to access nest data")
+                    return
+                }
+                
+                // Generate PDF
+                guard let pdfData = await PDFExportService.generateSessionPDF(
+                    session: sessionItem,
+                    nestItem: nest,
+                    visibilityLevel: sessionItem.visibilityLevel,
+                    events: sessionEvents
+                ) else {
+                    await showError(message: "Failed to generate PDF")
+                    return
+                }
+                
+                // Create temporary file
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("\(sessionItem.title)_session_details.pdf")
+                
+                try pdfData.write(to: tempURL)
+                
+                // Present share sheet
+                await MainActor.run {
+                    let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                    
+                    // Configure for iPad
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = view
+                        popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                        popover.permittedArrowDirections = []
+                    }
+                    
+                    present(activityVC, animated: true)
+                }
+                
+            } catch {
+                await showError(message: "Failed to export PDF: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    @MainActor
+    private func showError(message: String) {
+        let alert = UIAlertController(title: "Export Error", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    
     @objc private func saveButtonTapped() {
         Task {
             do {
@@ -607,6 +677,41 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             cell.contentConfiguration = content
         }
         
+        let exportPDFRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
+            
+            guard let self else { return }
+            
+            var content = cell.defaultContentConfiguration()
+            
+            switch item {
+            case .exportPDF:
+                content.text = "Export Session Info"
+                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+                let image = UIImage(systemName: "document.badge.arrow.up.fill", withConfiguration: symbolConfiguration)?
+                    .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                content.image = image
+                
+                content.imageProperties.tintColor = NNColors.primary
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 8
+                
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+                
+                content.textProperties.font = .preferredFont(forTextStyle: .body)
+                
+                // Set secondary text color to secondaryLabel
+                content.secondaryTextProperties.font = .bodyM
+                content.secondaryTextProperties.color = .secondaryLabel
+                
+                cell.accessories = [.disclosureIndicator()]
+            default:
+                break
+            }
+            
+            cell.contentConfiguration = content
+        }
+        
         let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
             if case let .visibilityLevel(level) = item {
@@ -692,6 +797,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             case .events:
                 configuration.text = "Add Nest-related events for this session."
                 configuration.textProperties.numberOfLines = 0
+            case .exportPDF:
+                configuration.text = "Old school backup for new school parents"
+                configuration.textProperties.numberOfLines = 0
             case .status:
                 if self.isArchivedSession {
                     configuration.text = "This session has been archived, as such, it cannot be edited."
@@ -722,6 +830,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 return collectionView.dequeueConfiguredReusableCell(using: nestReviewRegistration, for: indexPath, item: item)
             case .expenses:
                 return collectionView.dequeueConfiguredReusableCell(using: expensesRegistration, for: indexPath, item: item)
+            case .exportPDF:
+                return collectionView.dequeueConfiguredReusableCell(using: exportPDFRegistration, for: indexPath, item: item)
             case .dateSelection:
                 return collectionView.dequeueConfiguredReusableCell(using: dateRegistration, for: indexPath, item: item)
             case .events:
@@ -753,6 +863,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.expenses], toSection: .expenses)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.events], toSection: .events)
+            
+            if isEditingSession && sessionItem.status != .archived {
+                snapshot.appendSections([.exportPDF])
+                snapshot.appendItems([.exportPDF], toSection: .exportPDF)
+            }
             
             // We'll add the nest review section later after checking if entries need review
         } else {
@@ -793,6 +908,23 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func expenseButtonTapped() {
         let vc = NNFeaturePreviewViewController(feature: .expenses)
         present(vc, animated: true)
+    }
+    
+    private func exportPDFButtonTapped() {
+        // Create alert with PDF export warning
+        let alert = UIAlertController(
+            title: "Export Session as PDF", 
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Export PDF", style: .default) { [weak self] _ in
+            self?.exportToPDF()
+        })
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        present(alert, animated: true)
     }
     
     private func updateVisibilityLevel(_ level: VisibilityLevel) {
@@ -1335,6 +1467,7 @@ extension EditSessionViewController {
         case status
         case nestReview
         case expenses
+        case exportPDF
         case date
         case events
         case time
@@ -1348,6 +1481,7 @@ extension EditSessionViewController {
         case sessionStatus(SessionStatus)
         case nestReview
         case expenses
+        case exportPDF
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
         case events
         case sessionEvent(SessionEvent)
@@ -1369,18 +1503,20 @@ extension EditSessionViewController {
                 hasher.combine(4)
             case .expenses:
                 hasher.combine(5)
-            case .dateSelection(let start, let end, let isMultiDay):
+            case .exportPDF:
                 hasher.combine(6)
+            case .dateSelection(let start, let end, let isMultiDay):
+                hasher.combine(7)
                 hasher.combine(start)
                 hasher.combine(end)
                 hasher.combine(isMultiDay)
             case .events:
-                hasher.combine(7)
-            case .sessionEvent(let event):
                 hasher.combine(8)
+            case .sessionEvent(let event):
+                hasher.combine(9)
                 hasher.combine(event)
             case .moreEvents(let count):
-                hasher.combine(9)
+                hasher.combine(10)
                 hasher.combine(count)
             }
         }
@@ -1391,6 +1527,7 @@ extension EditSessionViewController {
                  (.inviteSitter, .inviteSitter),
                  (.nestReview, .nestReview),
                  (.expenses, .expenses),
+                 (.exportPDF, .exportPDF),
                  (.events, .events):
                 return true
             case let (.visibilityLevel(l1), .visibilityLevel(l2)):
@@ -1420,7 +1557,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .events, .moreEvents:
             // Don't allow highlighting events if they are currently loading
             return !isLoadingEvents
-        case .expenses, .sessionEvent:
+        case .expenses, .exportPDF, .sessionEvent:
             return true
         default:
             return false
@@ -1466,6 +1603,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
             }
         case .expenses:
             expenseButtonTapped()
+        case .exportPDF:
+            exportPDFButtonTapped()
         case .overview:
             break
         case .events, .moreEvents:

@@ -154,6 +154,15 @@ final class SessionEventViewController: NNSheetViewController {
         }
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Animate the selected color circle to show its selected state
+        if !isReadOnly && selectedColorIndex < colorButtons.count {
+            colorButtonTapped(colorButtons[selectedColorIndex])
+        }
+    }
+    
     // MARK: - Setup Methods
     override func addContentToContainer() {
         super.addContentToContainer()
@@ -387,6 +396,10 @@ final class SessionEventViewController: NNSheetViewController {
             button.layer.borderColor = color.border.cgColor
             button.layer.borderWidth = index == selectedColorIndex ? 6 : 3
             button.addTarget(self, action: #selector(colorButtonTapped(_:)), for: .touchUpInside)
+            
+            // Set initial transform to identity for all buttons
+            // The selected button will be animated to scale in viewDidAppear
+            button.transform = .identity
             
             colorButtons.append(button)
             colorStack.addArrangedSubview(button)
