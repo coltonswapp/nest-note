@@ -21,8 +21,9 @@ final class UserService {
     // Store pending FCM token
     private var pendingFCMToken: String?
     
-    // Flag to prevent duplicate profile fetches
+    // Flags to prevent duplicate operations
     private var isSettingUp: Bool = false
+    private var isFetchingProfile: Bool = false
     
     // MARK: - Initialization
     private init() {
@@ -32,6 +33,12 @@ final class UserService {
     // MARK: - Auth State Management
     private func handleAuthStateChange(firebaseUser: User?) async {
         if let firebaseUser = firebaseUser {
+            // Skip if we're already setting up and this is the same user
+            if isSettingUp && currentUser?.id == firebaseUser.uid {
+                Logger.log(level: .info, category: .userService, message: "Auth state change skipped - setup already in progress for user: \(firebaseUser.uid)")
+                return
+            }
+            
             do {
                 let nestUser = try await fetchUserProfile(userId: firebaseUser.uid)
                 self.currentUser = nestUser
@@ -418,14 +425,22 @@ final class UserService {
     
     // MARK: - Sign out & reset
     func logout(currentDeviceToken: String?) async throws {
+        var fcmTokenDeletionError: Error?
+        var firestoreTokenRemovalError: Error?
+        
+        // Try to delete the FCM token from Firebase Messaging (don't fail if this fails)
         do {
-            // Delete the FCM token from Firebase Messaging
             try await Messaging.messaging().deleteToken()
             Logger.log(level: .info, category: .userService, message: "FCM token deleted from Firebase Messaging")
-            
-            // If we have a current user, remove the token from their Firestore document
-            if let currentDeviceToken {
-                if let currentUser = currentUser {
+        } catch {
+            fcmTokenDeletionError = error
+            Logger.log(level: .error, category: .userService, message: "FCM token deletion failed (continuing with logout): \(error.localizedDescription)")
+        }
+        
+        // Try to remove the token from Firestore document (don't fail if this fails)
+        if let currentDeviceToken {
+            if let currentUser = currentUser {
+                do {
                     let docRef = db.collection("users").document(currentUser.id)
                     let snapshot = try await docRef.getDocument()
                     
@@ -443,18 +458,28 @@ final class UserService {
                         
                         Logger.log(level: .info, category: .userService, message: "FCM token removed from user document in Firestore")
                     }
+                } catch {
+                    firestoreTokenRemovalError = error
+                    Logger.log(level: .error, category: .userService, message: "Firestore token removal failed (continuing with logout): \(error.localizedDescription)")
                 }
             }
-            
-            // Sign out from Firebase Auth
+        }
+        
+        // Always attempt to sign out from Firebase Auth - this is critical
+        do {
             try auth.signOut()
             currentUser = nil
             isAuthenticated = false
             clearAuthState()
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
+            
+            // Log any token cleanup failures as warnings since logout succeeded
+            if fcmTokenDeletionError != nil || firestoreTokenRemovalError != nil {
+                Logger.log(level: .error, category: .userService, message: "Logout succeeded but token cleanup had issues")
+            }
         } catch {
-            Logger.log(level: .error, category: .userService, message: "Logout failed: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .userService, message: "Firebase Auth signOut failed: \(error.localizedDescription)")
             throw AuthError.unknown
         }
     }
@@ -485,7 +510,22 @@ final class UserService {
     
     // MARK: - Firestore Methods
     private func fetchUserProfile(userId: String) async throws -> NestUser {
-        Logger.log(level: .debug, category: .userService, message: "Fetching user profile for ID: \(userId)")
+        // Check if we're already fetching this user's profile
+        if isFetchingProfile && currentUser?.id == userId {
+            Logger.log(level: .info, category: .userService, message: "Profile fetch already in progress for user: \(userId), skipping duplicate request")
+            // Wait for the current fetch to complete and return current user
+            while isFetchingProfile {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            if let user = currentUser, user.id == userId {
+                return user
+            }
+        }
+        
+        isFetchingProfile = true
+        defer { isFetchingProfile = false }
+        
+        Logger.log(level: .info, category: .userService, message: "Fetching user profile for ID: \(userId)")
         
         let docRef = db.collection("users").document(userId)
         let snapshot = try await docRef.getDocument()
@@ -496,7 +536,7 @@ final class UserService {
             throw AuthError.invalidUserData
         }
         
-        Logger.log(level: .debug, category: .userService, message: "User Profile fetched ✅")
+        Logger.log(level: .info, category: .userService, message: "User Profile fetched ✅")
         return userProfile
     }
     

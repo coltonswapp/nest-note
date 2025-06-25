@@ -41,6 +41,7 @@ final class OnboardingContainerViewController: UIViewController {
     private let onboardingNavigationController: UINavigationController
     private var totalSteps: Int
     private var currentStep: Int = 0
+    private var isCurrentStepSurvey: Bool = false
     
     // MARK: - Initialization
     init(navigationController: UINavigationController, totalSteps: Int) {
@@ -112,10 +113,26 @@ final class OnboardingContainerViewController: UIViewController {
             print("Help tapped")
         }
         
+        var menuChildren: [UIAction] = [backToLogin]
+        
+        // Only add skip survey option if we're currently on a survey step
+        if isCurrentStepSurvey {
+            let skipSurvey = UIAction(
+                title: "Skip Survey",
+                image: UIImage(systemName: "forward.circle"),
+                attributes: []
+            ) { [weak self] _ in
+                self?.delegate?.onboardingContainerDidRequestSkipSurvey(self!)
+            }
+            menuChildren.append(skipSurvey)
+        }
+        
+        menuChildren.append(help)
+        
         let menu = UIMenu(
             title: "",
             options: .displayInline,
-            children: [backToLogin, help]
+            children: menuChildren
         )
         
         ellipsisButton.menu = menu
@@ -154,9 +171,16 @@ final class OnboardingContainerViewController: UIViewController {
             self.progressBar.setProgress(progress, animated: true)
         }
     }
+    
+    func updateSurveyStatus(_ isSurvey: Bool) {
+        guard isCurrentStepSurvey != isSurvey else { return }
+        isCurrentStepSurvey = isSurvey
+        setupEllipsisMenu() // Refresh the menu
+    }
 }
 
 // MARK: - Delegate Protocol
 protocol OnboardingContainerDelegate: AnyObject {
     func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController)
+    func onboardingContainerDidRequestSkipSurvey(_ container: OnboardingContainerViewController)
 }

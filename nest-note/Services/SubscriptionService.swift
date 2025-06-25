@@ -243,6 +243,9 @@ extension PaywallPresentable where Self: PaywallViewControllerDelegate {
         let paywallViewController = PaywallViewController()
         paywallViewController.delegate = self
         present(paywallViewController, animated: true)
+        
+        // Mark the final setup step as complete when paywall is viewed
+        SetupService.shared.markStepComplete(.finalStep)
     }
     
     func showUpgradePrompt(for feature: ProFeature) {

@@ -84,6 +84,7 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             headerView.configure(title: section.title)
         }
         
+        
         let infoCellRegistration = UICollectionView.CellRegistration<InfoCell, Item> { cell, indexPath, item in
             if case let .info(title, detail) = item {
                 cell.configure(title: title, detail: detail)
@@ -113,7 +114,7 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         }
         
         dataSource.supplementaryViewProvider = { [weak self] (collectionView, kind, indexPath) in
-            collectionView.dequeueConfiguredReusableSupplementary(using: self!.headerRegistration, for: indexPath)
+            return collectionView.dequeueConfiguredReusableSupplementary(using: self!.headerRegistration, for: indexPath)
         }
     }
     
@@ -312,8 +313,8 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         
         // Cancel action
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
-            // Revert UI by refreshing collection view
-            self?.applyInitialSnapshots()
+            // Revert the segmented control to the current mode
+            self?.revertModeSwitchCell(to: currentMode)
         })
         
         // Confirm action
@@ -322,6 +323,22 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         })
         
         present(alert, animated: true)
+    }
+    
+    private func revertModeSwitchCell(to mode: AppMode) {
+        // Find the mode switch cell and revert its segmented control
+        guard let snapshot = dataSource?.snapshot(),
+              let modeSwitchItem = snapshot.itemIdentifiers(inSection: .info).first(where: { item in
+                  if case .modeSwitch = item { return true }
+                  return false
+              }),
+              let indexPath = dataSource?.indexPath(for: modeSwitchItem),
+              let cell = collectionView?.cellForItem(at: indexPath) as? ModeSwitchCell else {
+            return
+        }
+        
+        // Revert the segmented control to the correct state
+        cell.revertToMode(mode)
     }
     
     private func performModeSwitch(to newMode: AppMode) {
@@ -379,10 +396,18 @@ private class ModeSwitchCell: UICollectionViewListCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .bodyS
+        label.font = .captionBold
         label.textColor = .secondaryLabel
         label.text = "CURRENT MODE"
         return label
+    }()
+    
+    private let infoButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "info.circle"), for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }()
     
     private let segmentedControl: UISegmentedControl = {
@@ -391,8 +416,16 @@ private class ModeSwitchCell: UICollectionViewListCell {
         return control
     }()
     
+    private lazy var titleStackView: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [titleLabel, infoButton])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 4
+        return stack
+    }()
+    
     private lazy var stackView: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [titleLabel, segmentedControl])
+        let stack = UIStackView(arrangedSubviews: [titleStackView, segmentedControl])
         stack.axis = .vertical
         stack.spacing = 8
         stack.alignment = .fill
@@ -423,6 +456,7 @@ private class ModeSwitchCell: UICollectionViewListCell {
     
     private func setupActions() {
         segmentedControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+        infoButton.addTarget(self, action: #selector(infoButtonTapped), for: .touchUpInside)
     }
     
     @objc private func modeChanged() {
@@ -430,8 +464,26 @@ private class ModeSwitchCell: UICollectionViewListCell {
         delegate?.modeSwitchCell(didSelectMode: newMode)
     }
     
+    @objc private func infoButtonTapped() {
+        // Find the containing view controller
+        var responder: UIResponder? = self
+        while responder != nil {
+            responder = responder?.next
+            if let viewController = responder as? UIViewController {
+                let modeInfoVC = ModeInfoViewController()
+                viewController.present(modeInfoVC, animated: true)
+                break
+            }
+        }
+    }
+    
     func configure() {
         // Update segment control state
         segmentedControl.selectedSegmentIndex = ModeManager.shared.currentMode == .nestOwner ? 0 : 1
+    }
+    
+    func revertToMode(_ mode: AppMode) {
+        // Revert the segmented control to the specified mode without triggering the change handler
+        segmentedControl.selectedSegmentIndex = mode == .nestOwner ? 0 : 1
     }
 }

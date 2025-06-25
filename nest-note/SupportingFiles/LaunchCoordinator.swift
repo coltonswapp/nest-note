@@ -12,6 +12,7 @@ final class LaunchCoordinator {
     private weak var window: UIWindow?
     private weak var navigationController: UINavigationController?
     private var userType: UserType?
+    private var currentOnboardingCoordinator: OnboardingCoordinator?
     
     // MARK: - Shared Instance
     static private(set) var shared: LaunchCoordinator?
@@ -165,8 +166,14 @@ final class LaunchCoordinator {
     
     private func reconfigureAfterAuthentication() async throws {
         do {
-            // Reconfigure services with the new user
-            try await Launcher.shared.configure()
+            // Only reconfigure if we actually need to - avoid redundant calls
+            // The auth state listener may have already configured services
+            if !UserService.shared.isSignedIn {
+                Logger.log(level: .debug, category: .launcher, message: "User not signed in during reconfigure, running full configuration")
+                try await Launcher.shared.configure()
+            } else {
+                Logger.log(level: .debug, category: .launcher, message: "User already signed in, skipping redundant service configuration")
+            }
             
             // Configure for the current user type
             try await configureForCurrentUser()
@@ -226,6 +233,7 @@ extension LaunchCoordinator: AuthenticationDelegate {
         }
         
         let onboardingCoordinator = OnboardingCoordinator()
+        self.currentOnboardingCoordinator = onboardingCoordinator
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self
         (containerVC as? OnboardingContainerViewController)?.delegate = self
@@ -262,6 +270,11 @@ extension LaunchCoordinator: AuthenticationDelegate {
 
 // MARK: - OnboardingContainerDelegate
 extension LaunchCoordinator: OnboardingContainerDelegate {
+    func onboardingContainerDidRequestSkipSurvey(_ container: OnboardingContainerViewController) {
+        // Delegate the skip survey request to the OnboardingCoordinator
+        currentOnboardingCoordinator?.onboardingContainerDidRequestSkipSurvey(container)
+    }
+    
     func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
         // Dismiss the onboarding container
         container.dismiss(animated: true) { [weak self] in
