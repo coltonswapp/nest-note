@@ -260,6 +260,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         collectionView.delegate = self
         collectionView.delaysContentTouches = false
         
+        // Prevent accidental dismissal by swipe or other gestures
+        isModalInPresentation = true
+        
         if let sheetPresentationController = sheetPresentationController {
             sheetPresentationController.detents = [.large()]
             sheetPresentationController.prefersGrabberVisible = false
@@ -343,12 +346,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         // Generate exactly 6 test events
-//        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
-//           case let .dateSelection(startDate, endDate, _) = dateItem {
-//            let dateInterval = DateInterval(start: startDate, end: endDate)
-//            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
-//            updateEventsSection(with: sessionEvents)
-//        }
+        //        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+        //           case let .dateSelection(startDate, endDate, _) = dateItem {
+        //            let dateInterval = DateInterval(start: startDate, end: endDate)
+        //            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
+        //            updateEventsSection(with: sessionEvents)
+        //        }
     }
     
     private func setupNavigationBar() {
@@ -412,14 +415,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     @objc override func closeButtonTapped() {
-        dismiss(animated: true)
+        // Check for unsaved changes before dismissing
+        if hasUnsavedChanges {
+            let alert = UIAlertController(
+                title: "Discard Changes?",
+                message: "You have unsaved changes. Are you sure you want to discard them?",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(
+                title: "Keep Editing",
+                style: .cancel
+            ))
+            
+            alert.addAction(UIAlertAction(
+                title: "Discard Changes",
+                style: .destructive
+            ) { [weak self] _ in
+                self?.dismiss(animated: true)
+            })
+            
+            present(alert, animated: true)
+        } else {
+            dismiss(animated: true)
+        }
     }
     
     @objc private func shareButtonTapped() {
         // Create alert with PDF export warning
         let alert = UIAlertController(
-            title: "Export Session as PDF", 
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            title: "Export Session as PDF",
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -846,7 +872,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Add supplementary view provider to data source
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
             return collectionView.dequeueConfiguredReusableSupplementary(
-                using: footerRegistration, 
+                using: footerRegistration,
                 for: indexPath
             )
         }
@@ -894,7 +920,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
-        let eventVC = SessionEventViewController(sessionID: sessionItem.id)
+        let selectedDate = sessionItem.isMultiDay ? nil : sessionItem.startDate
+        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate)
+        eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
     
@@ -913,8 +941,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func exportPDFButtonTapped() {
         // Create alert with PDF export warning
         let alert = UIAlertController(
-            title: "Export Session as PDF", 
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            title: "Export Session as PDF",
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -1018,16 +1046,51 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func checkForChanges() {
-        let hasChanges = 
-            titleTextField.text != originalSession.title ||
-            selectedSitter?.id != originalSession.assignedSitter?.id ||
-            currentStartDate != originalSession.startDate ||
-            currentEndDate != originalSession.endDate ||
-            currentIsMultiDay != originalSession.isMultiDay ||
-            visibilityLevel != originalSession.visibilityLevel ||
-            sessionItem.status != originalSession.status
+        let hasChanges =
+        titleTextField.text != originalSession.title ||
+        selectedSitter?.id != originalSession.assignedSitter?.id ||
+        currentStartDate != originalSession.startDate ||
+        currentEndDate != originalSession.endDate ||
+        currentIsMultiDay != originalSession.isMultiDay ||
+        visibilityLevel != originalSession.visibilityLevel ||
+        sessionItem.status != originalSession.status ||
+        !sessionEventsMatch()
         
         hasUnsavedChanges = hasChanges
+    }
+    
+    // Helper method to compare session events for changes
+    private func sessionEventsMatch() -> Bool {
+        // For new sessions, check if any events have been added
+        if !isEditingSession {
+            return sessionEvents.isEmpty
+        }
+        
+        // For existing sessions, compare current events with original events
+        let originalEvents = originalSession.events ?? []
+        
+        // Quick check: if counts differ, definitely changed
+        if sessionEvents.count != originalEvents.count {
+            return false
+        }
+        
+        // Check if all events match (by ID and key properties)
+        for event in sessionEvents {
+            guard let originalEvent = originalEvents.first(where: { $0.id == event.id }) else {
+                return false // New event found
+            }
+            
+            // Compare key properties that matter for changes
+            if event.title != originalEvent.title ||
+               event.startDate != originalEvent.startDate ||
+               event.endDate != originalEvent.endDate ||
+               event.placeID != originalEvent.placeID ||
+               event.eventColor != originalEvent.eventColor {
+                return false
+            }
+        }
+        
+        return true
     }
     
     private func fetchSessionEvents() {
@@ -1063,6 +1126,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     
                     // Update local events array
                     self.sessionEvents = events
+                    
+                    // Store events in sessionItem for change tracking
+                    self.sessionItem.events = events
                     
                     // Update the events section in the collection view
                     if events.isEmpty {
@@ -1919,6 +1985,9 @@ extension EditSessionViewController: SessionCalendarViewControllerDelegate {
         // Update local events array
         sessionEvents = events
         
+        // Add events to sessionItem for change tracking
+        sessionItem.events = events
+        
         // Update events section
         updateEventsSection(with: events)
         
@@ -1942,8 +2011,21 @@ extension EditSessionViewController: SessionEventViewControllerDelegate {
         // Sort events by start time
         sessionEvents.sort { $0.startDate < $1.startDate }
         
+        // Add events to sessionItem for change tracking
+        sessionItem.events = sessionEvents
+        
         // Update events section
         updateEventsSection(with: sessionEvents)
+        
+        // For single-day sessions, also ensure the EventsCell shows the correct count
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first(where: { 
+            if case .events = $0 { return true }
+            return false
+        }),
+        let indexPath = dataSource.indexPath(for: eventsItem),
+        let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+            eventsCell.configure(eventCount: sessionEvents.count)
+        }
         
         // Check for unsaved changes
         checkForChanges()

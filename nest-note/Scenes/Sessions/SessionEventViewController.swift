@@ -102,13 +102,28 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil) {
         self.sessionID = sessionID
         self.event = event
         self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
+        
+        // Configure date controls with selected date if provided
+        if let selectedDate = selectedDate, event == nil {
+            configureWithSelectedDate(selectedDate)
+        }
+    }
+    
+    private func configureWithSelectedDate(_ selectedDate: Date) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: selectedDate)
+        let defaultStartTime = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: startOfDay) ?? startOfDay
+        let defaultEndTime = calendar.date(byAdding: .hour, value: 1, to: defaultStartTime) ?? defaultStartTime
+        
+        startControl.date = defaultStartTime
+        endControl.date = defaultEndTime
     }
     
     required init?(coder: NSCoder) {
