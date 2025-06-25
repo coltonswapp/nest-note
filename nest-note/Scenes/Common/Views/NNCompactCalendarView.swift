@@ -370,7 +370,11 @@ private class CompactCalendarDateCell: UICollectionViewCell {
             dateLabel.font = .h4
             contentView.backgroundColor = .label.withAlphaComponent(0.8)
             
-            if isStartDate {
+            if isStartDate && isEndDate {
+                // Single day - round all corners
+                contentView.layer.cornerRadius = 16
+                contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+            } else if isStartDate {
                 contentView.layer.cornerRadius = 16
                 contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner] // Left corners
             } else if isEndDate {
@@ -387,7 +391,11 @@ private class CompactCalendarDateCell: UICollectionViewCell {
                 contentView.layer.cornerRadius = 0 // Reset corner radius
                 
                 // Apply rounded corners for start and end dates
-                if isStartDate {
+                if isStartDate && isEndDate {
+                    // Single day - round all corners
+                    contentView.layer.cornerRadius = 16
+                    contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+                } else if isStartDate {
                     contentView.layer.cornerRadius = 16
                     contentView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner] // Left corners
                 } else if isEndDate {

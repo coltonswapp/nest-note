@@ -408,7 +408,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             present(nav, animated: true)
         case "Test Event Creation":
             let vc = SessionEventViewController()
-            vc.eventDelegate = self
             present(vc, animated: true)
         case "Glassy Button Playground":
             navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
@@ -699,14 +698,6 @@ extension SettingsViewController: EntryDetailViewControllerDelegate {
     
     func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
         //
-    }
-}
-
-extension SettingsViewController: SessionEventViewControllerDelegate {
-    func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
-        if let event = event {
-            showToast(text: "Event created: \(event.title)")
-        }
     }
 }
 
