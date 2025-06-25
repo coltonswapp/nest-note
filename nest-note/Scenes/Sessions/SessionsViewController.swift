@@ -457,15 +457,11 @@ class NestSessionsViewController: NNViewController {
                 try await sessionService.deleteSession(nestID: nestID, sessionID: session.id)
                 
                 await MainActor.run {
-                    // Update UI to reflect the deletion
-                    var snapshot = self.dataSource.snapshot()
-                    snapshot.deleteItems([.session(session)])
-                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                    // Remove from source of truth first
+                    self.allSessions.removeAll { $0.id == session.id }
                     
-                    // If this was the last session in a section, we need to reload everything
-                    if snapshot.numberOfItems == 0 {
-                        updateEmptyState()
-                    }
+                    // Update UI to reflect the deletion by rebuilding from source
+                    self.updateDisplayedSessions()
                     
                     // Log successful deletion
                     Logger.log(level: .info, category: .sessionService, message: "Session deleted successfully ✅")

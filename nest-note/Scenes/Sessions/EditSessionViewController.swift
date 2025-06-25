@@ -179,21 +179,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
-        self.originalSession = sessionItem
+        self.originalSession = sessionItem.copy() // Create a copy to preserve original state
         
         // A session is considered "new" if it doesn't exist in the SessionService's cache
         self.isEditingSession = SessionService.shared.sessionExists(sessionId: sessionItem.id)
         
-        // Create date range based on session type
-        if sessionItem.isMultiDay {
-            self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
-        } else {
-            // For single day, range is just that day
-            let calendar = Calendar.current
-            let startOfDay = calendar.middleOfDay(for: sessionItem.startDate)
-            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-            self.dateRange = DateInterval(start: startOfDay, end: endOfDay)
-        }
+        // Create date range using actual session start and end times
+        self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
         
         super.init(nibName: nil, bundle: nil)
     }
@@ -227,21 +219,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         sessionItem.ownerID = archivedSession.ownerID
         
         self.sessionItem = sessionItem
-        self.originalSession = sessionItem
+        self.originalSession = sessionItem.copy()
         
         // Archived sessions are always considered "existing"
         self.isEditingSession = true
         
-        // Create date range based on session type
-        if sessionItem.isMultiDay {
-            self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
-        } else {
-            // For single day, range is just that day
-            let calendar = Calendar.current
-            let startOfDay = calendar.middleOfDay(for: sessionItem.startDate)
-            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-            self.dateRange = DateInterval(start: startOfDay, end: endOfDay)
-        }
+        // Create date range using actual session start and end times
+        self.dateRange = DateInterval(start: sessionItem.startDate, end: sessionItem.endDate)
         
         super.init(nibName: nil, bundle: nil)
         
@@ -259,6 +243,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         collectionView.delegate = self
         collectionView.delaysContentTouches = false
+        
+        // Prevent accidental dismissal by swipe or other gestures
+        isModalInPresentation = true
         
         if let sheetPresentationController = sheetPresentationController {
             sheetPresentationController.detents = [.large()]
@@ -343,12 +330,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         // Generate exactly 6 test events
-//        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
-//           case let .dateSelection(startDate, endDate, _) = dateItem {
-//            let dateInterval = DateInterval(start: startDate, end: endDate)
-//            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
-//            updateEventsSection(with: sessionEvents)
-//        }
+        //        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+        //           case let .dateSelection(startDate, endDate, _) = dateItem {
+        //            let dateInterval = DateInterval(start: startDate, end: endDate)
+        //            sessionEvents = SessionEventGenerator.generateRandomEvents(in: dateInterval, count: 6)
+        //            updateEventsSection(with: sessionEvents)
+        //        }
     }
     
     private func setupNavigationBar() {
@@ -412,14 +399,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     @objc override func closeButtonTapped() {
-        dismiss(animated: true)
+        // Check for unsaved changes before dismissing
+        if hasUnsavedChanges {
+            let alert = UIAlertController(
+                title: "Discard Changes?",
+                message: "You have unsaved changes. Are you sure you want to discard them?",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(
+                title: "Keep Editing",
+                style: .cancel
+            ))
+            
+            alert.addAction(UIAlertAction(
+                title: "Discard Changes",
+                style: .destructive
+            ) { [weak self] _ in
+                self?.dismiss(animated: true)
+            })
+            
+            present(alert, animated: true)
+        } else {
+            dismiss(animated: true)
+        }
     }
     
     @objc private func shareButtonTapped() {
         // Create alert with PDF export warning
         let alert = UIAlertController(
-            title: "Export Session as PDF", 
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            title: "Export Session as PDF",
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -497,6 +507,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
                       case let .dateSelection(startDate, endDate, isMultiDay) = dateItem else {
                     showToast(text: "Invalid date selection", sentiment: .negative)
+                    return
+                }
+                
+                // Validate date range logic (same as SessionEventViewController)
+                guard validateDateRange(startDate: startDate, endDate: endDate) else {
                     return
                 }
                 
@@ -730,9 +745,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         let nestReviewRegistration = UICollectionView.CellRegistration<NestReviewCell, Item> { [weak self] cell, indexPath, item in
             guard let self = self else { return }
-            if case .nestReview = item {
-                // Start with just loading state (don't configure with 0)
-                cell.configure(itemCount: nil)
+            if case let .nestReview(count) = item {
+                cell.configure(itemCount: count)
                 cell.delegate = self
             }
         }
@@ -748,6 +762,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { [weak self] cell, indexPath, item in
             guard let self = self else { return }
             if case .events = item {
+                cell.delegate = self
                 // If we're still loading events and this is an existing session, show loading indicator
                 if self.sessionEvents.isEmpty && self.isEditingSession && !self.isArchivedSession {
                     cell.showLoading()
@@ -846,7 +861,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Add supplementary view provider to data source
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
             return collectionView.dequeueConfiguredReusableSupplementary(
-                using: footerRegistration, 
+                using: footerRegistration,
                 for: indexPath
             )
         }
@@ -894,7 +909,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
-        let eventVC = SessionEventViewController(sessionID: sessionItem.id)
+        let selectedDate = sessionItem.isMultiDay ? nil : sessionItem.startDate
+        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate)
+        eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
     
@@ -913,8 +930,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func exportPDFButtonTapped() {
         // Create alert with PDF export warning
         let alert = UIAlertController(
-            title: "Export Session as PDF", 
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.", 
+            title: "Export Session as PDF",
+            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -1018,16 +1035,51 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func checkForChanges() {
-        let hasChanges = 
-            titleTextField.text != originalSession.title ||
-            selectedSitter?.id != originalSession.assignedSitter?.id ||
-            currentStartDate != originalSession.startDate ||
-            currentEndDate != originalSession.endDate ||
-            currentIsMultiDay != originalSession.isMultiDay ||
-            visibilityLevel != originalSession.visibilityLevel ||
-            sessionItem.status != originalSession.status
+        let hasChanges =
+        titleTextField.text != originalSession.title ||
+        selectedSitter?.id != originalSession.assignedSitter?.id ||
+        currentStartDate != originalSession.startDate ||
+        currentEndDate != originalSession.endDate ||
+        currentIsMultiDay != originalSession.isMultiDay ||
+        visibilityLevel != originalSession.visibilityLevel ||
+        sessionItem.status != originalSession.status ||
+        !sessionEventsMatch()
         
         hasUnsavedChanges = hasChanges
+    }
+    
+    // Helper method to compare session events for changes
+    private func sessionEventsMatch() -> Bool {
+        // For new sessions, check if any events have been added
+        if !isEditingSession {
+            return sessionEvents.isEmpty
+        }
+        
+        // For existing sessions, compare current events with original events
+        let originalEvents = originalSession.events ?? []
+        
+        // Quick check: if counts differ, definitely changed
+        if sessionEvents.count != originalEvents.count {
+            return false
+        }
+        
+        // Check if all events match (by ID and key properties)
+        for event in sessionEvents {
+            guard let originalEvent = originalEvents.first(where: { $0.id == event.id }) else {
+                return false // New event found
+            }
+            
+            // Compare key properties that matter for changes
+            if event.title != originalEvent.title ||
+               event.startDate != originalEvent.startDate ||
+               event.endDate != originalEvent.endDate ||
+               event.placeID != originalEvent.placeID ||
+               event.eventColor != originalEvent.eventColor {
+                return false
+            }
+        }
+        
+        return true
     }
     
     private func fetchSessionEvents() {
@@ -1039,7 +1091,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Show loading indicator in the events cell
         if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
-           let eventsCell = collectionView.cellForItem(at: dataSource.indexPath(for: eventsItem)!) as? EventsCell {
+           let indexPath = dataSource.indexPath(for: eventsItem),
+           let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
             eventsCell.showLoading()
         }
         
@@ -1063,6 +1116,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     
                     // Update local events array
                     self.sessionEvents = events
+                    
+                    // Store events in sessionItem for change tracking
+                    self.sessionItem.events = events
                     
                     // Update the events section in the collection view
                     if events.isEmpty {
@@ -1228,6 +1284,36 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         HapticsHelper.lightHaptic()
     }
     
+    private func validateDateRange(startDate: Date, endDate: Date) -> Bool {
+        let calendar = Calendar.current
+        
+        // Check if start date is after end date
+        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedDescending {
+            let alert = UIAlertController(
+                title: "Invalid Time Range",
+                message: "The start time cannot be after the end time.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return false
+        }
+        
+        // Check if start and end times are the same
+        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
+            let alert = UIAlertController(
+                title: "Invalid Time Range",
+                message: "The start and end times cannot be the same.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return false
+        }
+        
+        return true
+    }
+    
     private func validateSession() -> Bool {
         var isValid = true
         var errors: [String] = []
@@ -1238,10 +1324,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             isValid = false
         }
         
-        // Check if dates are valid
-        if sessionItem.startDate >= sessionItem.endDate {
-            errors.append("End date must be after start date")
-            isValid = false
+        // Check if dates are valid using the same logic as validateDateRange
+        if !validateDateRange(startDate: sessionItem.startDate, endDate: sessionItem.endDate) {
+            return false
         }
         
         if !isValid {
@@ -1347,6 +1432,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Update last fetch time
         lastFetchTime = Date()
         
+        // Add the nest review section with loading state if it doesn't exist yet
+        if !shouldShowNestReview {
+            shouldShowNestReview = true
+            var snapshot = dataSource.snapshot()
+            if !snapshot.sectionIdentifiers.contains(.nestReview) {
+                snapshot.appendSections([.nestReview])
+                snapshot.appendItems([.nestReview(count: nil)], toSection: .nestReview) // nil = loading
+                dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+        
         Task {
             do {
                 Logger.log(level: .debug, category: .nestService, message: "Fetching outdated entries...")
@@ -1371,35 +1467,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     let hasOutdatedEntries = !outdatedEntries.isEmpty
                     let outdatedCount = outdatedEntries.count
                     
-                    // If we have outdated entries and the section doesn't exist yet, add it
+                    // Update the nest review section with the fetched count
                     if hasOutdatedEntries {
-                        if !self.shouldShowNestReview {
-                            self.shouldShowNestReview = true
-                            var snapshot = dataSource.snapshot()
-                            
-                            // Check if the nestReview section already exists
-                            if !snapshot.sectionIdentifiers.contains(.nestReview) {
-                                // Simpler approach - just add the section and item
-                                snapshot.appendSections([.nestReview])
-                                snapshot.appendItems([.nestReview], toSection: .nestReview)
-                                
-                                // Apply the changes
-                                dataSource.apply(snapshot, animatingDifferences: true)
-                                
-                                // Important: configure the cell immediately after adding it
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                    self.updateNestReviewCell(with: outdatedCount)
-                                }
-                            } else {
-                                // The section exists but needs updating
-                                self.updateNestReviewCell(with: outdatedCount)
-                            }
-                        } else {
-                            // The section is already shown, just update the count
-                            self.updateNestReviewCell(with: outdatedCount)
-                        }
+                        // Update the section with the actual count
+                        self.updateNestReviewSection(with: outdatedCount)
                     } else {
-                        // If we have no outdated entries and the section exists, remove it
+                        // If we have no outdated entries, remove the section
                         if self.shouldShowNestReview {
                             self.shouldShowNestReview = false
                             var snapshot = dataSource.snapshot()
@@ -1416,45 +1489,28 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 
                 // Even on error, we should update the cell to not show the loading state
                 await MainActor.run {
-                    self.updateNestReviewCell(with: 0)
+                    self.updateNestReviewSection(with: 0)
                 }
             }
         }
     }
     
-    // Add a dedicated method for updating the nest review cell
-    private func updateNestReviewCell(with count: Int) {
-        // Log the actual count we're trying to set
-        Logger.log(level: .debug, category: .general, message: "Updating NestReviewCell with count: \(count)")
+    // Add a dedicated method for updating the nest review section
+    private func updateNestReviewSection(with count: Int) {
+        Logger.log(level: .debug, category: .general, message: "Updating NestReviewSection with count: \(count)")
         
-        var currentSnapshot = dataSource.snapshot()
-        guard currentSnapshot.sectionIdentifiers.contains(.nestReview),
-              let nestReviewItem = currentSnapshot.itemIdentifiers(inSection: .nestReview).first else {
-            Logger.log(level: .debug, category: .general, message: "NestReviewCell not found in snapshot")
-            return
+        var snapshot = dataSource.snapshot()
+        
+        // Remove existing nest review item if it exists
+        if let existingItem = snapshot.itemIdentifiers(inSection: .nestReview).first {
+            snapshot.deleteItems([existingItem])
         }
         
-        // First, force a reconfiguration of the cell
-        currentSnapshot.reconfigureItems([nestReviewItem])
-        dataSource.apply(currentSnapshot, animatingDifferences: false)
+        // Add new item with updated count
+        snapshot.appendItems([.nestReview(count: count)], toSection: .nestReview)
+        dataSource.apply(snapshot, animatingDifferences: true)
         
-        // Then try to find the cell and update it directly
-        if let indexPath = dataSource.indexPath(for: nestReviewItem),
-           let cell = collectionView.cellForItem(at: indexPath) as? NestReviewCell {
-            Logger.log(level: .debug, category: .general, message: "NestReviewCell found - updating with count \(count)")
-            
-            // IMPORTANT: Configure with the actual count passed in, not 0
-            cell.configure(itemCount: count)
-            
-            // Double-check if the cell was updated correctly
-            Logger.log(level: .debug, category: .general, message: "After update - cell button title: \(cell.reviewButton.titleLabel?.text ?? "nil")")
-        } else {
-            // The cell might not be visible yet, try to force a reload
-            Logger.log(level: .debug, category: .general, message: "NestReviewCell not visible - forcing reload")
-            if let indexPath = dataSource.indexPath(for: nestReviewItem) {
-                collectionView.reloadItems(at: [indexPath])
-            }
-        }
+        Logger.log(level: .debug, category: .general, message: "NestReviewSection updated successfully with count: \(count)")
     }
 }
 
@@ -1479,7 +1535,7 @@ extension EditSessionViewController {
         case inviteSitter
         case visibilityLevel(VisibilityLevel)
         case sessionStatus(SessionStatus)
-        case nestReview
+        case nestReview(count: Int?) // nil = loading, Int = actual count
         case expenses
         case exportPDF
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
@@ -1499,8 +1555,9 @@ extension EditSessionViewController {
             case .sessionStatus(let status):
                 hasher.combine(3)
                 hasher.combine(status)
-            case .nestReview:
+            case .nestReview(let count):
                 hasher.combine(4)
+                hasher.combine(count)
             case .expenses:
                 hasher.combine(5)
             case .exportPDF:
@@ -1525,7 +1582,6 @@ extension EditSessionViewController {
             switch (lhs, rhs) {
             case (.overview, .overview),
                  (.inviteSitter, .inviteSitter),
-                 (.nestReview, .nestReview),
                  (.expenses, .expenses),
                  (.exportPDF, .exportPDF),
                  (.events, .events):
@@ -1534,6 +1590,8 @@ extension EditSessionViewController {
                 return l1 == l2
             case let (.sessionStatus(s1), .sessionStatus(s2)):
                 return s1 == s2
+            case let (.nestReview(c1), .nestReview(c2)):
+                return c1 == c2
             case let (.dateSelection(s1, e1, m1), .dateSelection(s2, e2, m2)):
                 return s1 == s2 && e1 == e2 && m1 == m2
             case let (.sessionEvent(e1), .sessionEvent(e2)):
@@ -1577,28 +1635,22 @@ extension EditSessionViewController: UICollectionViewDelegate {
             break
         case .dateSelection:
             break
-        case .nestReview:
-            // For NestReview cell, we want to:
-            // 1. If it's in a loading state, try to force an update
-            if let cell = collectionView.cellForItem(at: indexPath) as? NestReviewCell {
-                if cell.loadingIndicator.isAnimating {
-                    // Try to stop the loading state and trigger a re-fetch
-                    Logger.log(level: .debug, category: .general, message: "NestReview cell is loading, attempting recovery")
-                    cell.stopLoading()
-                    
-                    // If we have a non-zero lastOutdatedCount, use it 
-                    if lastOutdatedCount > 0 {
-                        Logger.log(level: .debug, category: .general, message: "Using cached count for recovery: \(lastOutdatedCount)")
-                        cell.configure(itemCount: lastOutdatedCount)
-                    } else {
-                        // Otherwise, fetch again
-                        fetchOutdatedEntries()
-                    }
+        case .nestReview(let count):
+            // For NestReview cell, check if it's still loading
+            if count == nil {
+                // Still loading, try to force an update
+                Logger.log(level: .debug, category: .general, message: "NestReview cell is loading, attempting recovery")
+                
+                // If we have a non-zero lastOutdatedCount, use it 
+                if lastOutdatedCount > 0 {
+                    Logger.log(level: .debug, category: .general, message: "Using cached count for recovery: \(lastOutdatedCount)")
+                    updateNestReviewSection(with: lastOutdatedCount)
                 } else {
-                    // Otherwise present the review controller normally
-                    presentEntryReview()
+                    // Otherwise, fetch again
+                    fetchOutdatedEntries()
                 }
             } else {
+                // Has a count (loading is complete), present the review controller
                 presentEntryReview()
             }
         case .expenses:
@@ -1607,7 +1659,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
             exportPDFButtonTapped()
         case .overview:
             break
-        case .events, .moreEvents:
+        case .events:
             // Skip handling events if we're still loading them
             if isLoadingEvents { return }
             
@@ -1622,23 +1674,12 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 }
                 
                 await MainActor.run {
-                    // Get the current date range from the date cell
-                    guard let dateItem = self.dataSource.snapshot().itemIdentifiers(inSection: .date).first,
-                          case let .dateSelection(startDate, endDate, _) = dateItem else {
-                        return
-                    }
-                    
-                    // Check if session duration is less than 24 hours
-                    let duration = Calendar.current.dateComponents([.hour], from: startDate, to: endDate)
-                    if let hours = duration.hour, hours < 24 {
-                        // For sessions less than 24 hours, directly present SessionEventViewController
-                        self.presentSessionEventViewController()
-                    } else {
-                        // For longer sessions, show the calendar view
-                        self.presentCalendarViewController()
-                    }
+                    // Always show the calendar view when tapping the events cell
+                    self.presentCalendarViewController()
                 }
             }
+        case .moreEvents:
+            self.presentCalendarViewController()
         case .sessionEvent(let event):
             // Check if user has session events feature (Pro subscription)
             Task {
@@ -1722,7 +1763,10 @@ extension EditSessionViewController: DatePresentationDelegate {
                 await MainActor.run {
                     // Enable multi-day in the DateCell and update data
                     self.enableDateCellMultiDay()
-                    self.updateMultiDaySelection(isMultiDay, startDate: startDate, endDate: endDate)
+                    
+                    // When enabling multi-day, set end date to start date + 1 day as default
+                    let defaultEndDate = Calendar.current.date(byAdding: .day, value: 1, to: startDate) ?? endDate
+                    self.updateMultiDaySelection(isMultiDay, startDate: startDate, endDate: defaultEndDate)
                 }
             }
         } else {
@@ -1919,6 +1963,9 @@ extension EditSessionViewController: SessionCalendarViewControllerDelegate {
         // Update local events array
         sessionEvents = events
         
+        // Add events to sessionItem for change tracking
+        sessionItem.events = events
+        
         // Update events section
         updateEventsSection(with: events)
         
@@ -1929,8 +1976,37 @@ extension EditSessionViewController: SessionCalendarViewControllerDelegate {
 
 // Add event delegate
 extension EditSessionViewController: SessionEventViewControllerDelegate {
+    func sessionEventViewController(_ controller: SessionEventViewController, didDeleteEvent event: SessionEvent) {
+        // Remove the event from local events array
+        sessionEvents.removeAll { $0.id == event.id }
+        
+        // Update sessionItem events for change tracking
+        sessionItem.events = sessionEvents
+        
+        // Update events section
+        updateEventsSection(with: sessionEvents)
+        
+        // For single-day sessions, also ensure the EventsCell shows the correct count
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first(where: { 
+            if case .events = $0 { return true }
+            return false
+        }),
+        let indexPath = dataSource.indexPath(for: eventsItem),
+        let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+            eventsCell.configure(eventCount: sessionEvents.count)
+        }
+        
+        // Check for unsaved changes
+        checkForChanges()
+        
+        showToast(text: "Event Deleted", sentiment: .positive)
+    }
+    
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
         guard let event = event else { return }
+        
+        // Check if this is an update or a new event
+        let isUpdate = sessionEvents.contains { $0.id == event.id }
         
         // Update local events array
         if let existingIndex = sessionEvents.firstIndex(where: { $0.id == event.id }) {
@@ -1942,13 +2018,28 @@ extension EditSessionViewController: SessionEventViewControllerDelegate {
         // Sort events by start time
         sessionEvents.sort { $0.startDate < $1.startDate }
         
+        // Add events to sessionItem for change tracking
+        sessionItem.events = sessionEvents
+        
         // Update events section
         updateEventsSection(with: sessionEvents)
+        
+        // For single-day sessions, also ensure the EventsCell shows the correct count
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first(where: { 
+            if case .events = $0 { return true }
+            return false
+        }),
+        let indexPath = dataSource.indexPath(for: eventsItem),
+        let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+            eventsCell.configure(eventCount: sessionEvents.count)
+        }
         
         // Check for unsaved changes
         checkForChanges()
         
-        showToast(text: "Event Updated", sentiment: .positive)
+        // Show appropriate toast message based on whether the event was created or updated
+        let toastMessage = isUpdate ? "Event Updated" : "Event Added"
+        showToast(text: toastMessage, sentiment: .positive)
     }
 }
 
@@ -2196,5 +2287,26 @@ extension EditSessionViewController: EntryReviewViewControllerDelegate {
             dataSource.apply(snapshot, animatingDifferences: true)
         }
     }
-} 
+}
+
+// MARK: - EventsCellDelegate
+extension EditSessionViewController: EventsCellDelegate {
+    func eventsCellDidTapPlusButton(_ cell: EventsCell) {
+        // Check if user has session events feature (Pro subscription)
+        Task {
+            let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+            if !hasSessionEvents {
+                await MainActor.run {
+                    self.showSessionEventsUpgradePrompt()
+                }
+                return
+            }
+            
+            await MainActor.run {
+                // Present SessionEventViewController for creating a new event
+                self.presentSessionEventViewController()
+            }
+        }
+    }
+}
 

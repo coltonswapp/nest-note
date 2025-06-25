@@ -62,7 +62,8 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         let view = NNEmptyStateView(
             icon: UIImage(systemName: "calendar.badge.plus"),
             title: "No events",
-            subtitle: "Tap anywhere on the calendar to add an event."
+            subtitle: "Tap anywhere on the calendar to add an event.",
+            actionButtonTitle: "Add Event"
         )
         view.isHidden = true
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -162,8 +163,6 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         view.addSubview(collectionView)
         view.addSubview(compactCalendarView)
         
-        setupEmptyStateView()
-        
         // Configure footnote text
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d"
@@ -222,24 +221,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     @objc private func addEventTapped() {
-        let eventVC = SessionEventViewController(sessionID: sessionID)
-        
+        let dateToUse = selectedDate ?? dateRange.start
+        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse)
         eventVC.eventDelegate = self
-        
-        // If we have a selected date, we could potentially configure the event VC with it
-        if let selectedDate = selectedDate {
-            // Configure the event VC with the selected date
-            let calendar = Calendar.current
-            let startOfDay = calendar.middleOfDay(for: selectedDate)
-            eventVC.startControl.date = startOfDay
-            eventVC.endControl.date = calendar.date(byAdding: .hour, value: 1, to: startOfDay) ?? startOfDay
-        } else {
-            let calendar = Calendar.current
-            let firstDayOfSession = dateRange.start
-            eventVC.startControl.date = firstDayOfSession
-            eventVC.endControl.date = calendar.date(byAdding: .hour, value: 1, to: firstDayOfSession) ?? firstDayOfSession
-        }
-        
         present(eventVC, animated: true)
     }
     
@@ -471,20 +455,6 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         }
     }
     
-    private func setupEmptyStateView() {
-        // Only add empty state view for non-sitters
-        if !isSitter {
-            view.addSubview(emptyStateView)
-            
-            NSLayoutConstraint.activate([
-                emptyStateView.centerXAnchor.constraint(equalTo: collectionView.centerXAnchor),
-                emptyStateView.centerYAnchor.constraint(equalTo: collectionView.centerYAnchor),
-                emptyStateView.leadingAnchor.constraint(greaterThanOrEqualTo: collectionView.leadingAnchor, constant: 32),
-                emptyStateView.trailingAnchor.constraint(lessThanOrEqualTo: collectionView.trailingAnchor, constant: -32)
-            ])
-        }
-    }
-    
     private func updateEmptyState() {
         // Only update empty state for non-sitters
         if !isSitter {
@@ -705,20 +675,15 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             present(eventVC, animated: true)
         } else {
             // Present new event creation
-            let eventVC = SessionEventViewController(sessionID: sessionID)
-            eventVC.eventDelegate = self
-            
-            // Configure with the section date
+            let dateToUse: Date
             if case .events(let date) = section {
-                let calendar = Calendar.current
-                let startOfDay = calendar.startOfDay(for: date)
-                let defaultStartTime = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: startOfDay) ?? startOfDay
-                let defaultEndTime = calendar.date(byAdding: .hour, value: 1, to: defaultStartTime) ?? defaultStartTime
-                
-                eventVC.startControl.date = defaultStartTime
-                eventVC.endControl.date = defaultEndTime
+                dateToUse = date
+            } else {
+                dateToUse = selectedDate ?? dateRange.start
             }
             
+            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse)
+            eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }
     }
@@ -857,6 +822,39 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
 }
 
 extension SessionCalendarViewController: SessionEventViewControllerDelegate {
+    func sessionEventViewController(_ controller: SessionEventViewController, didDeleteEvent event: SessionEvent) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: event.startDate)
+        
+        // Remove from events dictionary
+        if var events = eventsByDate[startOfDay] {
+            events.removeAll { $0.id == event.id }
+            if events.isEmpty {
+                eventsByDate.removeValue(forKey: startOfDay)
+                
+                // Recreate the snapshot to properly handle empty sections
+                applySnapshot()
+            } else {
+                eventsByDate[startOfDay] = events
+                
+                // If we still have events in the section, just delete the item
+                var snapshot = dataSource.snapshot()
+                snapshot.deleteItems([event])
+                dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+        
+        // Update other views
+        compactCalendarView.updateEvents(eventsByDate)
+        updateEmptyState()
+        
+        // Notify delegate
+        let allEvents = eventsByDate.values.flatMap { $0 }
+        delegate?.calendarViewController(self, didUpdateEvents: allEvents)
+        
+        showToast(text: "Event Deleted", sentiment: .positive)
+    }
+    
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
         guard let event = event else { return }
         

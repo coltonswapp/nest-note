@@ -199,6 +199,24 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     func clearAssignedSitter() {
         self.assignedSitter = nil
     }
+    
+    // MARK: - Copy Method
+    func copy() -> SessionItem {
+        let copiedSession = SessionItem(
+            id: self.id,
+            title: self.title,
+            startDate: self.startDate,
+            endDate: self.endDate,
+            isMultiDay: self.isMultiDay,
+            events: self.events, // Shallow copy of events array
+            visibilityLevel: self.visibilityLevel,
+            status: self.status,
+            assignedSitter: self.assignedSitter, // AssignedSitter is a struct, so it will be copied by value
+            nestID: self.nestID,
+            ownerID: self.ownerID
+        )
+        return copiedSession
+    }
 }
 
 protocol Containable {

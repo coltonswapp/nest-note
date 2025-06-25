@@ -334,7 +334,9 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     // Also call the delegate in the X button action
     @objc override func closeButtonTapped() {
         // Notify delegate that review is complete before dismissing
-        reviewDelegate?.entryReviewDidComplete()
+        if doneButton.isEnabled {
+            reviewDelegate?.entryReviewDidComplete()
+        }
         super.closeButtonTapped()
     }
     
