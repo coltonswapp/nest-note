@@ -662,6 +662,10 @@ extension SitterHomeViewController: JoinSessionViewControllerDelegate {
 
 // Add SessionEventViewControllerDelegate conformance
 extension SitterHomeViewController: SessionEventViewControllerDelegate {
+    func sessionEventViewController(_ controller: SessionEventViewController, didDeleteEvent event: SessionEvent) {
+        // do nothing, sitter cannot delete events
+    }
+    
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
         guard let event = event else { return }
         

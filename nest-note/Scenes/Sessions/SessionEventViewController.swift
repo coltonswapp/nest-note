@@ -2,6 +2,7 @@ import UIKit
 
 protocol SessionEventViewControllerDelegate: AnyObject {
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?)
+    func sessionEventViewController(_ controller: SessionEventViewController, didDeleteEvent event: SessionEvent)
 }
 
 final class SessionEventViewController: NNSheetViewController {
@@ -50,6 +51,16 @@ final class SessionEventViewController: NNSheetViewController {
         stackView.spacing = 8
         stackView.translatesAutoresizingMaskIntoConstraints = false
         return stackView
+    }()
+    
+    private lazy var infoButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
+        button.setImage(image, for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }()
     
     private let locationDividerView: UIView = {
@@ -134,7 +145,12 @@ final class SessionEventViewController: NNSheetViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupDateTimeControls()
-        itemsHiddenDuringTransition = [buttonStackView]
+        
+        // Hide info button for new events (no event data yet)
+        infoButton.isHidden = event == nil
+        setupInfoMenu()
+        
+        itemsHiddenDuringTransition = [buttonStackView, infoButton]
         
         // Configure with existing event
         if let event = event {
@@ -209,6 +225,7 @@ final class SessionEventViewController: NNSheetViewController {
         
         setupColorButtons()
         
+        containerView.addSubview(infoButton)
         containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
@@ -253,6 +270,12 @@ final class SessionEventViewController: NNSheetViewController {
             colorStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             colorStack.heightAnchor.constraint(equalToConstant: view.frame.width / 10),
             
+            // Info button constraints
+            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
+            infoButton.widthAnchor.constraint(equalToConstant: 44),
+            infoButton.heightAnchor.constraint(equalToConstant: 44),
+            
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
@@ -264,6 +287,77 @@ final class SessionEventViewController: NNSheetViewController {
         let now = Date()
         startControl.date = now
         endControl.date = Calendar.current.date(byAdding: .minute, value: 45, to: now) ?? now
+    }
+    
+    private func setupInfoMenu() {
+        guard let event = event else { return }
+        
+        var menuItems: [UIMenuElement] = []
+        
+        // Only add delete option if not read-only
+        if !isReadOnly {
+            let deleteAction = UIAction(
+                title: "Delete Event",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.handleDeleteTapped()
+            }
+            menuItems.append(deleteAction)
+        }
+        
+        let menu = UIMenu(title: "", children: menuItems)
+        infoButton.menu = menu
+        infoButton.showsMenuAsPrimaryAction = true
+    }
+    
+    private func handleDeleteTapped() {
+        guard let event = event else { return }
+        
+        let alert = UIAlertController(
+            title: "Delete Event",
+            message: "Are you sure you want to delete '\(event.title)'? This action cannot be undone.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.deleteEvent()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func deleteEvent() {
+        guard let event = event, let sessionID = sessionID else { return }
+        
+        Task {
+            do {
+                try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                await MainActor.run {
+                    eventDelegate?.sessionEventViewController(self, didDeleteEvent: event)
+                    dismiss(animated: true)
+                }
+            } catch {
+                await MainActor.run {
+                    let alert = UIAlertController(
+                        title: "Error",
+                        message: "Failed to delete event. Please try again.",
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(alert, animated: true)
+                }
+                Logger.log(level: .error, category: .sessionService, message: "Failed to delete event: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
     
     // MARK: - Actions
@@ -327,7 +421,7 @@ final class SessionEventViewController: NNSheetViewController {
         }
         
         guard validateDates() else {
-            shakeContainerView()
+            // Don't shake container when showing date validation alert
             return
         }
         

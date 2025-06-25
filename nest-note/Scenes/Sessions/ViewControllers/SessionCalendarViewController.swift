@@ -822,6 +822,39 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
 }
 
 extension SessionCalendarViewController: SessionEventViewControllerDelegate {
+    func sessionEventViewController(_ controller: SessionEventViewController, didDeleteEvent event: SessionEvent) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: event.startDate)
+        
+        // Remove from events dictionary
+        if var events = eventsByDate[startOfDay] {
+            events.removeAll { $0.id == event.id }
+            if events.isEmpty {
+                eventsByDate.removeValue(forKey: startOfDay)
+                
+                // Recreate the snapshot to properly handle empty sections
+                applySnapshot()
+            } else {
+                eventsByDate[startOfDay] = events
+                
+                // If we still have events in the section, just delete the item
+                var snapshot = dataSource.snapshot()
+                snapshot.deleteItems([event])
+                dataSource.apply(snapshot, animatingDifferences: true)
+            }
+        }
+        
+        // Update other views
+        compactCalendarView.updateEvents(eventsByDate)
+        updateEmptyState()
+        
+        // Notify delegate
+        let allEvents = eventsByDate.values.flatMap { $0 }
+        delegate?.calendarViewController(self, didUpdateEvents: allEvents)
+        
+        showToast(text: "Event Deleted", sentiment: .positive)
+    }
+    
     func sessionEventViewController(_ controller: SessionEventViewController, didCreateEvent event: SessionEvent?) {
         guard let event = event else { return }
         

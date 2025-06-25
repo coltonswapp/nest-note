@@ -7,7 +7,13 @@
 
 import UIKit
 
+protocol EventsCellDelegate: AnyObject {
+    func eventsCellDidTapPlusButton(_ cell: EventsCell)
+}
+
 final class EventsCell: UICollectionViewListCell {
+    weak var delegate: EventsCellDelegate?
+    
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -75,6 +81,9 @@ final class EventsCell: UICollectionViewListCell {
         contentView.addSubview(eventCountLabel)
         contentView.addSubview(loadingIndicator)
         
+        // Setup plus button target
+        plusButton.addTarget(self, action: #selector(plusButtonTapped), for: .touchUpInside)
+        
         NSLayoutConstraint.activate([
             iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             iconImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -106,6 +115,7 @@ final class EventsCell: UICollectionViewListCell {
         
         // Always show the plus button when showPlusButton is true
         plusButton.isHidden = !showPlusButton
+        plusButton.isUserInteractionEnabled = showPlusButton
         
         // Update title label to show count if there are events
         if eventCount > 0 {
@@ -113,8 +123,7 @@ final class EventsCell: UICollectionViewListCell {
             eventCountLabel.isHidden = true
         } else {
             titleLabel.text = "Events"
-            eventCountLabel.isHidden = false
-            eventCountLabel.text = "No events"
+            eventCountLabel.isHidden = true
         }
     }
     
@@ -144,5 +153,9 @@ final class EventsCell: UICollectionViewListCell {
         eventCountLabel.isHidden = true
         loadingIndicator.startAnimating()
         isUserInteractionEnabled = false
+    }
+    
+    @objc private func plusButtonTapped() {
+        delegate?.eventsCellDidTapPlusButton(self)
     }
 } 
