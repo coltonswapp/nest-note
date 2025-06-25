@@ -12,7 +12,7 @@ protocol OnboardingCoordinatorDelegate: AnyObject {
     func onboardingDidComplete()
 }
 
-final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
+final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, OnboardingContainerDelegate {
     
     // MARK: - Properties
     private let navigationController: UINavigationController
@@ -130,6 +130,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
             totalSteps: steps.count + 1  // +1 for finish step
         )
         
+        // Set container delegate
+        self.containerViewController.delegate = self
+        
         // Add navigation controller delegate
         navigationController.delegate = self
     }
@@ -151,8 +154,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
     }
     
     private func configureStep(_ viewController: NNOnboardingViewController) {
-        
         viewController.coordinator = self
+        
+        // Update container's survey status based on current step
+        let isSurveyStep = viewController is NNOnboardingSurveyViewController
+        containerViewController.updateSurveyStatus(isSurveyStep)
     }
     
     // MARK: - Navigation
@@ -214,6 +220,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         if let index = steps.firstIndex(where: { $0 === viewController }) {
             currentStepIndex = index
             containerViewController.updateProgress(step: currentStepIndex)
+        }
+        
+        // Update survey status when navigating
+        if let onboardingVC = viewController as? NNOnboardingViewController {
+            let isSurveyStep = onboardingVC is NNOnboardingSurveyViewController
+            containerViewController.updateSurveyStatus(isSurveyStep)
         }
     }
     
@@ -495,6 +507,60 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate {
         return false
     }
     #endif
+}
+
+// MARK: - OnboardingContainerDelegate
+extension OnboardingCoordinator {
+    func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
+        // Handle abort - go back to login
+        navigationController.dismiss(animated: true)
+    }
+    
+    func onboardingContainerDidRequestSkipSurvey(_ container: OnboardingContainerViewController) {
+        // Skip all survey steps and move to next non-survey step
+        skipSurveySteps()
+    }
+    
+    private func skipSurveySteps() {
+        // First, remove all survey steps from the current flow
+        steps.removeAll { $0 is NNOnboardingSurveyViewController }
+        
+        // Update the container's total steps count based on new allSteps
+        containerViewController.updateTotalSteps(allSteps.count)
+        
+        // Find the next non-survey step that we should navigate to
+        // This should be the first step after the role selection that isn't a survey
+        var nextStep: NNOnboardingViewController?
+        
+        // Look for the email step (which should be the next step after surveys)
+        nextStep = allSteps.first { $0 is OBEmailViewController }
+        
+        if let targetStep = nextStep {
+            // Check if this step is already in the navigation stack
+            let isAlreadyInStack = navigationController.viewControllers.contains { $0 === targetStep }
+            
+            if !isAlreadyInStack {
+                // Find the index of this step in allSteps for progress tracking
+                if let targetIndex = allSteps.firstIndex(where: { $0 === targetStep }) {
+                    currentStepIndex = targetIndex
+                    configureStep(targetStep)
+                    navigationController.pushViewController(targetStep, animated: true)
+                    
+                    // Update progress
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.containerViewController.updateProgress(step: self.currentStepIndex)
+                    }
+                }
+            } else {
+                // If it's already in the stack, pop back to it
+                navigationController.popToViewController(targetStep, animated: true)
+                if let targetIndex = allSteps.firstIndex(where: { $0 === targetStep }) {
+                    currentStepIndex = targetIndex
+                    containerViewController.updateProgress(step: currentStepIndex)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Delegate Example

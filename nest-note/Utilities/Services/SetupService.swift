@@ -54,41 +54,69 @@ final class SetupService {
     static let shared = SetupService()
     
     private enum Keys {
-        static let hasCompletedSetup = "hasCompletedSetup"
-        static let completedSteps = "completedSteps"
+        static func hasCompletedSetup(for userID: String) -> String {
+            return "hasCompletedSetup_\(userID)"
+        }
+        
+        static func completedSteps(for userID: String) -> String {
+            return "completedSteps_\(userID)"
+        }
     }
     
     private let defaults = UserDefaults.standard
     
+    private var currentUserID: String? {
+        return UserService.shared.currentUser?.id
+    }
+    
     private init() {
-        // Initialize with first two steps completed by default
-        if defaults.object(forKey: Keys.completedSteps) == nil {
-            markStepComplete(.createAccount)
-            markStepComplete(.setupNest)
-        }
+        // Initialization will be handled when a user is present
+        // The first time setup is accessed for a user, we'll initialize their steps
     }
     
     var hasCompletedSetup: Bool {
         get {
-            return defaults.bool(forKey: Keys.hasCompletedSetup)
+            guard let userID = currentUserID else { return false }
+            initializeUserSetupIfNeeded(userID: userID)
+            return defaults.bool(forKey: Keys.hasCompletedSetup(for: userID))
         }
         set {
-            defaults.set(newValue, forKey: Keys.hasCompletedSetup)
+            guard let userID = currentUserID else { return }
+            initializeUserSetupIfNeeded(userID: userID)
+            defaults.set(newValue, forKey: Keys.hasCompletedSetup(for: userID))
         }
     }
     
     // Get all completed step indices
     private var completedStepIndices: [Int] {
         get {
-            return defaults.array(forKey: Keys.completedSteps) as? [Int] ?? []
+            guard let userID = currentUserID else { return [] }
+            initializeUserSetupIfNeeded(userID: userID)
+            return defaults.array(forKey: Keys.completedSteps(for: userID)) as? [Int] ?? []
         }
         set {
-            defaults.set(newValue, forKey: Keys.completedSteps)
+            guard let userID = currentUserID else { return }
+            initializeUserSetupIfNeeded(userID: userID)
+            defaults.set(newValue, forKey: Keys.completedSteps(for: userID))
             
             // Check if all steps are complete
             if Set(newValue).count == SetupStepType.allCases.count {
                 hasCompletedSetup = true
             }
+        }
+    }
+    
+    // Initialize setup for a new user if needed
+    private func initializeUserSetupIfNeeded(userID: String) {
+        let completedStepsKey = Keys.completedSteps(for: userID)
+        
+        // Check if this user already has setup data
+        if defaults.object(forKey: completedStepsKey) == nil {
+            // This is a new user, initialize with first two steps completed
+            var initialSteps: [Int] = []
+            initialSteps.append(SetupStepType.createAccount.rawValue)
+            initialSteps.append(SetupStepType.setupNest.rawValue)
+            defaults.set(initialSteps, forKey: completedStepsKey)
         }
     }
     
@@ -145,6 +173,27 @@ final class SetupService {
             Logger.log(level: .error, category: .general, message: "Error checking entries for setup flow: \(error.localizedDescription)")
             return !hasCompletedSetup
         }
+    }
+    
+    // Reset setup for the current user (clears all setup data)
+    func resetSetupForCurrentUser() {
+        guard let userID = currentUserID else {
+            Logger.log(level: .error, category: .general, message: "Cannot reset setup - no current user")
+            return
+        }
+        
+        // Clear all setup data for this user
+        defaults.removeObject(forKey: Keys.hasCompletedSetup(for: userID))
+        defaults.removeObject(forKey: Keys.completedSteps(for: userID))
+        
+        Logger.log(level: .info, category: .general, message: "Setup reset for user: \(userID)")
+        
+        // Post notification that setup was reset
+        NotificationCenter.default.post(name: .setupStepDidComplete, object: nil, userInfo: [
+            "setupReset": true,
+            "completedSteps": 0,
+            "totalSteps": SetupStepType.allCases.count
+        ])
     }
     
     // Mark a specific step as incomplete

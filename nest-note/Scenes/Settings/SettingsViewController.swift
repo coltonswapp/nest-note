@@ -305,7 +305,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Notifications", "bell"),
             ("App Icon", "app"),
             ("Terms & Privacy", "doc.text"),
-            ("Support", "questionmark.circle")
+            ("Support", "questionmark.circle"),
+            ("Reset Setup", "arrow.counterclockwise")
         ].map { Item.generalItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(generalItems, toSection: .general)
         
@@ -548,6 +549,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 let vc = AppIconViewController()
                 let nav = UINavigationController(rootViewController: vc)
                 present(nav, animated: true)
+            case "Reset Setup":
+                showResetSetupConfirmation()
             default:
                 print("Selected General item: \(title)")
             }
@@ -617,6 +620,33 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         
         paywallViewController.delegate = self
         present(paywallViewController, animated: true)
+        
+        // Mark the final setup step as complete when paywall is viewed
+        SetupService.shared.markStepComplete(.finalStep)
+    }
+    
+    private func showResetSetupConfirmation() {
+        let alert = UIAlertController(
+            title: "Reset Setup",
+            message: "This will reset your setup progress and you'll need to go through the setup flow again. Are you sure?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Reset", style: .destructive) { _ in
+            SetupService.shared.resetSetupForCurrentUser()
+            
+            // Show confirmation
+            let successAlert = UIAlertController(
+                title: "Setup Reset",
+                message: "Your setup has been reset. You'll see the setup flow on your next visit to the home screen.",
+                preferredStyle: .alert
+            )
+            successAlert.addAction(UIAlertAction(title: "OK", style: .default))
+            self.present(successAlert, animated: true)
+        })
+        
+        present(alert, animated: true)
     }
 
     @objc private func handleUserInformationUpdate() {

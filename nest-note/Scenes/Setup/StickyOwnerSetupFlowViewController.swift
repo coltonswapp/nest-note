@@ -1,7 +1,9 @@
 import UIKit
 import UserNotifications
+import RevenueCat
+import RevenueCatUI
 
-final class StickyOwnerSetupFlowViewController: NNViewController {
+final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate {
     
     // MARK: - Properties
     weak var delegate: SetupFlowDelegate?
@@ -239,9 +241,38 @@ final class StickyOwnerSetupFlowViewController: NNViewController {
     }
     
     private func presentFinalStep() {
-        // Example implementation
-        // let finalStepVC = FinalSetupStepViewController()
-        // navigationController?.pushViewController(finalStepVC, animated: true)
+        // Show the paywall for the final step
+        showUpgradeFlow()
+    }
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .unlimitedEntries // or whichever feature represents the "Pro" upgrade
+    }
+    
+    // MARK: - PaywallViewControllerDelegate
+    func paywallViewControllerDidComplete(_ controller: PaywallViewController) {
+        // Mark final step as complete when paywall is dismissed (regardless of purchase)
+        setupService.markStepComplete(.finalStep)
+        delegate?.setupFlowDidUpdateStepStatus()
+        
+        // Reload UI
+        tableView.reloadData()
+        updateFinishButtonState()
+        
+        controller.dismiss(animated: true)
+    }
+    
+    func paywallViewControllerDidCancel(_ controller: PaywallViewController) {
+        // Still mark as complete - the user has seen the paywall
+        setupService.markStepComplete(.finalStep)
+        delegate?.setupFlowDidUpdateStepStatus()
+        
+        // Reload UI
+        tableView.reloadData()
+        updateFinishButtonState()
+        
+        controller.dismiss(animated: true)
     }
     
     // Request notification permissions
