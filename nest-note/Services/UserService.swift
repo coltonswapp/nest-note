@@ -4,6 +4,8 @@ import FirebaseFirestore
 import FirebaseMessaging
 import UserNotifications
 import RevenueCat
+import AuthenticationServices
+import CryptoKit
 
 final class UserService {
     
@@ -17,6 +19,7 @@ final class UserService {
         return currentUser != nil
     }
     private(set) var isAuthenticated: Bool = false
+    private var currentNonce: String?
     
     // Store pending FCM token
     private var pendingFCMToken: String?
@@ -323,6 +326,235 @@ final class UserService {
         }
     }
     
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> (user: NestUser, isNewUser: Bool, isIncompleteSignup: Bool) {
+        Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In")
+        
+        do {
+            // Create Firebase credential from Apple credential
+            guard let nonce = self.currentNonce else {
+                throw AuthError.unknown
+            }
+            
+            guard let appleIDToken = credential.identityToken,
+                  let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                throw AuthError.unknown
+            }
+            
+            let firebaseCredential = OAuthProvider.credential(
+                withProviderID: "apple.com",
+                idToken: idTokenString,
+                rawNonce: nonce
+            )
+            
+            // Sign in with Firebase
+            let result = try await auth.signIn(with: firebaseCredential)
+            let firebaseUser = result.user
+            let isNewUser = result.additionalUserInfo?.isNewUser ?? false
+            
+            Logger.log(level: .debug, category: .userService, message: "Firebase Apple Sign In successful, isNewUser: \(isNewUser)")
+            
+            if isNewUser {
+                // This is a new user - they need to complete onboarding
+                // Return minimal user info and let onboarding handle the rest
+                let tempUser = NestUser(
+                    id: firebaseUser.uid,
+                    personalInfo: .init(
+                        name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                        email: credential.email ?? firebaseUser.email ?? ""
+                    ),
+                    primaryRole: .nestOwner, // Default, will be updated in onboarding
+                    roles: .init(ownedNestId: nil, nestAccess: [])
+                )
+                
+                return (user: tempUser, isNewUser: true, isIncompleteSignup: false)
+            } else {
+                // Firebase says existing user, but try to fetch their profile
+                do {
+                    let user = try await fetchUserProfile(userId: firebaseUser.uid)
+                    
+                    // Profile exists - they're truly an existing user
+                    self.currentUser = user
+                    self.isAuthenticated = true
+                    
+                    Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
+                    
+                    return (user: user, isNewUser: false, isIncompleteSignup: false)
+                } catch {
+                    // Profile doesn't exist - they authenticated before but never completed onboarding
+                    Logger.log(level: .info, category: .userService, message: "Firebase user exists but no profile found - treating as new user for onboarding")
+                    
+                    let tempUser = NestUser(
+                        id: firebaseUser.uid,
+                        personalInfo: .init(
+                            name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                            email: credential.email ?? firebaseUser.email ?? ""
+                        ),
+                        primaryRole: .nestOwner, // Default, will be updated in onboarding
+                        roles: .init(ownedNestId: nil, nestAccess: [])
+                    )
+                    
+                    return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
+                }
+            }
+            
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Apple Sign In failed: \(error)")
+            
+            let authError = error as NSError
+            switch authError.code {
+            case AuthErrorCode.networkError.rawValue:
+                throw AuthError.networkError
+            default:
+                throw AuthError.unknown
+            }
+        }
+    }
+    
+    func signUpWithApple(credential: ASAuthorizationAppleIDCredential, with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
+        Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In signup")
+        
+        do {
+            // Create Firebase credential from Apple credential
+            guard let nonce = self.currentNonce else {
+                throw AuthError.unknown
+            }
+            
+            guard let appleIDToken = credential.identityToken,
+                  let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                throw AuthError.unknown
+            }
+            
+            let firebaseCredential = OAuthProvider.credential(
+                withProviderID: "apple.com",
+                idToken: idTokenString,
+                rawNonce: nonce
+            )
+            
+            // Sign in with Firebase
+            let result = try await auth.signIn(with: firebaseCredential)
+            let firebaseUser = result.user
+            
+            Logger.log(level: .debug, category: .userService, message: "Firebase Apple Sign In successful")
+            
+            // Get user info from Apple credential
+            let email = credential.email ?? firebaseUser.email ?? ""
+            let fullName = credential.fullName?.formatted() ?? info.fullName
+            
+            // Set display name if available
+            if !fullName.isEmpty {
+                let changeRequest = firebaseUser.createProfileChangeRequest()
+                changeRequest.displayName = fullName
+                try await changeRequest.commitChanges()
+            }
+            
+            var defaultNest: NestItem?
+            
+            if let nestName = info.nestInfo?.name,
+               let nestAddress = info.nestInfo?.address {
+                // Create default nest for user
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
+            }
+            
+            let user = NestUser(
+                id: firebaseUser.uid,
+                personalInfo: .init(
+                    name: fullName,
+                    email: email
+                ),
+                primaryRole: info.role,
+                roles: .init(
+                    ownedNestId: defaultNest?.id,
+                    nestAccess: defaultNest != nil ? [.init(
+                        nestId: defaultNest!.id,
+                        accessLevel: .owner,
+                        grantedAt: Date()
+                    )] : []
+                )
+            )
+            
+            // Save user profile to Firestore
+            try await saveUserProfile(user)
+            
+            // Update current user and authentication state
+            self.currentUser = user
+            self.isAuthenticated = true
+            
+//            // Update FCM token
+//            try await updateFCMToken()
+            
+            Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
+            
+            return user
+            
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Apple Sign In signup failed: \(error)")
+            
+            // Convert Firebase errors to custom errors
+            let authError = error as NSError
+            switch authError.code {
+            case AuthErrorCode.networkError.rawValue:
+                throw AuthError.networkError
+            default:
+                throw AuthError.unknown
+            }
+        }
+    }
+    
+    func completeAppleSignUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
+        Logger.log(level: .info, category: .userService, message: "Completing Apple Sign In profile setup")
+        
+        // User is already authenticated with Firebase, just need to create their profile
+        guard let firebaseUser = auth.currentUser else {
+            throw AuthError.unknown
+        }
+        
+        do {
+            // Get user info from Firebase user and onboarding info
+            let email = firebaseUser.email ?? ""
+            let fullName = firebaseUser.displayName ?? info.fullName
+            
+            var defaultNest: NestItem?
+            
+            if let nestName = info.nestInfo?.name,
+               let nestAddress = info.nestInfo?.address {
+                // Create default nest for user
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
+            }
+            
+            let user = NestUser(
+                id: firebaseUser.uid,
+                personalInfo: .init(
+                    name: fullName,
+                    email: email
+                ),
+                primaryRole: info.role,
+                roles: .init(
+                    ownedNestId: defaultNest?.id,
+                    nestAccess: defaultNest != nil ? [.init(
+                        nestId: defaultNest!.id,
+                        accessLevel: .owner,
+                        grantedAt: Date()
+                    )] : []
+                )
+            )
+            
+            // Save user profile to Firestore
+            try await saveUserProfile(user)
+            
+            // Update current user and authentication state
+            self.currentUser = user
+            self.isAuthenticated = true
+            
+            Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
+            
+            return user
+            
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Apple Sign In profile setup failed: \(error)")
+            throw error
+        }
+    }
+    
     /// Creates a nest for the specified user
     /// - Parameters:
     ///   - userId: The ID of the user who will own the nest
@@ -601,6 +833,54 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "Notification preferences updated successfully")
+    }
+
+    // MARK: - Apple Sign In Helper Methods
+    func generateNonce() -> String {
+        let nonce = randomNonceString()
+        self.currentNonce = nonce
+        return nonce
+    }
+    
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+        
+        while remainingLength > 0 {
+            let randoms: [UInt8] = (0 ..< 16).map { _ in
+                var random: UInt8 = 0
+                let errorCode = SecRandomCopyBytes(kSecRandomDefault, 1, &random)
+                if errorCode != errSecSuccess {
+                    fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(errorCode)")
+                }
+                return random
+            }
+            
+            randoms.forEach { random in
+                if remainingLength == 0 {
+                    return
+                }
+                
+                if random < charset.count {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            String(format: "%02x", $0)
+        }.joined()
+        
+        return hashString
     }
 }
 

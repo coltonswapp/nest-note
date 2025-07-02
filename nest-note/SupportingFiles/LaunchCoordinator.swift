@@ -1,5 +1,6 @@
 import UIKit
 import FirebaseAuth
+import AuthenticationServices
 
 enum UserType {
     case owner
@@ -234,6 +235,26 @@ extension LaunchCoordinator: AuthenticationDelegate {
         
         let onboardingCoordinator = OnboardingCoordinator()
         self.currentOnboardingCoordinator = onboardingCoordinator
+        let containerVC = onboardingCoordinator.start()
+        onboardingCoordinator.authenticationDelegate = self
+        (containerVC as? OnboardingContainerViewController)?.delegate = self
+        
+        // Present the container view controller modally
+        containerVC.modalPresentationStyle = .fullScreen
+        navigationController.present(containerVC, animated: true)
+    }
+    
+    func startAppleSignInOnboarding(with credential: ASAuthorizationAppleIDCredential) {
+        guard let navigationController = self.navigationController else {
+            return
+        }
+        
+        let onboardingCoordinator = OnboardingCoordinator()
+        self.currentOnboardingCoordinator = onboardingCoordinator
+        
+        // Pre-configure the coordinator with Apple credential
+        onboardingCoordinator.handleAppleSignIn(credential: credential)
+        
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self
         (containerVC as? OnboardingContainerViewController)?.delegate = self

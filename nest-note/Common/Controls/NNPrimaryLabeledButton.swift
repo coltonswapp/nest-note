@@ -281,6 +281,7 @@ class NNLoadingButton: NNBaseControl {
         super.init(title: title)
         self.primaryBackgroundColor = fillStyle.backgroundColor
         self.titleLabel.textColor = titleColor
+        self.imageView.tintColor = titleColor
         backgroundColor = primaryBackgroundColor
         setupSpinner()
     }

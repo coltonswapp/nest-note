@@ -6,6 +6,8 @@
 //
 
 import UIKit
+import AuthenticationServices
+import CryptoKit
 
 protocol AuthenticationDelegate: AnyObject {
     func authenticationComplete()
@@ -72,6 +74,7 @@ final class LandingViewController: NNViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .vertical
         stack.spacing = 12
+        stack.alignment = .center
         return stack
     }()
     
@@ -103,6 +106,17 @@ final class LandingViewController: NNViewController {
         return button
     }()
     
+    private lazy var signInWithAppleButton: NNPrimaryLabeledButton = {
+        let appleImage = UIImage(systemName: "apple.logo")
+        let button = NNPrimaryLabeledButton(title: "Sign in with Apple", image: appleImage)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.backgroundColor = .label
+        button.titleLabel.textColor = .systemBackground
+        button.addTarget(self, action: #selector(signInWithAppleTapped), for: .touchUpInside)
+        return button
+    }()
+    
+
     private lazy var signUpButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("Don't have an account? Sign Up", for: .normal)
@@ -138,6 +152,7 @@ final class LandingViewController: NNViewController {
         mainStack.addArrangedSubview(loginStack)
         view.addSubview(mainStack)
         
+        view.addSubview(signInWithAppleButton)
         view.addSubview(loginButton)
         view.addSubview(signUpButton)
     }
@@ -153,12 +168,23 @@ final class LandingViewController: NNViewController {
             mainStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             
             emailField.heightAnchor.constraint(equalToConstant: 55),
+            emailField.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
+            
             passwordField.heightAnchor.constraint(equalToConstant: 55),
+            passwordField.widthAnchor.constraint(equalTo: mainStack.widthAnchor),
+            
+            mainStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            mainStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
         ])
         
         loginButtonBottomConstraint = loginButton.bottomAnchor.constraint(equalTo: signUpButton.topAnchor, constant: -16)
         
         NSLayoutConstraint.activate([
+            signInWithAppleButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            signInWithAppleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            signInWithAppleButton.heightAnchor.constraint(equalToConstant: 55),
+            signInWithAppleButton.bottomAnchor.constraint(equalTo: loginButton.topAnchor, constant: -12),
+            
             loginButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
             loginButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
             loginButton.heightAnchor.constraint(equalToConstant: 55),
@@ -173,6 +199,31 @@ final class LandingViewController: NNViewController {
         self.dismiss(animated: true) {
             self.delegate?.signUpTapped()
         }
+    }
+    
+    @objc private func signInWithAppleTapped() {
+        let appleIDProvider = ASAuthorizationAppleIDProvider()
+        let request = appleIDProvider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+        
+        // Generate and set nonce for security
+        let nonce = UserService.shared.generateNonce()
+        request.nonce = sha256(nonce)
+        
+        let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+        authorizationController.delegate = self
+        authorizationController.presentationContextProvider = self
+        authorizationController.performRequests()
+    }
+    
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            String(format: "%02x", $0)
+        }.joined()
+        
+        return hashString
     }
     
     // MARK: - Keyboard Handling
@@ -223,6 +274,11 @@ final class LandingViewController: NNViewController {
     
     // MARK: - Actions
     @objc private func loginTapped() {
+        // Handle regular email/password login only
+        handleRegularLogin()
+    }
+    
+    private func handleRegularLogin() {
         Task {
             do {
                 guard let email = emailField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -326,6 +382,100 @@ extension LandingViewController: UITextFieldDelegate {
             textField.resignFirstResponder()
         }
         return true
+    }
+}
+
+// MARK: - ASAuthorizationControllerDelegate
+extension LandingViewController: ASAuthorizationControllerDelegate {
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            Task {
+                do {
+                    let result = try await UserService.shared.signInWithApple(credential: appleIDCredential)
+                    
+                    await MainActor.run {
+                        if result.isNewUser {
+                            if result.isIncompleteSignup {
+                                // This is an incomplete signup - show explanation
+                                self.showIncompleteSignupAlert(credential: appleIDCredential)
+                            } else {
+                                // This is a truly new user - go directly to onboarding
+                                self.startAppleOnboardingFlow(credential: appleIDCredential)
+                            }
+                        } else {
+                            // Existing user - sign them in
+                            self.handleExistingAppleUser()
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        let alert = UIAlertController(
+                            title: "Sign In Failed",
+                            message: error.localizedDescription,
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
+                    }
+                }
+            }
+        }
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        let alert = UIAlertController(
+            title: "Sign In Failed",
+            message: error.localizedDescription,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    
+    private func startAppleOnboardingFlow(credential: ASAuthorizationAppleIDCredential) {
+        // Dismiss the login screen and start onboarding directly
+        self.dismiss(animated: true) {
+            if let delegate = self.delegate as? LaunchCoordinator {
+                delegate.startAppleSignInOnboarding(with: credential)
+            } else {
+                self.delegate?.signUpTapped()
+            }
+        }
+    }
+    
+    private func showIncompleteSignupAlert(credential: ASAuthorizationAppleIDCredential) {
+        let alert = UIAlertController(
+            title: "Welcome Back!",
+            message: "Let's finish setting up your NestNote account.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Complete Setup", style: .default) { _ in
+            self.startAppleOnboardingFlow(credential: credential)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func handleExistingAppleUser() {
+        // Existing user - sign them in directly
+        Task {
+            try await Launcher.shared.configure()
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+            
+            await MainActor.run {
+                Logger.log(level: .info, category: .general, message: "Successfully signed in with Apple")
+                self.delegate?.authenticationComplete()
+                self.dismiss(animated: true)
+            }
+        }
+    }
+}
+
+// MARK: - ASAuthorizationControllerPresentationContextProviding
+extension LandingViewController: ASAuthorizationControllerPresentationContextProviding {
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return view.window!
     }
 }
 

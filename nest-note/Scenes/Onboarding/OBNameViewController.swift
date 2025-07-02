@@ -1,5 +1,7 @@
 import UIKit
 import Combine
+import AuthenticationServices
+import CryptoKit
 
 final class OBNameViewController: NNOnboardingViewController {
     
@@ -105,6 +107,55 @@ final class OBEmailViewController: NNOnboardingViewController {
         return textField
     }()
     
+    private let signInWithAppleButton: ASAuthorizationAppleIDButton = {
+        let button = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.cornerRadius = 8
+        return button
+    }()
+    
+    private let orDividerView: UIView = {
+        let containerView = UIView()
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        let leftLine = UIView()
+        leftLine.backgroundColor = UIColor.systemGray4
+        leftLine.translatesAutoresizingMaskIntoConstraints = false
+        
+        let rightLine = UIView()
+        rightLine.backgroundColor = UIColor.systemGray4
+        rightLine.translatesAutoresizingMaskIntoConstraints = false
+        
+        let orLabel = UILabel()
+        orLabel.text = "or"
+        orLabel.textColor = UIColor.systemGray
+        orLabel.font = UIFont.systemFont(ofSize: 14)
+        orLabel.textAlignment = .center
+        orLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        containerView.addSubview(leftLine)
+        containerView.addSubview(rightLine)
+        containerView.addSubview(orLabel)
+        
+        NSLayoutConstraint.activate([
+            leftLine.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            leftLine.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            leftLine.trailingAnchor.constraint(equalTo: orLabel.leadingAnchor, constant: -16),
+            leftLine.heightAnchor.constraint(equalToConstant: 1),
+            
+            orLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            orLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            orLabel.widthAnchor.constraint(equalToConstant: 24),
+            
+            rightLine.leadingAnchor.constraint(equalTo: orLabel.trailingAnchor, constant: 16),
+            rightLine.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            rightLine.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            rightLine.heightAnchor.constraint(equalToConstant: 1)
+        ])
+        
+        return containerView
+    }()
+    
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -121,6 +172,8 @@ final class OBEmailViewController: NNOnboardingViewController {
         
         emailTextField.delegate = self
         confirmEmailTextField.delegate = self
+        
+        signInWithAppleButton.addTarget(self, action: #selector(signInWithAppleTapped), for: .touchUpInside)
         
         ctaButton?.isEnabled = false
     }
@@ -163,13 +216,40 @@ final class OBEmailViewController: NNOnboardingViewController {
         (coordinator as? OnboardingCoordinator)?.next()
     }
     
+    @objc private func signInWithAppleTapped() {
+        let appleIDProvider = ASAuthorizationAppleIDProvider()
+        let request = appleIDProvider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+        
+        // Generate and set nonce for security
+        let nonce = UserService.shared.generateNonce()
+        request.nonce = sha256(nonce)
+        
+        let authorizationController = ASAuthorizationController(authorizationRequests: [request])
+        authorizationController.delegate = self
+        authorizationController.presentationContextProvider = self
+        authorizationController.performRequests()
+    }
+    
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            String(format: "%02x", $0)
+        }.joined()
+        
+        return hashString
+    }
+    
     // MARK: - Setup
     override func setupContent() {
+        view.addSubview(signInWithAppleButton)
+        view.addSubview(orDividerView)
         view.addSubview(emailTextField)
         view.addSubview(confirmEmailTextField)
         
         NSLayoutConstraint.activate([
-            emailTextField.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 32),
+            emailTextField.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 24),
             emailTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             emailTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             emailTextField.heightAnchor.constraint(equalToConstant: 50),
@@ -177,7 +257,17 @@ final class OBEmailViewController: NNOnboardingViewController {
             confirmEmailTextField.topAnchor.constraint(equalTo: emailTextField.bottomAnchor, constant: 16),
             confirmEmailTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             confirmEmailTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            confirmEmailTextField.heightAnchor.constraint(equalToConstant: 50)
+            confirmEmailTextField.heightAnchor.constraint(equalToConstant: 50),
+            
+            orDividerView.topAnchor.constraint(equalTo: confirmEmailTextField.bottomAnchor, constant: 24),
+            orDividerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            orDividerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            orDividerView.heightAnchor.constraint(equalToConstant: 20),
+            
+            signInWithAppleButton.topAnchor.constraint(equalTo: orDividerView.bottomAnchor, constant: 32),
+            signInWithAppleButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            signInWithAppleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            signInWithAppleButton.heightAnchor.constraint(equalToConstant: 50),
         ])
     }
 }
@@ -191,6 +281,26 @@ extension OBEmailViewController: UITextFieldDelegate {
             textField.resignFirstResponder()
         }
         return true
+    }
+}
+
+// MARK: - ASAuthorizationControllerDelegate
+extension OBEmailViewController: ASAuthorizationControllerDelegate {
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            (coordinator as? OnboardingCoordinator)?.handleAppleSignInMidFlow(credential: appleIDCredential)
+        }
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        showToast(delay: 0.5, text: "Sign in failed", subtitle: error.localizedDescription, sentiment: .negative)
+    }
+}
+
+// MARK: - ASAuthorizationControllerPresentationContextProviding
+extension OBEmailViewController: ASAuthorizationControllerPresentationContextProviding {
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return view.window!
     }
 }
 
