@@ -224,6 +224,7 @@ final class UserService {
     // MARK: - Authentication Methods
     func login(email: String, password: String) async throws -> AuthDataResult {
         Logger.log(level: .info, category: .userService, message: "Attempting login for email: \(email)")
+        Tracker.shared.track(.regularLoginAttempted)
         do {
             // Only perform Firebase authentication
             let result = try await auth.signIn(withEmail: email, password: password)
@@ -238,10 +239,12 @@ final class UserService {
                 Logger.log(level: .info, category: .userService, message: "Updated FCM token after login")
             }
             
+            Tracker.shared.track(.regularLoginSucceeded)
             return result
             
         } catch let error as NSError {
             Logger.log(level: .error, category: .userService, message: "Login failed - Error: \(error.localizedDescription)")
+            Tracker.shared.track(.regularLoginAttempted, result: false, error: error.localizedDescription)
             switch error.code {
             case AuthErrorCode.wrongPassword.rawValue,
                  AuthErrorCode.invalidEmail.rawValue,
@@ -257,6 +260,7 @@ final class UserService {
     
     func signUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
         Logger.log(level: .info, category: .userService, message: "Attempting signup for email: \(info.email)")
+        Tracker.shared.track(.regularSignUpAttempted)
         do {
             
             // Create Firebase user
@@ -303,6 +307,7 @@ final class UserService {
             self.currentUser = user
             self.isAuthenticated = true
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
+            Tracker.shared.track(.regularSignUpSucceeded)
             
             // Save authentication state
             saveAuthState()
@@ -311,6 +316,7 @@ final class UserService {
             
         } catch let error as NSError {
             Logger.log(level: .error, category: .userService, message: "Signup failed - Error: \(error.localizedDescription)")
+            Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
             switch error.code {
             case AuthErrorCode.emailAlreadyInUse.rawValue:
                 throw AuthError.emailAlreadyInUse
@@ -328,6 +334,7 @@ final class UserService {
     
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> (user: NestUser, isNewUser: Bool, isIncompleteSignup: Bool) {
         Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In")
+        Tracker.shared.track(.appleSignInAttempted)
         
         do {
             // Create Firebase credential from Apple credential
@@ -366,6 +373,7 @@ final class UserService {
                     roles: .init(ownedNestId: nil, nestAccess: [])
                 )
                 
+                Tracker.shared.track(.appleSignInSucceeded)
                 return (user: tempUser, isNewUser: true, isIncompleteSignup: false)
             } else {
                 // Firebase says existing user, but try to fetch their profile
@@ -377,6 +385,7 @@ final class UserService {
                     self.isAuthenticated = true
                     
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
+                    Tracker.shared.track(.appleSignInSucceeded)
                     
                     return (user: user, isNewUser: false, isIncompleteSignup: false)
                 } catch {
@@ -393,12 +402,14 @@ final class UserService {
                         roles: .init(ownedNestId: nil, nestAccess: [])
                     )
                     
+                    Tracker.shared.track(.appleSignInSucceeded)
                     return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
                 }
             }
             
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In failed: \(error)")
+            Tracker.shared.track(.appleSignInAttempted, result: false, error: error.localizedDescription)
             
             let authError = error as NSError
             switch authError.code {
@@ -412,6 +423,7 @@ final class UserService {
     
     func signUpWithApple(credential: ASAuthorizationAppleIDCredential, with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
         Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In signup")
+        Tracker.shared.track(.appleSignUpAttempted)
         
         do {
             // Create Firebase credential from Apple credential
@@ -483,11 +495,13 @@ final class UserService {
 //            try await updateFCMToken()
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
+            Tracker.shared.track(.appleSignUpSucceeded)
             
             return user
             
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In signup failed: \(error)")
+            Tracker.shared.track(.appleSignUpAttempted, result: false, error: error.localizedDescription)
             
             // Convert Firebase errors to custom errors
             let authError = error as NSError
@@ -705,6 +719,7 @@ final class UserService {
             clearAuthState()
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
+            Tracker.shared.track(.userLoggedOut)
             
             // Log any token cleanup failures as warnings since logout succeeded
             if fcmTokenDeletionError != nil || firestoreTokenRemovalError != nil {

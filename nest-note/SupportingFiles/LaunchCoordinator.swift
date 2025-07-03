@@ -105,9 +105,12 @@ final class LaunchCoordinator {
         
         let landingVC = LandingViewController()
         landingVC.delegate = self
-        landingVC.isModalInPresentation = true // Prevent dismissal by swipe
         
-        navigationController.present(landingVC, animated: true)
+        // Wrap in navigation controller to enable push navigation
+        let authNavController = UINavigationController(rootViewController: landingVC)
+        authNavController.isModalInPresentation = true // Prevent dismissal by swipe
+        
+        navigationController.present(authNavController, animated: true)
     }
     
     private func handleAuthenticationError(_ error: Error, presentingFrom viewController: UIViewController) {
@@ -203,15 +206,16 @@ extension LaunchCoordinator: AuthenticationDelegate {
     func authenticationComplete() {
         Task {
             do {
-                // Get the landing view controller
+                // Get the auth navigation controller and landing view controller
                 guard let navigationController = self.navigationController,
-                      let landingVC = navigationController.presentedViewController as? LandingViewController else {
+                      let authNavController = navigationController.presentedViewController as? UINavigationController,
+                      let landingVC = authNavController.viewControllers.first as? LandingViewController else {
                     return
                 }
                 
                 // Dismiss and reconfigure
                 await MainActor.run {
-                    landingVC.dismiss(animated: true) {
+                    authNavController.dismiss(animated: true) {
                         Task {
                             do {
                                 try await self.reconfigureAfterAuthentication()

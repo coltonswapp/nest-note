@@ -6,7 +6,7 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(view, for: .rectanglePatternSmall, with: NNColors.primary)
+        NNAssetHelper.configureImageView(view, for: .rectanglePattern, with: NNColors.primary)
         view.alpha = 0.4
         return view
     }()
