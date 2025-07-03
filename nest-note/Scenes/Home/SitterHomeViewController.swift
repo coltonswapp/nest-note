@@ -15,6 +15,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
     private let sitterViewService = SitterViewService.shared
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
+    private var isLoadingEvents = false
     
     private lazy var loadingSpinner: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -205,7 +206,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 let formatter = DateIntervalFormatter()
                 formatter.dateStyle = .medium
                 formatter.timeStyle = .none
-                let duration = formatter.string(from: session.startDate, to: session.endDate) ?? ""
+                let duration = formatter.string(from: session.startDate, to: session.endDate)
                 
                 cell.configure(title: session.title, duration: duration)
                 
@@ -219,11 +220,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         
         let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, HomeItem> { cell, indexPath, item in
             if case .events = item {
-                // Filter upcoming events
-                let upcomingEvents = self.getUpcomingEvents()
-                
-                // Configure with custom text showing only upcoming events
-                cell.configureUpcoming(eventCount: upcomingEvents.count, showPlusButton: false)
+                // If we're still loading events, show loading indicator
+                if self.sessionEvents.isEmpty && self.isLoadingEvents {
+                    cell.showLoading()
+                } else {
+                    cell.configure(eventCount: self.sessionEvents.count)
+                }
             }
         }
         
@@ -420,11 +422,24 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
     }
     
     private func fetchSessionEvents(session: SessionItem) {
+        // Set loading state
+        isLoadingEvents = true
+        
+        // Show loading indicator in the events cell
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
+           let indexPath = dataSource.indexPath(for: eventsItem),
+           let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+            eventsCell.showLoading()
+        }
+        
         Task {
             do {
                 let events = try await SessionService.shared.getSessionEvents(for: session.id, nestID: session.nestID)
                 
                 await MainActor.run {
+                    // Reset loading state
+                    self.isLoadingEvents = false
+                    
                     // Update local events array
                     self.sessionEvents = events
                     
@@ -433,6 +448,18 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 }
             } catch {
                 Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    // Reset loading state
+                    self.isLoadingEvents = false
+                    
+                    // Configure the events cell to show zero events
+                    if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
+                       let indexPath = dataSource.indexPath(for: eventsItem),
+                       let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+                        eventsCell.configure(eventCount: 0)
+                    }
+                }
             }
         }
     }
@@ -446,6 +473,11 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
     private func updateEventsSection(with events: [SessionEvent]) {
         var snapshot = dataSource.snapshot()
         
+        // Skip if events section doesn't exist
+        if !snapshot.sectionIdentifiers.contains(.events) {
+            return
+        }
+        
         // Remove any existing event items
         let existingItems = snapshot.itemIdentifiers(inSection: .events)
             .filter { if case .sessionEvent = $0 { return true } else { return false } }
@@ -456,25 +488,22 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             .filter { if case .moreEvents = $0 { return true } else { return false } }
         snapshot.deleteItems(existingMoreItems)
         
-        // Filter events - only include events that haven't ended yet
-        let currentDate = Date()
-        let upcomingEvents = events.filter { $0.endDate > currentDate }
+        // Add new event items
+        let sortedEvents = events.sorted { $0.startDate < $1.startDate }
         
-        // Sort events by start date (soonest first)
-        let sortedEvents = upcomingEvents.sorted { $0.startDate < $1.startDate }
-        
-        // If we have events, show them and always add the "See All" button
-        if !events.isEmpty {
-            // Show upcoming events up to the max visible limit
-            let visibleEvents = Array(sortedEvents.prefix(min(sortedEvents.count, maxVisibleEvents)))
+        // If we have more than maxVisibleEvents, only show the first few
+        if sortedEvents.count > maxVisibleEvents {
+            let visibleEvents = Array(sortedEvents.prefix(maxVisibleEvents))
+            let remainingCount = sortedEvents.count - maxVisibleEvents
+            
             let eventItems = visibleEvents.map { HomeItem.sessionEvent($0) }
             snapshot.appendItems(eventItems, toSection: .events)
-            
-            // Always add the "See All" button when there are any events (upcoming or past)
-            snapshot.appendItems([.moreEvents(events.count)], toSection: .events)
+            snapshot.appendItems([.moreEvents(remainingCount)], toSection: .events)
+        } else {
+            let eventItems = sortedEvents.map { HomeItem.sessionEvent($0) }
+            snapshot.appendItems(eventItems, toSection: .events)
         }
         
-        // Update the event count in the section header
         snapshot.reconfigureItems([.events])
         dataSource.apply(snapshot, animatingDifferences: true)
     }
@@ -597,28 +626,22 @@ extension SitterHomeViewController: UICollectionViewDelegate {
             }
             
         case .events, .moreEvents:
+            // Skip handling events if we're still loading them
+            if isLoadingEvents { return }
+            
             // Get the current session
             if let session = sitterViewService.currentSession {
-                // Check if session duration is less than 24 hours
-                let duration = Calendar.current.dateComponents([.hour], from: session.startDate, to: session.endDate)
-                if let hours = duration.hour, hours < 24 {
-                    // For sessions less than 24 hours, directly present SessionEventViewController
-                    let eventVC = SessionEventViewController(sessionID: session.id, isReadOnly: true)
-                    present(eventVC, animated: true)
-                } else {
-                    // For longer sessions, show the calendar view
-                    let dateRange = DateInterval(start: session.startDate, end: session.endDate)
-                    let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents, isSitter: true)
-                    calendarVC.delegate = self
-                    let nav = UINavigationController(rootViewController: calendarVC)
-                    present(nav, animated: true)
-                }
+                // Present calendar view
+                let dateRange = DateInterval(start: session.startDate, end: session.endDate)
+                let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
+                let nav = UINavigationController(rootViewController: calendarVC)
+                present(nav, animated: true)
             }
             
         case .sessionEvent(let event):
             // Present event details
             if let session = sitterViewService.currentSession {
-                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
+                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false)
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }

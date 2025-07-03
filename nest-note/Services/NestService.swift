@@ -13,7 +13,11 @@ final class NestService: EntryRepository {
     static let shared = NestService()
     private let db = Firestore.firestore()
     
-    @Published private(set) var currentNest: NestItem?
+    @Published private(set) var currentNest: NestItem? {
+        didSet {
+            Logger.log(level: .info, category: .nestService, message: "Current nest set, id: \(currentNest?.id)")
+        }
+    }
     @Published private(set) var isOwner: Bool = false
     
     // Add cached entries

@@ -117,6 +117,15 @@ private class LogCell: UITableViewCell {
         return label
     }()
     
+    private let levelLabel: UILabel = {
+        let label = UILabel()
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
+        label.textColor = .label
+        label.textAlignment = .left
+        label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        return label
+    }()
+    
     private let categoryLabel: UILabel = {
         let label = UILabel()
         label.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
@@ -144,6 +153,7 @@ private class LogCell: UITableViewCell {
     }
     
     private func setupViews() {
+        headerStackView.addArrangedSubview(levelLabel)
         headerStackView.addArrangedSubview(categoryLabel)
         headerStackView.addArrangedSubview(timestampLabel)
         
@@ -164,7 +174,17 @@ private class LogCell: UITableViewCell {
     
     func configure(with log: LogLine) {
         timestampLabel.text = log.timestamp
+        levelLabel.text = "[\(log.level.rawValue.uppercased())]"
         categoryLabel.text = "[\(log.category)]"
         contentLabel.text = log.content
+        
+        // Apply error styling for error logs
+        if log.level == .error {
+            backgroundColor = UIColor.red.withAlphaComponent(0.15)
+            levelLabel.textColor = .red
+        } else {
+            backgroundColor = .clear
+            levelLabel.textColor = .label
+        }
     }
 }

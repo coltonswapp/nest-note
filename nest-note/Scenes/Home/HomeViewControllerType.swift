@@ -20,6 +20,8 @@ protocol HomeViewControllerType: NNViewController {
     // MARK: - Navigation
     func presentHouseholdView()
     func presentCategoryView(category: String)
+    
+    func setFCMToken()
 }
 
 // MARK: - Shared Types
@@ -189,4 +191,23 @@ extension HomeViewControllerType {
             self.present(alert, animated: true)
         }
     }
-} 
+}
+
+import FirebaseMessaging
+extension HomeViewControllerType {
+    
+    func setFCMToken() {
+        Logger.log(level: .info, category: .general, message: "Setting FCM token...")
+        
+        Task {
+            do {
+                let fcmToken = try await Messaging.messaging().token()
+                try await UserService.shared.updateFCMToken(fcmToken)
+                Logger.log(level: .info, category: .general, message: "Successfully updated FCM token.")
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to update FCM token: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+}

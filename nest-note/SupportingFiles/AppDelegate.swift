@@ -65,6 +65,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     // MARK: - APNs Registration
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().setAPNSToken(deviceToken, type: .unknown)
+        Logger.log(level: .info, category: .general, message: "didRegisterForRemoteNotifications called...")
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -85,7 +86,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         Task {
             do {
                 try await UserService.shared.updateFCMToken(fcmToken)
-                try await UserService.shared.updateNotificationPreferences(.init(sessionNotifications: true, otherNotifications: true))
                 Logger.log(level: .info, category: .general, message: "Successfully updated FCM token in Firestore")
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to update FCM token: \(error.localizedDescription)")

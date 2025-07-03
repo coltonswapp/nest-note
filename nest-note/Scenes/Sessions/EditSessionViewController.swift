@@ -58,6 +58,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         return field
     }()
     
+    private lazy var refreshControl: UIRefreshControl = {
+        let control = UIRefreshControl()
+        control.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        return control
+    }()
+    
     private var visibilityLevel: VisibilityLevel = .standard
     
     private var sessionItem: SessionItem
@@ -244,6 +250,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         collectionView.delegate = self
         collectionView.delaysContentTouches = false
         
+        collectionView.refreshControl = refreshControl
+        
         // Prevent accidental dismissal by swipe or other gestures
         isModalInPresentation = true
         
@@ -396,6 +404,100 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Setup text field delegate
         titleTextField.delegate = self
+    }
+    
+    @objc func refresh() {
+        Task { await refreshSession() }
+    }
+    
+    func refreshSession() async {
+        // Only refresh if we're editing an existing session
+        guard isEditingSession else { collectionView.refreshControl?.endRefreshing(); return }
+        
+        do {
+            Logger.log(level: .debug, category: .sessionService, message: "Refreshing session: \(sessionItem.id)")
+            
+            // Fetch the latest session data
+            let refreshedSession = try await SessionService.shared.getSession(nestID: sessionItem.nestID, sessionID: sessionItem.id)
+            
+            guard let refreshedSession else { collectionView.refreshControl?.endRefreshing(); return }
+            
+            await MainActor.run {
+                // Update session item with fresh data
+                self.sessionItem = refreshedSession
+                
+                // Update UI elements that depend on session data
+                self.titleTextField.text = refreshedSession.title
+                self.visibilityLevel = refreshedSession.visibilityLevel
+                
+                // Update selected sitter if it exists
+                if let assignedSitter = refreshedSession.assignedSitter {
+                    self.selectedSitter = assignedSitter.asSitterItem()
+                }
+                
+                // Update data source with refreshed session data
+                self.updateDataSourceAfterRefresh()
+                
+                // Check for changes after refresh
+                self.checkForChanges()
+                
+                // Refresh session events if needed
+                if !self.isArchivedSession {
+                    self.fetchSessionEvents()
+                }
+                
+                Logger.log(level: .debug, category: .sessionService, message: "Session refreshed successfully")
+                collectionView.refreshControl?.endRefreshing()
+            }
+            
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Failed to refresh session: \(error.localizedDescription)")
+            collectionView.refreshControl?.endRefreshing()
+            
+            await MainActor.run {
+                // Show error to user
+                let alert = UIAlertController(
+                    title: "Refresh Failed",
+                    message: "Could not refresh session data. Please try again.",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                self.present(alert, animated: true)
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func updateDataSourceAfterRefresh() {
+        var snapshot = dataSource.snapshot()
+        
+        // Update visibility level item
+        if let existingVisibilityItem = snapshot.itemIdentifiers(inSection: .visibility).first {
+            snapshot.deleteItems([existingVisibilityItem])
+            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+        }
+        
+        // Update status item
+        if let existingStatusItem = snapshot.itemIdentifiers(inSection: .status).first {
+            snapshot.deleteItems([existingStatusItem])
+            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
+        }
+        
+        // Update date selection item
+        if let existingDateItem = snapshot.itemIdentifiers(inSection: .date).first {
+            snapshot.deleteItems([existingDateItem])
+            snapshot.appendItems([.dateSelection(startDate: sessionItem.startDate, endDate: sessionItem.endDate, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
+        }
+        
+        // Update sitter item
+        if let existingSitterItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+            snapshot.deleteItems([existingSitterItem])
+            snapshot.appendItems([.inviteSitter], toSection: .sitter)
+        }
+        
+        // Apply the changes
+        dataSource.apply(snapshot, animatingDifferences: true)
     }
     
     @objc override func closeButtonTapped() {

@@ -218,6 +218,7 @@
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = NestNote;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -249,6 +250,7 @@
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = NestNote;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;

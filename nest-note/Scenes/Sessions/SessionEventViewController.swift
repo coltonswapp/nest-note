@@ -37,8 +37,12 @@ final class SessionEventViewController: NNSheetViewController {
         return control
     }()
     
-    private lazy var saveButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: "Create Event", backgroundColor: .systemBlue)
+    private lazy var saveButton: NNLoadingButton = {
+        let button = NNLoadingButton(
+            title: "Create Event",
+            titleColor: .white,
+            fillStyle: .fill(.systemBlue)
+        )
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
     }()
@@ -170,7 +174,7 @@ final class SessionEventViewController: NNSheetViewController {
             }
             
             // Update save button
-            saveButton.setTitle(isReadOnly ? "" : "Update Event", for: .normal)
+            saveButton.setTitle(isReadOnly ? "" : "Update Event")
         }
         
         // Configure read-only mode if needed
@@ -425,6 +429,9 @@ final class SessionEventViewController: NNSheetViewController {
             return
         }
         
+        // Start loading state
+        saveButton.startLoading()
+        
         // Create or update the event
         let event = SessionEvent(
             id: self.event?.id ?? UUID().uuidString, // Keep existing ID if editing
@@ -447,18 +454,28 @@ final class SessionEventViewController: NNSheetViewController {
                 try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
                 
                 await MainActor.run {
+                    saveButton.stopLoading(withSuccess: true)
                     eventDelegate?.sessionEventViewController(self, didCreateEvent: event)
-                    dismiss(animated: true)
+                    
+                    // Small delay to show success state before dismissing
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.dismiss(animated: true)
+                    }
                 }
             } catch {
                 await MainActor.run {
-                    let alert = UIAlertController(
-                        title: "Error",
-                        message: "Failed to save event. Please try again.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    self.present(alert, animated: true)
+                    saveButton.stopLoading(withSuccess: false)
+                    
+                    // Small delay to show error state before alert
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        let alert = UIAlertController(
+                            title: "Error",
+                            message: "Failed to save event. Please try again.",
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
+                    }
                 }
                 Logger.log(level: .error, category: .sessionService, message: "Failed to save event: \(error.localizedDescription)")
             }

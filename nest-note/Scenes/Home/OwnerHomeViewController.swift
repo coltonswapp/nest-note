@@ -1,5 +1,6 @@
 import UIKit
 import Combine
+import FirebaseMessaging
 
 final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     // MARK: - Properties
@@ -40,6 +41,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         
         // Check setup status when the view loads
         checkSetupStatus()
+        
+//        setFCMToken()
     }
     
     override func setup() {

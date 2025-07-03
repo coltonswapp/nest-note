@@ -250,14 +250,39 @@ class SessionService {
         }
     }
     
+    // MARK: - Helper Methods
+    /// Determines the correct nestID for a given sessionID
+    /// Handles both owner and sitter scenarios using local session cache
+    private func getNestIDForSession(sessionID: String) async throws -> String {
+        // First, check local sessions array for the nestID (most efficient)
+        if let session = sessions.first(where: { $0.id == sessionID }) {
+            return session.nestID
+        }
+        
+        // If not in local cache, check if user is a sitter for this session
+        guard let userID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+        
+        let sitterSessionRef = db.collection("users").document(userID)
+            .collection("sitterSessions").document(sessionID)
+        let sitterSessionDoc = try await sitterSessionRef.getDocument()
+        
+        if let sitterSession = try? sitterSessionDoc.data(as: SitterSession.self) {
+            return sitterSession.nestID
+        }
+        
+        // If we can't find the session in either place, throw an error
+        throw SessionError.sessionNotFound
+    }
+    
     // MARK: - Session Events
     /// Creates or updates a single event in a session
     func updateSessionEvent(_ event: SessionEvent, sessionID: String) async throws {
-        guard let nestID = NestService.shared.currentNest?.id else {
-            throw ServiceError.noCurrentNest
-        }
+        // Get the correct nestID for this session (handles both owner and sitter cases)
+        let nestID = try await getNestIDForSession(sessionID: sessionID)
         
-        Logger.log(level: .info, category: .sessionService, message: "Updating event: \(event.id) for session: \(sessionID)")
+        Logger.log(level: .info, category: .sessionService, message: "Updating event: \(event.id) for session: \(sessionID) in nest: \(nestID)")
         
         do {
             let eventRef = db.collection("nests")
@@ -291,11 +316,10 @@ class SessionService {
     
     /// Updates multiple events in a session using a batch write
     func updateSessionEvents(_ events: [SessionEvent], sessionID: String) async throws {
-        guard let nestID = NestService.shared.currentNest?.id else {
-            throw ServiceError.noCurrentNest
-        }
+        // Get the correct nestID for this session (handles both owner and sitter cases)
+        let nestID = try await getNestIDForSession(sessionID: sessionID)
         
-        Logger.log(level: .info, category: .sessionService, message: "Batch updating \(events.count) events for session: \(sessionID)")
+        Logger.log(level: .info, category: .sessionService, message: "Batch updating \(events.count) events for session: \(sessionID) in nest: \(nestID)")
         
         let batch = db.batch()
         let sessionRef = db.collection("nests")
@@ -363,11 +387,10 @@ class SessionService {
     
     /// Deletes a single event from a session
     func deleteSessionEvent(_ eventID: String, sessionID: String) async throws {
-        guard let nestID = NestService.shared.currentNest?.id else {
-            throw ServiceError.noCurrentNest
-        }
+        // Get the correct nestID for this session (handles both owner and sitter cases)
+        let nestID = try await getNestIDForSession(sessionID: sessionID)
         
-        Logger.log(level: .info, category: .sessionService, message: "Deleting event: \(eventID) from session: \(sessionID)")
+        Logger.log(level: .info, category: .sessionService, message: "Deleting event: \(eventID) from session: \(sessionID) in nest: \(nestID)")
         
         do {
             let eventRef = db.collection("nests")
@@ -397,11 +420,10 @@ class SessionService {
     
     /// Deletes all events from a session
     func deleteAllSessionEvents(sessionID: String) async throws {
-        guard let nestID = NestService.shared.currentNest?.id else {
-            throw ServiceError.noCurrentNest
-        }
+        // Get the correct nestID for this session (handles both owner and sitter cases)
+        let nestID = try await getNestIDForSession(sessionID: sessionID)
         
-        Logger.log(level: .info, category: .sessionService, message: "Deleting all events for session: \(sessionID)")
+        Logger.log(level: .info, category: .sessionService, message: "Deleting all events for session: \(sessionID) in nest: \(nestID)")
         
         let eventsRef = db.collection("nests")
             .document(nestID)

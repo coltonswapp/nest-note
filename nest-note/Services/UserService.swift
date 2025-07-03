@@ -69,15 +69,6 @@ final class UserService {
                     pendingFCMToken = nil
                 }
                 
-                // Request notification permissions when user logs in
-//                await requestNotificationPermissions()
-                
-                // Try to get a fresh FCM token
-                if let fcmToken = try? await Messaging.messaging().token() {
-                    try? await updateFCMToken(fcmToken)
-                    Logger.log(level: .info, category: .userService, message: "Updated FCM token after auth state change")
-                }
-                
                 Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged in: \(nestUser)")
             } catch {
                 self.currentUser = nil
@@ -183,6 +174,36 @@ final class UserService {
         } catch {
             Logger.log(level: .error, category: .userService, message: "Failed to update FCM tokens in Firestore: \(error.localizedDescription)")
             Logger.log(level: .error, category: .userService, message: "Detailed error: \(error)")
+            throw error
+        }
+    }
+    
+    // MARK: - FCM Token Retrieval
+    func fetchStoredFCMTokens() async throws -> [(token: String, uploadedDate: Date)] {
+        guard let currentUser = currentUser else {
+            Logger.log(level: .error, category: .userService, message: "No current user when fetching FCM tokens")
+            return []
+        }
+        
+        Logger.log(level: .info, category: .userService, message: "Fetching stored FCM tokens for user: \(currentUser.id)")
+        
+        let docRef = db.collection("users").document(currentUser.id)
+        do {
+            let snapshot = try await docRef.getDocument()
+            let fcmTokensData = snapshot.data()?["fcmTokens"] as? [[String: Any]] ?? []
+            
+            let fcmTokens: [(token: String, uploadedDate: Date)] = fcmTokensData.compactMap { tokenData in
+                guard let token = tokenData["token"] as? String,
+                      let uploadedTimestamp = tokenData["uploadedDate"] as? Timestamp else {
+                    return nil
+                }
+                return (token: token, uploadedDate: uploadedTimestamp.dateValue())
+            }
+            
+            Logger.log(level: .info, category: .userService, message: "Successfully fetched \(fcmTokens.count) FCM tokens from Firestore")
+            return fcmTokens
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Failed to fetch FCM tokens from Firestore: \(error.localizedDescription)")
             throw error
         }
     }

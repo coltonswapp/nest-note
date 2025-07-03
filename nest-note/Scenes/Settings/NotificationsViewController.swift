@@ -1,5 +1,6 @@
 import UIKit
 import UserNotifications
+import FirebaseMessaging
 
 class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
@@ -68,7 +69,7 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
             )
             
             // Footer size
-            let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
+            let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(20))
             let footer = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: footerSize,
                 elementKind: UICollectionView.elementKindSectionFooter,
@@ -108,10 +109,18 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
+        let fcmTokenCellRegistration = UICollectionView.CellRegistration<FCMTokenCell, Item> { cell, indexPath, item in
+            if case let .fcmToken(token, uploadDate) = item {
+                cell.configure(token: token, uploadDate: uploadDate)
+            }
+        }
+        
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .notification:
                 return collectionView.dequeueConfiguredReusableCell(using: notificationCellRegistration, for: indexPath, item: item)
+            case .fcmToken:
+                return collectionView.dequeueConfiguredReusableCell(using: fcmTokenCellRegistration, for: indexPath, item: item)
             }
         }
         
@@ -127,19 +136,19 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.notifications])
+        snapshot.appendSections([.notifications, .fcmTokens])
         
         // Get current notification settings
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { [weak self] settings in
-            DispatchQueue.main.async {
+            Task {
                 guard let self = self,
                       let user = UserService.shared.currentUser else { return }
                 
                 let isSystemAuthorized = settings.authorizationStatus == .authorized
                 let preferences = user.personalInfo.notificationPreferences
                 
-                let items: [Item] = [
+                let notificationItems: [Item] = [
                     .notification(
                         title: "Session Notifications",
                         description: "Receive notifications about your sessions starting & ending",
@@ -152,13 +161,28 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
                     )
                 ]
                 
-                snapshot.appendItems(items, toSection: .notifications)
-                print("auth status: \(settings.authorizationStatus)")
-                self.notificationsEnabled = isSystemAuthorized
+                snapshot.appendItems(notificationItems, toSection: .notifications)
                 
-                // Force a layout update to refresh the footer visibility
-                self.dataSource.apply(snapshot, animatingDifferences: false)
-                self.collectionView.collectionViewLayout.invalidateLayout()
+                // Fetch FCM tokens from Firestore
+                do {
+                    let fcmTokens = try await UserService.shared.fetchStoredFCMTokens()
+                    let fcmTokenItems: [Item] = fcmTokens.map { tokenData in
+                        .fcmToken(token: tokenData.token, uploadDate: tokenData.uploadedDate)
+                    }
+                    snapshot.appendItems(fcmTokenItems, toSection: .fcmTokens)
+                } catch {
+                    Logger.log(level: .error, category: .general, message: "Failed to fetch FCM tokens: \(error.localizedDescription)")
+                    // Continue without FCM tokens on error
+                }
+                
+                await MainActor.run {
+                    print("auth status: \(settings.authorizationStatus)")
+                    self.notificationsEnabled = isSystemAuthorized
+                    
+                    // Force a layout update to refresh the footer visibility
+                    self.dataSource.apply(snapshot, animatingDifferences: false)
+                    self.collectionView.collectionViewLayout.invalidateLayout()
+                }
             }
         }
     }
@@ -199,16 +223,19 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
     enum Section: Hashable {
         case notifications
+        case fcmTokens
         
         var title: String {
             switch self {
             case .notifications: return "Notification Preferences"
+            case .fcmTokens: return "FCM Tokens (Debug)"
             }
         }
     }
     
     enum Item: Hashable {
         case notification(title: String, description: String, isEnabled: Bool)
+        case fcmToken(token: String, uploadDate: Date)
     }
     
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
@@ -229,14 +256,44 @@ extension NotificationsViewController: NotificationCellDelegate {
                 // Determine which preference to update based on the cell's title
                 if cell.titleLabel.text == "Session Notifications" {
                     preferences?.sessionNotifications = isOn
+                    
+                    // If enabling notifications, ensure we have permissions and FCM token
+                    if isOn {
+                        await handleNotificationEnable()
+                    }
                 } else if cell.titleLabel.text == "Other Notifications" {
                     preferences?.otherNotifications = isOn
+                    
+                    // If enabling notifications, ensure we have permissions and FCM token
+                    if isOn {
+                        await handleNotificationEnable()
+                    }
                 }
                 
                 try await UserService.shared.updateNotificationPreferences(preferences ?? .default)
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to update notification preferences: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    private func handleNotificationEnable() async {
+        do {
+            // Request notification permissions if not already granted
+            await UserService.shared.requestNotificationPermissions()
+            
+            // Get current FCM token and ensure it's saved to the database
+            let fcmToken = try await Messaging.messaging().token()
+            try await UserService.shared.updateFCMToken(fcmToken)
+            Logger.log(level: .info, category: .general, message: "FCM token updated successfully when enabling notifications")
+            
+            // Refresh the UI to show updated FCM tokens
+            await MainActor.run {
+                self.applyInitialSnapshots()
+            }
+            
+        } catch {
+            Logger.log(level: .error, category: .general, message: "Failed to handle notification enable: \(error.localizedDescription)")
         }
     }
 }
@@ -381,6 +438,73 @@ class NotificationFooterView: UICollectionReusableView {
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         settingsAction?()
+    }
+}
+
+// MARK: - FCMTokenCell
+class FCMTokenCell: UICollectionViewListCell {
+    private let tokenLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .label
+        label.numberOfLines = 0
+        return label
+    }()
+    
+    private let dateLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyM
+        label.textColor = .secondaryLabel
+        return label
+    }()
+    
+    private lazy var labelsStackView: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [tokenLabel, dateLabel])
+        stack.axis = .vertical
+        stack.spacing = 4
+        return stack
+    }()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupViews() {
+        contentView.addSubview(labelsStackView)
+        
+        labelsStackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            labelsStackView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            labelsStackView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            labelsStackView.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 8),
+            labelsStackView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -8)
+        ])
+    }
+    
+    func configure(token: String, uploadDate: Date) {
+        // Show first 20 and last 20 characters of token with ellipsis in middle
+        let tokenDisplay: String
+        if token.count > 40 {
+            let start = String(token.prefix(20))
+            let end = String(token.suffix(20))
+            tokenDisplay = "\(start)...\(end)"
+        } else {
+            tokenDisplay = token
+        }
+        
+        tokenLabel.text = tokenDisplay
+        
+        // Format the upload date
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        dateLabel.text = "Uploaded: \(formatter.string(from: uploadDate))"
     }
 }
 

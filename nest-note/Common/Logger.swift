@@ -16,6 +16,7 @@ public protocol LogProvider {
 
 public struct LogLine: CustomStringConvertible {
     let timestamp: String
+    let level: Logger.Level
     let category: String
     let content: String
     
@@ -64,6 +65,7 @@ public final class Logger {
         
         let logLine = LogLine(
             timestamp: dateFormatter.string(from: Date()),
+            level: level,
             category: category?.rawValue ?? "",
             content: message
         )

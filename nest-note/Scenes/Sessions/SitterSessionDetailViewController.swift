@@ -10,6 +10,7 @@ final class SitterSessionDetailViewController: NNViewController {
     private let nestName: String
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
+    private var isLoadingEvents = false
     
     // MARK: - Enums
     enum Section: Int {
@@ -259,7 +260,12 @@ final class SitterSessionDetailViewController: NNViewController {
         
         let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
             if case .events = item {
-                cell.configure(eventCount: self.sessionEvents.count)
+                // If we're still loading events, show loading indicator
+                if self.sessionEvents.isEmpty && self.isLoadingEvents {
+                    cell.showLoading()
+                } else {
+                    cell.configure(eventCount: self.sessionEvents.count)
+                }
             }
         }
         
@@ -436,11 +442,24 @@ final class SitterSessionDetailViewController: NNViewController {
     }
     
     private func fetchSessionEvents() {
+        // Set loading state
+        isLoadingEvents = true
+        
+        // Show loading indicator in the events cell
+        if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
+           let indexPath = dataSource.indexPath(for: eventsItem),
+           let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+            eventsCell.showLoading()
+        }
+        
         Task {
             do {
                 let events = try await SessionService.shared.getSessionEvents(for: session.id, nestID: session.nestID)
                 
                 await MainActor.run {
+                    // Reset loading state
+                    self.isLoadingEvents = false
+                    
                     // Update local events array
                     self.sessionEvents = events
                     
@@ -449,6 +468,18 @@ final class SitterSessionDetailViewController: NNViewController {
                 }
             } catch {
                 Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    // Reset loading state
+                    self.isLoadingEvents = false
+                    
+                    // Configure the events cell to show zero events
+                    if let eventsItem = dataSource.snapshot().itemIdentifiers(inSection: .events).first,
+                       let indexPath = dataSource.indexPath(for: eventsItem),
+                       let eventsCell = collectionView.cellForItem(at: indexPath) as? EventsCell {
+                        eventsCell.configure(eventCount: 0)
+                    }
+                }
             }
         }
     }
@@ -542,8 +573,11 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
-        case .sessionEvent, .events, .moreEvents, .expenses:
+        case .sessionEvent, .expenses:
             return true
+        case .events, .moreEvents:
+            // Don't allow highlighting events if they are currently loading
+            return !isLoadingEvents
         default:
             return false
         }
@@ -559,6 +593,9 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             present(eventVC, animated: true)
             
         case .events, .moreEvents:
+            // Skip handling events if we're still loading them
+            if isLoadingEvents { return }
+            
             // Get the current date range from the date cell
             guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
                   case let .dateSelection(startDate, endDate, _) = dateItem else {
