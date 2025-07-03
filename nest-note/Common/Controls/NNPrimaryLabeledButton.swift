@@ -12,11 +12,20 @@ class NNBaseControl: UIControl {
         case touchDown, touchCancel, touchUp
     }
     
+    // MARK: - Foreground Color
+    var foregroundColor: UIColor = .white {
+        didSet {
+            titleLabel.textColor = foregroundColor
+            imageView.tintColor = foregroundColor
+        }
+    }
+    
     override var isEnabled: Bool {
         didSet {
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.originalBackgroundColor : .systemGray4
-                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
+                self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
+                self.imageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
         }
     }
@@ -31,7 +40,7 @@ class NNBaseControl: UIControl {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
-        label.textColor = .white
+        label.textColor = foregroundColor
         label.font = .h4
         label.isUserInteractionEnabled = false
         return label
@@ -41,7 +50,7 @@ class NNBaseControl: UIControl {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = .white
+        imageView.tintColor = foregroundColor
         imageView.isUserInteractionEnabled = false
         return imageView
     }()
@@ -58,8 +67,9 @@ class NNBaseControl: UIControl {
     private var visualEffectView: UIVisualEffectView?
     
     // MARK: - Initialization
-    init(title: String, image: UIImage? = nil) {
+    init(title: String, image: UIImage? = nil, foregroundColor: UIColor = .white) {
         super.init(frame: .zero)
+        self.foregroundColor = foregroundColor
         setupControl(title: title, image: image)
     }
     
@@ -236,7 +246,8 @@ class NNPrimaryLabeledButton: NNBaseControl {
         didSet {
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? NNColors.primary : .systemGray4
-                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
+                self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
+                self.imageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
         }
     }
@@ -265,7 +276,7 @@ class NNLoadingButton: NNBaseControl {
         didSet {
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.primaryBackgroundColor : .systemGray4
-                self.titleLabel.textColor = self.isEnabled ? .white : .systemGray2
+                self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
         }
     }
@@ -281,6 +292,7 @@ class NNLoadingButton: NNBaseControl {
         super.init(title: title)
         self.primaryBackgroundColor = fillStyle.backgroundColor
         self.titleLabel.textColor = titleColor
+        self.imageView.tintColor = titleColor
         backgroundColor = primaryBackgroundColor
         setupSpinner()
     }

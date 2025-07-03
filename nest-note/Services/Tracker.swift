@@ -41,6 +41,17 @@ class Tracker {
         // MARK: - Profile Related Events
         case nameUpdated = "nameUpdated"
         case modeSwitched = "modeSwitched"
+        
+        // MARK: - Authentication Related Events
+        case appleSignInAttempted = "appleSignInAttempted"
+        case appleSignInSucceeded = "appleSignInSucceeded"
+        case appleSignUpAttempted = "appleSignUpAttempted"
+        case appleSignUpSucceeded = "appleSignUpSucceeded"
+        case regularLoginAttempted = "regularLoginAttempted"
+        case regularLoginSucceeded = "regularLoginSucceeded"
+        case regularSignUpAttempted = "regularSignUpAttempted"
+        case regularSignUpSucceeded = "regularSignUpSucceeded"
+        case userLoggedOut = "userLoggedOut"
     }
     
     // MARK: - User Context Management

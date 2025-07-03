@@ -7,6 +7,7 @@
 
 import UIKit
 import Combine
+import AuthenticationServices
 
 protocol OnboardingCoordinatorDelegate: AnyObject {
     func onboardingDidComplete()
@@ -38,20 +39,13 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }()
     
     private var allSteps: [NNOnboardingViewController] {
-        var currentSteps = steps
-        
-        // Only add nest creation step for parents
-        if userInfo.role == .nestOwner {
-            currentSteps.append(OBCreateNestViewController())
-        }
-        
-        // Always add finish step last
-        currentSteps.append(OBFinishViewController())
-        return currentSteps
+        return steps
     }
     
     // MARK: - User Information
     private var userInfo = UserOnboardingInfo()
+    private var appleCredential: ASAuthorizationAppleIDCredential?
+    private var isStartingWithApple = false
     
     struct UserOnboardingInfo {
         var fullName: String = ""
@@ -60,6 +54,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var role: NestUser.UserType = .nestOwner
         var nestInfo: NestInfo?
         var surveyResponses: [String: [String]] = [:]
+        var isAppleSignIn: Bool = false
         
         struct NestInfo {
             var name: String?
@@ -147,6 +142,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     private func configureInitialStep() {
+        // If we're starting with Apple Sign In, don't configure initial step yet
+        // The Apple credential handler will configure the appropriate step
+        if isStartingWithApple {
+            return
+        }
+        
         guard let initialStep = steps.first else { return }
         currentStepIndex = 0
         configureStep(initialStep)
@@ -240,7 +241,13 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         #endif
 
         // First handle the signup logic
-        let user = try await UserService.shared.signUp(with: userInfo)
+        let user: NestUser
+        if userInfo.isAppleSignIn {
+            // User is already authenticated, just need to complete profile setup
+            user = try await UserService.shared.completeAppleSignUp(with: userInfo)
+        } else {
+            user = try await UserService.shared.signUp(with: userInfo)
+        }
         Logger.log(level: .info, category: .signup, message: "Successfully completed signup for user: \(user.personalInfo.name)")
         
         // Save survey responses
@@ -404,6 +411,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     func validateRole(_ role: NestUser.UserType) {
         roleValidationSubject.send(true)
         updateRole(role)
+        
+        // Add required steps to the flow when role is selected
+        ensureRequiredStepsExist()
+    }
+    
+    private func ensureRequiredStepsExist() {
+        // Add nest creation step for owners if it doesn't exist
+        if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBCreateNestViewController }) {
+            steps.append(OBCreateNestViewController())
+        }
+        
+        // Add finish step if it doesn't exist
+        if !steps.contains(where: { $0 is OBFinishViewController }) {
+            steps.append(OBFinishViewController())
+        }
+        
+        // Update container's step count
+        containerViewController.updateTotalSteps(steps.count)
     }
     
     func validateNest(name: String, address: String) {
@@ -415,6 +440,83 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         
         if isValid {
             userInfo.nestInfo = UserOnboardingInfo.NestInfo(name: trimmedName, address: trimmedAddress)
+        }
+    }
+    
+    // MARK: - Apple Sign In
+    func handleAppleSignIn(credential: ASAuthorizationAppleIDCredential) {
+        // Store the credential for later use
+        self.appleCredential = credential
+        self.isStartingWithApple = true
+        
+        // Extract user info from Apple credential
+        if let email = credential.email {
+            userInfo.email = email
+        }
+        
+        if let fullName = credential.fullName {
+            let nameComponents = [fullName.givenName, fullName.familyName].compactMap { $0 }
+            userInfo.fullName = nameComponents.joined(separator: " ")
+        }
+        
+        // Mark as Apple sign in
+        userInfo.isAppleSignIn = true
+        
+        // Ensure required steps exist for the default role
+        ensureRequiredStepsExist()
+        
+        // Skip to role selection since we have the user's basic info
+        skipToRoleSelection()
+    }
+    
+    func handleAppleSignInMidFlow(credential: ASAuthorizationAppleIDCredential) {
+        // Store the credential for later use
+        self.appleCredential = credential
+        
+        // Extract user info from Apple credential
+        if let email = credential.email {
+            userInfo.email = email
+        }
+        
+        if let fullName = credential.fullName {
+            let nameComponents = [fullName.givenName, fullName.familyName].compactMap { $0 }
+            userInfo.fullName = nameComponents.joined(separator: " ")
+        }
+        
+        // Mark as Apple sign in
+        userInfo.isAppleSignIn = true
+        
+        // Remove password step since we don't need it for Apple users
+        steps.removeAll { $0 is OBPasswordViewController }
+        
+        // Update container's total steps count
+        containerViewController.updateTotalSteps(allSteps.count)
+        
+        // Continue to next step in the flow
+        next()
+    }
+    
+    private func skipToRoleSelection() {
+        // For Apple users, remove the email and password steps from the flow
+        steps.removeAll { $0 is OBEmailViewController || $0 is OBPasswordViewController }
+        
+        // Update container's total steps count
+        containerViewController.updateTotalSteps(allSteps.count)
+        
+        // Find the role selection step
+        guard let roleStep = allSteps.first(where: { $0 is OBRoleViewController }),
+              let roleIndex = allSteps.firstIndex(where: { $0 === roleStep }) else {
+            return
+        }
+        
+        // Clear the navigation stack and set role selection as the root
+        currentStepIndex = roleIndex
+        configureStep(roleStep)
+        
+        // Use a small delay to ensure the container is fully presented
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.navigationController.setViewControllers([roleStep], animated: false)
+            self.containerViewController.updateProgress(step: self.currentStepIndex)
         }
     }
     
@@ -522,26 +624,40 @@ extension OnboardingCoordinator {
     }
     
     private func skipSurveySteps() {
+        Logger.log(level: .info, category: .general, message: "Skipping survey steps for Apple user: \(userInfo.isAppleSignIn), role: \(userInfo.role)")
+        
         // First, remove all survey steps from the current flow
         steps.removeAll { $0 is NNOnboardingSurveyViewController }
-        
-        // Update the container's total steps count based on new allSteps
-        containerViewController.updateTotalSteps(allSteps.count)
         
         // Find the next non-survey step that we should navigate to
         // This should be the first step after the role selection that isn't a survey
         var nextStep: NNOnboardingViewController?
         
-        // Look for the email step (which should be the next step after surveys)
-        nextStep = allSteps.first { $0 is OBEmailViewController }
+        // For Apple Sign In users, email step might not exist, so find the next available step
+        if userInfo.isAppleSignIn {
+            // Look for the next step after role: could be nest creation (if owner) or finish
+            if userInfo.role == .nestOwner {
+                nextStep = steps.first { $0 is OBCreateNestViewController }
+            } else {
+                nextStep = steps.first { $0 is OBFinishViewController }
+            }
+        } else {
+            // For regular users, look for the email step (which should be the next step after surveys)
+            nextStep = steps.first { $0 is OBEmailViewController }
+        }
+        
+        // Update the container's total steps count after potentially modifying steps
+        containerViewController.updateTotalSteps(allSteps.count)
         
         if let targetStep = nextStep {
+            Logger.log(level: .info, category: .general, message: "Found target step: \(type(of: targetStep))")
+            
             // Check if this step is already in the navigation stack
             let isAlreadyInStack = navigationController.viewControllers.contains { $0 === targetStep }
             
             if !isAlreadyInStack {
-                // Find the index of this step in allSteps for progress tracking
-                if let targetIndex = allSteps.firstIndex(where: { $0 === targetStep }) {
+                // Find the index of this step in steps for progress tracking
+                if let targetIndex = steps.firstIndex(where: { $0 === targetStep }) {
                     currentStepIndex = targetIndex
                     configureStep(targetStep)
                     navigationController.pushViewController(targetStep, animated: true)
@@ -554,11 +670,13 @@ extension OnboardingCoordinator {
             } else {
                 // If it's already in the stack, pop back to it
                 navigationController.popToViewController(targetStep, animated: true)
-                if let targetIndex = allSteps.firstIndex(where: { $0 === targetStep }) {
+                if let targetIndex = steps.firstIndex(where: { $0 === targetStep }) {
                     currentStepIndex = targetIndex
                     containerViewController.updateProgress(step: currentStepIndex)
                 }
             }
+        } else {
+            Logger.log(level: .error, category: .general, message: "No target step found for survey skip")
         }
     }
 }
