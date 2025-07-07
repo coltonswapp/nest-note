@@ -8,6 +8,7 @@
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import SafariServices
 
 class SettingsViewController: NNViewController, UICollectionViewDelegate {
     
@@ -544,6 +545,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 present(nav, animated: true)
             case "Reset Setup":
                 showResetSetupConfirmation()
+            case "Terms & Privacy":
+                showPrivacyPolicy()
+            case "Support":
+                showContactPage()
             default:
                 print("Selected General item: \(title)")
             }
@@ -640,6 +645,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
         })
         
         present(alert, animated: true)
+    }
+    
+    private func showPrivacyPolicy() {
+        guard let url = URL(string: "https://www.nestnoteapp.com/privacypolicy") else { return }
+        let safariVC = SFSafariViewController(url: url)
+        present(safariVC, animated: true)
+    }
+    
+    private func showContactPage() {
+        guard let url = URL(string: "https://www.nestnoteapp.com/contact") else { return }
+        let safariVC = SFSafariViewController(url: url)
+        present(safariVC, animated: true)
     }
 
     @objc private func handleUserInformationUpdate() {
