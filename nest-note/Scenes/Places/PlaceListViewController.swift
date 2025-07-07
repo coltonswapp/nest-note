@@ -1,6 +1,8 @@
 import UIKit
 import MapKit
 import Contacts
+import RevenueCat
+import RevenueCatUI
 
 protocol PlaceSelectionDelegate: AnyObject {
     func didSelectPlace(_ place: Place)
@@ -44,12 +46,15 @@ final class PlaceListViewController: NNViewController {
     weak var selectionDelegate: PlaceSelectionDelegate?
     
     private var isSelecting: Bool = false
+    var isReadOnly: Bool = false
+    private var sitterViewService: SitterViewService?
     
     private var emptyStateView: NNEmptyStateView?
     
-    init(isSelecting: Bool = false) {
+    init(isSelecting: Bool = false, sitterViewService: SitterViewService? = nil) {
         super.init(nibName: nil, bundle: nil)
         self.isSelecting = isSelecting
+        self.sitterViewService = sitterViewService
     }
     
     @MainActor required init?(coder: NSCoder) {
@@ -116,14 +121,16 @@ final class PlaceListViewController: NNViewController {
             action: #selector(toggleLayout)
         )
         
-        let addButton = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            style: .plain,
-            target: self,
-            action: #selector(addButtonTapped)
-        )
-        
-        navigationItem.rightBarButtonItem = addButton
+        if !isReadOnly {
+            let addButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: self,
+                action: #selector(addButtonTapped)
+            )
+            
+            navigationItem.rightBarButtonItem = addButton
+        }
         navigationItem.leftBarButtonItem = layoutButton
         navigationController?.navigationBar.tintColor = .label
     }
@@ -246,8 +253,16 @@ final class PlaceListViewController: NNViewController {
         
         Task {
             do {
-                // Fetch all places including temporary ones
-                _ = try await PlacesService.shared.fetchPlaces(includeTemporary: true)
+                // Check if we're in sitter mode and need visibility filtering
+                if let sitterService = sitterViewService {
+                    // Use SitterViewService to get filtered places
+                    let filteredPlaces = try await sitterService.fetchNestPlaces()
+                    // Update PlacesService's local cache with the filtered results
+                    PlacesService.shared.setPlaces(filteredPlaces)
+                } else {
+                    // Owner mode - fetch all places including temporary ones
+                    _ = try await PlacesService.shared.fetchPlaces(includeTemporary: true)
+                }
                 applySnapshot()
             } catch {
                 Logger.log(level: .error, category: .placesService, 
@@ -279,8 +294,23 @@ final class PlaceListViewController: NNViewController {
     
     // MARK: - Actions
     @objc private func addButtonTapped() {
-        let selectPlaceVC = SelectPlaceViewController()
-        navigationController?.pushViewController(selectPlaceVC, animated: true)
+        Task {
+            let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
+            if !hasUnlimitedPlaces {
+                let currentPlaceCount = PlacesService.shared.places.filter { !$0.isTemporary }.count
+                if currentPlaceCount >= 3 {
+                    await MainActor.run {
+                        self.showPlaceLimitAlert()
+                    }
+                    return
+                }
+            }
+            
+            await MainActor.run {
+                let selectPlaceVC = SelectPlaceViewController()
+                self.navigationController?.pushViewController(selectPlaceVC, animated: true)
+            }
+        }
     }
     
     @objc private func toggleLayout() {
@@ -343,6 +373,29 @@ final class PlaceListViewController: NNViewController {
         selectPlaceVC.temporaryPlaceDelegate = self
         navigationController?.pushViewController(selectPlaceVC, animated: true)
     }
+    
+    private func showPlaceLimitAlert() {
+        let alert = UIAlertController(
+            title: ProFeature.unlimitedPlaces.alertTitle,
+            message: ProFeature.unlimitedPlaces.alertMessage,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
+            let paywallViewController = PaywallViewController()
+            self.present(paywallViewController, animated: true)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func flashCell(for place: Place) {
+        guard let indexPath = dataSource?.indexPath(for: place),
+              let cell = collectionView.cellForItem(at: indexPath) as? PlaceCell else { return }
+        
+        cell.flash()
+    }
 }
 
 // MARK: - Section
@@ -365,9 +418,9 @@ extension PlaceListViewController: UICollectionViewDelegate {
             return
         }
         
-        let detailVC = PlaceDetailViewController(place: place, thumbnail: image)
-        detailVC.delegate = self
-        navigationController?.pushViewController(detailVC, animated: true)
+        let detailVC = PlaceDetailViewController(place: place, isReadOnly: isReadOnly)
+        detailVC.placeListDelegate = self
+        present(detailVC, animated: true)
     }
     
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
@@ -380,21 +433,34 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
     func placeListViewController(didUpdatePlace place: Place) {
         print("Attempting to update place: \(place.alias)")
         
-        // Create a fresh snapshot with the latest data
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Place>()
-        snapshot.appendSections([.main])
-        let places = PlacesService.shared.places
-        snapshot.appendItems(places)
-        
-        // Find the updated place in the service's array
-        if let updatedPlace = places.first(where: { $0.id == place.id }) {
-            // Reconfigure just this item
-            snapshot.reconfigureItems([updatedPlace])
+        if navigationController?.viewControllers.count != 1 {
+            navigationController?.popToRootViewController(animated: true)
         }
         
-        dataSource.apply(snapshot, animatingDifferences: false)
-
-        showToast(text: "Place updated", sentiment: .positive)
+        // Check if this is a new place being added or an existing place being updated
+        let isNewPlace = !PlacesService.shared.places.contains { $0.id == place.id }
+        
+        // Create a fresh snapshot with the updated data
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Place>()
+        snapshot.appendSections([.main])
+        
+        // Only show non-temporary places in the list view
+        let placesToShow = PlacesService.shared.places.filter { !$0.isTemporary }
+        snapshot.appendItems(placesToShow)
+        
+        // Apply the snapshot on the main actor
+        Task { @MainActor in
+            await dataSource.apply(snapshot, animatingDifferences: true)
+            updateEmptyState()
+            
+            // Flash the cell after the snapshot is applied
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                self.flashCell(for: place)
+            }
+        }
+        
+        let toastMessage = isNewPlace ? "Place created" : "Place updated"
+        showToast(text: toastMessage, sentiment: .positive)
     }
     
     func placeListViewController(didDeletePlace place: Place) {

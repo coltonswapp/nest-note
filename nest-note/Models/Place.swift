@@ -12,6 +12,7 @@ struct Place: Codable, Identifiable, Hashable {
     let createdAt: Date
     let updatedAt: Date
     var isTemporary: Bool
+    var visibilityLevel: VisibilityLevel
     
     struct ThumbnailURLs: Codable, Hashable {
         let light: String
@@ -20,7 +21,7 @@ struct Place: Codable, Identifiable, Hashable {
     
     // Custom CodingKeys to handle optional properties
     enum CodingKeys: String, CodingKey {
-        case id, nestId, alias, address, coordinate, thumbnailURLs, createdAt, updatedAt, isTemporary
+        case id, nestId, alias, address, coordinate, thumbnailURLs, createdAt, updatedAt, isTemporary, visibilityLevel
     }
     
     init(id: String = UUID().uuidString,
@@ -30,6 +31,7 @@ struct Place: Codable, Identifiable, Hashable {
          coordinate: CLLocationCoordinate2D,
          thumbnailURLs: ThumbnailURLs? = nil,
          isTemporary: Bool = false,
+         visibilityLevel: VisibilityLevel = .standard,
          createdAt: Date = Date(),
          updatedAt: Date = Date()) {
         self.id = id
@@ -39,6 +41,7 @@ struct Place: Codable, Identifiable, Hashable {
         self.coordinate = GeoPoint(latitude: coordinate.latitude, longitude: coordinate.longitude)
         self.thumbnailURLs = thumbnailURLs
         self.isTemporary = isTemporary
+        self.visibilityLevel = visibilityLevel
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -66,15 +69,32 @@ struct Place: Codable, Identifiable, Hashable {
             // If no isTemporary field exists, infer from alias (no alias = temporary)
             isTemporary = alias == nil
         }
+        
+        // For backward compatibility - if visibilityLevel is missing, default to standard
+        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
     }
     
     // MARK: - Hashable
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(alias)
+        hasher.combine(address)
+        hasher.combine(coordinate.latitude)
+        hasher.combine(coordinate.longitude)
+        hasher.combine(thumbnailURLs)
+        hasher.combine(visibilityLevel)
+        hasher.combine(updatedAt)
     }
     
     static func == (lhs: Place, rhs: Place) -> Bool {
-        return lhs.id == rhs.id
+        return lhs.id == rhs.id &&
+               lhs.alias == rhs.alias &&
+               lhs.address == rhs.address &&
+               lhs.coordinate.latitude == rhs.coordinate.latitude &&
+               lhs.coordinate.longitude == rhs.coordinate.longitude &&
+               lhs.thumbnailURLs == rhs.thumbnailURLs &&
+               lhs.visibilityLevel == rhs.visibilityLevel &&
+               lhs.updatedAt == rhs.updatedAt
     }
 }
 
