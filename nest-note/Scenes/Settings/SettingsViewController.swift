@@ -552,10 +552,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             default:
                 print("Selected General item: \(title)")
             }
+        
         #if DEBUG
         case .debugItem(let title, _):
             handleDebugItemSelection(title)
         #endif
+            
+        default:
+            return
         }
         
         // Optionally, deselect the item

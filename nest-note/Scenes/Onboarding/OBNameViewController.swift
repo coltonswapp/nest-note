@@ -399,6 +399,8 @@ final class OBPasswordViewController: NNOnboardingViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         passwordTextField.becomeFirstResponder()
+        passwordTextField.delegate = self
+        confirmPasswordTextField.delegate = self
     }
     
     private func setupActions() {
