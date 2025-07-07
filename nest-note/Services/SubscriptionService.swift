@@ -154,6 +154,7 @@ enum ProFeature {
     case customCategories
     case multiDaySessions
     case sessionEvents
+    case unlimitedPlaces
     
     func isAvailable(for tier: SubscriptionService.SubscriptionTier) -> Bool {
         switch tier {
@@ -174,6 +175,8 @@ enum ProFeature {
             return "Multi-day Sessions"
         case .sessionEvents:
             return "Session Events"
+        case .unlimitedPlaces:
+            return "Unlimited Places"
         }
     }
     
@@ -187,6 +190,8 @@ enum ProFeature {
             return "Schedule overnight stays and extended care sessions"
         case .sessionEvents:
             return "Add detailed scheduling within sessions"
+        case .unlimitedPlaces:
+            return "Add unlimited locations for all your family's needs"
         }
     }
     
@@ -202,6 +207,8 @@ enum ProFeature {
             return "Pro Feature"
         case .sessionEvents:
             return "Pro Feature"
+        case .unlimitedPlaces:
+            return "Place Limit Reached"
         }
     }
     
@@ -215,6 +222,8 @@ enum ProFeature {
             return "Multi-day sessions are a Pro feature. Upgrade to Pro for multi-day sessions and more features."
         case .sessionEvents:
             return "Session events are a Pro feature. Upgrade to Pro for session events and more features."
+        case .unlimitedPlaces:
+            return "You've reached the 3 place limit on the free plan. Upgrade to Pro for unlimited places and more features."
         }
     }
     
@@ -228,6 +237,8 @@ enum ProFeature {
             return "Subscription activated! You can now create multi-day sessions & do so much more!"
         case .sessionEvents:
             return "Subscription activated! You can now create session events & do so much more!"
+        case .unlimitedPlaces:
+            return "Subscription activated! You can now create unlimited places & do so much more!"
         }
     }
 }

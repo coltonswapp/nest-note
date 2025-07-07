@@ -1,20 +1,94 @@
+//
+//  PlaceDetailViewController.swift
+//  nest-note
+//
+//  Created by Colton Swapp on 7/6/25.
+//
+
 import UIKit
 import MapKit
 import Contacts
 
-final class PlaceDetailViewController: NNViewController {
+final class PlaceDetailViewController: NNSheetViewController {
+    
+    weak var placeDelegate: PlaceAddressCellDelegate?
+    weak var placeListDelegate: PlaceListViewControllerDelegate?
     
     // MARK: - Properties
-    private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    private var placemark: CLPlacemark
+    private var placeAlias: String
+    private var thumbnail: UIImage?
+    private var thumbnailAsset: UIImageAsset?
     
-    private var saveButton: NNLoadingButton!
+    let addressLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.numberOfLines = 2
+        label.textAlignment = .left
+        label.textColor = .label
+        label.font = .bodyM
+        label.isUserInteractionEnabled = true
+        return label
+    }()
+    
+    private let mapView: MKMapView = {
+        let mapView = MKMapView()
+        mapView.isUserInteractionEnabled = false
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        mapView.layer.cornerRadius = 18
+        return mapView
+    }()
+    
+    private lazy var saveButton: NNLoadingButton = {
+        let button = NNLoadingButton(
+            title: isEditingPlace ? "Update" : "Create",
+            titleColor: .white,
+            fillStyle: .fill(.systemBlue)
+        )
+        button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
+        return button
+    }()
+    
+    private lazy var visibilityButton: NNSmallPrimaryButton = {
+        let button = NNSmallPrimaryButton(
+            title: "Standard",
+            image: UIImage(systemName: "chevron.up.chevron.down"),
+            imagePlacement: .right,
+            backgroundColor: NNColors.offBlack
+        )
+        button.titleLabel?.font = .h4
+        return button
+    }()
+    
+    private let buttonStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.distribution = .fill
+        stackView.alignment = .fill
+        stackView.spacing = 8
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
+    }()
+    
+    private lazy var infoButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
+        button.setImage(image, for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.showsMenuAsPrimaryAction = true
+        button.menu = createMenu()
+        return button
+    }()
     
     private var existingPlace: Place?
-    private var placemark: CLPlacemark
-    private var alias: String = ""
-    private var thumbnailAsset: UIImageAsset?
-    private var thumbnail: UIImage?
+    private var pendingLocationUpdate: (address: String, coordinate: CLLocationCoordinate2D, thumbnail: UIImage)?
+    private var originalAlias: String?
+    private let isEditingPlace: Bool
+    var isReadOnly: Bool = false
+    private var visibilityLevel: VisibilityLevel
+    private var originalVisibilityLevel: VisibilityLevel?
     
     // Add property to track changes
     private var hasUnsavedChanges: Bool = false {
@@ -23,194 +97,127 @@ final class PlaceDetailViewController: NNViewController {
         }
     }
     
-    private let isEditingPlace: Bool
-    
-    private var originalAlias: String?
-    
-    private var pendingLocationUpdate: (address: String, coordinate: CLLocationCoordinate2D, thumbnail: UIImage)?
-    
-    weak var delegate: PlaceListViewControllerDelegate?
-    
     // MARK: - Initialization
-    init(placemark: CLPlacemark, thumbnail: UIImage) {
+    init(placemark: CLPlacemark, alias: String, thumbnail: UIImage? = nil) {
         self.placemark = placemark
+        self.placeAlias = alias
         self.thumbnail = thumbnail
-        self.thumbnailAsset = thumbnail.imageAsset
+        self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = false
-        super.init(nibName: nil, bundle: nil)
+        self.visibilityLevel = .standard
+        super.init(sourceFrame: nil)
     }
     
-    init(place: Place, thumbnail: UIImage) {
-        self.existingPlace = place
+    init(place: Place, thumbnail: UIImage? = nil, isReadOnly: Bool = false) {
         self.placemark = MKPlacemark(
             coordinate: place.locationCoordinate,
             addressDictionary: [CNPostalAddressStreetKey: place.address]
         )
-        self.alias = place.alias ?? "Temporary Place"
+        self.existingPlace = place
+        self.placeAlias = place.alias ?? "Temporary Place"
         self.thumbnail = thumbnail
-        self.thumbnailAsset = thumbnail.imageAsset
-        
+        self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = true
-        super.init(nibName: nil, bundle: nil)
+        self.isReadOnly = isReadOnly
+        self.visibilityLevel = place.visibilityLevel
+        super.init(sourceFrame: nil)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    override func loadView() {
-        super.loadView()
-    }
-    
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        titleLabel.text = existingPlace == nil ? "New Place" : isReadOnly ? "View Place" : "Edit Place"
         originalAlias = existingPlace?.alias
+        originalVisibilityLevel = existingPlace?.visibilityLevel
         
-    }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.navigationBar.prefersLargeTitles = false
-    }
-    
-    override func setup() {
-        title = "Place Details"
-        configureCollectionView()
-        configureDataSource()
-        applyInitialSnapshots()
-        setupNavigationBarButtons()
-        setupSaveButton()
+        itemsHiddenDuringTransition = [buttonStackView, infoButton]
+        setupContent()
+        setupMapView()
         updateSaveButtonState()
+        
+        placeDelegate = self
+        setupInfoButton()
+        
+        // Add target for titleField changes
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
+        titleField.delegate = self
     }
     
-    // MARK: - Collection View Setup
-    private func configureCollectionView() {
-        let layout = createLayout()
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.delegate = self
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         
-        let insets = UIEdgeInsets(
-            top: 20,
-            left: 0,
-            bottom: 100,
-            right: 0
-        )
+        // Auto-focus titleField for new places
+        if !isEditingPlace {
+            titleField.becomeFirstResponder()
+        }
         
-        collectionView.contentInset = insets
-        collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: insets.bottom - 30, right: 0)
+        if isReadOnly {
+            titleField.isUserInteractionEnabled = false
+            configureReadOnlyMode()
+        } else {
+            setupVisibilityMenu()
+        }
+    }
+    
+    private func setupInfoButton() {
+        infoButton.menu = createMenu()
+    }
+    
+    // MARK: - Setup Methods
+    override func addContentToContainer() {
+        super.addContentToContainer()
         
-        view.addSubview(collectionView)
+        buttonStackView.addArrangedSubview(visibilityButton)
+        if !isReadOnly {
+            buttonStackView.addArrangedSubview(saveButton)
+        }
+        
+        containerView.addSubview(mapView)
+        containerView.addSubview(addressLabel)
+        
+        if !isReadOnly {
+            containerView.addSubview(infoButton)
+        }
+        containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-    }
-    
-    private func createLayout() -> UICollectionViewLayout {
-        let layout = UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
-            var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-            config.footerMode = .supplementary
-            let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-            section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)
-            return section
-        }
-        return layout
-    }
-    
-    // MARK: - Data Source
-    private enum Section {
-        case name
-        case address
-    }
-    
-    enum Item: Hashable {
-        case name(String)
-        case address(String)
-    }
-    
-    private func configureDataSource() {
-        let nameRegistration = UICollectionView.CellRegistration<PlaceNameCell, Item> { [weak self] cell, indexPath, item in
-            if case .name = item {
-                cell.configure(with: item)
-                cell.delegate = self
-            }
-        }
-        
-        let addressRegistration = UICollectionView.CellRegistration<PlaceAddressCell, Item> { [weak self] cell, indexPath, item in
-            if case let .address(address) = item {
-                cell.configure(with: address, thumbnail: self?.thumbnail)
-                cell.delegate = self
-            }
-        }
-        
-        let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
-            elementKind: UICollectionView.elementKindSectionFooter
-        ) { [weak self] supplementaryView, elementKind, indexPath in
-            guard let self = self else { return }
-            var configuration = supplementaryView.defaultContentConfiguration()
             
-            switch self.dataSource.sectionIdentifier(for: indexPath.section) {
-            case .name:
-                configuration.text = "Add a friendly name for your place"
-            case .address:
-                configuration.text = "Tap thumbnail to enlarge"
-            default:
-                break
-            }
+            // Map view constraints
+            mapView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 16),
+            mapView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            mapView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            mapView.heightAnchor.constraint(equalToConstant: 180),
             
-            configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
-            configuration.textProperties.color = .tertiaryLabel
-            configuration.textProperties.alignment = .center
+            // Address label constraints
+            addressLabel.topAnchor.constraint(equalTo: mapView.bottomAnchor, constant: 16),
+            addressLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            addressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
-            supplementaryView.contentConfiguration = configuration
-        }
-        
-        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            switch item {
-            case .name:
-                return collectionView.dequeueConfiguredReusableCell(using: nameRegistration, for: indexPath, item: item)
-            case .address:
-                return collectionView.dequeueConfiguredReusableCell(using: addressRegistration, for: indexPath, item: item)
-            }
-        }
-        
-        dataSource.supplementaryViewProvider = { collectionView, elementKind, indexPath in
-            return collectionView.dequeueConfiguredReusableSupplementary(
-                using: footerRegistration,
-                for: indexPath
-            )
-        }
-    }
-    
-    private func applyInitialSnapshots() {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.name, .address])
-        
-        // Use existing place's alias or empty string for new places
-        snapshot.appendItems([.name(alias)], toSection: .name)
-        snapshot.appendItems([.address(formatAddress(from: placemark))], toSection: .address)
-        dataSource.apply(snapshot, animatingDifferences: false)
-    }
-    
-    // MARK: - Actions
-    private func setupSaveButton() {
-        saveButton = NNLoadingButton(
-            title: existingPlace != nil ? "Update Place" : "Save Place",
-            titleColor: .white,
-            fillStyle: .fill(NNColors.primary)
-        )
-        saveButton.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
-        saveButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        saveButton.isEnabled = !isEditingPlace
+            // Info button constraints (only if not read-only)
+        ] + (isReadOnly ? [] : [
+            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
+            infoButton.widthAnchor.constraint(equalToConstant: 44),
+            infoButton.heightAnchor.constraint(equalToConstant: 44),
+        ]) + [
+            buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.heightAnchor.constraint(equalToConstant: 46),
+            
+            visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6)
+        ] + (isReadOnly ? [] : [
+            saveButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.4)
+        ]))
     }
     
     @objc private func saveButtonTapped() {
-        guard !alias.isEmpty else {
+        guard !placeAlias.isEmpty else {
             // Show error about missing alias
             let alert = UIAlertController(
                 title: "Missing Name",
@@ -229,7 +236,8 @@ final class PlaceDetailViewController: NNViewController {
                 if let existingPlace = existingPlace {
                     // Update existing place
                     var updatedPlace = existingPlace
-                    updatedPlace.alias = alias
+                    updatedPlace.alias = placeAlias
+                    updatedPlace.visibilityLevel = visibilityLevel
                     
                     // Apply pending location update if exists
                     if let locationUpdate = pendingLocationUpdate {
@@ -245,67 +253,148 @@ final class PlaceDetailViewController: NNViewController {
                             thumbnailAsset: thumbnailAsset
                         )
                     } else {
-                        // Just update the alias
+                        // Just update the alias and visibility
                         try await PlacesService.shared.updatePlace(updatedPlace)
                     }
                     
-                    Task {
-                        delegate?.placeListViewController(didUpdatePlace: updatedPlace)
-                        saveButton.stopLoading(withSuccess: true)
-                        try await Task.sleep(nanoseconds: 400_000_000)
+                    await MainActor.run {
+                        self.placeListDelegate?.placeListViewController(didUpdatePlace: updatedPlace)
+                        self.saveButton.stopLoading(withSuccess: true)
                         
-                        await MainActor.run {
-                            navigationController?.popToRootViewController(animated: true)
+                        // Dismiss the sheet after a short delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            self.dismiss(animated: true)
                         }
                     }
                 } else {
                     // Create new place
-                    guard let thumbnail = thumbnail else { return }
-                    
-                    let address = formatAddress(from: placemark)
+                    let address = existingPlace?.address ?? formatAddress(from: placemark)
                     let coordinate = placemark.location?.coordinate ?? CLLocationCoordinate2D()
                     
+                    // Generate thumbnail if not provided
+                    let finalThumbnail: UIImage
+                    if let thumbnail = thumbnail {
+                        finalThumbnail = thumbnail
+                    } else {
+                        // Generate thumbnail from current map view
+                        finalThumbnail = try await generateThumbnail(for: coordinate)
+                    }
+                    
                     let asset = thumbnailAsset ?? {
-                        Logger.log(level: .error, category: .placesService,
-                            message: "No thumbnail asset available, falling back to single image")
                         let asset = UIImageAsset()
-                        asset.register(thumbnail, with: UITraitCollection(userInterfaceStyle: .light))
-                        asset.register(thumbnail, with: UITraitCollection(userInterfaceStyle: .dark))
+                        asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .light))
+                        asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .dark))
                         return asset
                     }()
                     
                     let newPlace = try await PlacesService.shared.createPlace(
-                        alias: alias,
+                        alias: placeAlias,
                         address: address,
                         coordinate: coordinate,
-                        thumbnailAsset: asset
+                        thumbnailAsset: asset,
+                        visibilityLevel: visibilityLevel
                     )
                     
                     await MainActor.run {
                         // Show success feedback
                         HapticsHelper.thwompHaptic()
-                        showToast(text: "Place saved", sentiment: .positive)
+                        self.showToast(text: "Place saved", sentiment: .positive)
+                        self.saveButton.stopLoading(withSuccess: true)
                         
-                        // Pop to root and notify delegate to refresh
-                        if let placeListVC = navigationController?.viewControllers.first as? PlaceListViewController {
-                            placeListVC.placeListViewController(didUpdatePlace: newPlace)
+                        // Notify delegate and dismiss
+                        self.placeListDelegate?.placeListViewController(didUpdatePlace: newPlace)
+                        
+//                        let onComplete: () -> Void = {
+//                            if let presentingViewController = self.presentingViewController as? UINavigationController {
+//                                presentingViewController.popToRootViewController(animated: true)
+//                            }
+//                        }
+                        
+                        // Dismiss the sheet and pop to root after a short delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            self.dismiss(animated: true) {
+//                                onComplete()
+                                //
+                            }
                         }
-                        navigationController?.popToRootViewController(animated: true)
                     }
                 }
             } catch {
-                Logger.log(level: .error, category: .placesService, 
-                    message: "Failed to save place: \(error.localizedDescription)")
-                
                 await MainActor.run {
-                    saveButton.stopLoading()
+                    self.saveButton.stopLoading()
                     HapticsHelper.failureHaptic()
-                    showToast(text: "Failed to save changes", sentiment: .negative)
+                    self.showToast(text: "Failed to save place", sentiment: .negative)
                 }
             }
         }
     }
     
+    private func generateThumbnail(for coordinate: CLLocationCoordinate2D) async throws -> UIImage {
+        return try await withCheckedThrowingContinuation { continuation in
+            MapThumbnailGenerator.shared.generateDynamicThumbnail(
+                for: coordinate,
+                visibleRegion: MKCoordinateRegion(
+                    center: coordinate,
+                    latitudinalMeters: 300,
+                    longitudinalMeters: 300
+                )
+            ) { thumbnail in
+                if let thumbnail = thumbnail {
+                    continuation.resume(returning: thumbnail)
+                } else {
+                    continuation.resume(throwing: NSError(domain: "ThumbnailError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to generate thumbnail"]))
+                }
+            }
+        }
+    }
+    
+    // MARK: - Setup Methods
+    private func setupContent() {
+        titleField.text = placeAlias
+        titleField.isUserInteractionEnabled = !isReadOnly
+        setupAddressLabel()
+        setupAddressTapGesture()
+    }
+    
+    private func setupAddressLabel() {
+        let address = existingPlace?.address ?? formatAddress(from: placemark)
+        let attributedString = NSAttributedString(
+            string: address,
+            attributes: [
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .font: UIFont.bodyL
+            ]
+        )
+        addressLabel.attributedText = attributedString
+    }
+    
+    private func setupAddressTapGesture() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(addressTapped))
+        addressLabel.addGestureRecognizer(tapGesture)
+    }
+    
+    @objc private func addressTapped() {
+        placeDelegate?.placeAddressCellAddressTapped(addressLabel, place: existingPlace)
+    }
+    
+    private func setupMapView() {
+        guard let coordinate = placemark.location?.coordinate else { return }
+        
+        let annotation = MKPointAnnotation()
+        annotation.coordinate = coordinate
+        annotation.title = placeAlias
+        
+        mapView.addAnnotation(annotation)
+        
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 300,
+            longitudinalMeters: 300
+        )
+        mapView.setRegion(region, animated: false)
+    }
+    
+    // MARK: - Helper Methods
     private func formatAddress(from placemark: CLPlacemark) -> String {
         var components: [String] = []
         
@@ -332,64 +421,39 @@ final class PlaceDetailViewController: NNViewController {
         return components.joined(separator: ", ")
     }
     
-    override func setupNavigationBarButtons() {
-        // Only show edit/delete menu if we're editing an existing place
-        if existingPlace != nil {
-            let menuButton = UIBarButtonItem(
-                image: UIImage(systemName: "ellipsis"),
-                menu: createMenu()
-            )
-            navigationItem.rightBarButtonItem = menuButton
-        }
-        
-        navigationController?.navigationBar.tintColor = .label
-    }
-    
     private func createMenu() -> UIMenu {
-        let editAction = UIAction(
-            title: "Edit Location",
-            image: UIImage(systemName: "mappin.and.ellipse")
-        ) { [weak self] _ in
-            guard let self = self,
-                  let place = self.existingPlace else { return }
-            
-            let selectPlaceVC = SelectPlaceViewController(placeToEdit: place)
-            selectPlaceVC.locationDelegate = self
-            self.navigationController?.pushViewController(selectPlaceVC, animated: true)
-        }
+        var actions: [UIAction] = []
         
-        let deleteAction = UIAction(
-            title: "Delete Place",
-            image: UIImage(systemName: "trash"),
-            attributes: .destructive
-        ) { [weak self] _ in
-            self?.handleDelete()
-        }
-        
-        return UIMenu(children: [editAction, deleteAction])
-    }
-    
-    private func updateSaveButtonState() {
-        saveButton.isEnabled = !isEditingPlace || hasUnsavedChanges
-        
-        // Update button title to show state
-        let baseTitle = isEditingPlace ? "Update Place" : "Save Place"
-        saveButton.titleLabel.text = hasUnsavedChanges ? baseTitle : baseTitle
-        
-        // Optionally animate the button if there are changes
-        if hasUnsavedChanges {
-            saveButton.transform = .identity
-            UIView.animate(withDuration: 0.3, delay: 0, options: [.allowUserInteraction]) {
-                self.saveButton.transform = .identity
+        // Only show edit/delete if we have an existing place
+        if existingPlace != nil {
+            let editAction = UIAction(
+                title: "Edit Location",
+                image: UIImage(systemName: "mappin.and.ellipse")
+            ) { [weak self] _ in
+                self?.handleEditLocation()
             }
+            
+            let deleteAction = UIAction(
+                title: "Delete Place",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.handleDelete()
+            }
+            
+            actions = [editAction, deleteAction]
         }
+        
+        return UIMenu(children: actions)
     }
     
-    @objc private func dismissTapped() {
-        closeButtonTapped()
-    }
-    
-    @objc private func actionsButtonTapped() {
+    private func handleEditLocation() {
+        guard let place = existingPlace else { return }
+        
+        let selectPlaceVC = SelectPlaceViewController(placeToEdit: place)
+        selectPlaceVC.locationDelegate = self
+        
+        present(UINavigationController(rootViewController: selectPlaceVC), animated: true)
     }
     
     private func handleDelete() {
@@ -415,41 +479,120 @@ final class PlaceDetailViewController: NNViewController {
                 try await PlacesService.shared.deletePlace(place)
                 
                 await MainActor.run {
-                    delegate?.placeListViewController(didDeletePlace: place)
+                    self.placeListDelegate?.placeListViewController(didDeletePlace: place)
                     // Show success feedback
                     HapticsHelper.thwompHaptic()
-                    showToast(text: "Place deleted", sentiment: .positive)
+                    self.showToast(text: "Place deleted", sentiment: .positive)
                     
-                    // Dismiss or pop based on presentation style
-                    if navigationController?.viewControllers.count ?? 0 <= 1 {
-                        dismiss(animated: true)
-                    } else {
-                        navigationController?.popViewController(animated: true)
-                    }
+                    // Dismiss the sheet
+                    self.dismiss(animated: true)
                 }
             } catch {
                 await MainActor.run {
                     // Show error feedback
                     HapticsHelper.failureHaptic()
-                    showToast(text: "Failed to delete place", sentiment: .negative)
+                    self.showToast(text: "Failed to delete place", sentiment: .negative)
                 }
             }
         }
     }
-}
-
-// MARK: - PlaceNameCellDelegate
-extension PlaceDetailViewController: PlaceNameCellDelegate {
-    func placeNameCell(_ cell: PlaceNameCell, didUpdateAlias alias: String) {
-        self.alias = alias
-        hasUnsavedChanges = alias != originalAlias
+    
+    func showCopyFeedback() {
+        HapticsHelper.lightHaptic()
+        
+        let copiedLabel = UILabel()
+        copiedLabel.text = "Copied!"
+        copiedLabel.textColor = .white
+        copiedLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        copiedLabel.textAlignment = .center
+        copiedLabel.layer.cornerRadius = 10
+        copiedLabel.clipsToBounds = true
+        copiedLabel.alpha = 0
+        
+        view.addSubview(copiedLabel)
+        copiedLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            copiedLabel.centerXAnchor.constraint(equalTo: addressLabel.centerXAnchor),
+            copiedLabel.centerYAnchor.constraint(equalTo: addressLabel.centerYAnchor),
+            copiedLabel.widthAnchor.constraint(equalToConstant: 100),
+            copiedLabel.heightAnchor.constraint(equalToConstant: 40)
+        ])
+        
+        UIView.animate(withDuration: 0.2) {
+            copiedLabel.alpha = 1
+        }
+        
+        UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
+            copiedLabel.alpha = 0
+        }) { _ in
+            copiedLabel.removeFromSuperview()
+        }
+    }
+    
+    // MARK: - Visibility Level Methods
+    private func setupVisibilityMenu() {
+        let infoAction = UIAction(title: "Learn about Levels", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+            self?.showVisibilityLevelInfo()
+        }
+        
+        let visibilityActions = VisibilityLevel.allCases.map { level in
+            UIAction(title: level.title, state: level == self.visibilityLevel ? .on : .off) { [weak self] action in
+                HapticsHelper.lightHaptic()
+                self?.visibilityLevel = level
+                self?.updateVisibilityButton()
+                self?.checkForUnsavedChanges()
+            }
+        }
+        
+        let visibilitySection = UIMenu(title: "Select Visibility", options: .displayInline, children: visibilityActions)
+        let infoSection = UIMenu(title: "What level is right for me?", options: .displayInline, children: [infoAction])
+        
+        visibilityButton.menu = UIMenu(children: [visibilitySection, infoSection])
+        visibilityButton.showsMenuAsPrimaryAction = true
+        
+        updateVisibilityButton()
+    }
+    
+    private func updateVisibilityButton() {
+        var container = AttributeContainer()
+        container.font = .h4
+        visibilityButton.configuration?.attributedTitle = AttributedString(visibilityLevel.title, attributes: container)
+        
+        if let menu = visibilityButton.menu {
+            let updatedActions = menu.children.compactMap { $0 as? UIMenu }.flatMap { $0.children }.map { action in
+                guard let action = action as? UIAction else { return action }
+                if VisibilityLevel.allCases.map({ $0.title }).contains(action.title) {
+                    action.state = action.title == visibilityLevel.title ? .on : .off
+                }
+                return action
+            }
+            
+            visibilityButton.menu = UIMenu(children: [
+                UIMenu(title: "Select Visibility", options: .displayInline, children: updatedActions.filter { VisibilityLevel.allCases.map({ $0.title }).contains($0.title) }),
+                UIMenu(title: "", options: .displayInline, children: updatedActions.filter { $0.title == "Learn about Levels" })
+            ])
+        }
+    }
+    
+    private func showVisibilityLevelInfo() {
+        let viewController = VisibilityLevelInfoViewController()
+        present(viewController, animated: true)
+        HapticsHelper.lightHaptic()
+    }
+    
+    private func configureReadOnlyMode() {
+        // Disable editing
+        titleField.isEnabled = false
+        
+        // Configure visibility button for read-only mode
+        visibilityButton.isEnabled = false
+        updateVisibilityButton()
     }
 }
 
-// MARK: - PlaceAddressCellDelegate
 extension PlaceDetailViewController: PlaceAddressCellDelegate {
     func placeAddressCell(didTapThumbnail viewController: ImageViewerController) {
-        present(viewController, animated: true)
+        //
     }
     
     func placeAddressCellAddressTapped(_ view: UIView, place: Place?) {
@@ -459,23 +602,17 @@ extension PlaceDetailViewController: PlaceAddressCellDelegate {
             coordinate = CLLocationCoordinate2D(latitude: self.existingPlace!.coordinate.latitude, longitude: self.existingPlace!.coordinate.longitude)
         }
         
-        if let view = view as? PlaceAddressCell {
+        if let view = view as? UILabel {
             AddressActionHandler.presentAddressOptions(
                 from: self,
-                sourceView: view.addressLabel,
+                sourceView: addressLabel,
                 address: address,
                 coordinate: coordinate,
                 onCopy: {
-                    view.showCopyFeedback()
+                    self.showCopyFeedback()
                 }
             )
         }
-    }
-}
-
-extension PlaceDetailViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        return false
     }
 }
 
@@ -490,26 +627,72 @@ extension PlaceDetailViewController: SelectPlaceLocationDelegate {
         // Store the pending changes
         pendingLocationUpdate = (newAddress, newCoordinate, newThumbnail)
         
-        self.thumbnail = newThumbnail
-        self.thumbnailAsset = newThumbnail.imageAsset
-        
         // Update UI with new location
         placemark = MKPlacemark(coordinate: newCoordinate)
         
-        // Create a new snapshot instead of reconfiguring
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.name, .address])
+        // Update the address label
+        let attributedString = NSAttributedString(
+            string: newAddress,
+            attributes: [
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .font: UIFont.bodyL
+            ]
+        )
+        addressLabel.attributedText = attributedString
         
-        // Keep the existing name
-        snapshot.appendItems([.name(alias)], toSection: .name)
+        // Update the map - remove old annotations and add new one
+        mapView.removeAnnotations(mapView.annotations)
         
-        // Add the new address
-        snapshot.appendItems([.address(newAddress)], toSection: .address)
+        let annotation = MKPointAnnotation()
+        annotation.coordinate = newCoordinate
+        annotation.title = placeAlias
+        mapView.addAnnotation(annotation)
         
-        // Apply the new snapshot
-        dataSource.apply(snapshot, animatingDifferences: true)
+        let region = MKCoordinateRegion(
+            center: newCoordinate,
+            latitudinalMeters: 300,
+            longitudinalMeters: 300
+        )
+        mapView.setRegion(region, animated: true)
         
-        // Enable save button
+        // Enable save button since location was updated
         hasUnsavedChanges = true
+    }
+}
+
+// MARK: - Private Methods
+private extension PlaceDetailViewController {
+    @objc func titleFieldChanged() {
+        placeAlias = titleField.text ?? ""
+        checkForUnsavedChanges()
+    }
+    
+    func checkForUnsavedChanges() {
+        let aliasChanged = placeAlias != originalAlias
+        let visibilityChanged = originalVisibilityLevel != nil && visibilityLevel != originalVisibilityLevel
+        let locationChanged = pendingLocationUpdate != nil
+        
+        hasUnsavedChanges = aliasChanged || visibilityChanged || locationChanged
+    }
+    
+    func updateSaveButtonState() {
+        if isReadOnly {
+            saveButton.isHidden = true
+            return
+        }
+        
+        let hasChanges = hasUnsavedChanges || !isEditingPlace
+        saveButton.isEnabled = hasChanges
+        
+        // Update button title
+        let baseTitle = isEditingPlace ? "Update" : "Create"
+        saveButton.setTitle(baseTitle)
+    }
+}
+
+extension PlaceDetailViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }

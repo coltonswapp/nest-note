@@ -63,6 +63,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     ]
     
     private let miscItems: [Item] = [
+        Item(title: "Places", icon: "map"),
         Item(title: "Contacts", icon: "person.2.fill"),
         Item(title: "Activity Suggestions", icon: "lightbulb.fill")
     ]
@@ -402,21 +403,31 @@ extension NestViewController: UICollectionViewDelegate {
             present(featurePreviewVC, animated: true)
             
         case .misc:
-            let feature: SurveyService.Feature
             switch categoryItem.title {
-            case "Contacts":
-                feature = .contacts
-            case "Activity Suggestions":
-                feature = .activitySuggestions
+            case "Places":
+                let isReadOnly = !(entryRepository is NestService)
+                let sitterService = entryRepository as? SitterViewService
+                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: sitterService)
+                placesVC.isReadOnly = isReadOnly
+                let nav = UINavigationController(rootViewController: placesVC)
+                present(nav, animated: true)
             default:
-                return
+                let feature: SurveyService.Feature
+                switch categoryItem.title {
+                case "Contacts":
+                    feature = .contacts
+                case "Activity Suggestions":
+                    feature = .activitySuggestions
+                default:
+                    return
+                }
+                
+                let featurePreviewVC = NNFeaturePreviewViewController(
+                    feature: feature
+                )
+                featurePreviewVC.modalPresentationStyle = .formSheet
+                present(featurePreviewVC, animated: true)
             }
-            
-            let featurePreviewVC = NNFeaturePreviewViewController(
-                feature: feature
-            )
-            featurePreviewVC.modalPresentationStyle = .formSheet
-            present(featurePreviewVC, animated: true)
             
         default:
             break

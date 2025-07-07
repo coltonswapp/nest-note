@@ -282,7 +282,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                     ("Permanent Access", "person.badge.key.fill"),
                     ("Saved Sitters", "heart"),
                     ("Sessions", "calendar"),
-                    ("Places", "map"),
                     ("Subscription", "creditcard")
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(nestItems, toSection: .myNest)
@@ -295,7 +294,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                 ("Saved Sitters", "heart"),
                 ("Upcoming Sessions", "calendar"),
                 ("Session History", "clock"),
-                ("Places", "map"),
                 ("Subscription", "creditcard")
             ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
             snapshot.appendItems(defaultItems, toSection: .myNest)
@@ -511,10 +509,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
                         let nav = UINavigationController(rootViewController: sessionsVC)
                         present(nav, animated: true)
                     }
-                case "Places":
-                    let placesVC = PlaceListViewController()
-                    let nav = UINavigationController(rootViewController: placesVC)
-                    present(nav, animated: true)
                 case "Saved Sitters":
                     let sitterListVC = SitterListViewController(displayMode: .default)
                     let nav = UINavigationController(rootViewController: sitterListVC)

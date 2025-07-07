@@ -8,6 +8,8 @@
 import UIKit
 import MapKit
 import CoreLocation
+import RevenueCat
+import RevenueCatUI
 
 protocol SelectPlaceLocationDelegate: AnyObject {
     func didUpdatePlaceLocation(
@@ -430,14 +432,35 @@ class SelectPlaceViewController: NNViewController {
                             newThumbnail: thumbnail
                         )
                         
-                        self.navigationController?.popViewController(animated: true)
+                        self.dismiss(animated: true)
                     } else {
-                        // Create new place
-                        let detailVC = PlaceDetailViewController(
-                            placemark: placemark,
-                            thumbnail: thumbnail
-                        )
-                        self.navigationController?.pushViewController(detailVC, animated: true)
+                        // Check place limit before creating new place
+                        Task {
+                            let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
+                            if !hasUnlimitedPlaces {
+                                let currentPlaceCount = PlacesService.shared.places.filter { !$0.isTemporary }.count
+                                if currentPlaceCount >= 3 {
+                                    await MainActor.run {
+                                        self.showPlaceLimitAlert()
+                                    }
+                                    return
+                                }
+                            }
+                            
+                            await MainActor.run {
+                                // Create new place
+                                let newPlaceVC = PlaceDetailViewController(
+                                    placemark: placemark,
+                                    alias: "",
+                                    thumbnail: thumbnail
+                                )
+                                
+                                let placeListViewController = self.navigationController?.viewControllers.first as? PlaceListViewController
+                                
+                                newPlaceVC.placeListDelegate = placeListViewController
+                                self.present(newPlaceVC, animated: true)
+                            }
+                        }
                     }
                 }
             }
@@ -446,6 +469,22 @@ class SelectPlaceViewController: NNViewController {
     
     @objc private func clearButtonTapped() {
         clearSelection()
+    }
+    
+    private func showPlaceLimitAlert() {
+        let alert = UIAlertController(
+            title: ProFeature.unlimitedPlaces.alertTitle,
+            message: ProFeature.unlimitedPlaces.alertMessage,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
+            let paywallViewController = PaywallViewController()
+            self.present(paywallViewController, animated: true)
+        })
+        
+        present(alert, animated: true)
     }
     
     // Replace tap handler with long press handler

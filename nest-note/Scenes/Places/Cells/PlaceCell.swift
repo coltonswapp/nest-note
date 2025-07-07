@@ -182,13 +182,11 @@ final class PlaceCell: UICollectionViewCell {
     
     // Add a flash method for visual feedback
     func flash() {
-        UIView.animate(withDuration: 0.1, animations: {
-            self.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-            self.contentView.alpha = 0.7
+        UIView.animate(withDuration: 0.3, animations: {
+            self.contentView.backgroundColor = NNColors.primary.withAlphaComponent(0.3)
         }) { _ in
-            UIView.animate(withDuration: 0.1) {
-                self.transform = .identity
-                self.contentView.alpha = 1.0
+            UIView.animate(withDuration: 0.3) {
+                self.contentView.backgroundColor = .systemBackground
             }
         }
     }

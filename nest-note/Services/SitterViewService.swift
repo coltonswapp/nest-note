@@ -41,8 +41,13 @@ final class SitterViewService: EntryRepository {
         currentNest?.address
     }
     
+    var currentSessionVisibilityLevel: VisibilityLevel? {
+        currentSession?.visibilityLevel
+    }
+    
     // MARK: - Nest Entries
     private var cachedEntries: [String: [BaseEntry]]?
+    private var cachedPlaces: [Place]?
     
     /// Fetches entries for the current nest, using cache if available
     func fetchNestEntries() async throws -> [String: [BaseEntry]] {
@@ -80,10 +85,58 @@ final class SitterViewService: EntryRepository {
         cachedEntries = nil
     }
     
+    /// Clears the places cache
+    func clearPlacesCache() {
+        Logger.log(level: .info, category: .sitterViewService, message: "Clearing places cache")
+        cachedPlaces = nil
+    }
+    
     /// Forces a refresh of the entries
     func refreshEntries() async throws -> [String: [BaseEntry]] {
         clearEntriesCache()
         return try await fetchNestEntries()
+    }
+    
+    // MARK: - Places
+    
+    /// Fetches places for the current nest, filtered by visibility level
+    func fetchNestPlaces() async throws -> [Place] {
+        // Return cached places if available
+        if let cachedPlaces = cachedPlaces {
+            Logger.log(level: .info, category: .sitterViewService, message: "Using cached places")
+            return cachedPlaces
+        }
+        
+        // Get the current session and nest from our viewState
+        guard case .ready(let session, let nest) = viewState else {
+            throw SessionError.noCurrentNest
+        }
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetching places for nest: \(nest.id)")
+        
+        // Fetch places from Firestore
+        let placesRef = db.collection("nests").document(nest.id).collection("places")
+        let snapshot = try await placesRef.getDocuments()
+        let allPlaces = try snapshot.documents.map { try $0.data(as: Place.self) }
+        
+        // Filter places based on sitter's visibility level from the session
+        let sitterVisibilityLevel = session.visibilityLevel
+        let filteredPlaces = allPlaces.filter { place in
+            sitterVisibilityLevel.hasAccess(to: place.visibilityLevel)
+        }
+        
+        // Cache the filtered places
+        self.cachedPlaces = filteredPlaces
+        
+        Logger.log(level: .info, category: .sitterViewService, 
+                  message: "Fetched \(allPlaces.count) places, filtered to \(filteredPlaces.count) based on \(sitterVisibilityLevel.title) access level ✅")
+        return filteredPlaces
+    }
+    
+    /// Forces a refresh of the places
+    func refreshPlaces() async throws -> [Place] {
+        clearPlacesCache()
+        return try await fetchNestPlaces()
     }
     
     // MARK: - Initialization
@@ -135,9 +188,10 @@ final class SitterViewService: EntryRepository {
             // Set the categories on the nest
             nest.categories = categories
             
-            // Clear entries cache when switching nests
+            // Clear caches when switching nests
             if currentNest?.id != nest.id {
                 clearEntriesCache()
+                clearPlacesCache()
             }
             
             // Update state with session and nest information first
@@ -163,6 +217,7 @@ final class SitterViewService: EntryRepository {
         Logger.log(level: .info, category: .sitterViewService, message: "Resetting SitterViewService")
         viewState = .loading
         clearEntriesCache()
+        clearPlacesCache()
     }
     
     // MARK: - Session Access

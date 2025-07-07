@@ -30,9 +30,20 @@ final class PlacesService {
     func createPlace(alias: String, 
                     address: String, 
                     coordinate: CLLocationCoordinate2D, 
-                    thumbnailAsset: UIImageAsset) async throws -> Place {
+                    thumbnailAsset: UIImageAsset,
+                    visibilityLevel: VisibilityLevel = .standard) async throws -> Place {
         guard let nestId = NestService.shared.currentNest?.id else {
             throw ServiceError.noCurrentNest
+        }
+        
+        // Check place limit for non-pro users
+        let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
+        if !hasUnlimitedPlaces {
+            let currentPlaceCount = places.filter { !$0.isTemporary }.count
+            if currentPlaceCount >= 3 {
+                Logger.log(level: .info, category: .placesService, message: "Place creation blocked: limit of 3 reached for free user")
+                throw ServiceError.placeLimit
+            }
         }
         
         Logger.log(level: .info, category: .placesService, message: "Creating new place: \(alias)")
@@ -50,7 +61,9 @@ final class PlacesService {
                 alias: alias,
                 address: address,
                 coordinate: coordinate,
-                thumbnailURLs: thumbnailURLs
+                thumbnailURLs: thumbnailURLs,
+                isTemporary: false,
+                visibilityLevel: visibilityLevel
             )
             
             try await savePlaceDocument(place)
@@ -71,7 +84,7 @@ final class PlacesService {
         }
     }
     
-    func fetchPlaces(includeTemporary: Bool = true) async throws -> [Place] {
+    func fetchPlaces(includeTemporary: Bool = true, visibilityFilter: VisibilityLevel? = nil) async throws -> [Place] {
         guard let nestId = selectedNestId else {
             throw ServiceError.noCurrentNest
         }
@@ -86,7 +99,17 @@ final class PlacesService {
         let allPlaces = try snapshot.documents.map { try $0.data(as: Place.self) }
         
         // Filter out temporary places if not requested
-        let filteredPlaces = includeTemporary ? allPlaces : allPlaces.filter { !$0.isTemporary }
+        var filteredPlaces = includeTemporary ? allPlaces : allPlaces.filter { !$0.isTemporary }
+        
+        // Apply visibility filtering if specified
+        if let visibilityLevel = visibilityFilter {
+            filteredPlaces = filteredPlaces.filter { place in
+                visibilityLevel.hasAccess(to: place.visibilityLevel)
+            }
+            Logger.log(level: .info, category: .placesService, 
+                      message: "Applied \(visibilityLevel.title) visibility filter: \(allPlaces.count) -> \(filteredPlaces.count) places")
+        }
+        
         self.places = filteredPlaces
         
         Logger.log(level: .info, category: .placesService, message: "Fetched \(filteredPlaces.count) places ✅ (\(filteredPlaces.filter(\.isTemporary).count) temp places)")
@@ -215,6 +238,12 @@ final class PlacesService {
     
     func clearImageCache() {
         imageAssets.removeAll()
+    }
+    
+    /// Sets the places array directly (used for sitter filtered results)
+    func setPlaces(_ newPlaces: [Place]) {
+        self.places = newPlaces
+        Logger.log(level: .info, category: .placesService, message: "Places array set to \(newPlaces.count) items")
     }
     
     // MARK: - Private Methods
@@ -395,7 +424,8 @@ final class PlacesService {
             address: address,
             coordinate: coordinate,
             thumbnailURLs: nil,
-            isTemporary: true
+            isTemporary: true,
+            visibilityLevel: .standard
         )
         
         Logger.log(level: .info, category: .placesService, message: "In-memory temporary place created ✅")
@@ -438,14 +468,18 @@ extension PlacesService {
                 alias: "Home",
                 address: "123 Main St, Salt Lake City, UT 84111",
                 coordinate: CLLocationCoordinate2D(latitude: 40.7608, longitude: -111.8910),
-                thumbnailURLs: .init(light: "debug_url", dark: "debug_url")
+                thumbnailURLs: .init(light: "debug_url", dark: "debug_url"),
+                isTemporary: false,
+                visibilityLevel: .standard
             ),
             Place(
                 nestId: nestId,
                 alias: "School",
                 address: "456 Education Ave, Salt Lake City, UT 84112",
                 coordinate: CLLocationCoordinate2D(latitude: 40.7645, longitude: -111.8465),
-                thumbnailURLs: .init(light: "debug_url", dark: "debug_url")
+                thumbnailURLs: .init(light: "debug_url", dark: "debug_url"),
+                isTemporary: false,
+                visibilityLevel: .extended
             )
         ]
         

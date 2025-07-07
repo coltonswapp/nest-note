@@ -13,6 +13,7 @@ enum ServiceError: LocalizedError {
     case imageConversionFailed
     case imageUploadFailed
     case invalidOperation(String)
+    case placeLimit
     
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ enum ServiceError: LocalizedError {
             return "Failed to upload image"
         case .invalidOperation:
             return "Invalid operation"
+        case .placeLimit:
+            return "Place limit reached"
         }
     }
     
@@ -69,6 +72,8 @@ enum ServiceError: LocalizedError {
             return "The image upload to storage failed"
         case .invalidOperation:
             return "Try again"
+        case .placeLimit:
+            return "You've reached the maximum number of places for your plan"
         }
     }
     
@@ -98,6 +103,8 @@ enum ServiceError: LocalizedError {
             return "Check your connection and try again"
         case .invalidOperation:
             return "Try again"
+        case .placeLimit:
+            return "Upgrade to Pro for unlimited places"
         }
     }
 } 
