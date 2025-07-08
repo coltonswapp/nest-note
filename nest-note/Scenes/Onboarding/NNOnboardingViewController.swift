@@ -97,7 +97,7 @@ class NNOnboardingViewController: UIViewController {
         NSLayoutConstraint.activate([
             button.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             button.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            button.heightAnchor.constraint(equalToConstant: 56),
+            button.heightAnchor.constraint(equalToConstant: 55),
             buttonBottomConstraint!
         ])
         
@@ -132,7 +132,7 @@ class NNOnboardingViewController: UIViewController {
         let keyboardHeight = keyboardFrame.height
         
         UIView.animate(withDuration: duration) {
-            self.buttonBottomConstraint?.constant = -keyboardHeight
+            self.buttonBottomConstraint?.constant = -keyboardHeight + 24
             self.view.layoutIfNeeded()
         }
     }

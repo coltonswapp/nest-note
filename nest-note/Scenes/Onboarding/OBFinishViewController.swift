@@ -1,3 +1,12 @@
+//
+//  OBFinishViewController.swift
+//  nest-note
+//
+//  Created by Colton Swapp on 7/8/25.
+//
+
+import UIKit
+
 final class OBFinishViewController: NNOnboardingViewController {
     
     private lazy var activityIndicator: NNLoadingSpinner = {
@@ -23,7 +32,7 @@ final class OBFinishViewController: NNOnboardingViewController {
         
         setupOnboarding(
             title: "Finishing up...",
-            subtitle: "Beep boop, crunching bits"
+            subtitle: "Gathering twigs, grass, and leaves for your nest..."
         )
         
         setupContent()

@@ -18,6 +18,7 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
     
     // Store observation tokens
     private var entryObserver: NSObjectProtocol?
+    private var placeObserver: NSObjectProtocol?
     
     private let topImageView: UIImageView = {
         let imageView = UIImageView()
@@ -76,6 +77,9 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
         // Remove observers if they exist
         if let entryObserver = entryObserver {
             NotificationCenter.default.removeObserver(entryObserver)
+        }
+        if let placeObserver = placeObserver {
+            NotificationCenter.default.removeObserver(placeObserver)
         }
         NotificationCenter.default.removeObserver(self)
     }
@@ -172,6 +176,10 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             // Navigate to create an entry
             presentAddFirstEntry()
             
+        case .addFirstPlace:
+            // Navigate to add a place
+            presentAddFirstPlace()
+            
         case .exploreVisibilityLevels:
             // Navigate to explore visibility levels
             presentExploreVisibility()
@@ -219,10 +227,51 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             self?.setupService.markStepComplete(.addFirstEntry)
             self?.delegate?.setupFlowDidUpdateStepStatus()
             
+            // Dismiss the presented NestCategoryViewController
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self?.presentedViewController?.dismiss(animated: true) {
+                    self?.showToast(delay: 0.0, text: "First Entry Added!", subtitle: "Here's to many more! 🥂", sentiment: .positive)                    
+                }
+            }
+            
             // Remove the observer after the step is completed
             if let entryObserver = self?.entryObserver {
                 NotificationCenter.default.removeObserver(entryObserver)
                 self?.entryObserver = nil
+            }
+        }
+    }
+    
+    private func presentAddFirstPlace() {
+        // Create a PlaceListViewController for adding a place
+        let placeListVC = PlaceListViewController()
+        
+        // Wrap in a navigation controller for proper presentation
+        let navController = UINavigationController(rootViewController: placeListVC)
+        
+        // Present the view controller
+        present(navController, animated: true)
+        
+        // Add observer to mark step as complete when a place is saved
+        placeObserver = NotificationCenter.default.addObserver(
+            forName: .placeDidSave,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.setupService.markStepComplete(.addFirstPlace)
+            self?.delegate?.setupFlowDidUpdateStepStatus()
+            
+            // Dismiss the presented PlaceListViewController
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                self?.presentedViewController?.dismiss(animated: true) {
+                    self?.showToast(delay: 0.0, text: "First Place Added!", subtitle: "You can never have too many!", sentiment: .positive)
+                }
+            }
+            
+            // Remove the observer after the step is completed
+            if let placeObserver = self?.placeObserver {
+                NotificationCenter.default.removeObserver(placeObserver)
+                self?.placeObserver = nil
             }
         }
     }
@@ -337,10 +386,12 @@ extension StickyOwnerSetupFlowViewController: UITableViewDelegate, UITableViewDa
         
         content.secondaryText = step.subtitle
         content.secondaryTextProperties.font = .bodyM
+        content.secondaryTextProperties.numberOfLines = 0
+        
         content.secondaryTextProperties.color = .secondaryLabel
         
         // Add some padding
-        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
+        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 8, bottom: 16, trailing: 8)
         cell.contentConfiguration = content
         
         // Always check completion status directly from the service, never rely on cell state
@@ -370,10 +421,6 @@ extension StickyOwnerSetupFlowViewController: UITableViewDelegate, UITableViewDa
         cell.layer.masksToBounds = true
         
         return cell
-    }
-    
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 70
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

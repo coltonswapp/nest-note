@@ -458,9 +458,6 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
                 self.flashCell(for: place)
             }
         }
-        
-        let toastMessage = isNewPlace ? "Place created" : "Place updated"
-        showToast(text: toastMessage, sentiment: .positive)
     }
     
     func placeListViewController(didDeletePlace place: Place) {

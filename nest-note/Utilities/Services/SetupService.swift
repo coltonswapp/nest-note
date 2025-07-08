@@ -6,10 +6,11 @@ enum SetupStepType: Int, CaseIterable {
     case createAccount = 0
     case setupNest = 1
     case addFirstEntry = 2
-    case exploreVisibilityLevels = 3
-    case enableNotifications = 4
-    case feedback = 5
-    case finalStep = 6
+    case addFirstPlace = 3
+    case exploreVisibilityLevels = 4
+    case enableNotifications = 5
+    case feedback = 6
+    case finalStep = 7
     
     var title: String {
         switch self {
@@ -19,6 +20,8 @@ enum SetupStepType: Int, CaseIterable {
             return "Setup your Nest"
         case .addFirstEntry:
             return "Add your first entry"
+        case .addFirstPlace:
+            return "Add your first place"
         case .exploreVisibilityLevels:
             return "Explore Visibility Levels"
         case .enableNotifications:
@@ -35,13 +38,15 @@ enum SetupStepType: Int, CaseIterable {
         case .createAccount:
             return "You already did this one!"
         case .setupNest:
-            return "This one is already complete as well!"
+            return "Add a nest name and address."
         case .addFirstEntry:
-            return "Entries live on your nest"
+            return "Garage codes, wifi passwords, and other general information make great entries. These are what your sitter will see."
+        case .addFirstPlace:
+            return "Places are locations that would be important for sitters to know about. Grandma's house, favorite park, etc."
         case .exploreVisibilityLevels:
-            return "Share as much or as litte..."
+            return "Decide what information you'd like to keep situational."
         case .enableNotifications:
-            return "Stay in the know"
+            return "Stay in the know."
         case .feedback:
             return "We value your opinion!"
         case .finalStep:
@@ -229,6 +234,10 @@ final class SetupService {
             // This would need to be implemented based on your data model
             return checkIfUserHasEntries()
             
+        case .addFirstPlace:
+            // Check if user has at least one place
+            return checkIfUserHasPlaces()
+            
         case .exploreVisibilityLevels:
             // Check if user has explored visibility levels
             // This would need to be implemented based on your app's behavior
@@ -254,6 +263,11 @@ final class SetupService {
         // Placeholder - implement based on your data model
         // Example: return EntryService.shared.entriesCount > 0
         return isStepComplete(.addFirstEntry)
+    }
+    
+    private func checkIfUserHasPlaces() -> Bool {
+        // Check if user has at least one non-temporary place
+        return PlacesService.shared.places.filter { !$0.isTemporary }.count > 0
     }
     
     private func checkIfUserExploredVisibilityLevels() -> Bool {

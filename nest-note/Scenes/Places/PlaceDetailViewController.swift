@@ -298,17 +298,12 @@ final class PlaceDetailViewController: NNSheetViewController {
                     await MainActor.run {
                         // Show success feedback
                         HapticsHelper.thwompHaptic()
-                        self.showToast(text: "Place saved", sentiment: .positive)
                         self.saveButton.stopLoading(withSuccess: true)
                         
                         // Notify delegate and dismiss
                         self.placeListDelegate?.placeListViewController(didUpdatePlace: newPlace)
                         
-//                        let onComplete: () -> Void = {
-//                            if let presentingViewController = self.presentingViewController as? UINavigationController {
-//                                presentingViewController.popToRootViewController(animated: true)
-//                            }
-//                        }
+                        NotificationCenter.default.post(name: .placeDidSave, object: nil)
                         
                         // Dismiss the sheet and pop to root after a short delay
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -474,6 +469,8 @@ final class PlaceDetailViewController: NNSheetViewController {
     private func performDelete() {
         guard let place = existingPlace else { return }
         
+        saveButton.startLoading()
+        
         Task {
             do {
                 try await PlacesService.shared.deletePlace(place)
@@ -491,7 +488,9 @@ final class PlaceDetailViewController: NNSheetViewController {
                 await MainActor.run {
                     // Show error feedback
                     HapticsHelper.failureHaptic()
+                    saveButton.stopLoading(withSuccess: false)
                     self.showToast(text: "Failed to delete place", sentiment: .negative)
+                    
                 }
             }
         }

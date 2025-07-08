@@ -1,22 +1,26 @@
+//
+//  OBEmailViewController.swift
+//  nest-note
+//
+//  Created by Colton Swapp on 7/8/25.
+//
+import UIKit
+import AuthenticationServices
+import CryptoKit
+
 final class OBEmailViewController: NNOnboardingViewController {
     // MARK: - UI Elements
     private let emailTextField: NNTextField = {
         let textField = NNTextField()
         textField.placeholder = "Email"
         textField.keyboardType = .emailAddress
+        textField.autocorrectionType = .no
         textField.autocapitalizationType = .none
+        textField.spellCheckingType = .no
         textField.translatesAutoresizingMaskIntoConstraints = false
+        textField.textContentType = .emailAddress
         return textField
     }()
-    
-//    private let confirmEmailTextField: NNTextField = {
-//        let textField = NNTextField()
-//        textField.placeholder = "Confirm Email"
-//        textField.keyboardType = .emailAddress
-//        textField.autocapitalizationType = .none
-//        textField.translatesAutoresizingMaskIntoConstraints = false
-//        return textField
-//    }()
     
     private lazy var signInWithAppleButton: NNPrimaryLabeledButton = {
         let appleImage = UIImage(systemName: "apple.logo")
@@ -85,7 +89,6 @@ final class OBEmailViewController: NNOnboardingViewController {
         setupValidation()
         
         emailTextField.delegate = self
-//        confirmEmailTextField.delegate = self
         
         signInWithAppleButton.addTarget(self, action: #selector(signInWithAppleTapped), for: .touchUpInside)
         
@@ -102,18 +105,12 @@ final class OBEmailViewController: NNOnboardingViewController {
         
         // Add text change handlers
         emailTextField.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
-//        confirmEmailTextField.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
     }
     
     @objc private func textFieldDidChange() {
         (coordinator as? OnboardingCoordinator)?.validateEmail(
             email: emailTextField.text ?? ""
         )
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        emailTextField.becomeFirstResponder()
     }
     
     override func reset() {

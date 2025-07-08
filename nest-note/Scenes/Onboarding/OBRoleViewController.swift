@@ -1,3 +1,12 @@
+//
+//  OBRoleViewController.swift
+//  nest-note
+//
+//  Created by Colton Swapp on 7/8/25.
+//
+
+import UIKit
+
 final class OBRoleViewController: NNOnboardingViewController {
     
     // MARK: - UI Elements
