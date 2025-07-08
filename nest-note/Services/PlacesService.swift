@@ -76,6 +76,9 @@ final class PlacesService {
             // Log success event
             Tracker.shared.track(.nestPlaceAdded)
             
+            // Post notification for place creation
+            NotificationCenter.default.post(name: .placeDidSave, object: place)
+            
             return place
         } catch {
             // Log failure event

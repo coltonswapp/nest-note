@@ -39,6 +39,14 @@ enum EditUserInfoType: String {
             return NestService.shared.currentNest?.address ?? ""
         }
     }
+    
+    var textContentType: UITextContentType {
+        switch self {
+        case .name: return .name
+        case .nestAddress: return .fullStreetAddress
+        case .nestName: return .familyName
+        }
+    }
 }
 
 class EditUserInfoViewController: NNViewController {
@@ -157,12 +165,14 @@ class EditUserInfoViewController: NNViewController {
         fieldLabel.text = type.rawValue.uppercased()
         textField.placeholder = type.placeholder
         textField.text = type.currentValue
+        textField.textContentType = type.textContentType
         
         // Configure sheet presentation
         if let sheet = sheetPresentationController {
             sheet.detents = [.medium()]
             sheet.prefersGrabberVisible = true
         }
+        
     }
     
     override func addSubviews() {

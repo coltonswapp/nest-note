@@ -28,8 +28,12 @@ final class EntryDetailViewController: NNSheetViewController {
         return textView
     }()
     
-    private lazy var saveButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: entry == nil ? "Save" : "Update")
+    private lazy var saveButton: NNLoadingButton = {
+        let button = NNLoadingButton(
+            title: entry == nil ? "Save" : "Update",
+            titleColor: .white,
+            fillStyle: .fill(NNColors.primary)
+        )
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
     }()
@@ -309,7 +313,13 @@ final class EntryDetailViewController: NNSheetViewController {
             return
         }
         
+        saveButton.startLoading()
+        titleField.isUserInteractionEnabled = false
+        contentTextView.isUserInteractionEnabled = false
+        visibilityButton.isUserInteractionEnabled = false
+        
         Task {
+            
             do {
                 var savedEntry: BaseEntry
                 
@@ -347,6 +357,10 @@ final class EntryDetailViewController: NNSheetViewController {
                 }
             } catch {
                 await MainActor.run {
+                    saveButton.stopLoading(withSuccess: false)
+                    titleField.isUserInteractionEnabled = true
+                    contentTextView.isUserInteractionEnabled = true
+                    visibilityButton.isUserInteractionEnabled = true
                     // Handle errors (entry limit is checked before showing this VC)
                     self.showErrorAlert(message: error.localizedDescription)
                 }

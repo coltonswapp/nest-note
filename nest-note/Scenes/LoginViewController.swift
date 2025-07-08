@@ -43,8 +43,10 @@ final class LoginViewController: NNViewController {
         field.placeholder = "Email"
         field.returnKeyType = .next
         field.keyboardType = .emailAddress
-        field.autocapitalizationType = .none
+        field.textContentType = .emailAddress
         field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.spellCheckingType = .no
         field.delegate = self
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
         return field
@@ -126,6 +128,7 @@ final class LoginViewController: NNViewController {
         let button = UIButton(type: .system)
         button.setTitle("Don't have an account? Sign Up", for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.setTitleColor(NNColors.primary, for: .normal)
         button.addTarget(self, action: #selector(signUpTapped), for: .touchUpInside)
         return button
     }()
@@ -344,12 +347,22 @@ final class LoginViewController: NNViewController {
 // MARK: - UITextFieldDelegate
 extension LoginViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        
+        let text: String = textField.text ?? ""
+        
         switch textField {
         case emailField:
+            if text.isEmpty {
+                textField.resignFirstResponder()
+                return true
+            }
             passwordField.becomeFirstResponder()
         case passwordField:
+            if text.isEmpty {
+                textField.resignFirstResponder()
+                return true
+            }
             textField.resignFirstResponder()
-            guard ((textField.text?.isEmpty) != nil) else { return false }
             loginTapped()
             return true
         default:

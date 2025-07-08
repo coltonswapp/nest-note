@@ -364,16 +364,13 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
     }
     
-    func validateEmail(email: String, confirmEmail: String) {
+    func validateEmail(email: String) {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedConfirmEmail = confirmEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         
         let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
         let emailPredicate = NSPredicate(format:"SELF MATCHES %@", emailRegex)
         
-        let isValid = !trimmedEmail.isEmpty && 
-                     !trimmedConfirmEmail.isEmpty && 
-                     trimmedEmail == trimmedConfirmEmail &&
+        let isValid = !trimmedEmail.isEmpty &&
                      emailPredicate.evaluate(with: trimmedEmail)
         
         emailValidationSubject.send(isValid)
