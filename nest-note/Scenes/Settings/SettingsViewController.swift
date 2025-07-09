@@ -9,6 +9,7 @@ import UIKit
 import RevenueCat
 import RevenueCatUI
 import SafariServices
+import TipKit
 
 class SettingsViewController: NNViewController, UICollectionViewDelegate {
     
@@ -338,6 +339,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             ("Test Visibility Levels", "eye.circle"),
             ("Toast Test", "text.bubble.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
+            ("Reset Tooltips", "questionmark.circle.fill"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -456,6 +458,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
             let vc = CalendarViewController()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
+        case "Reset Tooltips":
+            resetTooltipsDatastore()
         default:
             break
         }
@@ -669,6 +673,31 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     
     @objc private func handleModeChange() {
         applyInitialSnapshots()
+    }
+    
+    private func resetTooltipsDatastore() {
+        let alert = UIAlertController(
+            title: "Reset Tooltips",
+            message: "This will reset all tooltip data and they will show again. Are you sure?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Reset", style: .destructive) { _ in
+            print("🔄 [TipKit Debug] SettingsViewController: User confirmed tooltip reset")
+            NNTipManager.shared.resetAllTips()
+            
+            // Show confirmation
+            let successAlert = UIAlertController(
+                title: "Tooltips Reset",
+                message: "All tooltip data has been reset. Tips will show again when appropriate.",
+                preferredStyle: .alert
+            )
+            successAlert.addAction(UIAlertAction(title: "OK", style: .default))
+            self.present(successAlert, animated: true)
+        })
+        
+        present(alert, animated: true)
     }
     
     deinit {
