@@ -43,7 +43,7 @@ final class LoginViewController: NNViewController {
         field.placeholder = "Email"
         field.returnKeyType = .next
         field.keyboardType = .emailAddress
-        field.textContentType = .emailAddress
+        field.textContentType = .username
         field.autocorrectionType = .no
         field.autocapitalizationType = .none
         field.spellCheckingType = .no
@@ -59,6 +59,7 @@ final class LoginViewController: NNViewController {
         field.isSecureTextEntry = true
         field.isPasswordTextField = true
         field.returnKeyType = .default
+        field.textContentType = .password
         field.delegate = self
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
         return field
@@ -318,6 +319,10 @@ final class LoginViewController: NNViewController {
                 await MainActor.run {
                     loginButton.stopLoading(withSuccess: true)
                     Logger.log(level: .info, category: .general, message: "Successfully signed in")
+                    
+                    // Prompt to save password to iCloud Keychain
+                    self.promptToSavePassword(email: email, password: password)
+                    
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         self.delegate?.authenticationComplete()
                         self.dismiss(animated: true)
@@ -336,6 +341,35 @@ final class LoginViewController: NNViewController {
                         self.present(alert, animated: true)
                     }
                 }
+            }
+        }
+    }
+    
+    private func promptToSavePassword(email: String, password: String) {
+        // Check if password is already saved to avoid duplicate prompts
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassInternetPassword,
+            kSecAttrServer as String: "nestnote.app",
+            kSecAttrAccount as String: email,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnAttributes as String: true
+        ]
+        
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        
+        // If password is not already saved, prompt to save it
+        if status == errSecItemNotFound {
+            let savePasswordQuery: [String: Any] = [
+                kSecClass as String: kSecClassInternetPassword,
+                kSecAttrServer as String: "nestnote.app",
+                kSecAttrAccount as String: email,
+                kSecValueData as String: password.data(using: .utf8)!,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+            
+            let saveStatus = SecItemAdd(savePasswordQuery as CFDictionary, nil)
+            if saveStatus == errSecSuccess {
+                Logger.log(level: .info, category: .general, message: "Password saved to iCloud Keychain")
             }
         }
     }
