@@ -298,6 +298,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             
             let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: menu)
             navigationItem.rightBarButtonItems = [menuButton]
+            navigationController?.navigationBar.tintColor = .label
         }
     }
     

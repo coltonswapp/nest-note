@@ -141,6 +141,7 @@ class SelectPlaceViewController: NNViewController {
     
     // Add properties for temporary place selection
     var isTemporarySelection = false
+    var suggestedPlaceName: String?
     
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -451,7 +452,7 @@ class SelectPlaceViewController: NNViewController {
                                 // Create new place
                                 let newPlaceVC = PlaceDetailViewController(
                                     placemark: placemark,
-                                    alias: "",
+                                    alias: self.suggestedPlaceName ?? "",
                                     thumbnail: thumbnail
                                 )
                                 
