@@ -7,6 +7,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let textField = NNTextField()
         textField.placeholder = "Password"
         textField.isSecureTextEntry = true
+        textField.isPasswordTextField = true
         textField.returnKeyType = .next
         textField.autocorrectionType = .no
         textField.autocapitalizationType = .none
@@ -22,6 +23,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let textField = NNTextField()
         textField.placeholder = "Confirm Password"
         textField.isSecureTextEntry = true
+        textField.isPasswordTextField = true
         textField.returnKeyType = .done
         textField.autocorrectionType = .no
         textField.autocapitalizationType = .none

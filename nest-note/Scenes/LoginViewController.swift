@@ -57,6 +57,7 @@ final class LoginViewController: NNViewController {
         field.borderStyle = .none
         field.placeholder = "Password"
         field.isSecureTextEntry = true
+        field.isPasswordTextField = true
         field.returnKeyType = .default
         field.delegate = self
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
@@ -462,6 +463,28 @@ class NNTextField: UITextField {
     var textInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12) {
         didSet { setNeedsDisplay() }
     }
+    
+    var isPasswordTextField: Bool = false {
+        didSet {
+            if isPasswordTextField {
+                setupPasswordToggle()
+            } else {
+                rightView = nil
+                rightViewMode = .never
+            }
+        }
+    }
+    
+    private lazy var passwordToggleButton: UIButton = {
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(systemName: "eye.slash"), for: .normal)
+        button.setImage(UIImage(systemName: "eye"), for: .selected)
+        button.tintColor = .systemGray2
+        button.addTarget(self, action: #selector(togglePasswordVisibility), for: .touchUpInside)
+        button.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
+        return button
+    }()
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupTextField()
@@ -481,6 +504,29 @@ class NNTextField: UITextField {
         backgroundColor = NNColors.NNSystemBackground6
         layer.cornerRadius = 18
     }
+    
+    private func setupPasswordToggle() {
+        rightView = passwordToggleButton
+        rightViewMode = .always
+        textInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 52)
+    }
+    
+    override func rightViewRect(forBounds bounds: CGRect) -> CGRect {
+        let rightViewRect = super.rightViewRect(forBounds: bounds)
+        return CGRect(
+            x: rightViewRect.origin.x - 12,
+            y: rightViewRect.origin.y,
+            width: rightViewRect.width,
+            height: rightViewRect.height
+        )
+    }
+    
+    @objc private func togglePasswordVisibility() {
+        isSecureTextEntry.toggle()
+        passwordToggleButton.isSelected = !isSecureTextEntry
+        HapticsHelper.lightHaptic()
+    }
+    
     override func textRect(forBounds bounds: CGRect) -> CGRect {
         return bounds.inset(by: textInsets)
     }
