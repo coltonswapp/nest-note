@@ -74,9 +74,6 @@ final class EntryDetailViewController: NNSheetViewController {
     let entry: BaseEntry?
     private let category: String
     
-    // Tip Group
-    private let entryTipGroup = EntryDetailTipGroup()
-    
     // MARK: - Initialization
     init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
@@ -111,8 +108,7 @@ final class EntryDetailViewController: NNSheetViewController {
         contentTextView.text = entry?.content
         contentTextView.delegate = self
         
-        // Add target for title field to mark tip as completed
-        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
+        // Remove automatic tip dismissal - let user dismiss manually
         
         if isReadOnly {
             configureReadOnlyMode()
@@ -126,11 +122,11 @@ final class EntryDetailViewController: NNSheetViewController {
         if entry == nil && !isReadOnly {
             titleField.becomeFirstResponder()
         }
-        
-        // Start observing tips after a delay to allow the view to settle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.startTipObservation()
-        }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        self.trackScreenVisit()
     }
     
     // MARK: - Setup Methods
@@ -187,8 +183,8 @@ final class EntryDetailViewController: NNSheetViewController {
                 
                 // Mark visibility tip as completed when visibility is changed
                 if let self = self,
-                   let visibilityTip = self.entryTipGroup.tips.first(where: { $0 is VisibilityLevelTip }) {
-                    NNTipManager.shared.completeTip(visibilityTip)
+                   let visibilityTip = EntryDetailTips.tipGroup.tips.first(where: { $0.id == "VisibilityLevelTip" }) {
+                    NNTipManager.shared.dismissTip(visibilityTip)
                 }
             }
         }
@@ -227,14 +223,6 @@ final class EntryDetailViewController: NNSheetViewController {
         let menu = UIMenu(title: "", children: menuItems)
         infoButton.menu = menu
         infoButton.showsMenuAsPrimaryAction = true
-        
-        // Mark details tip as completed when info button is tapped
-        infoButton.addAction(UIAction { [weak self] _ in
-            guard let self = self else { return }
-            if let detailsTip = self.entryTipGroup.tips.first(where: { $0 is EntryDetailsTip }) {
-                NNTipManager.shared.completeTip(detailsTip)
-            }
-        }, for: .menuActionTriggered)
     }
     
     private func updateVisibilityButton() {
@@ -330,12 +318,6 @@ final class EntryDetailViewController: NNSheetViewController {
     }
     
     // MARK: - Actions
-    @objc private func titleFieldChanged() {
-        // Mark title/content tip as completed when user starts typing
-        if let titleContentTip = entryTipGroup.tips.first(where: { $0 is EntryTitleContentTip }) {
-            NNTipManager.shared.completeTip(titleContentTip)
-        }
-    }
     
     @objc private func saveButtonTapped() {
         guard let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -403,81 +385,53 @@ final class EntryDetailViewController: NNSheetViewController {
     
     // MARK: - Tooltip Methods
     
-    private func startTipObservation() {
-        // Only show tips for new entries in non-read-only mode
-        guard entry == nil && !isReadOnly else { 
-            print("🔍 [TipKit Debug] EntryDetailViewController: Not starting tip observation - entry: \(entry != nil ? "exists" : "nil"), isReadOnly: \(isReadOnly)")
-            return 
-        }
-        
-        print("🔍 [TipKit Debug] EntryDetailViewController: Starting tip observation")
-        
-        // Configure tip UI mappings
-        let tipConfigurations: [String: (sourceView: UIView, arrowEdge: Edge, offset: CGPoint)] = [
-            "EntryTitleContentTip": (sourceView: titleField, arrowEdge: .top, offset: CGPoint(x: 0, y: 50)),
-            "EntryDetailsTip": (sourceView: infoButton, arrowEdge: .leading, offset: CGPoint(x: 8, y: 0)),
-            "VisibilityLevelTip": (sourceView: visibilityButton, arrowEdge: .bottom, offset: CGPoint(x: 0, y: 8))
-        ]
-        
-        // Debug each tip before starting observation
-        for tip in entryTipGroup.tips {
-            let tipTypeName = String(describing: type(of: tip))
-            NNTipManager.shared.debugTipStatus(tip, name: tipTypeName)
-        }
-        
-        // For development: Force show tips if they're all invalidated
-        #if DEBUG
-        let allTipsInvalidated = entryTipGroup.tips.allSatisfy { tip in
-            if case .invalidated = tip.status { return true }
-            return false
-        }
-        
-        if allTipsInvalidated {
-            print("🔧 [TipKit Debug] All tips are invalidated, using force show for development")
-            // Show tips manually for development
-            showTipsManuallyForDevelopment(tipConfigurations: tipConfigurations)
-            return
-        }
-        #endif
-        
-        // Start tip group observation - TipKit will handle the sequential ordering
-        observeTipGroup(entryTipGroup, tipConfigurations: tipConfigurations, groupId: "entryDetailTips")
-    }
-    
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        
-        // Stop all tip observations when leaving this view
-        stopAllTipObservations()
-    }
-    
-    #if DEBUG
-    // Manual tip showing for development when TipKit status is invalidated
-    private func showTipsManuallyForDevelopment(tipConfigurations: [String: (sourceView: UIView, arrowEdge: Edge, offset: CGPoint)]) {
-        print("🔧 [TipKit Debug] Showing tips manually for development")
-        
-        // Show first tip manually
-        guard let firstTip = entryTipGroup.tips.first,
-              let config = tipConfigurations[String(describing: type(of: firstTip))] else {
-            print("❌ [TipKit Debug] Could not get first tip configuration")
+    override func showTips() {
+        // Show tips in priority order - only show one at a time
+        guard entry == nil && !isReadOnly else {
             return
         }
         
-        let tipView = TipUIView(firstTip, arrowEdge: config.arrowEdge)
-        tipView.translatesAutoresizingMaskIntoConstraints = false
+        // Priority 1: Title/content tip (for new users)
+        let titleTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryTitleContentTip)
+        print("🔍 [DEBUG] Title tip should show: \(titleTipShouldShow)")
+        if titleTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.entryTitleContentTip,
+                sourceView: titleField,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: 0, y: 70)
+            )
+            return // Don't show other tips
+        }
         
-        // Add to view hierarchy
-        view.addSubview(tipView)
+        // Priority 2: Visibility tip (after 5 visits)
+        let visibilityTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.visibilityLevelTip)
+        print("🔍 [DEBUG] Visibility tip should show: \(visibilityTipShouldShow)")
+        if visibilityTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.visibilityLevelTip,
+                sourceView: visibilityButton,
+                in: self,
+                pinToEdge: .top,
+                offset: CGPoint(x: 0, y: 8)
+            )
+            return // Don't show other tips
+        }
         
-        // Set up constraints
-        NNTipManager.shared.setupConstraints(for: tipView, sourceView: config.sourceView, viewController: self, arrowEdge: config.arrowEdge, offset: config.offset)
-        
-        // Animate in
-        NNTipManager.shared.showTipWithAnimation(tipView)
-        
-        print("✅ [TipKit Debug] Manually showed tip for development")
+        // Priority 3: Entry details tip (after 10 visits)
+        let detailsTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryDetailsTip)
+        print("🔍 [DEBUG] Details tip should show: \(detailsTipShouldShow)")
+        if detailsTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.entryDetailsTip,
+                sourceView: infoButton,
+                in: self,
+                pinToEdge: .leading,
+                offset: CGPoint(x: 8, y: 0)
+            )
+        }
     }
-    #endif
     
     // MARK: - Error Handling
     
@@ -496,10 +450,7 @@ final class EntryDetailViewController: NNSheetViewController {
 // MARK: - UITextViewDelegate
 extension EntryDetailViewController: UITextViewDelegate {
     func textViewDidBeginEditing(_ textView: UITextView) {
-        // Mark title/content tip as completed when user starts typing
-        if let titleContentTip = entryTipGroup.tips.first(where: { $0 is EntryTitleContentTip }) {
-            NNTipManager.shared.completeTip(titleContentTip)
-        }
+        //
     }
     
     func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {

@@ -10,7 +10,6 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import RevenueCat
-import TipKit
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
@@ -30,13 +29,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         Purchases.logLevel = .debug
         Purchases.configure(withAPIKey: "appl_YZcLiFmgCpJbtEmWLRyDmuMuZsY")
-        
-        // Configure TipKit
-        #if DEBUG
-        // In debug mode, reset tips datastore for development
-        try? Tips.resetDatastore()
-        #endif
-        NNTipManager.shared.configure()
         
         return true
     }
