@@ -18,6 +18,36 @@
             endingLineNumber = "132"
             landmarkName = "updatePlace(_:thumbnailAsset:)"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "80204C63-120F-4DA3-9FBD-137CB6E6FBE0 - 2e27e7d35968057c"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(1) suspend resume partial function for nest_note.PlacesService.updatePlace(_: nest_note.Place, thumbnailAsset: Swift.Optional&lt;__C.UIImageAsset&gt;) async throws -&gt; ()"
+                  moduleName = "nest-note.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/cswapp/nest-note/nest-note/Services/PlacesService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "132"
+                  endingLineNumber = "132">
+               </Location>
+               <Location
+                  uuid = "80204C63-120F-4DA3-9FBD-137CB6E6FBE0 - c5f9641d420502b8"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(5) suspend resume partial function for nest_note.PlacesService.updatePlace(_: nest_note.Place, thumbnailAsset: Swift.Optional&lt;__C.UIImageAsset&gt;) async throws -&gt; ()"
+                  moduleName = "nest-note.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/cswapp/nest-note/nest-note/Services/PlacesService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "132"
+                  endingLineNumber = "132">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -66,6 +96,22 @@
             endingLineNumber = "430"
             landmarkName = "unknown"
             landmarkType = "0">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "120BC0A2-7AC2-44AB-973F-3DDC52E34AA2"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "nest-note/Scenes/Nest/NestCategoryViewController.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "379"
+            endingLineNumber = "379"
+            landmarkName = "showTips()"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

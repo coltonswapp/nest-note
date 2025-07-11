@@ -28,7 +28,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, BaseEntry>!
-    private var suggestionButton: NNPrimaryLabeledButton!
+    private var addEntryButton: NNPrimaryLabeledButton!
     private var emptyStateView: NNEmptyStateView!
     
     enum Section: Int, CaseIterable {
@@ -62,7 +62,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         setupLoadingIndicator()
         setupRefreshControl()
         setupNavigationBar()
-        setupSuggestionButton()
+        setupAddEntryButton()
         configureDataSource()
         setupEmptyStateView()
         collectionView.delegate = self
@@ -288,11 +288,39 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func setupNavigationBar() {
-        // Only show add button for nest owners
+        // Only show menu button for nest owners
         if entryRepository is NestService {
-            let addEntryButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addButtonTapped))
-            navigationItem.rightBarButtonItems = [addEntryButton]
+            let menu = UIMenu(title: "", children: [
+                UIAction(title: "Entry Suggestions", image: UIImage(systemName: "sparkles")) { _ in
+                    self.showEntrySuggestions()
+                }
+            ])
+            
+            let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: menu)
+            navigationItem.rightBarButtonItems = [menuButton]
         }
+    }
+    
+    
+    private func showEntrySuggestions() {
+        // Dismiss the suggestion tip when user opens suggestions
+        NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
+        
+        // Present CommonEntriesViewController as a sheet with medium and large detents
+        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository, sessionVisibilityLevel: sessionVisibilityLevel)
+        let navController = UINavigationController(rootViewController: commonEntriesVC)
+        
+        // Set this view controller as the delegate
+        commonEntriesVC.delegate = self
+        
+        if let sheet = navController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+            sheet.prefersEdgeAttachedInCompactHeight = true
+        }
+        
+        present(navController, animated: true)
     }
     
     @objc private func addButtonTapped() {
@@ -330,52 +358,34 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         showUpgradePrompt(for: proFeature)
     }
     
-    private func setupSuggestionButton() {
-        // Only show suggestion button for nest owners
+    private func setupAddEntryButton() {
+        // Only show add entry button for nest owners
         guard entryRepository is NestService else { return }
         
-        suggestionButton = NNPrimaryLabeledButton(title: "Looking for suggestions?", image: UIImage(systemName: "sparkles"))
-        suggestionButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        suggestionButton.addTarget(self, action: #selector(suggestionButtonTapped), for: .touchUpInside)
+        addEntryButton = NNPrimaryLabeledButton(title: "New Entry", image: UIImage(systemName: "plus"))
+        addEntryButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        addEntryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
     }
     
     override func showTips() {
-        // Only show suggestion tip for nest owners and if the suggestion button exists
+        // Only show suggestion tip for nest owners and if the menu button exists
         guard entryRepository is NestService, 
-              let suggestionButton = suggestionButton,
+              let menuButton = navigationItem.rightBarButtonItems?.first,
               NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip) else { return }
         
-        // Show the tooltip anchored to the suggestion button
-        // Using .top edge under new semantics (tooltip above button, arrow at bottom pointing down)
-        NNTipManager.shared.showTip(
-            NestCategoryTips.entrySuggestionTip,
-            sourceView: suggestionButton,
-            in: self,
-            pinToEdge: .top,
-            offset: CGPoint(x: 0, y: 8)
-        )
+        // Show the tooltip anchored to the navigation bar menu button
+        // Using .bottom edge to show tooltip below the navigation bar
+        if let buttonView = menuButton.value(forKey: "view") as? UIView {
+            NNTipManager.shared.showTip(
+                NestCategoryTips.entrySuggestionTip,
+                sourceView: buttonView,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: -8, y: 0)
+            )
+        }
     }
     
-    @objc private func suggestionButtonTapped() {
-        // Dismiss the suggestion tip when user taps the button
-        NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
-        
-        // Present CommonEntriesViewController as a sheet with medium and large detents
-        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository, sessionVisibilityLevel: sessionVisibilityLevel)
-        let navController = UINavigationController(rootViewController: commonEntriesVC)
-        
-        // Set this view controller as the delegate
-        commonEntriesVC.delegate = self
-        
-        if let sheet = navController.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-            sheet.prefersEdgeAttachedInCompactHeight = true
-        }
-        
-        present(navController, animated: true)
-    }
     
     private func flashCell(for entry: BaseEntry) {
         guard let indexPath = dataSource?.indexPath(for: entry),

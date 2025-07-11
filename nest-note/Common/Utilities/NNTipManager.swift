@@ -455,9 +455,24 @@ class NNTipManager {
         
         switch arrowEdge {
         case .top, .bottom:
-            // For top/bottom arrows, use 80% screen width and center the tooltip
+            // For top/bottom arrows, use 80% screen width but position to align arrow with source
             let widthConstraint = tipView.widthAnchor.constraint(equalTo: viewController.view.widthAnchor, multiplier: 0.8)
-            let centerXConstraint = tipView.centerXAnchor.constraint(equalTo: viewController.view.centerXAnchor)
+            
+            // Calculate where the source view is horizontally
+            let sourceViewFrame = sourceView.superview?.convert(sourceView.frame, to: viewController.view) ?? CGRect.zero
+            let sourceViewCenterX = sourceViewFrame.midX
+            let viewControllerWidth = viewController.view.bounds.width
+            let tooltipWidth = viewControllerWidth * 0.8
+            
+            // Calculate optimal tooltip center to keep arrow pointing to source
+            let idealTooltipCenterX = sourceViewCenterX
+            let minTooltipCenterX = tooltipWidth / 2 + 8 // 8pt margin
+            let maxTooltipCenterX = viewControllerWidth - tooltipWidth / 2 - 8 // 8pt margin
+            let clampedTooltipCenterX = max(minTooltipCenterX, min(maxTooltipCenterX, idealTooltipCenterX))
+            
+            // Create center constraint with calculated offset
+            let centerXOffset = clampedTooltipCenterX - viewControllerWidth / 2
+            let centerXConstraint = tipView.centerXAnchor.constraint(equalTo: viewController.view.centerXAnchor, constant: centerXOffset)
             
             if arrowEdge == .top {
                 // .top edge = tooltip pinned to top of source = tooltip above source
@@ -481,17 +496,20 @@ class NNTipManager {
                 tipView.centerYAnchor.constraint(equalTo: sourceView.centerYAnchor, constant: offset.y)
             ]
         case .trailing:
+            // For trailing arrows, especially nav bar buttons, use 80% width and position relative to source
+            let widthConstraint = tipView.widthAnchor.constraint(equalTo: viewController.view.widthAnchor, multiplier: 0.8)
             constraints = [
                 tipView.trailingAnchor.constraint(equalTo: sourceView.leadingAnchor, constant: -offset.x),
-                tipView.centerYAnchor.constraint(equalTo: sourceView.centerYAnchor, constant: offset.y)
+                tipView.centerYAnchor.constraint(equalTo: sourceView.centerYAnchor, constant: offset.y),
+                widthConstraint
             ]
         }
         
         // Add boundary constraints (only for leading/trailing arrows since top/bottom have fixed width)
         if arrowEdge == .leading || arrowEdge == .trailing {
             constraints.append(contentsOf: [
-                tipView.leadingAnchor.constraint(greaterThanOrEqualTo: viewController.view.leadingAnchor, constant: 16),
-                tipView.trailingAnchor.constraint(lessThanOrEqualTo: viewController.view.trailingAnchor, constant: -16)
+                tipView.leadingAnchor.constraint(greaterThanOrEqualTo: viewController.view.leadingAnchor, constant: 8),
+                tipView.trailingAnchor.constraint(lessThanOrEqualTo: viewController.view.trailingAnchor, constant: -8)
             ])
         }
         
