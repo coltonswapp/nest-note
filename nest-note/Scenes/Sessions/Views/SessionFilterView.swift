@@ -174,11 +174,13 @@ class SessionFilterView: UIView {
                 backgroundView.layer.borderColor = NNColors.primary.cgColor
                 topButtons.forEach { $0.configuration?.baseForegroundColor = NNColors.primary }
                 topButtons.forEach { $0.isEnabled = true }
+                isUserInteractionEnabled = true
             } else {
                 backgroundView.backgroundColor = UIColor.systemGray5
                 backgroundView.layer.borderColor = UIColor.systemGray4.cgColor
                 topButtons.forEach { $0.configuration?.baseForegroundColor = .tertiaryLabel }
                 topButtons.forEach { $0.isEnabled = false }
+                isUserInteractionEnabled = false
             }
         }
     }
