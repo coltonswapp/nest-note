@@ -18,6 +18,8 @@
   ],
   "settings" : {
     "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
     "_storeKitErrors" : [
       {
         "current" : null,
@@ -68,11 +70,11 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "ADDC0C52",
+      "id" : "D4FCC332",
       "localizations" : [
 
       ],
-      "name" : "nn-pro-monthly",
+      "name" : "nn-pro",
       "subscriptions" : [
         {
           "adHocOffers" : [
@@ -84,7 +86,7 @@
           "displayPrice" : "3.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "F497E26D",
+          "internalID" : "6F9AAEE6",
           "introductoryOffer" : null,
           "localizations" : [
             {
@@ -96,21 +98,12 @@
           "productID" : "com.Swappfunc.nest_note.Monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Monthly",
-          "subscriptionGroupID" : "ADDC0C52",
+          "subscriptionGroupID" : "D4FCC332",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 
           ]
-        }
-      ]
-    },
-    {
-      "id" : "E1510FB9",
-      "localizations" : [
-
-      ],
-      "name" : "nn-pro-annual",
-      "subscriptions" : [
+        },
         {
           "adHocOffers" : [
 
@@ -121,7 +114,7 @@
           "displayPrice" : "14.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "9F757AD0",
+          "internalID" : "31DBA991",
           "introductoryOffer" : null,
           "localizations" : [
             {
@@ -130,10 +123,10 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "com.Swappfunc.nest_note.Annual",
+          "productID" : "yearly",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Annual",
-          "subscriptionGroupID" : "E1510FB9",
+          "referenceName" : "NestNote Premium Yearly",
+          "subscriptionGroupID" : "D4FCC332",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 
