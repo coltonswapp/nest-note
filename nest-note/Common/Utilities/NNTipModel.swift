@@ -78,4 +78,24 @@ enum OwnerHomeTips {
     )
 }
 
+enum PlaceListTips {
+    
+    static let placeSuggestionTip = NNTipModel(
+        id: "PlaceSuggestionTip",
+        title: "Need Inspiration?",
+        message: "Browse our collection of place suggestions.",
+        systemImageName: "sparkles"
+    )
+}
+
+enum PlaceDetailTips {
+    
+    static let editLocationTip = NNTipModel(
+        id: "EditLocationTip",
+        title: "Edit Location",
+        message: "Change the address of a place here.",
+        systemImageName: "mappin.and.ellipse"
+    )
+}
+
 

@@ -126,13 +126,18 @@ class NNTipManager {
     private func setupPredefinedRules() {
         // Add rule to visibilityLevelTip - only show after 3 visits to EntryDetailViewController
         addRule(
-            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 5),
+            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 3),
             for: EntryDetailTips.visibilityLevelTip.id
         )
         
         addRule(
-            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 10),
+            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 6),
             for: EntryDetailTips.entryDetailsTip.id
+        )
+        
+        addRule(
+            VisitCountRule(screenName: "PlaceDetailViewController", minimumVisits: 3),
+            for: PlaceDetailTips.editLocationTip.id
         )
     }
     

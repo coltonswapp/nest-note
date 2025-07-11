@@ -42,7 +42,7 @@ class NNViewController: UIViewController {
     }
     
     override func viewDidAppear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
+        super.viewDidAppear(animated)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.showTips()
         }

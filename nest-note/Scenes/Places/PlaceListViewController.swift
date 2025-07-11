@@ -433,6 +433,24 @@ final class PlaceListViewController: NNViewController {
         
         cell.flash()
     }
+    
+    override func showTips() {
+        if !isReadOnly {
+            guard let menuButton = navigationItem.rightBarButtonItems?.first else { return }
+            
+            if NNTipManager.shared.shouldShowTip(PlaceListTips.placeSuggestionTip) {
+                if let buttonView = menuButton.value(forKey: "view") as? UIView {
+                    NNTipManager.shared.showTip(
+                        PlaceListTips.placeSuggestionTip,
+                        sourceView: buttonView,
+                        in: self,
+                        pinToEdge: .bottom,
+                        offset: CGPoint(x: -8, y: 0)
+                    )
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Section
