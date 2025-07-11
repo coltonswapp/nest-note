@@ -8,8 +8,9 @@
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import TipKit
 
-class NestCategoryViewController: UIViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate {
+class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
     private let entryRepository: EntryRepository
     private let category: String
@@ -338,7 +339,27 @@ class NestCategoryViewController: UIViewController, NestLoadable, CollectionView
         suggestionButton.addTarget(self, action: #selector(suggestionButtonTapped), for: .touchUpInside)
     }
     
+    override func showTips() {
+        // Only show suggestion tip for nest owners and if the suggestion button exists
+        guard entryRepository is NestService, 
+              let suggestionButton = suggestionButton,
+              NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip) else { return }
+        
+        // Show the tooltip anchored to the suggestion button
+        // Using .top edge under new semantics (tooltip above button, arrow at bottom pointing down)
+        NNTipManager.shared.showTip(
+            NestCategoryTips.entrySuggestionTip,
+            sourceView: suggestionButton,
+            in: self,
+            pinToEdge: .top,
+            offset: CGPoint(x: 0, y: 8)
+        )
+    }
+    
     @objc private func suggestionButtonTapped() {
+        // Dismiss the suggestion tip when user taps the button
+        NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
+        
         // Present CommonEntriesViewController as a sheet with medium and large detents
         let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository, sessionVisibilityLevel: sessionVisibilityLevel)
         let navController = UINavigationController(rootViewController: commonEntriesVC)

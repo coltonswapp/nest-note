@@ -1,6 +1,7 @@
 import UIKit
 import Combine
 import FirebaseMessaging
+import TipKit
 
 final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     // MARK: - Properties
@@ -14,6 +15,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     
     // Track whether we've checked if setup should be shown
     private var hasCheckedSetupStatus = false
+    
+    // Track whether we've already shown the setup tip in this session
+    private var hasShownSetupTip = false
     
     private var hasCompletedSetup: Bool {
         return setupService.hasCompletedSetup
@@ -333,6 +337,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         ], toSection: .quickAccess)
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
+        
+        // Show setup tip if setup progress cell is visible
+        if updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.showTips()
+                self.hasShownSetupTip = true
+            }
+        }
     }
     
     func refreshData() {
@@ -394,6 +406,38 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             }
         }
     }
+    
+    // MARK: - Tooltip Methods
+    
+    override func showTips() {
+        // Check if we should show the setup tip
+        guard NNTipManager.shared.shouldShowTip(OwnerHomeTips.finishSetupTip),
+              !hasShownSetupTip else { return }
+        
+        hasShownSetupTip = true
+        
+        // Find the setup progress cell
+        guard let setupSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .setupProgress),
+              let _ = dataSource.snapshot().itemIdentifiers(inSection: .setupProgress).first else {
+            return
+        }
+        
+        let setupIndexPath = IndexPath(item: 0, section: setupSection)
+        
+        // Make sure the cell is visible
+        guard let setupCell = collectionView.cellForItem(at: setupIndexPath) else {
+            return
+        }
+        
+        // Show the tooltip anchored to the bottom of the setup cell
+        NNTipManager.shared.showTip(
+            OwnerHomeTips.finishSetupTip,
+            sourceView: setupCell,
+            in: self,
+            pinToEdge: .bottom,
+            offset: CGPoint(x: 0, y: 8)
+        )
+    }
 }
 
 // MARK: - UICollectionViewDelegate
@@ -418,6 +462,8 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
             vc.modalPresentationStyle = .pageSheet
             present(vc, animated: true)
         case .setupProgress:
+            // Mark the setup tip as dismissed when user taps on it
+            NNTipManager.shared.dismissTip(OwnerHomeTips.finishSetupTip)
             presentSetupFlow()
         default:
             break

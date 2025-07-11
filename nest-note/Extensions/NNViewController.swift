@@ -7,7 +7,7 @@
 import UIKit
 
 class NNViewController: UIViewController {
-    
+
     override func loadView() {
         super.loadView()
         view.backgroundColor = .systemBackground
@@ -41,7 +41,19 @@ class NNViewController: UIViewController {
         // Subclasses can override this if needed
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.showTips()
+        }
+    }
+    
     @objc func closeButtonTapped() {
         self.dismiss(animated: true)
+    }
+    
+    func showTips() {
+        // Default empty implementation
+        // Subclasses can override this if needed
     }
 }

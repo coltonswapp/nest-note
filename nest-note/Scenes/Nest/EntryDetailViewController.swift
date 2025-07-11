@@ -1,6 +1,7 @@
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import TipKit
 
 protocol EntryDetailViewControllerDelegate: AnyObject {
     func entryDetailViewController(didSaveEntry entry: BaseEntry?)
@@ -107,6 +108,8 @@ final class EntryDetailViewController: NNSheetViewController {
         contentTextView.text = entry?.content
         contentTextView.delegate = self
         
+        // Remove automatic tip dismissal - let user dismiss manually
+        
         if isReadOnly {
             configureReadOnlyMode()
         } else {
@@ -119,6 +122,11 @@ final class EntryDetailViewController: NNSheetViewController {
         if entry == nil && !isReadOnly {
             titleField.becomeFirstResponder()
         }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        self.trackScreenVisit()
     }
     
     // MARK: - Setup Methods
@@ -172,6 +180,12 @@ final class EntryDetailViewController: NNSheetViewController {
                 HapticsHelper.lightHaptic()
                 self?.visibilityLevel = level
                 self?.updateVisibilityButton()
+                
+                // Mark visibility tip as completed when visibility is changed
+                if let self = self,
+                   let visibilityTip = EntryDetailTips.tipGroup.tips.first(where: { $0.id == "VisibilityLevelTip" }) {
+                    NNTipManager.shared.dismissTip(visibilityTip)
+                }
             }
         }
         
@@ -304,6 +318,7 @@ final class EntryDetailViewController: NNSheetViewController {
     }
     
     // MARK: - Actions
+    
     @objc private func saveButtonTapped() {
         guard let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty,
@@ -368,6 +383,56 @@ final class EntryDetailViewController: NNSheetViewController {
         }
     }
     
+    // MARK: - Tooltip Methods
+    
+    override func showTips() {
+        // Show tips in priority order - only show one at a time
+        guard entry == nil && !isReadOnly else {
+            return
+        }
+        
+        // Priority 1: Title/content tip (for new users)
+        let titleTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryTitleContentTip)
+        print("🔍 [DEBUG] Title tip should show: \(titleTipShouldShow)")
+        if titleTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.entryTitleContentTip,
+                sourceView: titleField,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: 0, y: 70)
+            )
+            return // Don't show other tips
+        }
+        
+        // Priority 2: Visibility tip (after 5 visits)
+        let visibilityTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.visibilityLevelTip)
+        print("🔍 [DEBUG] Visibility tip should show: \(visibilityTipShouldShow)")
+        if visibilityTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.visibilityLevelTip,
+                sourceView: visibilityButton,
+                in: self,
+                pinToEdge: .top,
+                offset: CGPoint(x: 0, y: 8)
+            )
+            return // Don't show other tips
+        }
+        
+        // Priority 3: Entry details tip (after 10 visits)
+        let detailsTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryDetailsTip)
+        print("🔍 [DEBUG] Details tip should show: \(detailsTipShouldShow)")
+        if detailsTipShouldShow {
+            NNTipManager.shared.showTip(
+                EntryDetailTips.entryDetailsTip,
+                sourceView: infoButton,
+                in: self,
+                pinToEdge: .leading,
+                offset: CGPoint(x: 8, y: 0)
+            )
+        }
+    }
+    
     // MARK: - Error Handling
     
     private func showErrorAlert(message: String) {
@@ -384,6 +449,10 @@ final class EntryDetailViewController: NNSheetViewController {
 
 // MARK: - UITextViewDelegate
 extension EntryDetailViewController: UITextViewDelegate {
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        //
+    }
+    
     func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         if interaction == .preview {
             return true

@@ -21,6 +21,8 @@ class NNColors {
     /// Light is the same as .systemGray6, dark is slightly lighter than .systemGray6
     static let NNSystemBackground6 = UIColor(named: "NNSystemBackground6")!
     
+    static let NNToolTipBackground = UIColor(named: "NNToolTipBackground")!
+    
     // Faux Colors
     static let fauxPlaceholder = UIColor(named: "FauxPlaceholder")!
     static let fauxSystemGrouped = UIColor(named: "FauxSystemGrouped")!
