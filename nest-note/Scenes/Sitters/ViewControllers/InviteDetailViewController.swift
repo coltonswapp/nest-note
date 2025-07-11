@@ -241,8 +241,12 @@ class InviteDetailViewController: NNViewController {
         let url = "nestnote://invite?code=\(code)"
         let message = "You've been invited to a NestNote session!\n\nUse this link to join: \(url)"
         
-        if let encodedMessage = message.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-           let smsURL = URL(string: "sms:&body=\(encodedMessage)") {
+        // Create a custom character set that preserves URL structure but encodes SMS body content
+        var allowedCharacters = CharacterSet.urlQueryAllowed
+        allowedCharacters.insert(charactersIn: ":/")
+        
+        if let encodedMessage = message.addingPercentEncoding(withAllowedCharacters: allowedCharacters),
+           let smsURL = URL(string: "sms:?body=\(encodedMessage)") {
             UIApplication.shared.open(smsURL)
         }
         
