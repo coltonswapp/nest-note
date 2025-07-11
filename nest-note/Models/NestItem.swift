@@ -12,6 +12,7 @@ struct NestItem: Codable {
     var address: String
     var entries: [BaseEntry]?
     var categories: [NestCategory]?
+    var pinnedCategories: [String]?
     
     init(id: String = UUID().uuidString, ownerId: String, name: String, address: String) {
         self.id = id
@@ -20,6 +21,7 @@ struct NestItem: Codable {
         self.address = address
         self.entries = nil
         self.categories = nil
+        self.pinnedCategories = nil
     }
 }
 

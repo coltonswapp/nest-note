@@ -12,6 +12,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     private let sessionService = SessionService.shared
     private let setupService = SetupService.shared
     private var currentSession: SessionItem?
+    private var pinnedCategories: [String] = []
+    private var categories: [NestCategory] = []
     
     // Track whether we've checked if setup should be shown
     private var hasCheckedSetupStatus = false
@@ -220,6 +222,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             cell.layer.masksToBounds = true
         }
         
+        // Pinned category registration
+        let pinnedCategoryCellRegistration = UICollectionView.CellRegistration<QuickAccessCell, HomeItem> { cell, indexPath, item in
+            if case let .pinnedCategory(name, icon) = item {
+                let image = UIImage(systemName: icon)
+                cell.configure(with: name, image: image)
+                cell.imageView.tintColor = .label
+            }
+            
+            cell.backgroundColor = .secondarySystemGroupedBackground
+            cell.layer.cornerRadius = 12
+            cell.layer.masksToBounds = true
+        }
+        
         // Configure data source
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item { 
@@ -232,6 +247,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             case .quickAccess:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: quickAccessCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .pinnedCategory:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: pinnedCategoryCellRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -265,6 +286,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 headerView.configure(title: title)
             case .nest:
                 title = "Your Nest"
+                headerView.configure(title: title)
+            case .quickAccess:
+                title = "Pinned Categories"
                 headerView.configure(title: title)
             case .setupProgress:
                 // No header for setup progress section
@@ -329,12 +353,16 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
             updatedSnapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
         }
         
-        // Quick access section
-        updatedSnapshot.appendSections([.quickAccess])
-        updatedSnapshot.appendItems([
-            .quickAccess(.ownerHousehold),
-            .quickAccess(.ownerEmergency)
-        ], toSection: .quickAccess)
+        // Quick access section - use pinned categories
+        if !pinnedCategories.isEmpty {
+            updatedSnapshot.appendSections([.quickAccess])
+            
+            let pinnedCategoryItems = pinnedCategories.map { categoryName in
+                HomeItem.pinnedCategory(name: categoryName, icon: iconForCategory(categoryName))
+            }
+            
+            updatedSnapshot.appendItems(pinnedCategoryItems, toSection: .quickAccess)
+        }
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
         
@@ -358,11 +386,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         Task {
             do {
                 loadingSpinner.startAnimating()
-                let sessions = try await sessionService.fetchSessions(nestID: nestID)
+                
+                // Fetch sessions, pinned categories, and categories concurrently
+                async let sessionsTask = sessionService.fetchSessions(nestID: nestID)
+                async let pinnedCategoriesTask = nestService.fetchPinnedCategories()
+                async let categoriesTask = nestService.fetchCategories()
+                
+                let (sessions, pinnedCategoryNames, categories) = try await (sessionsTask, pinnedCategoriesTask, categoriesTask)
                 
                 // Update the current session based on freshly fetched data
                 // Only show sessions with inProgress status in the current session section
                 self.currentSession = sessions.inProgress.first
+                self.pinnedCategories = pinnedCategoryNames
+                self.categories = categories
                 
                 DispatchQueue.main.async { [weak self] in
                     self?.loadingSpinner.stopAnimating()
@@ -372,6 +408,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 DispatchQueue.main.async { [weak self] in
                     self?.loadingSpinner.stopAnimating()
                     self?.currentSession = nil // Clear on error
+                    self?.pinnedCategories = []
+                    self?.categories = []
                     self?.applySnapshot(animatingDifferences: true)
                     self?.handleError(error)
                 }
@@ -405,6 +443,21 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
                 applySnapshot(animatingDifferences: true)
             }
         }
+    }
+    
+    private func iconForCategory(_ categoryName: String) -> String {
+        // Handle special case for "Places" which isn't a regular category
+        if categoryName == "Places" {
+            return "map.fill"
+        }
+        
+        // Find the category in our categories array
+        if let category = categories.first(where: { $0.name == categoryName }) {
+            return category.symbolName
+        }
+        
+        // Fallback to folder icon if category not found
+        return "folder.fill"
     }
     
     // MARK: - Tooltip Methods
@@ -456,6 +509,16 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
                 presentCategoryView(category: "Emergency")
             default:
                 break
+            }
+        case .pinnedCategory(let name, _):
+            if name == "Places" {
+                let isReadOnly = false
+                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: nil)
+                placesVC.isReadOnly = isReadOnly
+                let nav = UINavigationController(rootViewController: placesVC)
+                present(nav, animated: true)
+            } else {
+                presentCategoryView(category: name)
             }
         case .currentSession(let session):
             let vc = EditSessionViewController(sessionItem: session)

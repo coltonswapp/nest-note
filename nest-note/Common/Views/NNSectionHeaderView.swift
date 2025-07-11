@@ -13,7 +13,7 @@ class NNSectionHeaderView: UICollectionReusableView {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.font = .captionBold
-        label.textColor = .tertiaryLabel
+        label.textColor = .secondaryLabel
         return label
     }()
     

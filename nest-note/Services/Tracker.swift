@@ -52,6 +52,9 @@ class Tracker {
         case regularSignUpAttempted = "regularSignUpAttempted"
         case regularSignUpSucceeded = "regularSignUpSucceeded"
         case userLoggedOut = "userLoggedOut"
+        
+        // MARK: - Misc
+        case pinnedCategoriesUpdated = "pinnedCategoriesUpdated"
     }
     
     // MARK: - User Context Management

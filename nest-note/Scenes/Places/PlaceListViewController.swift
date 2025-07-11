@@ -153,9 +153,11 @@ final class PlaceListViewController: NNViewController {
         collectionView.delegate = self
         
         // Adjust content inset to prevent button obstruction
-        let bottomInset: CGFloat = view.safeAreaInsets.bottom + 20
-        collectionView.contentInset.bottom = bottomInset
-        collectionView.verticalScrollIndicatorInsets.bottom = bottomInset
+        let buttonHeight: CGFloat = 50
+        let buttonPadding: CGFloat = 10
+        let totalInset = buttonHeight + buttonPadding * 2
+        collectionView.contentInset.bottom = totalInset
+        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
         
         // Register cells
         collectionView.register(PlaceCell.self, forCellWithReuseIdentifier: PlaceCell.reuseIdentifier)

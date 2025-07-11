@@ -51,6 +51,12 @@ class SessionService {
         var past: [SessionItem]
     }
     
+    func reset() async {
+        Logger.log(level: .info, category: .nestService, message: "Resetting SessionService...")
+        sessions = []
+        sitterSessionCollection = nil
+    }
+    
     func sessionExists(sessionId: String) -> Bool {
         return sessions.contains(where: { $0.id == sessionId })
     }
