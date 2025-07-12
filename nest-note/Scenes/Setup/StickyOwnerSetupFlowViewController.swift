@@ -328,15 +328,15 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
     private func requestNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             DispatchQueue.main.async {
+                // Mark step as complete regardless of user's choice
+                self.setupService.markStepComplete(.enableNotifications)
+                self.tableView.reloadData()
+                self.updateFinishButtonState()
+                
+                // Notify delegate
+                self.delegate?.setupFlowDidUpdateStepStatus()
+                
                 if granted {
-                    // Mark step as complete if permissions granted
-                    self.setupService.markStepComplete(.enableNotifications)
-                    self.tableView.reloadData()
-                    self.updateFinishButtonState()
-                    
-                    // Notify delegate
-                    self.delegate?.setupFlowDidUpdateStepStatus()
-                    
                     // Show success message
                     let alert = UIAlertController(
                         title: "Notifications Enabled",
