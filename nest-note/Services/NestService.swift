@@ -65,6 +65,7 @@ final class NestService: EntryRepository {
         currentNest = nil
         isOwner = false
         clearEntriesCache()
+        clearSavedSittersCache()
         PlacesService.shared.selectedNestId = nil
     }
     

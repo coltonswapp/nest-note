@@ -30,13 +30,14 @@ class QuickAccessCell: UICollectionViewCell {
         
         // Configure imageView
         imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = .label
         imageView.widthAnchor.constraint(equalToConstant: 32).isActive = true
         imageView.heightAnchor.constraint(equalToConstant: 32).isActive = true
         
         // Configure label
         label.textAlignment = .center
         label.font = .h5
-        label.textColor = .secondaryLabel
+        label.textColor = .label
         
         // Add views to stackView
         stackView.addArrangedSubview(imageView)

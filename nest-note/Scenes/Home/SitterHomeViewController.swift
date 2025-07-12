@@ -198,7 +198,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 }
                 
                 cell.configure(with: title, image: image)
-                cell.imageView.tintColor = .label
             }
             
             cell.backgroundColor = .secondarySystemGroupedBackground
@@ -211,7 +210,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             if case let .pinnedCategory(name, icon) = item {
                 let image = UIImage(systemName: icon)
                 cell.configure(with: name, image: image)
-                cell.imageView.tintColor = .label
             }
             
             cell.backgroundColor = .secondarySystemGroupedBackground

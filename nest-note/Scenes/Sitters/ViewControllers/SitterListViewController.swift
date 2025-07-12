@@ -259,7 +259,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] (headerView, string, indexPath) in
             guard let section = self?.dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            let title = section == .inviteStatus ? "Selected Sitter" : "Available Sitters"
+            let title = section == .inviteStatus ? "Selected Sitter" : "Saved Sitters"
             headerView.configure(title: title)
         }
         
