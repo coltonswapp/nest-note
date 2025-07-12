@@ -9,6 +9,7 @@ class NNTipView: UIView {
     private var dismissHandler: (() -> Void)?
     private var sourceView: UIView?
     private var arrowXConstraint: NSLayoutConstraint?
+    private var arrowYConstraint: NSLayoutConstraint?
     
     // Public property to access the tip ID
     var tipId: String {
@@ -198,9 +199,10 @@ class NNTipView: UIView {
             
         case .trailing:
             // Arrow points right - square rotated 45 degrees, positioned at trailing edge
+            arrowYConstraint = arrowView.centerYAnchor.constraint(equalTo: centerYAnchor)
             NSLayoutConstraint.activate([
                 arrowView.centerXAnchor.constraint(equalTo: containerView.trailingAnchor),
-                arrowView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                arrowYConstraint!,
                 arrowView.widthAnchor.constraint(equalToConstant: arrowSize),
                 arrowView.heightAnchor.constraint(equalToConstant: arrowSize),
                 
@@ -247,26 +249,44 @@ class NNTipView: UIView {
     // Update arrow position to point to the source view
     func updateArrowPosition() {
         guard let sourceView = sourceView,
-              let arrowXConstraint = arrowXConstraint,
-              let superview = superview,
-              arrowEdge == .top || arrowEdge == .bottom else { return }
+              let superview = superview else { return }
         
-        // Convert source view center to the tooltip's coordinate system
-        let sourceViewCenterInSuperview = sourceView.superview?.convert(sourceView.center, to: superview) ?? CGPoint.zero
+        // Get the source view's frame in the superview's coordinate system
+        let sourceViewFrameInSuperview = sourceView.superview?.convert(sourceView.frame, to: superview) ?? CGRect.zero
+        let sourceViewCenterInSuperview = CGPoint(x: sourceViewFrameInSuperview.midX, y: sourceViewFrameInSuperview.midY)
         
-        // Convert superview coordinate to tooltip's local coordinate system
-        let sourceViewCenterInTooltip = superview.convert(sourceViewCenterInSuperview, to: self)
+        // Get the tooltip's frame in the superview's coordinate system
+        let tooltipFrameInSuperview = frame
         
-        // Calculate offset from tooltip center (which is where the arrow would be by default)
-        let tooltipCenterX = bounds.midX
-        let offset = sourceViewCenterInTooltip.x - tooltipCenterX
-        
-        // Clamp the offset to keep arrow within reasonable bounds of the tooltip
-        let maxOffset = bounds.width * 0.4 // Don't let arrow go beyond 40% of tooltip width
-        let clampedOffset = max(-maxOffset, min(maxOffset, offset))
-        
-        // Update the constraint
-        arrowXConstraint.constant = clampedOffset
+        switch arrowEdge {
+        case .top, .bottom:
+            guard let arrowXConstraint = arrowXConstraint else { return }
+            
+            // Calculate offset from tooltip center to source view center
+            let tooltipCenterX = tooltipFrameInSuperview.midX
+            let offset = sourceViewCenterInSuperview.x - tooltipCenterX
+            
+            // Clamp the offset to keep arrow within reasonable bounds of the tooltip
+            let maxOffset = bounds.width * 0.4 // Don't let arrow go beyond 40% of tooltip width
+            let clampedOffset = max(-maxOffset, min(maxOffset, offset))
+            
+            // Update the constraint
+            arrowXConstraint.constant = clampedOffset
+            
+        case .leading, .trailing:
+            guard let arrowYConstraint = arrowYConstraint else { return }
+            
+            // Calculate offset from tooltip center to source view center
+            let tooltipCenterY = tooltipFrameInSuperview.midY
+            let offset = sourceViewCenterInSuperview.y - tooltipCenterY
+            
+            // Clamp the offset to keep arrow within reasonable bounds of the tooltip
+            let maxOffset = bounds.height * 0.4 // Don't let arrow go beyond 40% of tooltip height
+            let clampedOffset = max(-maxOffset, min(maxOffset, offset))
+            
+            // Update the constraint
+            arrowYConstraint.constant = clampedOffset
+        }
     }
     
     func showWithAnimation() {

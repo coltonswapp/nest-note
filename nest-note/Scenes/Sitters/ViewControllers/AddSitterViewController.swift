@@ -10,89 +10,173 @@ class AddSitterViewController: NNViewController {
     
     weak var delegate: AddSitterViewControllerDelegate?
     
-    private lazy var nameTextField: UITextField = {
-        let textField = UITextField()
-        textField.placeholder = "Sitter's Name"
-        textField.autocapitalizationType = .words
-        textField.returnKeyType = .next
-        textField.delegate = self
-        textField.borderStyle = .roundedRect
-        textField.backgroundColor = .secondarySystemGroupedBackground
-        textField.translatesAutoresizingMaskIntoConstraints = false
-        return textField
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .h2
+        label.textAlignment = .center
+        label.textColor = .label
+        label.text = "Add New Sitter"
+        return label
     }()
     
-    private lazy var emailTextField: UITextField = {
-        let textField = UITextField()
-        textField.placeholder = "Sitter's Email"
-        textField.keyboardType = .emailAddress
-        textField.autocapitalizationType = .none
-        textField.returnKeyType = .done
-        textField.delegate = self
-        textField.borderStyle = .roundedRect
-        textField.backgroundColor = .secondarySystemGroupedBackground
-        textField.translatesAutoresizingMaskIntoConstraints = false
-        return textField
+    private let descriptionLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.bodyL
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.text = "Once you've added a sitter, they can be invited to your sessions."
+        return label
     }()
     
-    private var addButton: NNPrimaryLabeledButton!
+    private let titleStack: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 8
+        return stack
+    }()
+    
+    private let nameFieldLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "NAME"
+        label.font = .bodyM
+        label.textColor = .lightGray
+        return label
+    }()
+    
+    private lazy var nameTextField: NNTextField = {
+        let field = NNTextField(showClearButton: true)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.delegate = self
+        field.placeholder = "Jane Sitter"
+        field.autocapitalizationType = .words
+        field.returnKeyType = .next
+        field.textContentType = .name
+        field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
+        return field
+    }()
+    
+    private let nameFieldStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        return stack
+    }()
+    
+    private let emailFieldLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "EMAIL"
+        label.font = .bodyM
+        label.textColor = .lightGray
+        return label
+    }()
+    
+    private lazy var emailTextField: NNTextField = {
+        let field = NNTextField(showClearButton: true)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.delegate = self
+        field.placeholder = "janesitter@gmail.com"
+        field.keyboardType = .emailAddress
+        field.autocapitalizationType = .none
+        field.returnKeyType = .done
+        field.textContentType = .emailAddress
+        field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
+        return field
+    }()
+    
+    private let emailFieldStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        return stack
+    }()
+    
+    private lazy var addButton: NNLoadingButton = {
+        let button = NNLoadingButton(title: "Add Sitter", titleColor: .white, fillStyle: .fill(NNColors.primaryAlt))
+        button.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+        button.isEnabled = false
+        return button
+    }()
+    
+    private let stackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        navigationController?.isNavigationBarHidden = true
+        setupKeyboardAvoidance()
+    }
+    
+    private func setupKeyboardAvoidance() {
+        let bottomConstraint = addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+        bottomConstraint.isActive = true
         
-        setupAddButton()
-        
-        // Set up text field delegates
-        nameTextField.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
-        emailTextField.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
+        setupKeyboardAvoidance(
+            for: addButton,
+            bottomConstraint: bottomConstraint,
+            defaultBottomSpacing: 16
+        )
+    }
+    
+    deinit {
+        removeKeyboardAvoidance(for: addButton)
     }
     
     override func setup() {
-        title = "Add New Sitter"
-        view.backgroundColor = .systemGroupedBackground
+        
+        if let sheet = sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = true
+        }
     }
     
-    override func setupNavigationBarButtons() {
-        let closeButton = UIBarButtonItem(
-            image: UIImage(systemName: "xmark"),
-            style: .plain,
-            target: self,
-            action: #selector(closeButtonTapped)
-        )
-        closeButton.tintColor = .label
-        navigationItem.rightBarButtonItem = closeButton
-    }
     
     override func addSubviews() {
-        view.addSubview(nameTextField)
-        view.addSubview(emailTextField)
-        
+        view.addSubview(stackView)
+        titleStack.addArrangedSubview(titleLabel)
+        titleStack.addArrangedSubview(descriptionLabel)
+        stackView.addArrangedSubview(titleStack)
+        nameFieldStack.addArrangedSubview(nameFieldLabel)
+        nameFieldStack.addArrangedSubview(nameTextField)
+        stackView.addArrangedSubview(nameFieldStack)
+        emailFieldStack.addArrangedSubview(emailFieldLabel)
+        emailFieldStack.addArrangedSubview(emailTextField)
+        stackView.addArrangedSubview(emailFieldStack)
+        view.addSubview(addButton)
+    }
+    
+    override func constrainSubviews() {
         NSLayoutConstraint.activate([
-            nameTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            nameTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            nameTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            nameTextField.heightAnchor.constraint(equalToConstant: 56),
+            titleStack.leadingAnchor.constraint(equalTo: stackView.leadingAnchor),
+            titleStack.trailingAnchor.constraint(equalTo: stackView.trailingAnchor),
             
-            emailTextField.topAnchor.constraint(equalTo: nameTextField.bottomAnchor, constant: 16),
-            emailTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            emailTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            emailTextField.heightAnchor.constraint(equalToConstant: 56)
+            stackView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            
+            nameTextField.heightAnchor.constraint(equalToConstant: 55),
+            nameTextField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
+            
+            emailTextField.heightAnchor.constraint(equalToConstant: 55),
+            emailTextField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
+            
+            addButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            addButton.heightAnchor.constraint(equalToConstant: 55)
         ])
     }
     
-    private func setupAddButton() {
-        addButton = NNPrimaryLabeledButton(title: "Add Sitter")
-        
-        addButton.isEnabled = false
-        addButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
-        
-        addButton.pinToBottom(
-            of: view,
-            addBlurEffect: true,
-            blurRadius: 16,
-            blurMaskImage: UIImage(named: "testBG3")
-        )
-    }
     
     @objc private func addButtonTapped() {
         guard let name = nameTextField.text?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
@@ -101,42 +185,35 @@ class AddSitterViewController: NNViewController {
             return
         }
         
-        // Create new sitter (email encoding is handled in toSavedSitter())
+        addButton.startLoading()
+        
         let newSitter = SitterItem(
             id: UUID().uuidString,
             name: name,
             email: email
         )
         
-        // Save to Firestore
         Task {
             do {
                 try await NestService.shared.addSavedSitter(newSitter.toSavedSitter())
                 
+                try await Task.sleep(for: .seconds(1))
+                
                 await MainActor.run {
+                    addButton.stopLoading()
+                    showToast(text: "Sitter added successfully")
                     delegate?.addSitterViewController(self, didAddSitter: newSitter)
                 }
             } catch {
                 await MainActor.run {
-                    let alert = UIAlertController(
-                        title: "Error",
-                        message: "Failed to add sitter: \(error.localizedDescription)",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    present(alert, animated: true)
+                    addButton.stopLoading()
+                    showToast(text: "Failed to add sitter: \(error.localizedDescription)")
                 }
             }
         }
     }
     
-    @objc override func closeButtonTapped() {
-        delegate?.addSitterViewControllerDidCancel(self)
-    }
     
-    @objc private func dismissKeyboard() {
-        view.endEditing(true)
-    }
     
     @objc private func textFieldDidChange(_ textField: UITextField) {
         updateAddButtonState()
@@ -148,22 +225,11 @@ class AddSitterViewController: NNViewController {
         
         let isValidEmail = email.contains("@") && email.contains(".")
         addButton.isEnabled = !name.isEmpty && !email.isEmpty && isValidEmail
-        
-        // Debug print
-        print("Updating button state - name: \(name), email: \(email), enabled: \(addButton.isEnabled)")
     }
 }
 
 // MARK: - UITextFieldDelegate
 extension AddSitterViewController: UITextFieldDelegate {
-    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-        // Schedule button state update for next run loop to ensure text is updated
-        DispatchQueue.main.async {
-            self.updateAddButtonState()
-        }
-        return true
-    }
-    
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == nameTextField {
             emailTextField.becomeFirstResponder()

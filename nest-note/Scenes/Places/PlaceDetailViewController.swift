@@ -162,6 +162,8 @@ final class PlaceDetailViewController: NNSheetViewController {
         } else {
             setupVisibilityMenu()
         }
+        
+        self.trackScreenVisit()
     }
     
     private func setupInfoButton() {
@@ -586,6 +588,20 @@ final class PlaceDetailViewController: NNSheetViewController {
         // Configure visibility button for read-only mode
         visibilityButton.isEnabled = false
         updateVisibilityButton()
+    }
+    
+    override func showTips() {
+        guard existingPlace != nil && !isReadOnly else { return }
+        
+        if NNTipManager.shared.shouldShowTip(PlaceDetailTips.editLocationTip) {
+            NNTipManager.shared.showTip(
+                PlaceDetailTips.editLocationTip,
+                sourceView: infoButton,
+                in: self,
+                pinToEdge: .leading,
+                offset: CGPoint(x: 8, y: 0)
+            )
+        }
     }
 }
 

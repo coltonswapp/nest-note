@@ -49,6 +49,9 @@ final class LaunchCoordinator {
     @objc private func handleAppReset() {
         guard let navigationController = self.navigationController else { return }
         
+        // Clear user type since we're resetting
+        self.userType = nil
+        
         // Set loading placeholder before showing auth flow
         UIView.transition(with: navigationController.view,
                          duration: 0.3,

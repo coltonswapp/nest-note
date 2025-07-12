@@ -63,7 +63,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     ]
     
     private let miscItems: [Item] = [
-        Item(title: "Places", icon: "map"),
+        Item(title: "Places", icon: "map.fill"),
         Item(title: "Contacts", icon: "person.2.fill"),
         Item(title: "Activity Suggestions", icon: "lightbulb.fill")
     ]
@@ -281,6 +281,32 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func setupNavigationBar() {
+        // Only show menu for nest owners
+        guard entryRepository is NestService else { return }
+        
+        let pinnedCategoriesAction = UIAction(
+            title: "Pinned Categories",
+            image: UIImage(systemName: "rectangle.grid.2x2.fill")
+        ) { [weak self] _ in
+            self?.presentPinnedCategories()
+        }
+        
+        let menu = UIMenu(title: "", children: [pinnedCategoriesAction])
+        
+        let menuButton = UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis"),
+            style: .plain,
+            target: nil,
+            action: nil
+        )
+        menuButton.menu = menu
+        
+        navigationItem.rightBarButtonItem = menuButton
+    }
+    
+    private func presentPinnedCategories() {
+        let pinnedCategoriesVC = PinnedCategoriesViewController(entryRepository: entryRepository)
+        present(UINavigationController(rootViewController: pinnedCategoriesVC), animated: true)
     }
     
     @objc private func addButtonTapped() {
@@ -343,6 +369,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func loadEntries() async {
         loadingIndicator.startAnimating()
+        navigationItem.rightBarButtonItem?.isEnabled = false
         
         do {
             Logger.log(level: .info, category: .general, message: "Starting to load entries and categories")
@@ -361,6 +388,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 self.hasLoadedInitialData = true
                 self.handleLoadedEntries(groupedEntries)
                 self.loadingIndicator.stopAnimating()
+                navigationItem.rightBarButtonItem?.isEnabled = true
             }
         } catch {
             Logger.log(level: .error, category: .general, message: "Failed to load entries and categories: \(error)")

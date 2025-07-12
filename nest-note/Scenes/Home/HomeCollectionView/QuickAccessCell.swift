@@ -30,12 +30,13 @@ class QuickAccessCell: UICollectionViewCell {
         
         // Configure imageView
         imageView.contentMode = .scaleAspectFit
-        imageView.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        imageView.heightAnchor.constraint(equalToConstant: 60).isActive = true
+        imageView.tintColor = .label
+        imageView.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 32).isActive = true
         
         // Configure label
         label.textAlignment = .center
-        label.font = .h4
+        label.font = .h5
         label.textColor = .label
         
         // Add views to stackView
@@ -49,7 +50,7 @@ class QuickAccessCell: UICollectionViewCell {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            stackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: 6),
+            stackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: 2),
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 8),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -8),
             stackView.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 8),

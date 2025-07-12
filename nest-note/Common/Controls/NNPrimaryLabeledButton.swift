@@ -22,6 +22,7 @@ class NNBaseControl: UIControl {
     
     override var isEnabled: Bool {
         didSet {
+            guard oldValue != isEnabled else { return }
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.originalBackgroundColor : .systemGray4
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
@@ -244,6 +245,7 @@ class NNPrimaryLabeledButton: NNBaseControl {
     
     override var isEnabled: Bool {
         didSet {
+            guard oldValue != isEnabled else { return }
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? NNColors.primary : .systemGray4
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
@@ -274,6 +276,7 @@ class NNLoadingButton: NNBaseControl {
     
     override var isEnabled: Bool {
         didSet {
+            guard oldValue != isEnabled else { return }
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.primaryBackgroundColor : .systemGray4
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
@@ -662,6 +665,7 @@ class NNSmallPrimaryButton: UIButton {
     
     override var isEnabled: Bool {
         didSet {
+            guard oldValue != isEnabled else { return }
             UIView.animate(withDuration: 0.3) {
                 self.backgroundColor = self.isEnabled ? self.originalBackgroundColor : .systemGray4
             }

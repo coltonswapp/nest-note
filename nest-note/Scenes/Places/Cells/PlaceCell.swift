@@ -113,9 +113,9 @@ final class PlaceCell: UICollectionViewCell {
             blurEffectView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             blurEffectView.heightAnchor.constraint(equalTo: contentView.heightAnchor, multiplier: 0.35),
             
-            labelStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            labelStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            labelStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
+            labelStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            labelStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            labelStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8)
         ]
         
         // List Layout Constraints

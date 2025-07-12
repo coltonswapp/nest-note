@@ -24,6 +24,7 @@ final class PlaceListViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Place>!
     private var showTemporaryPlaces: Bool = false
     private var chooseOnMapButton: NNPrimaryLabeledButton?
+    private var newPlaceButton: NNPrimaryLabeledButton?
     private var loadingIndicator: UIActivityIndicatorView!
     private var isLoading = false {
         didSet {
@@ -83,6 +84,8 @@ final class PlaceListViewController: NNViewController {
         // Only show the "Choose on Map" button when in selection mode
         if isSelecting {
             setupChooseOnMapButton()
+        } else if !isReadOnly {
+            setupNewPlaceButton()
         }
     }
     
@@ -122,14 +125,22 @@ final class PlaceListViewController: NNViewController {
         )
         
         if !isReadOnly {
-            let addButton = UIBarButtonItem(
-                image: UIImage(systemName: "plus"),
+            let menuButton = UIBarButtonItem(
+                image: UIImage(systemName: "ellipsis"),
                 style: .plain,
                 target: self,
-                action: #selector(addButtonTapped)
+                action: nil
             )
             
-            navigationItem.rightBarButtonItem = addButton
+            let placeSuggestionsAction = UIAction(
+                title: "Place Suggestions",
+                image: UIImage(systemName: "sparkles")
+            ) { _ in
+                self.placeSuggestionsTapped()
+            }
+            
+            menuButton.menu = UIMenu(children: [placeSuggestionsAction])
+            navigationItem.rightBarButtonItem = menuButton
         }
         navigationItem.leftBarButtonItem = layoutButton
         navigationController?.navigationBar.tintColor = .label
@@ -142,9 +153,11 @@ final class PlaceListViewController: NNViewController {
         collectionView.delegate = self
         
         // Adjust content inset to prevent button obstruction
-        let bottomInset: CGFloat = view.safeAreaInsets.bottom + 20
-        collectionView.contentInset.bottom = bottomInset
-        collectionView.verticalScrollIndicatorInsets.bottom = bottomInset
+        let buttonHeight: CGFloat = 50
+        let buttonPadding: CGFloat = 10
+        let totalInset = buttonHeight + buttonPadding * 2
+        collectionView.contentInset.bottom = totalInset
+        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
         
         // Register cells
         collectionView.register(PlaceCell.self, forCellWithReuseIdentifier: PlaceCell.reuseIdentifier)
@@ -313,6 +326,13 @@ final class PlaceListViewController: NNViewController {
         }
     }
     
+    private func placeSuggestionsTapped() {
+        let commonPlacesVC = CommonPlacesViewController()
+        commonPlacesVC.delegate = self
+        let navController = UINavigationController(rootViewController: commonPlacesVC)
+        present(navController, animated: true)
+    }
+    
     @objc private func toggleLayout() {
         currentLayout = currentLayout == .grid ? .list : .grid
         navigationItem.leftBarButtonItem?.image = UIImage(systemName: currentLayout == .grid ? "list.bullet" : "square.grid.2x2")
@@ -329,9 +349,12 @@ final class PlaceListViewController: NNViewController {
         emptyStateView = NNEmptyStateView(
             icon: UIImage(systemName: "mappin.and.ellipse"),
             title: "No Places Yet",
-            subtitle: "Add your first place by tapping the + button"
+            subtitle: "Add your first place to get started",
+            actionButtonTitle: "Add a Place"
         )
         emptyStateView?.isHidden = true
+        
+        emptyStateView?.delegate = self
         
         if let emptyStateView = emptyStateView {
             view.addSubview(emptyStateView)
@@ -350,12 +373,18 @@ final class PlaceListViewController: NNViewController {
         if isLoading {
             emptyStateView?.isHidden = true
             collectionView.isHidden = true
+            newPlaceButton?.isHidden = true
             return
         }
         
         let isEmpty = PlacesService.shared.places.isEmpty
         emptyStateView?.isHidden = !isEmpty
         collectionView.isHidden = isEmpty
+        
+        // Show new place button only when there are places and we're not in selection mode
+        if !isSelecting && !isReadOnly {
+            newPlaceButton?.isHidden = isEmpty
+        }
     }
     
     private func setupChooseOnMapButton() {
@@ -363,6 +392,16 @@ final class PlaceListViewController: NNViewController {
         chooseOnMapButton?.addTarget(self, action: #selector(chooseOnMapButtonTapped), for: .touchUpInside)
         
         if let button = chooseOnMapButton {
+            button.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        }
+    }
+    
+    private func setupNewPlaceButton() {
+        newPlaceButton = NNPrimaryLabeledButton(title: "New Place", image: UIImage(systemName: "plus"))
+        newPlaceButton?.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+        newPlaceButton?.isHidden = true // Initially hidden
+        
+        if let button = newPlaceButton {
             button.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
         }
     }
@@ -395,6 +434,24 @@ final class PlaceListViewController: NNViewController {
               let cell = collectionView.cellForItem(at: indexPath) as? PlaceCell else { return }
         
         cell.flash()
+    }
+    
+    override func showTips() {
+        if !isReadOnly {
+            guard let menuButton = navigationItem.rightBarButtonItems?.first else { return }
+            
+            if NNTipManager.shared.shouldShowTip(PlaceListTips.placeSuggestionTip) {
+                if let buttonView = menuButton.value(forKey: "view") as? UIView {
+                    NNTipManager.shared.showTip(
+                        PlaceListTips.placeSuggestionTip,
+                        sourceView: buttonView,
+                        in: self,
+                        pinToEdge: .bottom,
+                        offset: CGPoint(x: -8, y: 0)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -483,5 +540,22 @@ extension PlaceListViewController: TemporaryPlaceSelectionDelegate {
             self?.selectionDelegate?.didSelectPlace(temporaryPlace)
             self?.dismiss(animated: true)
         }
+    }
+}
+
+extension PlaceListViewController: NNEmptyStateViewDelegate {
+    func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
+        
+        // Use the same action as the add button
+        addButtonTapped()
+    }
+}
+
+extension PlaceListViewController: CommonPlacesViewControllerDelegate {
+    func commonPlacesViewController(_ controller: CommonPlacesViewController, didSelectPlace commonPlace: CommonPlace) {
+        // Create and push the SelectPlaceViewController with the suggested place name
+        let selectPlaceVC = SelectPlaceViewController()
+        selectPlaceVC.suggestedPlaceName = commonPlace.name
+        navigationController?.pushViewController(selectPlaceVC, animated: true)
     }
 }

@@ -348,9 +348,9 @@ class NestSessionsViewController: NNViewController {
     }
     
     private func fetchNestSessions() {
+        filterView.isEnabled = false
         Task {
             do {
-                filterView.isEnabled = false
                 emptyStateView.isHidden = true
                 loadingSpinner.startAnimating()
                 guard let nestID = NestService.shared.currentNest?.id else {

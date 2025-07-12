@@ -7,6 +7,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let textField = NNTextField()
         textField.placeholder = "Password"
         textField.isSecureTextEntry = true
+        textField.isPasswordTextField = true
         textField.returnKeyType = .next
         textField.autocorrectionType = .no
         textField.autocapitalizationType = .none
@@ -14,6 +15,8 @@ final class OBPasswordViewController: NNOnboardingViewController {
         textField.smartQuotesType = .no
         textField.smartDashesType = .no
         textField.smartInsertDeleteType = .no
+        textField.textContentType = .newPassword
+        textField.passwordRules = UITextInputPasswordRules(descriptor: "minlength: 6; required: upper; required: lower; required: digit; required: [-!@#$%^&*()_+={}\\[\\]|\\;':\"<>?,.~`];")
         textField.translatesAutoresizingMaskIntoConstraints = false
         return textField
     }()
@@ -22,6 +25,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let textField = NNTextField()
         textField.placeholder = "Confirm Password"
         textField.isSecureTextEntry = true
+        textField.isPasswordTextField = true
         textField.returnKeyType = .done
         textField.autocorrectionType = .no
         textField.autocapitalizationType = .none
@@ -29,6 +33,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         textField.smartQuotesType = .no
         textField.smartDashesType = .no
         textField.smartInsertDeleteType = .no
+        textField.textContentType = .newPassword
         textField.translatesAutoresizingMaskIntoConstraints = false
         return textField
     }()

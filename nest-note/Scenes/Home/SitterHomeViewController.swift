@@ -16,6 +16,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
     private var isLoadingEvents = false
+    private var pinnedCategories: [String] = []
+    private var categories: [NestCategory] = []
     
     private lazy var loadingSpinner: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -111,6 +113,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 alignment: .top
             )
             
+            let verticalSpacing: CGFloat = 4
+            
             switch self.dataSource.snapshot().sectionIdentifiers[sectionIndex] {
             case .currentSession:
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
@@ -123,25 +127,27 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 return section
                 
             case .nest:
-                // Full width item with fixed height of 200
+                // Full width item with fixed height of 220
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
                 let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
-                section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
                 section.boundarySupplementaryItems = [header]
                 return section
                 
             case .quickAccess:
-                // Two column grid with fixed height of 160
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(160))
+                // Two column grid with fixed height of 180
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(100))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(160))
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(100))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
+                group.interItemSpacing = .fixed(8)
                 let section = NSCollectionLayoutSection(group: group)
-                section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 13, bottom: 20, trailing: 13)
+                section.interGroupSpacing = 8
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
+                section.boundarySupplementaryItems = [header]
                 return section
                 
             case .events:
@@ -151,7 +157,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 config.headerMode = .supplementary
                 
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-                section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 16)
                 return section
                 
             default:
@@ -192,7 +198,18 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 }
                 
                 cell.configure(with: title, image: image)
-                cell.imageView.tintColor = .label
+            }
+            
+            cell.backgroundColor = .secondarySystemGroupedBackground
+            cell.layer.cornerRadius = 12
+            cell.layer.masksToBounds = true
+        }
+        
+        // Pinned category registration
+        let pinnedCategoryCellRegistration = UICollectionView.CellRegistration<QuickAccessCell, HomeItem> { cell, indexPath, item in
+            if case let .pinnedCategory(name, icon) = item {
+                let image = UIImage(systemName: icon)
+                cell.configure(with: name, image: image)
             }
             
             cell.backgroundColor = .secondarySystemGroupedBackground
@@ -270,6 +287,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             case .quickAccess:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: quickAccessCellRegistration, 
+                    for: indexPath,
+                    item: item
+                )
+            case .pinnedCategory:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: pinnedCategoryCellRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -519,12 +542,20 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         snapshot.appendSections([.nest])
         snapshot.appendItems([.nest(name: nest.name, address: nest.address)], toSection: .nest)
         
-        // Add quick access section with both items
-        snapshot.appendSections([.quickAccess])
-        snapshot.appendItems([
-            .quickAccess(.sitterHousehold),
-            .quickAccess(.sitterEmergency)
-        ], toSection: .quickAccess)
+        // Store pinned categories and categories from nest
+        self.pinnedCategories = nest.pinnedCategories ?? []
+        self.categories = nest.categories ?? []
+        
+        // Add quick access section with pinned categories
+        if !pinnedCategories.isEmpty {
+            snapshot.appendSections([.quickAccess])
+            
+            let pinnedCategoryItems = pinnedCategories.map { categoryName in
+                HomeItem.pinnedCategory(name: categoryName, icon: iconForCategory(categoryName))
+            }
+            
+            snapshot.appendItems(pinnedCategoryItems, toSection: .quickAccess)
+        }
         
         // Finally add events section
         snapshot.appendSections([.events])
@@ -581,6 +612,21 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         navigationController?.pushViewController(NestViewController(entryRepository: SitterViewService.shared), animated: true)
     }
     
+    private func iconForCategory(_ categoryName: String) -> String {
+        // Handle special case for "Places" which isn't a regular category
+        if categoryName == "Places" {
+            return "map.fill"
+        }
+        
+        // Find the category in our categories array
+        if let category = categories.first(where: { $0.name == categoryName }) {
+            return category.symbolName
+        }
+        
+        // Fallback to folder icon if category not found
+        return "folder.fill"
+    }
+    
     // MARK: - Layout
     // Remove custom layout implementation to use the default one from HomeViewControllerType
     
@@ -617,6 +663,17 @@ extension SitterHomeViewController: UICollectionViewDelegate {
                 presentCategoryView(category: "Emergency")
             default:
                 break
+            }
+            
+        case .pinnedCategory(let name, _):
+            if name == "Places" {
+                let sitterService = SitterViewService.shared
+                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: sitterService)
+                placesVC.isReadOnly = true
+                let nav = UINavigationController(rootViewController: placesVC)
+                present(nav, animated: true)
+            } else {
+                presentCategoryView(category: name)
             }
             
         case .currentSession(let session):

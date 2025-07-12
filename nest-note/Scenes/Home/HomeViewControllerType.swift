@@ -37,6 +37,7 @@ enum HomeSection: Int {
 enum HomeItem: Hashable {
     case nest(name: String, address: String)
     case quickAccess(HomeQuickAccessType)
+    case pinnedCategory(name: String, icon: String)
     case currentSession(SessionItem)
     case upcomingSession(SessionItem)
     case events
@@ -53,22 +54,26 @@ enum HomeItem: Hashable {
         case .quickAccess(let type):
             hasher.combine(1)
             hasher.combine(type)
-        case .currentSession(let session):
+        case .pinnedCategory(let name, let icon):
             hasher.combine(2)
-            hasher.combine(session)
-        case .upcomingSession(let session):
+            hasher.combine(name)
+            hasher.combine(icon)
+        case .currentSession(let session):
             hasher.combine(3)
             hasher.combine(session)
-        case .events:
+        case .upcomingSession(let session):
             hasher.combine(4)
-        case .sessionEvent(let event):
+            hasher.combine(session)
+        case .events:
             hasher.combine(5)
+        case .sessionEvent(let event):
+            hasher.combine(6)
             hasher.combine(event)
         case .moreEvents(let count):
-            hasher.combine(6)
+            hasher.combine(7)
             hasher.combine(count)
         case .setupProgress(let current, let total):
-            hasher.combine(7)
+            hasher.combine(8)
             hasher.combine(current)
             hasher.combine(total)
         }
@@ -80,6 +85,8 @@ enum HomeItem: Hashable {
             return n1 == n2 && a1 == a2
         case let (.quickAccess(t1), .quickAccess(t2)):
             return t1 == t2
+        case let (.pinnedCategory(n1, i1), .pinnedCategory(n2, i2)):
+            return n1 == n2 && i1 == i2
         case let (.currentSession(s1), .currentSession(s2)):
             return s1 == s2
         case let (.upcomingSession(s1), .upcomingSession(s2)):
@@ -146,20 +153,21 @@ extension HomeViewControllerType {
                 let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
-                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: verticalSpacing, trailing: 18)
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
                 section.boundarySupplementaryItems = [header]
                 return section
                 
             case .quickAccess:
                 // Two column grid with fixed height of 180
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(160))
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(100))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(160))
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(100))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
+                group.interItemSpacing = .fixed(8)
                 let section = NSCollectionLayoutSection(group: group)
-                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing, leading: 13, bottom: 20, trailing: 13)
-//                section.boundarySupplementaryItems = [header]
+                section.interGroupSpacing = 8
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
+                section.boundarySupplementaryItems = [header]
                 return section
                 
             case .upcomingSessions, .events:
@@ -169,7 +177,7 @@ extension HomeViewControllerType {
                 config.headerMode = .supplementary
                 
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing, leading: 16, bottom: verticalSpacing, trailing: 16)
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing, leading: 18, bottom: verticalSpacing, trailing: 16)
                 section.boundarySupplementaryItems = [header]
                 return section
             }

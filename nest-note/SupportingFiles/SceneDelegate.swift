@@ -72,8 +72,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Called as the scene transitions from the background to the foreground.
         // Use this method to undo the changes made on entering the background.
         
-        // Trigger data refresh when app enters foreground
-        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+        // Only trigger data refresh if user is authenticated
+        if UserService.shared.isAuthenticated {
+            NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+        }
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
@@ -115,8 +117,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     // Handle notification response when app is launched via notification tap
     func scene(_ scene: UIScene, willContinueUserActivityWithType userActivityType: String) {
-        // Trigger data refresh when app becomes active
-        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+        // Only trigger data refresh if user is authenticated
+        if UserService.shared.isAuthenticated {
+            NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+        }
     }
 
     // Add a method to handle notification responses
@@ -126,10 +130,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // Handle session status change notification
         if let type = userInfo["type"] as? String, type == "session_status_change" {
-            // Post notifications to refresh both home controllers
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                NotificationCenter.default.post(name: .sessionDidChange, object: nil)
-                NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
+            // Only post notifications if user is authenticated
+            if UserService.shared.isAuthenticated {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+                    NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
+                }
             }
         }
     }

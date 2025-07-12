@@ -360,7 +360,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Add close button
         let closeButton = UIButton(type: .system)
         closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = .systemGray2
+        closeButton.tintColor = .systemGray
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
         customNavBar.addSubview(closeButton)

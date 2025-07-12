@@ -52,8 +52,10 @@ final class Launcher {
         // Reset ModeManager first
         ModeManager.shared.resetToDefaultMode()
         
-        // Reset NestService next
+        // Reset NestService
         await NestService.shared.reset()
+        // Reset SessionService
+        await SessionService.shared.reset()
         
         // Reset UserService last
         do {

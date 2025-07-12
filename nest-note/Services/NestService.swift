@@ -65,6 +65,7 @@ final class NestService: EntryRepository {
         currentNest = nil
         isOwner = false
         clearEntriesCache()
+        clearSavedSittersCache()
         PlacesService.shared.selectedNestId = nil
     }
     
@@ -609,6 +610,70 @@ extension NestService {
         } catch {
             // Log failure event
             Tracker.shared.track(.nestAddressUpdated, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+}
+
+// MARK: - Pinned Categories Methods
+extension NestService {
+    func fetchPinnedCategories() async throws -> [String] {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        // First check if we have it in currentNest
+        if let pinnedCategories = currentNest?.pinnedCategories {
+            Logger.log(level: .info, category: .nestService, message: "Using cached pinned categories from currentNest")
+            return pinnedCategories
+        }
+        
+        // Fetch from Firestore
+        let docRef = db.collection("nests").document(nestId)
+        let document = try await docRef.getDocument()
+        
+        guard let data = document.data(),
+              let pinnedCategories = data["pinnedCategories"] as? [String] else {
+            Logger.log(level: .info, category: .nestService, message: "No pinned categories found, returning empty array")
+            return []
+        }
+        
+        // Update currentNest cache
+        if var updatedNest = currentNest {
+            updatedNest.pinnedCategories = pinnedCategories
+            currentNest = updatedNest
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(pinnedCategories.count) pinned categories")
+        return pinnedCategories
+    }
+    
+    func savePinnedCategories(_ categoryNames: [String]) async throws {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        do {
+            // Update in Firestore
+            let docRef = db.collection("nests").document(nestId)
+            try await docRef.updateData([
+                "pinnedCategories": categoryNames,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+            
+            // Update currentNest cache
+            if var updatedNest = currentNest {
+                updatedNest.pinnedCategories = categoryNames
+                currentNest = updatedNest
+            }
+            
+            Logger.log(level: .info, category: .nestService, message: "Pinned categories saved successfully: \(categoryNames)")
+            
+            // Log success event
+            Tracker.shared.track(.pinnedCategoriesUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.pinnedCategoriesUpdated, result: false, error: error.localizedDescription)
             throw error
         }
     }
