@@ -79,7 +79,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     }()
     
     enum Section: Hashable {
-        case inviteStatus
         case sitters
     }
 
@@ -176,15 +175,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             config.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
                 guard let self = self else { return nil }
                 
-                // Get the section
-                let sectionIdentifiers = self.dataSource.snapshot().sectionIdentifiers
-                guard indexPath.section < sectionIdentifiers.count else { return nil }
-                
-                let section = sectionIdentifiers[indexPath.section]
-                
-                // Only allow deletion in the sitters section
-                guard section == .sitters else { return nil }
-                
                 // Get the appropriate sitters array based on mode
                 let sittersArray = self.displayMode == .selectSitter ? self.filteredSitters : self.allSitters
                 guard indexPath.row < sittersArray.count else { return nil }
@@ -239,7 +229,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             right: 0
         )
         collectionView.backgroundColor = .systemGroupedBackground
-        collectionView.register(InviteStatusCell.self, forCellWithReuseIdentifier: InviteStatusCell.reuseIdentifier)
         collectionView.register(InviteSitterCell.self, forCellWithReuseIdentifier: InviteSitterCell.reuseIdentifier)
         collectionView.register(
             NNSectionHeaderView.self,
@@ -259,52 +248,12 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] (headerView, string, indexPath) in
             guard let section = self?.dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            let title = section == .inviteStatus ? "Selected Sitter" : "Saved Sitters"
+            let title = "Saved Sitters"
             headerView.configure(title: title)
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { [weak self] collectionView, indexPath, item in
-            if let selectedSitter = item as? SelectedSitterItem {
-                guard let cell = collectionView.dequeueReusableCell(
-                    withReuseIdentifier: InviteStatusCell.reuseIdentifier,
-                    for: indexPath
-                ) as? InviteStatusCell else {
-                    fatalError("Could not create new cell")
-                }
-                
-                cell.delegate = self
-                
-                // Get invite status and code for the current session
-                if let session = self?.currentSession,
-                   let assignedSitter = session.assignedSitter {
-                    // If we have an invite ID, include the code
-                    if let inviteID = assignedSitter.inviteID,
-                       let code = inviteID.split(separator: "-").last {
-                        cell.configure(
-                            with: selectedSitter.sitter,
-                            inviteStatus: assignedSitter.inviteStatus,
-                            inviteCode: String(code),
-                            isEditingSession: self?.isEditingSession ?? true
-                        )
-                    } else {
-                        // No invite yet, but we still have the assigned sitter status
-                        cell.configure(
-                            with: selectedSitter.sitter,
-                            inviteStatus: assignedSitter.inviteStatus,
-                            isEditingSession: self?.isEditingSession ?? true
-                        )
-                    }
-                } else {
-                    // No assigned sitter yet
-                    cell.configure(
-                        with: selectedSitter.sitter,
-                        inviteStatus: .none,
-                        isEditingSession: self?.isEditingSession ?? true
-                    )
-                }
-                
-                return cell
-            } else if let sitter = item as? SitterItem {
+            if let sitter = item as? SitterItem {
                 guard let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: InviteSitterCell.reuseIdentifier,
                     for: indexPath
@@ -312,10 +261,13 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
                     fatalError("Could not create new cell")
                 }
                 
+                let isSelected = sitter.id == self?.selectedSitter?.id
+                print("DEBUG: Configuring cell for \(sitter.name) - isSelected: \(isSelected), selectedSitter: \(String(describing: self?.selectedSitter?.name))")
+                
                 cell.configure(
                     name: sitter.name,
                     email: sitter.email,
-                    isSelected: sitter.id == self?.selectedSitter?.id
+                    isSelected: isSelected
                 )
                 
                 return cell
@@ -335,12 +287,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     
     private func applySnapshot(animatingDifferences: Bool = true) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
-        
-        // Add invite status section if we have a selected sitter
-        if let selectedSitter = selectedSitter {
-            snapshot.appendSections([.inviteStatus])
-            snapshot.appendItems([SelectedSitterItem(sitter: selectedSitter)], toSection: .inviteStatus)
-        }
         
         // Add sitters section if we have sitters
         if !sitters.isEmpty {
@@ -430,7 +376,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             // In selectSitter mode, we want to select the chosen sitter
             guard let selectedSitter = selectedSitter else { return }
             delegate?.sitterListViewController(didSelectSitter: selectedSitter)
-            dismiss(animated: true)
+            navigationController?.dismiss(animated: true)
         }
     }
     
@@ -572,44 +518,18 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     }
 }
 
-// Helper class to represent a selected sitter in the invite status section
-class SelectedSitterItem: Hashable {
-    let id = UUID()
-    let sitter: SitterItem
-    
-    init(sitter: SitterItem) {
-        self.sitter = sitter
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: SelectedSitterItem, rhs: SelectedSitterItem) -> Bool {
-        return lhs.id == rhs.id
-    }
-}
 
 // Add UICollectionViewDelegate
 extension SitterListViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        // Get the section
-        let sectionIdentifiers = dataSource.snapshot().sectionIdentifiers
-        guard indexPath.section < sectionIdentifiers.count else { return }
-        
-        let section = sectionIdentifiers[indexPath.section]
-        
-        // Only handle selection in the recent section
-        guard section == .sitters else {
-            collectionView.deselectItem(at: indexPath, animated: true)
-            return
-        }
+        print("DEBUG: didSelectItemAt called for row \(indexPath.row), displayMode: \(displayMode)")
         
         // Get the appropriate sitters array based on mode
         let sittersArray = displayMode == .selectSitter ? filteredSitters : allSitters
         guard indexPath.row < sittersArray.count else { return }
         
         let tappedSitter = sittersArray[indexPath.row]
+        print("DEBUG: Tapped sitter: \(tappedSitter.name)")
         
         // Check if we have an active invite
         if let session = currentSession, 
@@ -641,16 +561,19 @@ extension SitterListViewController: UICollectionViewDelegate {
     }
     
     private func updateSitterSelection(_ tappedSitter: SitterItem, in collectionView: UICollectionView, at indexPath: IndexPath) {
-        // Store previous selection before updating
-        let previousSitter = selectedSitter
+        print("DEBUG: updateSitterSelection called")
+        print("DEBUG: tappedSitter: \(tappedSitter.name)")
         
         // Toggle selection
         if selectedSitter?.id == tappedSitter.id {
+            print("DEBUG: Deselecting sitter")
             selectedSitter = nil
         } else {
+            print("DEBUG: Selecting new sitter: \(tappedSitter.name)")
             selectedSitter = tappedSitter
         }
         
+        print("DEBUG: After selection, selectedSitter: \(String(describing: selectedSitter?.name))")
         updateInviteButtonState()
         
         // If the session has an invite, delete it, so we can
@@ -658,26 +581,16 @@ extension SitterListViewController: UICollectionViewDelegate {
         deleteSessionInvite()
         currentSession?.assignedSitter = nil
         
-        // First update the cells in the current snapshot
+        // Force reconfigure all cells to update selection display
         var currentSnapshot = dataSource.snapshot()
-        
-        // Reconfigure all sitters to ensure consistent selection state
-        let sittersToReconfigure = currentSnapshot.itemIdentifiers(inSection: .sitters)
-        currentSnapshot.reconfigureItems(sittersToReconfigure)
-        
-        
-        // Apply the current snapshot to update cell configurations
-        dataSource.apply(currentSnapshot, animatingDifferences: true) {
-            // After cell configurations are updated, then update sections if needed
-            if self.displayMode == .selectSitter {
-                self.applySnapshot()
-            }
+        if currentSnapshot.sectionIdentifiers.contains(.sitters) {
+            let allSitterItems = currentSnapshot.itemIdentifiers(inSection: .sitters)
+            currentSnapshot.reconfigureItems(allSitterItems)
+            dataSource.apply(currentSnapshot, animatingDifferences: false)
         }
         
         // Always deselect the cell to remove the persistent highlight
         collectionView.deselectItem(at: indexPath, animated: true)
-        
-        
         
         // If in selectSitter mode, dismiss the search keyboard
         if displayMode == .selectSitter {
@@ -719,137 +632,6 @@ extension SitterListViewController: UISearchBarDelegate {
     }
 }
 
-class InviteStatusCell: UICollectionViewListCell {
-    static let reuseIdentifier = "InviteStatusCell"
-    
-    private let nameLabel: UILabel = {
-        let label = UILabel()
-        label.font = .bodyL
-        label.textColor = .label
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-    
-    private var sendInviteButton: NNSmallPrimaryButton!
-    
-    private let containerView: UIView = {
-        let view = UIView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-    
-    weak var delegate: InviteStatusCellDelegate?
-    private var inviteCode: String?
-    private var isEditingSession: Bool = true
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        
-        // Initialize the button with default state
-        sendInviteButton = NNSmallPrimaryButton(
-            title: "SEND INVITE",
-            image: UIImage(systemName: "envelope.fill"),
-            backgroundColor: NNColors.primary.withAlphaComponent(0.15),
-            foregroundColor: NNColors.primary
-        )
-        sendInviteButton.translatesAutoresizingMaskIntoConstraints = false
-        sendInviteButton.addTarget(self, action: #selector(sendInviteButtonTapped), for: .touchUpInside)
-        
-        setupViews()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupViews() {
-        contentView.addSubview(containerView)
-        containerView.addSubview(nameLabel)
-        containerView.addSubview(sendInviteButton)
-        
-        NSLayoutConstraint.activate([
-            containerView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            
-            nameLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            nameLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-            
-            sendInviteButton.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
-            sendInviteButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
-            sendInviteButton.heightAnchor.constraint(equalToConstant: 46),
-            sendInviteButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8)
-        ])
-    }
-    
-    @objc private func sendInviteButtonTapped() {
-        if let code = inviteCode {
-            delegate?.inviteStatusCell(self, didTapViewInviteWithCode: code)
-        } else {
-            delegate?.inviteStatusCellDidTapSendInvite(self)
-        }
-    }
-    
-    func configure(with sitter: SitterItem, inviteStatus: SessionInviteStatus = .none, inviteCode: String? = nil, isEditingSession: Bool = true) {
-        nameLabel.text = sitter.name
-        self.inviteCode = inviteCode
-        self.isEditingSession = isEditingSession
-        
-        // Hide the invite button if we're not editing an existing session
-        sendInviteButton.isHidden = !isEditingSession
-        sendInviteButton.isEnabled = true
-        
-        // Configure button based on invite status
-        switch inviteStatus {
-        case .none:
-            sendInviteButton.configureButton(
-                title: "SEND INVITE",
-                image: UIImage(systemName: "arrow.up.circle.fill"),
-                imagePlacement: .right,
-                foregroundColor: NNColors.primary
-            )
-            sendInviteButton.backgroundColor = NNColors.primary.withAlphaComponent(0.15)
-            
-        case .invited:
-            sendInviteButton.configureButton(
-                title: "INVITE SENT",
-                image: UIImage(systemName: inviteStatus.icon),
-                imagePlacement: .right,
-                foregroundColor: UIColor.secondaryLabel
-            )
-            sendInviteButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
-            
-        case .accepted:
-            sendInviteButton.configureButton(
-                title: "ACCEPTED",
-                image: UIImage(systemName: inviteStatus.icon),
-                imagePlacement: .right,
-                foregroundColor: UIColor.secondaryLabel
-            )
-            sendInviteButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
-            
-        case .declined:
-            sendInviteButton.configureButton(
-                title: "DECLINED",
-                image: UIImage(systemName: inviteStatus.icon),
-                imagePlacement: .right,
-                foregroundColor: UIColor.secondaryLabel
-            )
-            sendInviteButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
-            sendInviteButton.isEnabled = false
-            
-        case .cancelled:
-            sendInviteButton.configureButton(
-                title: "CANCELLED",
-                image: UIImage(systemName: inviteStatus.icon),
-                imagePlacement: .right,
-                foregroundColor: UIColor.secondaryLabel
-            )
-            sendInviteButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
-        }
-    }
-}
 
 // MARK: - InviteSitterViewControllerDelegate
 extension SitterListViewController: InviteSitterViewControllerDelegate {
@@ -887,27 +669,4 @@ extension SitterListViewController: AddSitterViewControllerDelegate {
     }
 }
 
-// MARK: - InviteStatusCellDelegate
-extension SitterListViewController: InviteStatusCellDelegate {
-    func inviteStatusCellDidTapSendInvite(_ cell: InviteStatusCell) {
-        guard let selectedSitter = selectedSitter, let session = currentSession else { return }
-        
-        // Create and configure the InviteSitterViewController
-        let inviteSitterVC = InviteSitterViewController(sitter: selectedSitter, session: session)
-        inviteSitterVC.delegate = self
-        
-        // Push it onto the navigation stack
-        navigationController?.pushViewController(inviteSitterVC, animated: true)
-    }
-    
-    func inviteStatusCell(_ cell: InviteStatusCell, didTapViewInviteWithCode code: String) {
-        let inviteDetailVC = InviteDetailViewController()
-        inviteDetailVC.delegate = self
-        inviteDetailVC.configure(with: code, sessionID: currentSession!.id)
-        navigationController?.pushViewController(inviteDetailVC, animated: true)
-    }
-    
-    func inviteStatusCellDidTapDeleteInvite(_ cell: InviteStatusCell) {
-        // Implementation needed
-    }
-} 
+ 

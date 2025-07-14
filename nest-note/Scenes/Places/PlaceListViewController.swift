@@ -132,15 +132,17 @@ final class PlaceListViewController: NNViewController {
                 action: nil
             )
             
-            let placeSuggestionsAction = UIAction(
-                title: "Place Suggestions",
-                image: UIImage(systemName: "sparkles")
-            ) { _ in
-                self.placeSuggestionsTapped()
+            if !isSelecting {
+                let placeSuggestionsAction = UIAction(
+                    title: "Place Suggestions",
+                    image: UIImage(systemName: "sparkles")
+                ) { _ in
+                    self.placeSuggestionsTapped()
+                }
+                
+                menuButton.menu = UIMenu(children: [placeSuggestionsAction])
+                navigationItem.rightBarButtonItem = menuButton
             }
-            
-            menuButton.menu = UIMenu(children: [placeSuggestionsAction])
-            navigationItem.rightBarButtonItem = menuButton
         }
         navigationItem.leftBarButtonItem = layoutButton
         navigationController?.navigationBar.tintColor = .label
@@ -165,7 +167,7 @@ final class PlaceListViewController: NNViewController {
         
         if isSelecting {
             let insets = UIEdgeInsets(
-                top: 20,
+                top: 0,
                 left: 0,
                 bottom: 100, // Increased to accommodate button height + padding
                 right: 0

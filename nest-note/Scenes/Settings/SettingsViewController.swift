@@ -65,7 +65,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     }
 
     override func setup() {
-        navigationItem.title = "Settings"
+        navigationItem.title = "Menu"
         navigationController?.navigationBar.prefersLargeTitles = false
     }
     

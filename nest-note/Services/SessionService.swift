@@ -562,6 +562,62 @@ class SessionService {
     }
     
     /// Creates an invite for a sitter to join a session
+    func createInvite(
+        sitterEmail: String,
+        sessionID: String
+    ) async throws -> (id: String, code: String) {
+        // Convert the method to use email parameter directly
+        let sitter = SitterItem(id: UUID().uuidString, name: "", email: sitterEmail)
+        let code = try await createInviteForSitter(sessionID: sessionID, sitter: sitter)
+        let inviteID = "invite-\(code)"
+        return (id: inviteID, code: code)
+    }
+    
+    /// Updates an existing invite with new sitter information
+    func updateInvite(
+        inviteID: String,
+        sessionID: String,
+        sitterEmail: String,
+        sitterName: String
+    ) async throws {
+        guard let nestID = NestService.shared.currentNest?.id else {
+            throw SessionError.noCurrentNest
+        }
+        
+        // Get the current invite
+        let inviteRef = db.collection("invites").document(inviteID)
+        let inviteDoc = try await inviteRef.getDocument()
+        
+        guard inviteDoc.exists,
+              let invite = try? inviteDoc.data(as: Invite.self) else {
+            throw SessionError.sessionNotFound
+        }
+        
+        // Update the invite with new sitter email
+        try await inviteRef.updateData([
+            "sitterEmail": sitterEmail
+        ])
+        
+        // Update session's assigned sitter if needed
+        let sessionRef = db.collection("nests").document(nestID)
+            .collection("sessions").document(sessionID)
+        
+        guard let session = try await getSession(nestID: nestID, sessionID: sessionID) else {
+            throw SessionError.sessionNotFound
+        }
+        
+        if var assignedSitter = session.assignedSitter {
+            assignedSitter.email = sitterEmail
+            assignedSitter.name = sitterName
+            
+            let encodedSitter = try Firestore.Encoder().encode(assignedSitter)
+            try await sessionRef.updateData([
+                "assignedSitter": encodedSitter
+            ])
+        }
+    }
+    
+    /// Creates an invite for a sitter to join a session
     func createInviteForSitter(
         sessionID: String,
         sitter: SitterItem
@@ -909,10 +965,16 @@ class SessionService {
                 inviteAcceptedAt: Date()
             )
             
-            // Update the assigned sitter with the user's ID
+            // Update the assigned sitter with the actual joiner's information
             var updatedAssignedSitter = session.assignedSitter
             updatedAssignedSitter?.userID = currentUserID
             updatedAssignedSitter?.inviteStatus = .accepted
+            
+            // Update name and email to reflect who actually joined (not who was invited)
+            if let currentUser = Auth.auth().currentUser {
+                updatedAssignedSitter?.name = currentUser.displayName ?? "Unknown"
+                updatedAssignedSitter?.email = currentUser.email ?? ""
+            }
             
             // Update the saved sitter with the user's ID
             try await updateSavedSitterWithUserID(
