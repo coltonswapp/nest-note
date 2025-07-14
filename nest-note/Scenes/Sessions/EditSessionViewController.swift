@@ -34,11 +34,6 @@ protocol InviteSitterViewControllerDelegate: AnyObject {
     func inviteDetailViewControllerDidDeleteInvite()
 }
 
-protocol InviteStatusCellDelegate: AnyObject {
-    func inviteStatusCell(_ cell: InviteStatusCell, didTapViewInviteWithCode code: String)
-    func inviteStatusCellDidTapSendInvite(_ cell: InviteStatusCell)
-}
-
 // MARK: - EditSessionViewController
 class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
@@ -119,17 +114,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
     }
     
-    // Add selectedSitter property
-    private var selectedSitter: SitterItem? {
-        didSet {
-            // Update the UI when sitter changes
-            if let snapshot = dataSource.snapshot().itemIdentifiers(inSection: .sitter).first {
-                var newSnapshot = dataSource.snapshot()
-                newSnapshot.reloadItems([snapshot])
-                dataSource.apply(newSnapshot, animatingDifferences: true)
-            }
-        }
-    }
     
     weak var delegate: EditSessionViewControllerDelegate?
     
@@ -247,11 +231,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        collectionView.delegate = self
-        collectionView.delaysContentTouches = false
-        
-        collectionView.refreshControl = refreshControl
-        
         // Prevent accidental dismissal by swipe or other gestures
         isModalInPresentation = true
         
@@ -322,20 +301,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Pre-populate other fields if editing
         visibilityLevel = sessionItem.visibilityLevel
         
-        // Fetch sitter if we have an ID
-        if let sitterId = sessionItem.assignedSitter?.userID {
-            Task {
-                do {
-                    if let savedSitter = try await NestService.shared.fetchSavedSitterById(sitterId) {
-                        await MainActor.run {
-                            self.selectedSitter = SitterItem(id: savedSitter.id, name: savedSitter.name, email: savedSitter.email)
-                        }
-                    }
-                } catch {
-                    Logger.log(level: .error, category: .sessionService, message: "Error fetching sitter: \(error.localizedDescription)")
-                }
-            }
-        }
+        // Note: sessionItem.assignedSitter already contains the sitter information
+        // No need to fetch additional sitter details since AssignedSitter has all necessary data
         
         // Generate exactly 6 test events
         //        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
@@ -430,9 +397,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 self.titleTextField.text = refreshedSession.title
                 self.visibilityLevel = refreshedSession.visibilityLevel
                 
-                // Update selected sitter if it exists
+                // Update assigned sitter from refreshed session
                 if let assignedSitter = refreshedSession.assignedSitter {
-                    self.selectedSitter = assignedSitter.asSitterItem()
+                    // Update originalSession to match the refreshed data
+                    self.originalSession.assignedSitter = assignedSitter
+                } else {
+                    // Only clear assignedSitter if we previously had one
+                    // This prevents race conditions from clearing valid sitter assignments
+                    if self.originalSession.assignedSitter != nil {
+                        // Update originalSession to match the refreshed data
+                        self.originalSession.assignedSitter = nil
+                    }
                 }
                 
                 // Update data source with refreshed session data
@@ -619,23 +594,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 
                 // Update existing sessionItem with new values
                 sessionItem.title = title
-                if let selectedSitter = selectedSitter {
-                    if let existingAssignedSitter = sessionItem.assignedSitter,
-                       existingAssignedSitter.email == selectedSitter.email {
-                        // Keep existing assigned sitter if it's the same person
-                        // (preserves invite status and invite ID)
-                    } else {
-                        // Only create new assigned sitter if it's a different person
-                        sessionItem.assignedSitter = AssignedSitter(
-                            id: selectedSitter.id,
-                            name: selectedSitter.name,
-                            email: selectedSitter.email,
-                            userID: nil,
-                            inviteStatus: .none,
-                            inviteID: nil
-                        )
-                    }
-                }
+                // Note: sessionItem.assignedSitter is now updated directly in delegate methods
                 sessionItem.startDate = startDate
                 sessionItem.endDate = endDate
                 sessionItem.isMultiDay = isMultiDay
@@ -666,6 +625,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
+        // Ensure selection is enabled
+        collectionView.allowsSelection = true
+        collectionView.allowsMultipleSelection = false
+        
         let insets = UIEdgeInsets(
             top: 20,
             left: 0,
@@ -678,6 +641,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: insets.bottom - 30, right: 0)
         
         view.addSubview(collectionView)
+        
+        // Set delegate and other properties after collection view is fully configured
+        collectionView.delegate = self
+        collectionView.delaysContentTouches = false
+        collectionView.refreshControl = refreshControl
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -701,62 +669,38 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
         }
         
-        let inviteSitterRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
-            var content = cell.defaultContentConfiguration()
-            
+        let inviteSitterRegistration = UICollectionView.CellRegistration<SessionInviteSitterCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
             
             switch item {
             case .inviteSitter:
-                // Determine the sitter to display (selected or assigned)
-                let displaySitter = self.selectedSitter ?? (self.sessionItem.assignedSitter?.asSitterItem() ?? nil)
+                // Determine the sitter to display from assignedSitter
+                let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
                 
                 if let sitter = displaySitter {
-                    // Show sitter information
-                    content.text = sitter.name
-                    content.secondaryText = self.sessionItem.assignedSitter?.inviteStatus.displayName ?? SessionInviteStatus.none.displayName
+                    // Extract invite code from assigned sitter if available
+                    let inviteCode: String?
+                    if let assignedSitter = self.sessionItem.assignedSitter,
+                       let inviteID = assignedSitter.inviteID,
+                       let code = inviteID.split(separator: "-").last {
+                        inviteCode = String(code)
+                    } else {
+                        inviteCode = nil
+                    }
                     
-                    let image = UIImage(systemName: "person.badge.shield.checkmark.fill")?
-                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                    content.image = image
+                    // Use email as fallback if name is empty
+                    let displayName = sitter.name.isEmpty ? sitter.email : sitter.name
+                    
+                    cell.configure(name: displayName, inviteCode: inviteCode)
                 } else {
                     // Show default state
-                    content.text = isArchivedSession ? "No sitter" : "Add a sitter"
-                    content.secondaryText = nil
-                    
-                    let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
-                    let image = UIImage(systemName: "person.badge.plus", withConfiguration: symbolConfiguration)?
-                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                    content.image = image
-                }
-                
-                // Common styling
-                content.imageProperties.tintColor = NNColors.primary
-                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-                content.imageToTextPadding = 8
-                content.directionalLayoutMargins.top = 16
-                content.directionalLayoutMargins.bottom = 16
-                content.textProperties.font = .bodyL
-                
-                // Handle archived session styling
-                if isArchivedSession {
-                    content.textProperties.color = .secondaryLabel
-                    content.secondaryText = nil
-                }
-                
-                content.secondaryTextProperties.font = .bodyM
-                content.secondaryTextProperties.color = .secondaryLabel
-                
-                // Add disclosure indicator for non-archived sessions
-                if !self.isArchivedSession {
-                    cell.accessories = [.disclosureIndicator()]
+                    let placeholderName = isArchivedSession ? "No sitter" : ""
+                    cell.configure(name: placeholderName, inviteCode: nil)
                 }
                 
             default:
                 break
             }
-            
-            cell.contentConfiguration = content
         }
         
         let expensesRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
@@ -777,8 +721,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
                 content.imageToTextPadding = 8
                 
-                content.directionalLayoutMargins.top = 16
-                content.directionalLayoutMargins.bottom = 16
+                content.directionalLayoutMargins.top = 17
+                content.directionalLayoutMargins.bottom = 17
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
@@ -812,8 +756,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
                 content.imageToTextPadding = 8
                 
-                content.directionalLayoutMargins.top = 16
-                content.directionalLayoutMargins.bottom = 16
+                content.directionalLayoutMargins.top = 17
+                content.directionalLayoutMargins.bottom = 17
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
@@ -909,6 +853,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             
             // Configure footer based on section
             switch self.dataSource.sectionIdentifier(for: indexPath.section) {
+            case .sitter:
+                if !self.isArchivedSession {
+                    configuration.text = "Tap to manage sitter and invite details"
+                }
             case .nestReview:
                 configuration.text = "Review items to ensure your Nest is up to date."
             case .events:
@@ -1018,10 +966,29 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func inviteSitterButtonTapped() {
-        let inviteSitterVC = SitterListViewController(displayMode: .selectSitter, selectedSitter: selectedSitter, session: sessionItem, isEditingSession: isEditingSession)
-        inviteSitterVC.delegate = self
-        let nav = UINavigationController(rootViewController: inviteSitterVC)
-        present(nav, animated: true)
+        // Always navigate to InviteDetailViewController where users can manage sitters and invites
+        let displaySitter = sessionItem.assignedSitter?.asSitterItem()
+        let inviteDetailVC: InviteDetailViewController
+        
+        if let sitter = displaySitter {
+            // Check if there's an existing invite
+            if let assignedSitter = sessionItem.assignedSitter,
+               let inviteID = assignedSitter.inviteID,
+               let code = inviteID.split(separator: "-").last {
+                // Configure with existing invite
+                inviteDetailVC = InviteDetailViewController()
+                inviteDetailVC.configure(with: String(code), sessionID: sessionItem.id, sitter: sitter)
+            } else {
+                // Configure with sitter but no existing invite
+                inviteDetailVC = InviteDetailViewController(sitter: sitter, sessionID: sessionItem.id)
+            }
+        } else {
+            // Configure without sitter - user can select one in InviteDetailViewController
+            inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: sessionItem.id)
+        }
+        
+        inviteDetailVC.delegate = self
+        present(UINavigationController(rootViewController: inviteDetailVC), animated: true)
     }
     
     private func expenseButtonTapped() {
@@ -1139,7 +1106,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func checkForChanges() {
         let hasChanges =
         titleTextField.text != originalSession.title ||
-        selectedSitter?.id != originalSession.assignedSitter?.id ||
+        sessionItem.assignedSitter?.id != originalSession.assignedSitter?.id ||
         currentStartDate != originalSession.startDate ||
         currentEndDate != originalSession.endDate ||
         currentIsMultiDay != originalSession.isMultiDay ||
@@ -2025,7 +1992,6 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
     func didDeleteSitterInvite() {
         // Clear the assigned sitter
         sessionItem.assignedSitter = nil
-        selectedSitter = nil
         
         // Update the UI
         var snapshot = dataSource.snapshot()
@@ -2040,7 +2006,26 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
     }
     
     func sitterListViewController(didSelectSitter sitter: SitterItem) {
-        selectedSitter = sitter // Store the entire SitterItem
+        // Update the sessionItem's assignedSitter to reflect the new selection
+        sessionItem.assignedSitter = AssignedSitter(
+            id: sitter.id,
+            name: sitter.name,
+            email: sitter.email,
+            userID: nil,
+            inviteStatus: .none,
+            inviteID: nil
+        )
+        
+        // Update originalSession to reflect saved changes
+        originalSession.assignedSitter = sessionItem.assignedSitter
+        
+        // Update the UI to reflect the sitter selection
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+            snapshot.reloadItems([existingItem])
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
         checkForChanges() // Add this to check for changes after sitter selection
     }
 } 
@@ -2068,6 +2053,9 @@ extension EditSessionViewController: SessionCalendarViewControllerDelegate {
         // Add events to sessionItem for change tracking
         sessionItem.events = events
         
+        // Update originalSession to reflect saved changes
+        originalSession.events = events
+        
         // Update events section
         updateEventsSection(with: events)
         
@@ -2084,6 +2072,9 @@ extension EditSessionViewController: SessionEventViewControllerDelegate {
         
         // Update sessionItem events for change tracking
         sessionItem.events = sessionEvents
+        
+        // Update originalSession to reflect saved changes
+        originalSession.events = sessionEvents
         
         // Update events section
         updateEventsSection(with: sessionEvents)
@@ -2122,6 +2113,9 @@ extension EditSessionViewController: SessionEventViewControllerDelegate {
         
         // Add events to sessionItem for change tracking
         sessionItem.events = sessionEvents
+        
+        // Update originalSession to reflect saved changes
+        originalSession.events = sessionEvents
         
         // Update events section
         updateEventsSection(with: sessionEvents)
@@ -2328,8 +2322,32 @@ extension EditSessionViewController: StatusCellDelegate {
 // MARK: - InviteSitterViewControllerDelegate
 extension EditSessionViewController: InviteSitterViewControllerDelegate {
     func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem) {
-        // Update the selected sitter
-        selectedSitter = sitter
+        // Update the sessionItem's assignedSitter to reflect the change
+        // We assume the server was already updated when the invite was created/updated
+        if let existingAssignedSitter = sessionItem.assignedSitter {
+            // Keep existing invite ID and status, just update sitter info
+            sessionItem.assignedSitter = AssignedSitter(
+                id: sitter.id,
+                name: sitter.name,
+                email: sitter.email,
+                userID: existingAssignedSitter.userID,
+                inviteStatus: existingAssignedSitter.inviteStatus,
+                inviteID: existingAssignedSitter.inviteID
+            )
+        } else {
+            // Create new assigned sitter (for new invites)
+            sessionItem.assignedSitter = AssignedSitter(
+                id: sitter.id,
+                name: sitter.name,
+                email: sitter.email,
+                userID: nil,
+                inviteStatus: .none,
+                inviteID: nil
+            )
+        }
+        
+        // Update originalSession to reflect saved changes
+        originalSession.assignedSitter = sessionItem.assignedSitter
         
         // Update the UI
         var snapshot = dataSource.snapshot()
@@ -2348,30 +2366,24 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
     }
     
     func inviteDetailViewControllerDidDeleteInvite() {
-        return
+        // Clear the assigned sitter
+        sessionItem.assignedSitter = nil
+        
+        // Update originalSession to reflect saved changes
+        originalSession.assignedSitter = nil
+        
+        // Update the UI
+        var snapshot = dataSource.snapshot()
+        if let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+            snapshot.reloadItems([existingItem])
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+        
+        // Mark as having unsaved changes
+        checkForChanges()
+        showToast(text: "Invite deleted")
     }
 }
-
-// MARK: - InviteStatusCellDelegate
-extension EditSessionViewController: InviteStatusCellDelegate {
-    func inviteStatusCell(_ cell: InviteStatusCell, didTapViewInviteWithCode code: String) {
-        let inviteDetailVC = InviteDetailViewController()
-        inviteDetailVC.configure(with: code, sessionID: sessionItem.id)
-        inviteDetailVC.delegate = self
-        navigationController?.pushViewController(inviteDetailVC, animated: true)
-    }
-    
-    func inviteStatusCellDidTapSendInvite(_ cell: InviteStatusCell) {
-        guard let selectedSitter = selectedSitter else { return }
-        
-        // Create and configure the InviteSitterViewController
-        let inviteSitterVC = InviteSitterViewController(sitter: selectedSitter, session: sessionItem)
-        inviteSitterVC.delegate = self
-        
-        // Push it onto the navigation stack
-        navigationController?.pushViewController(inviteSitterVC, animated: true)
-    }
-} 
 
 // Add the EntryReviewViewControllerDelegate conformance
 extension EditSessionViewController: EntryReviewViewControllerDelegate {
@@ -2408,6 +2420,91 @@ extension EditSessionViewController: EventsCellDelegate {
                 // Present SessionEventViewController for creating a new event
                 self.presentSessionEventViewController()
             }
+        }
+    }
+}
+
+// MARK: - SessionInviteSitterCell
+class SessionInviteSitterCell: UICollectionViewListCell {
+    static let reuseIdentifier = "SessionInviteSitterCell"
+    
+    private let iconImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = NNColors.primary
+        
+        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
+        imageView.image = UIImage(systemName: "mail.fill", withConfiguration: symbolConfig)
+        return imageView
+    }()
+    
+    private let nameLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyL
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var codeLabel: NNSmallPrimaryButton = {
+        let button = NNSmallPrimaryButton(
+            title: "Test",
+            image: nil,
+            backgroundColor: NNColors.primary.withAlphaComponent(0.15),
+            foregroundColor: NNColors.primary
+        )
+        button.titleLabel?.font = .h4
+        button.isUserInteractionEnabled = false
+        
+        return button
+    }()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupViews() {
+        contentView.addSubview(iconImageView)
+        contentView.addSubview(nameLabel)
+        contentView.addSubview(codeLabel)
+        
+        NSLayoutConstraint.activate([
+            
+            iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            iconImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 24),
+            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+            
+            nameLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
+            nameLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: codeLabel.leadingAnchor, constant: -8),
+            
+            codeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            codeLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            codeLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            codeLabel.heightAnchor.constraint(equalToConstant: 40)
+        ])
+    }
+    
+    func configure(name: String, inviteCode: String?, isSelected: Bool = false) {
+        nameLabel.text = name.isEmpty ? "Configure Invite" : name
+        nameLabel.textColor = name.isEmpty ? .secondaryLabel : .label
+        iconImageView.tintColor = NNColors.primary
+        
+        if let code = inviteCode, !code.isEmpty && code != "000-000" {
+            let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
+            codeLabel.setTitle(formattedCode, for: .normal)
+        } else {
+            codeLabel.setTitle("000-000", for: .normal)
+            codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
+            codeLabel.foregroundColor = .secondaryLabel
+            codeLabel.titleLabel?.textColor = .secondaryLabel
         }
     }
 }

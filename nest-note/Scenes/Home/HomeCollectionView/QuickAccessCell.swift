@@ -36,7 +36,7 @@ class QuickAccessCell: UICollectionViewCell {
         
         // Configure label
         label.textAlignment = .center
-        label.font = .h5
+        label.font = .preferredFont(forTextStyle: .body)
         label.textColor = .label
         
         // Add views to stackView

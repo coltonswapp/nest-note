@@ -30,7 +30,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         let view = NNEmptyStateView(
             icon: nil,
             title: "No Active Session",
-            subtitle: "Active session details will appear here.",
+            subtitle: "Active session details will appear here. View all sessions via the menu.",
             actionButtonTitle: "Join a Session"
         )
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -61,15 +61,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = NNColors.primary
         
-        let settingsButton = UIBarButtonItem(
-            image: UIImage(systemName: "gearshape"),
-            style: .plain,
-            target: self,
-            action: #selector(settingsButtonTapped)
-        )
-        settingsButton.tintColor = .label
-        navigationItem.rightBarButtonItem = settingsButton
-        
         // Add loading spinner and empty state view
         view.addSubview(loadingSpinner)
         view.addSubview(emptyStateView)
@@ -86,6 +77,17 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
             emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+    }
+    
+    override func setupNavigationBarButtons() {
+        let menuButton = UIBarButtonItem(
+            image: UIImage(systemName: "line.3.horizontal"),
+            style: .plain,
+            target: self,
+            action: #selector(settingsButtonTapped)
+        )
+        menuButton.tintColor = .label
+        navigationItem.rightBarButtonItem = menuButton
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -343,7 +345,10 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
                 // title = "Events"
                 // headerView.configure(title: title)
                 return
-            case .quickAccess, .upcomingSessions:
+            case .quickAccess:
+                title = "Pinned Categories"
+                headerView.configure(title: title)
+            case .upcomingSessions:
                 return
             case .setupProgress:
                 return

@@ -98,7 +98,7 @@ class FauxDemoCollectionViewController: UIViewController {
     }
     
     private func setupUI() {
-        title = "Settings"
+        title = "Menu"
         view.backgroundColor = FauxDemoCollectionViewController.backgroundColor
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(

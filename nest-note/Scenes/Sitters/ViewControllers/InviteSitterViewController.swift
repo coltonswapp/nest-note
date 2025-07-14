@@ -204,9 +204,10 @@ class InviteSitterViewController: NNViewController {
                     ))
                     
                     // Show invite details
-                    let inviteDetailVC = InviteDetailViewController(showDeleteButton: false)
+                    let inviteDetailVC = InviteDetailViewController()
                     inviteDetailVC.delegate = delegate
-                    inviteDetailVC.configure(with: inviteCode, sessionID: session.id)  // Pass just the code without prefix
+                    let sitterItem = SitterItem(id: assignedSitter.id, name: assignedSitter.name, email: assignedSitter.email)
+                    inviteDetailVC.configure(with: inviteCode, sessionID: session.id, sitter: sitterItem)  // Pass just the code without prefix
                     
                     // Configure back button title
                     let backItem = UIBarButtonItem()

@@ -156,6 +156,8 @@ final class SessionEventViewController: NNSheetViewController {
         
         itemsHiddenDuringTransition = [buttonStackView, infoButton]
         
+        titleField.delegate = self
+        
         // Configure with existing event
         if let event = event {
             titleField.text = event.title
@@ -614,6 +616,13 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
     }
 }
 
+extension SessionEventViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
+}
+
 extension SessionEventViewController: PlaceSelectionDelegate {
     func didSelectPlace(_ place: Place) {
         locationView.configureWith(place)
@@ -698,7 +707,7 @@ class SessionEventLocationView: UIView {
     private let addressLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .bodyM
+        label.font = .bodyS
         label.textColor = .secondaryLabel
         label.numberOfLines = 2
         return label

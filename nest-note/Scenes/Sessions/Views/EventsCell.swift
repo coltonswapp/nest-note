@@ -106,6 +106,8 @@ final class EventsCell: UICollectionViewListCell {
             // Add loading indicator constraints, put it where the plus button is
             loadingIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             loadingIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            
+            contentView.heightAnchor.constraint(equalToConstant: 56)
         ])
     }
     
