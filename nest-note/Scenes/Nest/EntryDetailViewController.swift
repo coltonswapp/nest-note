@@ -8,7 +8,7 @@ protocol EntryDetailViewControllerDelegate: AnyObject {
     func entryDetailViewController(didDeleteEntry entry: BaseEntry)
 }
 
-final class EntryDetailViewController: NNSheetViewController {
+final class EntryDetailViewController: NNSheetViewController, NNTippable {
     
     // MARK: - Properties
     weak var entryDelegate: EntryDetailViewControllerDelegate?
@@ -124,10 +124,7 @@ final class EntryDetailViewController: NNSheetViewController {
         }
     }
     
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        self.trackScreenVisit()
-    }
+    
     
     // MARK: - Setup Methods
     override func addContentToContainer() {
@@ -383,17 +380,18 @@ final class EntryDetailViewController: NNSheetViewController {
         }
     }
     
-    // MARK: - Tooltip Methods
+    // MARK: - NNTippable Methods
     
-    override func showTips() {
+    func showTips() {
         // Show tips in priority order - only show one at a time
         guard entry == nil && !isReadOnly else {
             return
         }
         
+        trackScreenVisit()
+        
         // Priority 1: Title/content tip (for new users)
         let titleTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryTitleContentTip)
-        print("🔍 [DEBUG] Title tip should show: \(titleTipShouldShow)")
         if titleTipShouldShow {
             NNTipManager.shared.showTip(
                 EntryDetailTips.entryTitleContentTip,
@@ -407,7 +405,6 @@ final class EntryDetailViewController: NNSheetViewController {
         
         // Priority 2: Visibility tip (after 5 visits)
         let visibilityTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.visibilityLevelTip)
-        print("🔍 [DEBUG] Visibility tip should show: \(visibilityTipShouldShow)")
         if visibilityTipShouldShow {
             NNTipManager.shared.showTip(
                 EntryDetailTips.visibilityLevelTip,
@@ -421,7 +418,6 @@ final class EntryDetailViewController: NNSheetViewController {
         
         // Priority 3: Entry details tip (after 10 visits)
         let detailsTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryDetailsTip)
-        print("🔍 [DEBUG] Details tip should show: \(detailsTipShouldShow)")
         if detailsTipShouldShow {
             NNTipManager.shared.showTip(
                 EntryDetailTips.entryDetailsTip,

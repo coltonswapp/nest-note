@@ -67,7 +67,7 @@ final class OBRoleViewController: NNOnboardingViewController {
         super.viewDidLoad()
         
         setupOnboarding(
-            title: "To be or not to be?",
+            title: "How will you use NestNote?",
             subtitle: "Are you signing up primarily as a Parent or a Sitter?"
         )
         

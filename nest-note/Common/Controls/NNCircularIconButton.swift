@@ -13,7 +13,7 @@ class NNCircularIconButton: NNBaseControl {
     // MARK: - Initialization
     init(
         icon: UIImage?,
-        backgroundColor: UIColor = .tertiarySystemGroupedBackground,
+        backgroundColor: UIColor = NNColors.groupedBackground,
         foregroundColor: UIColor = .label,
         size: CGFloat = 60
     ) {

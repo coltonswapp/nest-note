@@ -7,7 +7,7 @@ extension Notification.Name {
     static let sessionStatusDidChange = Notification.Name("SessionStatusDidChange")
 }
 
-final class SitterHomeViewController: NNViewController, HomeViewControllerType {
+final class SitterHomeViewController: NNViewController, HomeViewControllerType, NNTippable {
     // MARK: - Properties
     var collectionView: UICollectionView!
     var dataSource: UICollectionViewDiffableDataSource<HomeSection, HomeItem>!
@@ -567,6 +567,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         snapshot.appendItems([.events], toSection: .events)
         
         dataSource.apply(snapshot, animatingDifferences: true)
+        
+        // Show tips after snapshot is applied if there's a current session
+        if snapshot.sectionIdentifiers.contains(.currentSession) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.showTips()
+            }
+        }
     }
     
     private func applyEmptySnapshot() {
@@ -645,6 +652,33 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType {
         print("Empty state view tapped directly from SitterHomeViewController")
         // Manually trigger the action button tap
         emptyStateViewDidTapActionButton(emptyStateView)
+    }
+    
+    func showTips() {
+        trackScreenVisit()
+        
+        // Only show tip when there's a current session
+        guard let currentSessionSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .currentSession),
+              let _ = dataSource.snapshot().itemIdentifiers(inSection: .currentSession).first,
+              NNTipManager.shared.shouldShowTip(HomeTips.happeningNowTip) else {
+            return
+        }
+        
+        let currentSessionIndexPath = IndexPath(item: 0, section: currentSessionSection)
+        
+        // Make sure the cell is visible
+        guard let currentSessionCell = collectionView.cellForItem(at: currentSessionIndexPath) else {
+            return
+        }
+        
+        // Show the tip anchored to the bottom of the current session cell
+        NNTipManager.shared.showTip(
+            HomeTips.happeningNowTip,
+            sourceView: currentSessionCell,
+            in: self,
+            pinToEdge: .bottom,
+            offset: CGPoint(x: 0, y: 8)
+        )
     }
 }
 

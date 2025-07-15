@@ -11,7 +11,7 @@ import RevenueCatUI
 import SafariServices
 import TipKit
 
-class SettingsViewController: NNViewController, UICollectionViewDelegate {
+class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTippable {
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -82,6 +82,32 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate {
     override func constrainSubviews() {
         NSLayoutConstraint.activate([
         ])
+    }
+    
+    func showTips() {
+        
+        trackScreenVisit()
+        
+        guard let accountSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .account),
+              let _ = dataSource.snapshot().itemIdentifiers(inSection: .account).first else { return }
+        
+        let accountIndexPath = IndexPath(item: 0, section: accountSection)
+        
+        // Make sure the cell is visible
+        guard let accountCell = collectionView.cellForItem(at: accountIndexPath) else {
+            return
+        }
+        
+        // Show the tooltip anchored to the bottom of the setup cell
+        if NNTipManager.shared.shouldShowTip(SettingsTips.profileTip) {
+            NNTipManager.shared.showTip(
+                SettingsTips.profileTip,
+                sourceView: accountCell,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: 0, y: 8)
+            )
+        }
     }
     
     private func setupRegistrations() {

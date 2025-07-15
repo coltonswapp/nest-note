@@ -9,7 +9,7 @@ import UIKit
 import MapKit
 import Contacts
 
-final class PlaceDetailViewController: NNSheetViewController {
+final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     
     weak var placeDelegate: PlaceAddressCellDelegate?
     weak var placeListDelegate: PlaceListViewControllerDelegate?
@@ -590,8 +590,10 @@ final class PlaceDetailViewController: NNSheetViewController {
         updateVisibilityButton()
     }
     
-    override func showTips() {
+    func showTips() {
         guard existingPlace != nil && !isReadOnly else { return }
+        
+        trackScreenVisit()
         
         if NNTipManager.shared.shouldShowTip(PlaceDetailTips.editLocationTip) {
             NNTipManager.shared.showTip(

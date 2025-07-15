@@ -306,5 +306,71 @@ class NNTipView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         // Arrow is now a simple rotated square - no need to recreate shape
+        updateShadowPath()
+    }
+    
+    private func updateShadowPath() {
+        // Create a unified shadow path that includes both container and arrow
+        let path = UIBezierPath()
+        let containerRect = containerView.frame
+        let arrowRect = arrowView.frame
+        let arrowSize: CGFloat = 12
+        
+        // Add the container rectangle with rounded corners
+        path.append(UIBezierPath(roundedRect: containerRect, cornerRadius: 12))
+        
+        // Add arrow triangle based on edge
+        switch arrowEdge {
+        case .top:
+            // Arrow pointing down from bottom of container
+            let arrowTip = CGPoint(x: arrowRect.midX, y: arrowRect.midY + arrowSize/2)
+            let arrowLeft = CGPoint(x: arrowRect.midX - arrowSize/2, y: containerRect.maxY)
+            let arrowRight = CGPoint(x: arrowRect.midX + arrowSize/2, y: containerRect.maxY)
+            
+            path.move(to: arrowLeft)
+            path.addLine(to: arrowTip)
+            path.addLine(to: arrowRight)
+            path.close()
+            
+        case .bottom:
+            // Arrow pointing up from top of container
+            let arrowTip = CGPoint(x: arrowRect.midX, y: arrowRect.midY - arrowSize/2)
+            let arrowLeft = CGPoint(x: arrowRect.midX - arrowSize/2, y: containerRect.minY)
+            let arrowRight = CGPoint(x: arrowRect.midX + arrowSize/2, y: containerRect.minY)
+            
+            path.move(to: arrowLeft)
+            path.addLine(to: arrowTip)
+            path.addLine(to: arrowRight)
+            path.close()
+            
+        case .leading:
+            // Arrow pointing left from leading edge of container
+            let arrowTip = CGPoint(x: arrowRect.midX - arrowSize/2, y: arrowRect.midY)
+            let arrowTop = CGPoint(x: containerRect.minX, y: arrowRect.midY - arrowSize/2)
+            let arrowBottom = CGPoint(x: containerRect.minX, y: arrowRect.midY + arrowSize/2)
+            
+            path.move(to: arrowTop)
+            path.addLine(to: arrowTip)
+            path.addLine(to: arrowBottom)
+            path.close()
+            
+        case .trailing:
+            // Arrow pointing right from trailing edge of container
+            let arrowTip = CGPoint(x: arrowRect.midX + arrowSize/2, y: arrowRect.midY)
+            let arrowTop = CGPoint(x: containerRect.maxX, y: arrowRect.midY - arrowSize/2)
+            let arrowBottom = CGPoint(x: containerRect.maxX, y: arrowRect.midY + arrowSize/2)
+            
+            path.move(to: arrowTop)
+            path.addLine(to: arrowTip)
+            path.addLine(to: arrowBottom)
+            path.close()
+        }
+        
+        // Apply unified shadow to the main view
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.2
+        layer.shadowOffset = CGSize(width: 2, height: 6)
+        layer.shadowRadius = 10
+        layer.shadowPath = path.cgPath
     }
 }
