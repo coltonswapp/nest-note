@@ -10,7 +10,7 @@ import RevenueCat
 import RevenueCatUI
 import TipKit
 
-class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate {
+class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate, NNTippable {
     // MARK: - Properties
     private let entryRepository: EntryRepository
     private let category: String
@@ -368,7 +368,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         addEntryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
     }
     
-    override func showTips() {
+    func showTips() {
         // Only show suggestion tip for nest owners and if the menu button exists
         guard entryRepository is NestService, 
               let menuButton = navigationItem.rightBarButtonItems?.first,
@@ -376,6 +376,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         // Show the tooltip anchored to the navigation bar menu button
         // Using .bottom edge to show tooltip below the navigation bar
+        guard !(navigationController?.navigationBar.prefersLargeTitles ?? false) else { return }
+        
+        trackScreenVisit()
+        
         if let buttonView = menuButton.value(forKey: "view") as? UIView {
             NNTipManager.shared.showTip(
                 NestCategoryTips.entrySuggestionTip,

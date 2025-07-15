@@ -9,7 +9,7 @@ import UIKit
 import RevenueCat
 import RevenueCatUI
 
-class NestViewController: NNViewController, NestLoadable, PaywallPresentable, PaywallViewControllerDelegate {
+class NestViewController: NNViewController, NestLoadable, PaywallPresentable, PaywallViewControllerDelegate, NNTippable {
     var loadingIndicator: UIActivityIndicatorView!
     var hasLoadedInitialData: Bool = false
     var refreshControl: UIRefreshControl!
@@ -525,6 +525,26 @@ extension NestViewController: AddressCellDelegate {
 extension NestViewController {
     func handleLoadedData() {
         return
+    }
+    
+    func showTips() {
+        // Only show tips when in read-only mode (sitter view)
+        guard !(entryRepository is NestService) else { return }
+        
+        trackScreenVisit()
+        
+        // Find the address cell in the first section
+        let addressIndexPath = IndexPath(item: 0, section: Section.address.rawValue)
+        if let addressCell = collectionView.cellForItem(at: addressIndexPath),
+           NNTipManager.shared.shouldShowTip(NestViewTips.getDirectionsTip) {
+            NNTipManager.shared.showTip(
+                NestViewTips.getDirectionsTip,
+                sourceView: addressCell,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: 0, y: 8)
+            )
+        }
     }
 }
 

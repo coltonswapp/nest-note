@@ -3,7 +3,7 @@ import Combine
 import FirebaseMessaging
 import TipKit
 
-final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
+final class OwnerHomeViewController: NNViewController, HomeViewControllerType, NNTippable {
     // MARK: - Properties
     var collectionView: UICollectionView!
     var dataSource: UICollectionViewDiffableDataSource<HomeSection, HomeItem>!
@@ -20,6 +20,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     
     // Track whether we've already shown the setup tip in this session
     private var hasShownSetupTip = false
+    
+    // Track whether we've already shown the happening now tip in this session
+    private var hasShownHappeningNowTip = false
     
     private var hasCompletedSetup: Bool {
         return setupService.hasCompletedSetup
@@ -366,11 +369,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
         
-        // Show setup tip if setup progress cell is visible
-        if updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
+        // Show tips if either current session or setup progress cell is visible
+        if updatedSnapshot.sectionIdentifiers.contains(.currentSession) || updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.showTips()
-                self.hasShownSetupTip = true
+                if updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
+                    self.hasShownSetupTip = true
+                }
             }
         }
     }
@@ -462,8 +467,34 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType {
     
     // MARK: - Tooltip Methods
     
-    override func showTips() {
-        // Check if we should show the setup tip
+    func showTips() {
+        trackScreenVisit()
+        
+        // Check for current session tip first (higher priority)
+        if let currentSessionSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .currentSession),
+           let _ = dataSource.snapshot().itemIdentifiers(inSection: .currentSession).first,
+           NNTipManager.shared.shouldShowTip(HomeTips.happeningNowTip),
+           !hasShownHappeningNowTip {
+            
+            let currentSessionIndexPath = IndexPath(item: 0, section: currentSessionSection)
+            
+            // Make sure the cell is visible
+            if let currentSessionCell = collectionView.cellForItem(at: currentSessionIndexPath) {
+                hasShownHappeningNowTip = true
+                
+                // Show the tip anchored to the bottom of the current session cell
+                NNTipManager.shared.showTip(
+                    HomeTips.happeningNowTip,
+                    sourceView: currentSessionCell,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: 0, y: 8)
+                )
+                return
+            }
+        }
+        
+        // Check if we should show the setup tip (lower priority)
         guard NNTipManager.shared.shouldShowTip(OwnerHomeTips.finishSetupTip),
               !hasShownSetupTip else { return }
         
@@ -521,6 +552,9 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
                 presentCategoryView(category: name)
             }
         case .currentSession(let session):
+            // Dismiss the happening now tip when the current session cell is tapped
+            NNTipManager.shared.dismissTip(HomeTips.happeningNowTip)
+            
             let vc = EditSessionViewController(sessionItem: session)
             vc.modalPresentationStyle = .pageSheet
             present(vc, animated: true)

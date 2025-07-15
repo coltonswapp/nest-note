@@ -86,6 +86,13 @@ enum PlaceListTips {
         message: "Browse our collection of place suggestions.",
         systemImageName: "sparkles"
     )
+    
+    static let chooseOnMapTip = NNTipModel(
+        id: "ChooseOnMapTip",
+        title: "Quick Add",
+        message: "Tap here to quickly find and select an address",
+        systemImageName: "mappin.and.ellipse"
+    )
 }
 
 enum PlaceDetailTips {
@@ -95,6 +102,33 @@ enum PlaceDetailTips {
         title: "Edit Location",
         message: "Change the address of a place here.",
         systemImageName: "mappin.and.ellipse"
+    )
+}
+
+enum SettingsTips {
+    static let profileTip = NNTipModel(
+        id: "ProfileTip",
+        title: "Account Details",
+        message: "Tap here to manage your account.",
+        systemImageName: "person.crop.square"
+    )
+}
+
+enum NestViewTips {
+    static let getDirectionsTip = NNTipModel(
+        id: "GetDirectionsTip",
+        title: "Get Directions",
+        message: "Tap here to get directions to the nest",
+        systemImageName: "location"
+    )
+}
+
+enum HomeTips {
+    static let happeningNowTip = NNTipModel(
+        id: "HappeningNowTip",
+        title: "Happening Now",
+        message: "This is where you can quickly access the details of a session happening currently",
+        systemImageName: "clock"
     )
 }
 

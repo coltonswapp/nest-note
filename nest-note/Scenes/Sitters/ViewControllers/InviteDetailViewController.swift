@@ -43,21 +43,18 @@ class InviteDetailViewController: NNViewController {
     private lazy var copyButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "doc.on.doc"),
         title: "Copy",
-        backgroundColor: .systemBackground,
         foregroundColor: .label
     )
     
     private lazy var messageButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "message"),
         title: "Message",
-        backgroundColor: .systemBackground,
         foregroundColor: .label
     )
     
     private lazy var shareButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "square.and.arrow.up"),
         title: "Share",
-        backgroundColor: .systemBackground,
         foregroundColor: .label
     )
     

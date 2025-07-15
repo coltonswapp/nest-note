@@ -2501,10 +2501,9 @@ class SessionInviteSitterCell: UICollectionViewListCell {
             let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
             codeLabel.setTitle(formattedCode, for: .normal)
         } else {
-            codeLabel.setTitle("000-000", for: .normal)
             codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
             codeLabel.foregroundColor = .secondaryLabel
-            codeLabel.titleLabel?.textColor = .secondaryLabel
+            codeLabel.setTitle("000-000", for: .normal)
         }
     }
 }

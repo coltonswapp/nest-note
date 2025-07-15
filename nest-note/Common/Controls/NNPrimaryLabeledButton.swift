@@ -567,6 +567,7 @@ class NNSmallPrimaryButton: UIButton {
         guard let title else { return }
         var container = AttributeContainer()
         container.font = .h4
+        container.foregroundColor = foregroundColor
         configuration?.attributedTitle = AttributedString(title, attributes: container)
     }
     

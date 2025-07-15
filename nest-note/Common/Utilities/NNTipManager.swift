@@ -139,6 +139,11 @@ class NNTipManager {
             VisitCountRule(screenName: "PlaceDetailViewController", minimumVisits: 3),
             for: PlaceDetailTips.editLocationTip.id
         )
+        
+        addRule(
+            VisitCountRule(screenName: "SettingsViewController", minimumVisits: 3),
+            for: SettingsTips.profileTip.id
+        )
     }
     
     // Track dismissed tips using UserDefaults
@@ -484,7 +489,7 @@ class NNTipManager {
                 constraints = [
                     centerXConstraint,
                     widthConstraint,
-                    tipView.bottomAnchor.constraint(equalTo: sourceView.topAnchor, constant: -offset.y)
+                    tipView.bottomAnchor.constraint(equalTo: sourceView.topAnchor, constant: offset.y)
                 ]
             } else { // .bottom
                 // .bottom edge = tooltip pinned to bottom of source = tooltip below source

@@ -17,7 +17,7 @@ protocol TemporaryPlaceSelectionDelegate: AnyObject {
     func didSelectTemporaryPlace(address: String, coordinate: CLLocationCoordinate2D)
 }
 
-final class PlaceListViewController: NNViewController {
+final class PlaceListViewController: NNViewController, NNTippable {
     
     // MARK: - Properties
     private var collectionView: UICollectionView!
@@ -409,6 +409,9 @@ final class PlaceListViewController: NNViewController {
     }
     
     @objc private func chooseOnMapButtonTapped() {
+        // Dismiss the tip when the button is tapped
+        NNTipManager.shared.dismissTip(PlaceListTips.chooseOnMapTip)
+        
         let selectPlaceVC = SelectPlaceViewController()
         selectPlaceVC.isTemporarySelection = true
         selectPlaceVC.temporaryPlaceDelegate = self
@@ -438,8 +441,23 @@ final class PlaceListViewController: NNViewController {
         cell.flash()
     }
     
-    override func showTips() {
-        if !isReadOnly {
+    func showTips() {
+        trackScreenVisit()
+        
+        if isSelecting {
+            // Show Quick Add tip for the Choose on Map button when in selection mode
+            if let chooseOnMapButton = chooseOnMapButton,
+               NNTipManager.shared.shouldShowTip(PlaceListTips.chooseOnMapTip) {
+                NNTipManager.shared.showTip(
+                    PlaceListTips.chooseOnMapTip,
+                    sourceView: chooseOnMapButton,
+                    in: self,
+                    pinToEdge: .top,
+                    offset: CGPoint(x: 0, y: -8)
+                )
+            }
+        } else if !isReadOnly {
+            // Show place suggestion tip for the menu button in normal mode
             guard let menuButton = navigationItem.rightBarButtonItems?.first else { return }
             
             if NNTipManager.shared.shouldShowTip(PlaceListTips.placeSuggestionTip) {
