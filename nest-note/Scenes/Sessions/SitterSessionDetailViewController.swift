@@ -11,6 +11,7 @@ final class SitterSessionDetailViewController: NNViewController {
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
     private var isLoadingEvents = false
+    private var isArchivedSession: Bool = false
     
     // MARK: - Enums
     enum Section: Int {
@@ -86,6 +87,30 @@ final class SitterSessionDetailViewController: NNViewController {
         modalPresentationStyle = .pageSheet
     }
     
+    // Initializer for archived sitter sessions
+    init(archivedSession: ArchivedSitterSession) {
+        // Convert archived session to SessionItem
+        let sessionItem = SessionItem(
+            id: archivedSession.id,
+            title: "Session at \(archivedSession.nestName)",
+            startDate: archivedSession.inviteAcceptedAt,
+            endDate: archivedSession.parentSessionCompletedDate ?? archivedSession.archivedDate,
+            isMultiDay: false,
+            events: [],
+            visibilityLevel: .standard,
+            status: .completed,
+            assignedSitter: nil,
+            nestID: archivedSession.nestID,
+            ownerID: nil
+        )
+        
+        self.session = sessionItem
+        self.nestName = archivedSession.nestName
+        self.isArchivedSession = true
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .pageSheet
+    }
+    
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -102,8 +127,8 @@ final class SitterSessionDetailViewController: NNViewController {
             sheetPresentationController.prefersGrabberVisible = false
         }
         
-        // Fetch events only for non-completed sessions
-        if session.status != .completed {
+        // Fetch events for all sessions except archived ones
+        if !isArchivedSession {
             fetchSessionEvents()
         }
         
@@ -334,6 +359,12 @@ final class SitterSessionDetailViewController: NNViewController {
                 configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
                 configuration.textProperties.color = .tertiaryLabel
                 configuration.textProperties.alignment = .center
+            } else if self.dataSource.sectionIdentifier(for: indexPath.section) == .visibility && self.isArchivedSession {
+                configuration.text = "This session has been archived, as such, it cannot be edited."
+                configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
+                configuration.textProperties.color = .tertiaryLabel
+                configuration.textProperties.alignment = .center
+                configuration.textProperties.numberOfLines = 0
             }
             
             supplementaryView.contentConfiguration = configuration
@@ -411,9 +442,9 @@ final class SitterSessionDetailViewController: NNViewController {
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
-        // Add all sections except events for completed sessions
-        if session.status == .completed {
-            snapshot.appendSections([.name, .date, .visibility, .expenses])
+        // Add sections based on session type
+        if isArchivedSession {
+            snapshot.appendSections([.name, .date, .visibility])
         } else {
             snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
         }
@@ -430,11 +461,13 @@ final class SitterSessionDetailViewController: NNViewController {
         // Add visibility level
         snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
 
-        // Add expenses section
-        snapshot.appendItems([.expenses], toSection: .expenses)
+        // Add expenses section only for non-archived sessions
+        if !isArchivedSession {
+            snapshot.appendItems([.expenses], toSection: .expenses)
+        }
         
-        // Add events section only for non-completed sessions
-        if session.status != .completed {
+        // Add events section only for non-archived sessions
+        if !isArchivedSession {
             snapshot.appendItems([.events], toSection: .events)
         }
         
@@ -538,17 +571,7 @@ final class SitterSessionDetailViewController: NNViewController {
         // Update the session item
         session.status = newStatus
         
-        // If the status changed to completed, update the UI accordingly
-        if newStatus == .completed {
-            Task { @MainActor in
-                // Reconfigure the snapshot to remove events section
-                var snapshot = dataSource.snapshot()
-                if snapshot.sectionIdentifiers.contains(.events) {
-                    snapshot.deleteSections([.events])
-                    dataSource.apply(snapshot, animatingDifferences: true)
-                }
-            }
-        }
+        // Keep events section visible for all session statuses including completed
         
         // Log the status change
         Logger.log(
