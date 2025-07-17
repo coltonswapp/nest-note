@@ -290,11 +290,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
            case .dateSelection = dateItem {
             var newSnapshot = dataSource.snapshot()
             newSnapshot.deleteItems([dateItem])
-            newSnapshot.appendItems([.dateSelection(
+            newSnapshot.insertItems([.dateSelection(
                 startDate: sessionItem.startDate,
                 endDate: sessionItem.endDate,
                 isMultiDay: sessionItem.isMultiDay
-            )], toSection: .date)
+            )], beforeItem: .sessionStatus(sessionItem.status))
             dataSource.apply(newSnapshot, animatingDifferences: false)
         }
         
@@ -453,17 +453,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
         }
         
-        // Update status item
-        if let existingStatusItem = snapshot.itemIdentifiers(inSection: .status).first {
-            snapshot.deleteItems([existingStatusItem])
-            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-        }
-        
-        // Update date selection item
-        if let existingDateItem = snapshot.itemIdentifiers(inSection: .date).first {
-            snapshot.deleteItems([existingDateItem])
-            snapshot.appendItems([.dateSelection(startDate: sessionItem.startDate, endDate: sessionItem.endDate, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
-        }
+        // Update date selection and status items (both are in the date section now)
+        let dateItems = snapshot.itemIdentifiers(inSection: .date)
+        snapshot.deleteItems(dateItems)
+        snapshot.appendItems([.dateSelection(startDate: sessionItem.startDate, endDate: sessionItem.endDate, isMultiDay: sessionItem.isMultiDay), .sessionStatus(sessionItem.status)], toSection: .date)
         
         // Update sitter item
         if let existingSitterItem = snapshot.itemIdentifiers(inSection: .sitter).first {
@@ -872,7 +865,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             case .exportPDF:
                 configuration.text = "Old school backup for new school parents"
                 configuration.textProperties.numberOfLines = 0
-            case .status:
+            case .date:
                 if self.isArchivedSession {
                     configuration.text = "This session has been archived, as such, it cannot be edited."
                     configuration.textProperties.numberOfLines = 0
@@ -928,12 +921,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            snapshot.appendSections([.sitter, .date, .visibility, .status, .expenses, .events])
+            snapshot.appendSections([.sitter, .date, .visibility, .expenses, .events])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
-            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
             snapshot.appendItems([.expenses], toSection: .expenses)
-            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
+            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay), .sessionStatus(sessionItem.status)], toSection: .date)
             snapshot.appendItems([.events], toSection: .events)
             
             if isEditingSession && sessionItem.status != .archived {
@@ -943,11 +935,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             
             // We'll add the nest review section later after checking if entries need review
         } else {
-            snapshot.appendSections([.sitter, .date, .visibility, .status])
+            snapshot.appendSections([.sitter, .date, .visibility])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
-            snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
+            snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay), .sessionStatus(sessionItem.status)], toSection: .date)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
@@ -1314,11 +1305,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 self.sessionItem.status = status
                 
                 var snapshot = self.dataSource.snapshot()
-                if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
-                    snapshot.deleteItems([existingItem])
-                    snapshot.appendItems([.sessionStatus(status)], toSection: .status)
-                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                let dateItems = snapshot.itemIdentifiers(inSection: .date)
+                
+                // Find the date selection item to maintain order
+                let dateSelectionItem = dateItems.first(where: { if case .dateSelection = $0 { return true }; return false })
+                
+                // Delete all items in the date section and re-add in correct order
+                snapshot.deleteItems(dateItems)
+                if let dateItem = dateSelectionItem {
+                    snapshot.appendItems([dateItem, .sessionStatus(status)], toSection: .date)
+                } else {
+                    snapshot.appendItems([.sessionStatus(status)], toSection: .date)
                 }
+                self.dataSource.apply(snapshot, animatingDifferences: true)
                 
                 self.checkForChanges()
                 
@@ -1338,11 +1337,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         sessionItem.status = status
         
         var snapshot = dataSource.snapshot()
-        if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
-            snapshot.deleteItems([existingItem])
-            snapshot.appendItems([.sessionStatus(status)], toSection: .status)
-            dataSource.apply(snapshot, animatingDifferences: true)
+        let dateItems = snapshot.itemIdentifiers(inSection: .date)
+        
+        // Find the date selection item to maintain order
+        let dateSelectionItem = dateItems.first(where: { if case .dateSelection = $0 { return true }; return false })
+        
+        // Delete all items in the date section and re-add in correct order
+        snapshot.deleteItems(dateItems)
+        if let dateItem = dateSelectionItem {
+            snapshot.appendItems([dateItem, .sessionStatus(status)], toSection: .date)
+        } else {
+            snapshot.appendItems([.sessionStatus(status)], toSection: .date)
         }
+        dataSource.apply(snapshot, animatingDifferences: true)
         
         checkForChanges()
         
@@ -1462,11 +1469,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Update the UI
         var snapshot = dataSource.snapshot()
-        if let existingItem = snapshot.itemIdentifiers(inSection: .status).first {
-            snapshot.deleteItems([existingItem])
-            snapshot.appendItems([.sessionStatus(newStatus)], toSection: .status)
-            dataSource.apply(snapshot, animatingDifferences: true)
+        let dateItems = snapshot.itemIdentifiers(inSection: .date)
+        
+        // Find the date selection item to maintain order
+        let dateSelectionItem = dateItems.first(where: { if case .dateSelection = $0 { return true }; return false })
+        
+        // Delete all items in the date section and re-add in correct order
+        snapshot.deleteItems(dateItems)
+        if let dateItem = dateSelectionItem {
+            snapshot.appendItems([dateItem, .sessionStatus(newStatus)], toSection: .date)
+        } else {
+            snapshot.appendItems([.sessionStatus(newStatus)], toSection: .date)
         }
+        dataSource.apply(snapshot, animatingDifferences: true)
         
         // Log the status change
         Logger.log(
@@ -1596,7 +1611,6 @@ extension EditSessionViewController {
         case overview
         case sitter
         case visibility
-        case status
         case nestReview
         case expenses
         case exportPDF
@@ -1853,14 +1867,21 @@ extension EditSessionViewController: DatePresentationDelegate {
     
     private func updateMultiDaySelection(_ isMultiDay: Bool, startDate: Date, endDate: Date) {
         // Update the data source with the new multi-day state
-        guard let snapshot = dataSource.snapshot().itemIdentifiers(inSection: .date).first else { return }
+        let dateItems = dataSource.snapshot().itemIdentifiers(inSection: .date)
+        
+        // Find the existing status item to preserve it
+        let statusItem = dateItems.first(where: { if case .sessionStatus = $0 { return true }; return false })
         
         var newSnapshot = dataSource.snapshot()
-        newSnapshot.deleteItems([snapshot])
-        newSnapshot.appendItems([.dateSelection(startDate: startDate,
-                                              endDate: endDate,
-                                              isMultiDay: isMultiDay)],
-                              toSection: .date)
+        newSnapshot.deleteItems(dateItems)
+        
+        // Add date selection first, then status (if it exists)
+        var itemsToAdd: [Item] = [.dateSelection(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay)]
+        if let status = statusItem {
+            itemsToAdd.append(status)
+        }
+        
+        newSnapshot.appendItems(itemsToAdd, toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
         checkForChanges()
     }
@@ -1939,12 +1960,21 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
         }
         
         // Update the data source
+        let dateItems = dataSource.snapshot().itemIdentifiers(inSection: .date)
+        
+        // Find the existing status item to preserve it
+        let statusItem = dateItems.first(where: { if case .sessionStatus = $0 { return true }; return false })
+        
         var newSnapshot = dataSource.snapshot()
-        newSnapshot.deleteItems([snapshot])
-        newSnapshot.appendItems([.dateSelection(startDate: newStartDate,
-                                              endDate: newEndDate,
-                                              isMultiDay: currentMultiDayState)],
-                              toSection: .date)
+        newSnapshot.deleteItems(dateItems)
+        
+        // Add date selection first, then status (if it exists)
+        var itemsToAdd: [Item] = [.dateSelection(startDate: newStartDate, endDate: newEndDate, isMultiDay: currentMultiDayState)]
+        if let status = statusItem {
+            itemsToAdd.append(status)
+        }
+        
+        newSnapshot.appendItems(itemsToAdd, toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
         
         checkForChanges()

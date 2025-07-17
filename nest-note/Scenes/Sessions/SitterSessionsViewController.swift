@@ -431,14 +431,10 @@ extension SitterSessionsViewController: UICollectionViewDelegate {
             }
             
         case .archivedSession(let archivedSession):
-            // Display archived session details
-            let alert = UIAlertController(
-                title: "Completed Session",
-                message: "This session was completed on \(formatDate(archivedSession.archivedDate)).\n\nNest: \(archivedSession.nestName)",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
+            // Use the archived session initializer
+            let detailVC = SitterSessionDetailViewController(archivedSession: archivedSession)
+            detailVC.modalPresentationStyle = .pageSheet
+            present(detailVC, animated: true)
             
         case .empty:
             // Do nothing for empty state cells
@@ -457,6 +453,7 @@ extension SitterSessionsViewController: UICollectionViewDelegate {
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
+    
 }
 
 extension SitterSessionsViewController: SessionFilterViewDelegate {
