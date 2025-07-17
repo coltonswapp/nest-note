@@ -1,8 +1,41 @@
+/* eslint-disable max-len */
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
+const {onCall} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
+const sgMail = require("@sendgrid/mail");
+
+// Define the SendGrid API key secret
+const sendGridApiKey = defineSecret("SENDGRID_API_KEY");
 admin.initializeApp();
+
+// Initialize SendGrid API key (will be set when first email function is called)
+let sendGridInitialized = false;
+
+/**
+ * Initialize SendGrid with API key from secrets
+ */
+function initializeSendGrid() {
+  if (sendGridInitialized) return;
+
+  try {
+    const apiKey = sendGridApiKey.value();
+
+    if (apiKey) {
+      // Trim any whitespace or line breaks from the API key
+      const cleanApiKey = apiKey.trim();
+      sgMail.setApiKey(cleanApiKey);
+      sendGridInitialized = true;
+      console.log("SendGrid initialized successfully");
+    } else {
+      console.warn("SendGrid API key not found in environment configuration");
+    }
+  } catch (error) {
+    console.error("Error initializing SendGrid:", error);
+  }
+}
 
 const SessionStatus = {
   UPCOMING: "upcoming",
@@ -22,6 +55,181 @@ function calculatePercentages(distribution, total) {
     acc[key] = (count / total) * 100;
     return acc;
   }, {});
+}
+
+/**
+ * Sends an email using SendGrid
+ * @param {string} to - Recipient email address
+ * @param {string} subject - Email subject
+ * @param {string} text - Plain text content
+ * @param {string} html - HTML content (optional)
+ * @param {string} from - Sender email (optional, defaults to configured sender)
+ * @return {Promise<boolean>} Success status
+ */
+async function sendEmail(to, subject, text, html = null, from = null) {
+  initializeSendGrid();
+
+  if (!sendGridInitialized) {
+    logger.error("SendGrid API key not configured");
+    throw new Error("SendGrid API key not configured");
+  }
+
+  const msg = {
+    to: to,
+    from: from || "NestNote <support@nestnoteapp.com>", // Your verified sender domain
+    subject: subject,
+    text: text,
+  };
+
+  if (html) {
+    msg.html = html;
+  }
+
+  try {
+    await sgMail.send(msg);
+    logger.info(`Email sent successfully to ${to}`);
+    return true;
+  } catch (error) {
+    logger.error(`Failed to send email to ${to}: ${error.message}`);
+    if (error.response) {
+      logger.error(
+          `SendGrid error details: ${JSON.stringify(error.response.body)}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Sends a session invite email to a sitter
+ * @param {string} sitterEmail - Sitter's email address
+ * @param {string} sitterName - Sitter's name
+ * @param {Object} sessionData - Session details
+ * @param {string} nestName - Name of the nest
+ * @param {string} inviteLink - Link to accept the invitation
+ * @return {Promise<boolean>} Success status
+ */
+async function sendSessionInviteEmail(
+    sitterEmail, sitterName, sessionData, nestName, inviteLink) {
+  const subject = `NestNote - Invitation from ${nestName}`;
+  const buttonStyle = "background-color: #007AFF; color: white; " +
+    "padding: 12px 24px; text-decoration: none; border-radius: 6px; " +
+    "display: inline-block;";
+
+  const text = `Hi ${sitterName},
+
+You've been invited to sit for a session at ${nestName}!
+
+Session Details:
+- Title: ${sessionData.title}
+- Location: ${sessionData.location || "Location details in app"}
+
+To accept this invitation, please click the link below:
+${inviteLink}
+
+Thanks,
+The NestNote Team`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #333;">🏡 NestNote - Session Invitation</h2>
+      <p>Hi ${sitterName},</p>
+      <p>You've been invited to sit for a session at <strong>${nestName}</strong>!</p>
+      
+      <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #555;">Session Details:</h3>
+        <ul style="list-style: none; padding: 0;">
+          <li style="margin: 10px 0;"><strong>Title:</strong> ${sessionData.title}</li>
+          <li style="margin: 10px 0;"><strong>Location:</strong> ${sessionData.location || "Location details in app"}</li>
+        </ul>
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${inviteLink}" style="${buttonStyle}">Accept Invitation</a>
+      </div>
+      
+      <p style="color: #666; font-size: 14px;">
+        Thanks,<br>
+        The NestNote Team
+      </p>
+    </div>
+  `;
+
+  return await sendEmail(sitterEmail, subject, text, html);
+}
+
+/**
+ * Sends a session reminder email
+ * @param {string} userEmail - User's email address
+ * @param {string} userName - User's name
+ * @param {Object} sessionData - Session details
+ * @param {string} userRole - Role (owner/sitter)
+ * @return {Promise<boolean>} Success status
+ */
+async function sendSessionReminderEmail(
+    userEmail, userName, sessionData, userRole = "owner") {
+  const isOwner = userRole === "owner";
+  const subject = `🔔 Session Reminder: ${sessionData.title}`;
+
+  // Handle both Firebase Timestamp and millisecond timestamp formats
+  const startDate = sessionData.startDate.toDate ?
+    sessionData.startDate.toDate() :
+    new Date(sessionData.startDate);
+  const endDate = sessionData.endDate.toDate ?
+    sessionData.endDate.toDate() :
+    new Date(sessionData.endDate);
+
+  const timeUntil = startDate.getTime() - Date.now();
+  const hoursUntil = Math.round(timeUntil / (1000 * 60 * 60));
+  const startTime = startDate.toLocaleTimeString();
+  const endTime = endDate.toLocaleTimeString();
+  const sessionDate = startDate.toLocaleDateString();
+  const timeText = hoursUntil <= 1 ? "soon" : `in ${hoursUntil} hours`;
+  const sessionType = isOwner ? "session" : "sitting session";
+
+  const text = `Hi ${userName},
+
+This is a reminder that your ${sessionType} is starting ${timeText}!
+
+Session Details:
+- Title: ${sessionData.title}
+- Date: ${sessionDate}
+- Time: ${startTime} - ${endTime}
+- Location: ${sessionData.location || "Location details in app"}
+
+${isOwner ? "Make sure everything is ready for your sitter!" : "Thanks for helping out!"}
+
+Best regards,
+The NestNote Team`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #333;">🔔 Session Reminder</h2>
+      <p>Hi ${userName},</p>
+      <p>This is a reminder that your ${sessionType} is starting <strong>${timeText}</strong>!</p>
+      
+      <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="margin-top: 0; color: #555;">Session Details:</h3>
+        <ul style="list-style: none; padding: 0;">
+          <li style="margin: 10px 0;"><strong>Title:</strong> ${sessionData.title}</li>
+          <li style="margin: 10px 0;"><strong>Date:</strong> ${sessionDate}</li>
+          <li style="margin: 10px 0;"><strong>Time:</strong> ${startTime} - ${endTime}</li>
+          <li style="margin: 10px 0;"><strong>Location:</strong> ${sessionData.location || "Location details in app"}</li>
+        </ul>
+      </div>
+      
+      <p style="color: #555;">
+        ${isOwner ? "Make sure everything is ready for your sitter!" : "Thanks for helping out!"}
+      </p>
+      
+      <p style="color: #666; font-size: 14px;">
+        Best regards,<br>
+        The NestNote Team
+      </p>
+    </div>
+  `;
+
+  return await sendEmail(userEmail, subject, text, html);
 }
 
 /**
@@ -429,6 +637,119 @@ exports.helloNestNote = functions.https.onCall((data, context) => {
     timestamp: Date.now(),
     // Don't echo back the input data for now
   };
+});
+
+/**
+ * Simple test function to verify callable function structure
+ */
+exports.testEmail = functions.https.onCall(async (data, context) => {
+  console.log("Test function called with data keys:", Object.keys(data));
+
+  const {to, subject, text} = data.data || data;
+
+  console.log("Extracted fields:", {to, subject, text});
+
+  // Validate required fields
+  if (!to || !subject || !text) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: to, subject, text",
+    );
+  }
+
+  // Mock email sending
+  return {
+    success: true,
+    message: `Would send email to ${to} with subject "${subject}"`,
+    data: {to, subject, text},
+  };
+});
+
+/**
+ * Cloud function to send session invite emails
+ */
+exports.sendSessionInviteEmail = onCall({
+  secrets: [sendGridApiKey],
+}, async (request) => {
+  const {sitterEmail, sitterName, sessionData, nestName, inviteLink} = request.data;
+
+  // Validate required fields
+  if (!sitterEmail || !sitterName || !sessionData || !nestName || !inviteLink) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: sitterEmail, sitterName, sessionData, nestName, inviteLink",
+    );
+  }
+
+  try {
+    await sendSessionInviteEmail(sitterEmail, sitterName, sessionData, nestName, inviteLink);
+    return {success: true, message: "Invite email sent successfully"};
+  } catch (error) {
+    logger.error(`Failed to send invite email: ${error.message}`);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to send invite email",
+        error.message,
+    );
+  }
+});
+
+/**
+ * Cloud function to send session reminder emails
+ */
+exports.sendSessionReminderEmail = functions.https.onCall(async (data, context) => {
+  const {userEmail, userName, sessionData, userRole} = data.data || data;
+
+  // Validate required fields
+  if (!userEmail || !userName || !sessionData) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: userEmail, userName, sessionData",
+    );
+  }
+
+  try {
+    await sendSessionReminderEmail(userEmail, userName, sessionData, userRole);
+    return {success: true, message: "Reminder email sent successfully"};
+  } catch (error) {
+    logger.error(`Failed to send reminder email: ${error.message}`);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to send reminder email",
+        error.message,
+    );
+  }
+});
+
+/**
+ * Generic email sending function for admin use
+ */
+exports.sendEmail = functions.https.onCall(async (data, context) => {
+  const {to, subject, text, html, from} = data.data || data;
+
+  // Debug: Log received data (safe logging to avoid circular references)
+  console.log("Received data keys:", Object.keys(data));
+  console.log("Extracted fields:", {to, subject, text, html, from});
+
+  // Validate required fields
+  if (!to || !subject || !text) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: to, subject, text",
+    );
+  }
+
+  try {
+    await sendEmail(to, subject, text, html, from);
+    return {success: true, message: "Email sent successfully"};
+  } catch (error) {
+    logger.error(`Failed to send email: ${error.message}`);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to send email",
+        error.message,
+    );
+  }
 });
 
 /**

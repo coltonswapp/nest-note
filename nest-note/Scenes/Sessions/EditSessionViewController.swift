@@ -29,8 +29,8 @@ protocol StatusCellDelegate: AnyObject {
 }
 
 protocol InviteSitterViewControllerDelegate: AnyObject {
-    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem)
-    func inviteSitterViewControllerDidCancel(_ controller: InviteSitterViewController)
+    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem, inviteId: String)
+    func inviteSitterViewControllerDidCancel()
     func inviteDetailViewControllerDidDeleteInvite()
 }
 
@@ -675,27 +675,32 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             switch item {
             case .inviteSitter:
                 // Determine the sitter to display from assignedSitter
-                let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
-                
-                if let sitter = displaySitter {
-                    // Extract invite code from assigned sitter if available
-                    let inviteCode: String?
-                    if let assignedSitter = self.sessionItem.assignedSitter,
-                       let inviteID = assignedSitter.inviteID,
-                       let code = inviteID.split(separator: "-").last {
-                        inviteCode = String(code)
+                if isEditingSession {
+                    
+                    let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
+                    
+                    if let sitter = displaySitter {
+                        // Extract invite code from assigned sitter if available
+                        let inviteCode: String?
+                        if let assignedSitter = self.sessionItem.assignedSitter,
+                           let inviteID = assignedSitter.inviteID,
+                           let code = inviteID.split(separator: "-").last {
+                            inviteCode = String(code)
+                        } else {
+                            inviteCode = nil
+                        }
+                        
+                        // Use email as fallback if name is empty
+                        let displayName = sitter.name.isEmpty ? sitter.email : sitter.name
+                        
+                        cell.configure(name: displayName, inviteCode: inviteCode)
                     } else {
-                        inviteCode = nil
+                        // Show default state
+                        let placeholderName = isArchivedSession ? "No sitter" : ""
+                        cell.configure(name: placeholderName, inviteCode: nil)
                     }
-                    
-                    // Use email as fallback if name is empty
-                    let displayName = sitter.name.isEmpty ? sitter.email : sitter.name
-                    
-                    cell.configure(name: displayName, inviteCode: inviteCode)
                 } else {
-                    // Show default state
-                    let placeholderName = isArchivedSession ? "No sitter" : ""
-                    cell.configure(name: placeholderName, inviteCode: nil)
+                    cell.configureDisabled()
                 }
                 
             default:
@@ -854,8 +859,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             // Configure footer based on section
             switch self.dataSource.sectionIdentifier(for: indexPath.section) {
             case .sitter:
-                if !self.isArchivedSession {
+                if !self.isArchivedSession && self.isEditingSession {
                     configuration.text = "Tap to manage sitter and invite details"
+                } else if !self.isEditingSession {
+                    configuration.text = "Create an invite after creating your session"
                 }
             case .nestReview:
                 configuration.text = "Review items to ensure your Nest is up to date."
@@ -1696,7 +1703,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         
         switch item {
         case .inviteSitter:
-            guard !isArchivedSession else { return }
+            guard !isArchivedSession && isEditingSession else { break }
             inviteSitterButtonTapped()
         case .visibilityLevel:
             break
@@ -2321,7 +2328,7 @@ extension EditSessionViewController: StatusCellDelegate {
 
 // MARK: - InviteSitterViewControllerDelegate
 extension EditSessionViewController: InviteSitterViewControllerDelegate {
-    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem) {
+    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem, inviteId: String) {
         // Update the sessionItem's assignedSitter to reflect the change
         // We assume the server was already updated when the invite was created/updated
         if let existingAssignedSitter = sessionItem.assignedSitter {
@@ -2342,7 +2349,7 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
                 email: sitter.email,
                 userID: nil,
                 inviteStatus: .none,
-                inviteID: nil
+                inviteID: inviteId
             )
         }
         
@@ -2360,7 +2367,7 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
         checkForChanges()
     }
     
-    func inviteSitterViewControllerDidCancel(_ controller: InviteSitterViewController) {
+    func inviteSitterViewControllerDidCancel() {
         // Just pop back to the previous screen
         navigationController?.popViewController(animated: true)
     }
@@ -2381,7 +2388,6 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
         
         // Mark as having unsaved changes
         checkForChanges()
-        showToast(text: "Invite deleted")
     }
 }
 
@@ -2505,6 +2511,16 @@ class SessionInviteSitterCell: UICollectionViewListCell {
             codeLabel.foregroundColor = .secondaryLabel
             codeLabel.setTitle("000-000", for: .normal)
         }
+    }
+    
+    func configureDisabled() {
+        nameLabel.text = "Configure Invite"
+        nameLabel.textColor = .secondaryLabel
+        iconImageView.tintColor = .secondaryLabel
+        
+        codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
+        codeLabel.foregroundColor = .secondaryLabel
+        codeLabel.setTitle("000-000", for: .normal)
     }
 }
 

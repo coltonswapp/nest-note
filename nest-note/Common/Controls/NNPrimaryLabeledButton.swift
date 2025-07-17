@@ -68,10 +68,10 @@ class NNBaseControl: UIControl {
     private var visualEffectView: UIVisualEffectView?
     
     // MARK: - Initialization
-    init(title: String, image: UIImage? = nil, foregroundColor: UIColor = .white) {
+    init(title: String, image: UIImage? = nil, backgroundColor: UIColor = NNColors.primary, foregroundColor: UIColor = .white) {
         super.init(frame: .zero)
         self.foregroundColor = foregroundColor
-        setupControl(title: title, image: image)
+        setupControl(title: title, image: image, backgroundColor: backgroundColor)
     }
     
     required init?(coder: NSCoder) {
@@ -88,8 +88,8 @@ class NNBaseControl: UIControl {
     }
     
     // MARK: - Setup
-    private func setupControl(title: String, image: UIImage?) {
-        setupAppearance()
+    private func setupControl(title: String, image: UIImage?, backgroundColor: UIColor) {
+        setupAppearance(backgroundColor: backgroundColor)
         setupTouchHandling()
         setupLayout()
         
@@ -98,14 +98,14 @@ class NNBaseControl: UIControl {
         imageView.isHidden = image == nil
     }
     
-    private func setupAppearance() {
-        backgroundColor = NNColors.primary
+    private func setupAppearance(backgroundColor: UIColor) {
+        self.backgroundColor = backgroundColor
         layer.cornerRadius = 18
         clipsToBounds = true
         translatesAutoresizingMaskIntoConstraints = false
         
         layer.borderWidth = 1
-        layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
+        layer.borderColor = backgroundColor.lighter(by: 15).cgColor
     }
     
     private func setupLayout() {
@@ -243,11 +243,23 @@ class NNBaseControl: UIControl {
 // Now NNPrimaryLabeledButton can be much simpler
 class NNPrimaryLabeledButton: NNBaseControl {
     
+    private var primaryBackgroundColor: UIColor = NNColors.primary
+    
+    // MARK: - Initialization
+    override init(title: String, image: UIImage? = nil, backgroundColor: UIColor = NNColors.primary, foregroundColor: UIColor = .white) {
+        self.primaryBackgroundColor = backgroundColor
+        super.init(title: title, image: image, backgroundColor: backgroundColor, foregroundColor: foregroundColor)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
     override var isEnabled: Bool {
         didSet {
             guard oldValue != isEnabled else { return }
             UIView.animate(withDuration: 0.3) {
-                self.backgroundColor = self.isEnabled ? NNColors.primary : .systemGray4
+                self.backgroundColor = self.isEnabled ? self.primaryBackgroundColor : .systemGray4
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
                 self.imageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
@@ -288,17 +300,15 @@ class NNLoadingButton: NNBaseControl {
     
     // MARK: - Initialization
     init(title: String, 
-         titleColor: UIColor, 
-         fillStyle: FillStyle, 
+         titleColor: UIColor = .white, 
+         fillStyle: FillStyle = .fill(NNColors.primary), 
          transitionStyle: LoadingTransitionStyle = .verticalSlide) {
         self.transitionStyle = transitionStyle
-        super.init(title: title)
         self.primaryBackgroundColor = fillStyle.backgroundColor
-        self.titleLabel.textColor = titleColor
-        self.imageView.tintColor = titleColor
-        backgroundColor = primaryBackgroundColor
+        super.init(title: title, backgroundColor: fillStyle.backgroundColor, foregroundColor: titleColor)
         setupSpinner()
     }
+    
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")

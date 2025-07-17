@@ -400,7 +400,7 @@ class NestSessionsViewController: NNViewController {
     }
     
     private func setupNewSessionButton() {
-        ctaButton = NNPrimaryLabeledButton(title: "New Session")
+        ctaButton = NNPrimaryLabeledButton(title: "New Session", image: UIImage(systemName: "plus"))
         view.addSubview(ctaButton)
         
         ctaButton.addTarget(self, action: #selector(ctaTapped), for: .touchUpInside)

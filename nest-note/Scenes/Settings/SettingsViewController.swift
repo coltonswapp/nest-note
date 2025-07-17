@@ -88,25 +88,49 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         trackScreenVisit()
         
-        guard let accountSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .account),
-              let _ = dataSource.snapshot().itemIdentifiers(inSection: .account).first else { return }
+        let snapshot = dataSource.snapshot()
         
-        let accountIndexPath = IndexPath(item: 0, section: accountSection)
-        
-        // Make sure the cell is visible
-        guard let accountCell = collectionView.cellForItem(at: accountIndexPath) else {
-            return
+        // Find accountSection & cell to display tip
+        if let accountSection = snapshot.sectionIdentifiers.firstIndex(of: .account),
+           let _ = snapshot.itemIdentifiers(inSection: .account).first {
+            
+            let accountIndexPath = IndexPath(item: 0, section: accountSection)
+            
+            // Make sure the cell is visible
+            if let accountCell = collectionView.cellForItem(at: accountIndexPath) {
+                
+                // Show the tooltip anchored to the bottom of the setup cell
+                if NNTipManager.shared.shouldShowTip(SettingsTips.profileTip) {
+                    NNTipManager.shared.showTip(
+                        SettingsTips.profileTip,
+                        sourceView: accountCell,
+                        in: self,
+                        pinToEdge: .bottom,
+                        offset: CGPoint(x: 0, y: 8)
+                    )
+                }
+            }
         }
         
-        // Show the tooltip anchored to the bottom of the setup cell
-        if NNTipManager.shared.shouldShowTip(SettingsTips.profileTip) {
-            NNTipManager.shared.showTip(
-                SettingsTips.profileTip,
-                sourceView: accountCell,
-                in: self,
-                pinToEdge: .bottom,
-                offset: CGPoint(x: 0, y: 8)
-            )
+        if let myNestSection = snapshot.sectionIdentifiers.firstIndex(of: .myNest),
+           let _ = snapshot.itemIdentifiers(inSection: .myNest).first {
+            
+            let sessionsIndexPath = IndexPath(item: 0, section: myNestSection)
+            
+            // Make sure the cell is visible
+            if let sessionsCell = collectionView.cellForItem(at: sessionsIndexPath) {
+                
+                // Show the tooltip anchored to the bottom of the setup cell
+                if NNTipManager.shared.shouldShowTip(SettingsTips.sessionsTip) {
+                    NNTipManager.shared.showTip(
+                        SettingsTips.sessionsTip,
+                        sourceView: sessionsCell,
+                        in: self,
+                        pinToEdge: .bottom,
+                        offset: CGPoint(x: 0, y: 0)
+                    )
+                }
+            }
         }
     }
     
@@ -300,16 +324,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         if UserService.shared.isSignedIn {
             if ModeManager.shared.isSitterMode {
                 let sittingItems = [
-                    ("Saved Nests", "heart"),
                     ("Sessions", "calendar"),
+                    ("Saved Nests", "heart"),
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
             } else {
                 let nestItems = [
+                    ("Sessions", "calendar"),
                     ("Nest Members", "person.2.fill"),
                     ("Permanent Access", "person.badge.key.fill"),
                     ("Saved Sitters", "heart"),
-                    ("Sessions", "calendar"),
                     ("Subscription", "creditcard")
                 ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(nestItems, toSection: .myNest)
@@ -504,6 +528,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case .account(let email, let name):
             if UserService.shared.isSignedIn {
                 showUserProfile()
+                NNTipManager.shared.dismissTip(SettingsTips.profileTip)
             } else {
                 showUserSignIn()
             }
@@ -534,7 +559,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     if ModeManager.shared.isNestOwnerMode {
                         let sessionsVC = NestSessionsViewController()
                         let nav = UINavigationController(rootViewController: sessionsVC)
-                        present(nav, animated: true)
+                        present(nav, animated: true) {
+                            NNTipManager.shared.dismissTip(SettingsTips.sessionsTip)
+                        }
                     } else {
                         let sessionsVC = SitterSessionsViewController()
                         let nav = UINavigationController(rootViewController: sessionsVC)
