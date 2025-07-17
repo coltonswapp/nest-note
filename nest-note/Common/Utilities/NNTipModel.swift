@@ -112,6 +112,13 @@ enum SettingsTips {
         message: "Tap here to manage your account.",
         systemImageName: "person.crop.square"
     )
+    
+    static let sessionsTip = NNTipModel(
+        id: "SessionsTip",
+        title: "Your Sessions Live Here",
+        message: "Tap to see in-progress, upcoming, & past sessions.",
+        systemImageName: "rectangle.fill.on.rectangle.angled.fill"
+    )
 }
 
 enum NestViewTips {

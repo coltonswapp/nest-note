@@ -112,11 +112,6 @@ class JoinSessionViewController: NNViewController {
         setupKeyboardObservers()
     }
     
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        codeTextField.textField.becomeFirstResponder()
-    }
-    
     override func addSubviews() {
         view.addSubview(topImageView)
         topImageView.pinToTop(of: view)

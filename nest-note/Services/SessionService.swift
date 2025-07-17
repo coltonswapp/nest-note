@@ -564,10 +564,11 @@ class SessionService {
     /// Creates an invite for a sitter to join a session
     func createInvite(
         sitterEmail: String,
+        sitterName: String,
         sessionID: String
     ) async throws -> (id: String, code: String) {
         // Convert the method to use email parameter directly
-        let sitter = SitterItem(id: UUID().uuidString, name: "", email: sitterEmail)
+        let sitter = SitterItem(id: UUID().uuidString, name: sitterName, email: sitterEmail)
         let code = try await createInviteForSitter(sessionID: sessionID, sitter: sitter)
         let inviteID = "invite-\(code)"
         return (id: inviteID, code: code)
@@ -754,7 +755,7 @@ class SessionService {
         
         let updatedSitter = AssignedSitter(
             id: session.assignedSitter?.id ?? UUID().uuidString,
-            name: session.assignedSitter?.name ?? invite.sitterEmail,
+            name: session.assignedSitter?.name ?? "Sitter",
             email: invite.sitterEmail,
             userID: existingUserID,  // Preserve the existing userID
             inviteStatus: sessionStatus,
@@ -970,9 +971,15 @@ class SessionService {
             updatedAssignedSitter?.userID = currentUserID
             updatedAssignedSitter?.inviteStatus = .accepted
             
-            // Update name and email to reflect who actually joined (not who was invited)
+            // Update email to reflect who actually joined, but preserve the original invited name
+            // unless the current user has a proper name set
             if let currentUser = Auth.auth().currentUser {
-                updatedAssignedSitter?.name = currentUser.displayName ?? "Unknown"
+                // Only update the name if the current user has a proper name in their profile
+                // Otherwise, keep the original invited sitter's name
+                if let userName = UserService.shared.currentUser?.personalInfo.name, !userName.isEmpty {
+                    updatedAssignedSitter?.name = userName
+                }
+                // Always update email to reflect who actually accepted
                 updatedAssignedSitter?.email = currentUser.email ?? ""
             }
             

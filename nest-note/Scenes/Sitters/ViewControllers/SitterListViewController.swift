@@ -54,6 +54,9 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     }()
     
     private var inviteButton: NNPrimaryLabeledButton!
+    private var bottomButtonStack: UIStackView!
+    private var selectSitterButton: NNPrimaryLabeledButton!
+    private var addSitterButton: NNPrimaryLabeledButton!
     private let initialSelectedSitter: SitterItem?
     private let displayMode: SitterListDisplayMode
     
@@ -109,7 +112,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         // Set initial selection first
         if let sitter = initialSelectedSitter {
             selectedSitter = sitter
-            updateInviteButtonState()
+            updateBottomButtonStackState()
         } else if let session = currentSession,
                   let assignedSitter = session.assignedSitter {
             // If no initial sitter but we have an assigned sitter, use that
@@ -118,7 +121,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
                 name: assignedSitter.name,
                 email: assignedSitter.email
             )
-            updateInviteButtonState()
+            updateBottomButtonStackState()
         }
         
         // Setup loading indicator and refresh control
@@ -148,7 +151,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         }
         
         setupCollectionView()
-        setupInviteButton()
+        setupBottomButtonStack()
         
         // Add empty state view
         setupEmptyStateView()
@@ -216,7 +219,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.allowsSelection = displayMode == .selectSitter
+        collectionView.allowsSelection = true
         view.addSubview(collectionView)
         
         // Add content insets
@@ -349,26 +352,81 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         collectionView.isHidden = shouldShowEmptyState
     }
     
-    private func setupInviteButton() {
-        // Set button title based on mode
-        let buttonTitle = displayMode == .default ? "Add a New Sitter" : "Select Sitter"
-        inviteButton = NNPrimaryLabeledButton(title: buttonTitle)
-        inviteButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        inviteButton.addTarget(self, action: #selector(inviteButtonTapped), for: .touchUpInside)
+    private func setupBottomButtonStack() {
+        // Create the stack view
+        bottomButtonStack = UIStackView()
+        bottomButtonStack.axis = .horizontal
+        bottomButtonStack.distribution = .fillEqually
+        bottomButtonStack.spacing = 12
+        bottomButtonStack.translatesAutoresizingMaskIntoConstraints = false
         
-        // In default mode, the button is always enabled
-        // In selectSitter mode, the button is only enabled when a sitter is selected
-        if displayMode == .default {
-            inviteButton.isEnabled = true
+        // Create buttons
+        selectSitterButton = NNPrimaryLabeledButton(title: "Select Sitter", backgroundColor: NNColors.primary, foregroundColor: .white)
+        addSitterButton = NNPrimaryLabeledButton(title: "Add Sitter", backgroundColor: NNColors.primary, foregroundColor: .white)
+        
+        // Add targets
+        selectSitterButton.addTarget(self, action: #selector(selectSitterButtonTapped), for: .touchUpInside)
+        addSitterButton.addTarget(self, action: #selector(addSitterButtonTapped), for: .touchUpInside)
+        
+        // Add buttons to stack
+        bottomButtonStack.addArrangedSubview(selectSitterButton)
+        bottomButtonStack.addArrangedSubview(addSitterButton)
+        
+        // Pin the stack to bottom with blur effect
+        pinBottomButtonStackToBottom()
+        
+        // Update button visibility and state
+        updateBottomButtonStackState()
+    }
+    
+    private func pinBottomButtonStackToBottom() {
+        view.addSubview(bottomButtonStack)
+        
+        // Create variable blur effect view matching NNPrimaryLabeledButton implementation
+        let blurEffectView = UIVisualEffectView()
+        if let maskImage = UIImage(named: "testBG3") {
+            blurEffectView.effect = UIBlurEffect.variableBlurEffect(radius: 16, maskImage: maskImage)
         } else {
-            updateInviteButtonState()
+            blurEffectView.effect = UIBlurEffect(style: .regular)
         }
+        blurEffectView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Insert blur view behind the stack
+        view.insertSubview(blurEffectView, belowSubview: bottomButtonStack)
+        
+        // Pin constraints
+        NSLayoutConstraint.activate([
+            // Button stack constraints
+            bottomButtonStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            bottomButtonStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            bottomButtonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            bottomButtonStack.heightAnchor.constraint(equalToConstant: 55),
+            
+            // Blur effect constraints matching NNPrimaryLabeledButton
+            blurEffectView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            blurEffectView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            blurEffectView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            blurEffectView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -55 - 80)
+        ])
+    }
+    
+    @objc private func selectSitterButtonTapped() {
+        guard let selectedSitter = selectedSitter else { return }
+        delegate?.sitterListViewController(didSelectSitter: selectedSitter)
+        navigationController?.dismiss(animated: true)
+    }
+    
+    @objc private func addSitterButtonTapped() {
+        let addVC = EditSitterViewController()
+        addVC.delegate = self
+        let navController = UINavigationController(rootViewController: addVC)
+        present(navController, animated: true)
     }
     
     @objc private func inviteButtonTapped() {
         if displayMode == .default {
             // In default mode, we want to add a new sitter
-            let addVC = AddSitterViewController()
+            let addVC = EditSitterViewController()
             addVC.delegate = self
             let navController = UINavigationController(rootViewController: addVC)
             present(navController, animated: true)
@@ -384,10 +442,33 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         dismiss(animated: true)
     }
     
-    private func updateInviteButtonState() {
-        // Only update button state in selectSitter mode
+    private func updateBottomButtonStackState() {
+        let hasSitters = !allSitters.isEmpty
+        
         if displayMode == .selectSitter {
-            inviteButton.isEnabled = selectedSitter != nil
+            // In selectSitter mode, show both buttons if there are sitters
+            // Show only "Add Sitter" if no sitters exist
+            selectSitterButton.isHidden = !hasSitters
+            addSitterButton.isHidden = false
+            
+            // Enable "Select Sitter" only when a sitter is selected
+            selectSitterButton.isEnabled = selectedSitter != nil && hasSitters
+            addSitterButton.isEnabled = true
+        } else {
+            // In default mode, never show "Select Sitter" button
+            // Only show "Add Sitter" button
+            selectSitterButton.isHidden = true
+            addSitterButton.isHidden = false
+            
+            // Add Sitter button is always enabled in default mode
+            addSitterButton.isEnabled = true
+        }
+    }
+    
+    private func updateInviteButtonState() {
+        // Keep this method for backward compatibility if needed elsewhere
+        if displayMode == .selectSitter {
+            inviteButton?.isEnabled = selectedSitter != nil
         }
     }
     
@@ -410,6 +491,9 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             collectionView.isHidden = false
             applySnapshot()
         }
+        
+        // Update button stack state after data loads
+        updateBottomButtonStackState()
     }
     
     func loadData(showLoadingIndicator: Bool = true) async {
@@ -531,6 +615,19 @@ extension SitterListViewController: UICollectionViewDelegate {
         let tappedSitter = sittersArray[indexPath.row]
         print("DEBUG: Tapped sitter: \(tappedSitter.name)")
         
+        // Always deselect the cell immediately
+        collectionView.deselectItem(at: indexPath, animated: true)
+        
+        if displayMode == .default {
+            // In default mode, show EditSitterViewController with populated data
+            let editVC = EditSitterViewController(sitter: tappedSitter)
+            editVC.delegate = self
+            let navController = UINavigationController(rootViewController: editVC)
+            present(navController, animated: true)
+            return
+        }
+        
+        // SelectSitter mode behavior
         // Check if we have an active invite
         if let session = currentSession, 
            let sitter = session.assignedSitter,
@@ -544,9 +641,7 @@ extension SitterListViewController: UICollectionViewDelegate {
                 preferredStyle: .alert
             )
             
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
-                collectionView.deselectItem(at: indexPath, animated: true)
-            })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
             
             alert.addAction(UIAlertAction(title: "Change Sitter", style: .destructive) { [weak self] _ in
                 self?.updateSitterSelection(tappedSitter, in: collectionView, at: indexPath)
@@ -574,7 +669,7 @@ extension SitterListViewController: UICollectionViewDelegate {
         }
         
         print("DEBUG: After selection, selectedSitter: \(String(describing: selectedSitter?.name))")
-        updateInviteButtonState()
+        updateBottomButtonStackState()
         
         // If the session has an invite, delete it, so we can
         // generate a new invite for the newly selected sitter
@@ -632,26 +727,9 @@ extension SitterListViewController: UISearchBarDelegate {
     }
 }
 
-
-// MARK: - InviteSitterViewControllerDelegate
-extension SitterListViewController: InviteSitterViewControllerDelegate {
-    func inviteDetailViewControllerDidDeleteInvite() {
-        delegate?.didDeleteSitterInvite()
-    }
-    
-    func inviteSitterViewControllerDidSendInvite(to sitter: SitterItem) {
-        delegate?.sitterListViewController(didSelectSitter: sitter)
-    }
-    
-    func inviteSitterViewControllerDidCancel(_ controller: InviteSitterViewController) {
-        // Just pop back to the sitter list
-        navigationController?.popViewController(animated: true)
-    }
-}
-
 // MARK: - AddSitterViewControllerDelegate
 extension SitterListViewController: AddSitterViewControllerDelegate {
-    func addSitterViewController(_ controller: AddSitterViewController, didAddSitter sitter: SitterItem) {
+    func addSitterViewController(_ controller: EditSitterViewController, didAddSitter sitter: SitterItem) {
         // Dismiss the add sitter view controller
         controller.dismiss(animated: true)
         
@@ -664,7 +742,7 @@ extension SitterListViewController: AddSitterViewControllerDelegate {
         }
     }
     
-    func addSitterViewControllerDidCancel(_ controller: AddSitterViewController) {
+    func addSitterViewControllerDidCancel(_ controller: EditSitterViewController) {
         controller.dismiss(animated: true)
     }
 }

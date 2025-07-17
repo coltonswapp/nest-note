@@ -2,20 +2,21 @@ import UIKit
 import Foundation
 
 protocol AddSitterViewControllerDelegate: AnyObject {
-    func addSitterViewController(_ controller: AddSitterViewController, didAddSitter sitter: SitterItem)
-    func addSitterViewControllerDidCancel(_ controller: AddSitterViewController)
+    func addSitterViewController(_ controller: EditSitterViewController, didAddSitter sitter: SitterItem)
+    func addSitterViewControllerDidCancel(_ controller: EditSitterViewController)
 }
 
-class AddSitterViewController: NNViewController {
+class EditSitterViewController: NNViewController {
     
     weak var delegate: AddSitterViewControllerDelegate?
+    private var existingSitter: SitterItem?
     
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.font = .h2
         label.textAlignment = .center
         label.textColor = .label
-        label.text = "Add New Sitter"
+        label.text = "Add New Sitter" // Will be updated in setup if editing
         return label
     }()
     
@@ -25,7 +26,7 @@ class AddSitterViewController: NNViewController {
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
-        label.text = "Once you've added a sitter, they can be invited to your sessions."
+        label.text = "Once you've added a sitter, they can be invited to your sessions." // Will be updated in setup if editing
         return label
     }()
     
@@ -98,7 +99,7 @@ class AddSitterViewController: NNViewController {
     }()
     
     private lazy var addButton: NNLoadingButton = {
-        let button = NNLoadingButton(title: "Add Sitter", titleColor: .white, fillStyle: .fill(NNColors.primaryAlt))
+        let button = NNLoadingButton(title: "Add Sitter", titleColor: .white, fillStyle: .fill(NNColors.primary)) // Will be updated in setup if editing
         button.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
         button.isEnabled = false
         return button
@@ -111,6 +112,12 @@ class AddSitterViewController: NNViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }()
+    
+    // MARK: - Initialization
+    convenience init(sitter: SitterItem) {
+        self.init()
+        self.existingSitter = sitter
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -138,6 +145,26 @@ class AddSitterViewController: NNViewController {
         if let sheet = sheetPresentationController {
             sheet.detents = [.medium()]
             sheet.prefersGrabberVisible = true
+        }
+        
+        // Configure UI based on whether we're editing or adding
+        if let sitter = existingSitter {
+            // Editing mode
+            titleLabel.text = "Edit Sitter"
+            descriptionLabel.text = "Update your sitter's information below."
+            addButton.setTitle("Save Changes")
+            
+            // Populate fields
+            nameTextField.text = sitter.name
+            emailTextField.text = sitter.email
+            
+            // Update button state
+            updateAddButtonState()
+        } else {
+            // Adding mode (default)
+            titleLabel.text = "Add New Sitter"
+            descriptionLabel.text = "Once you've added a sitter, they can be invited to your sessions."
+            addButton.setTitle("Add Sitter")
         }
     }
     
@@ -187,27 +214,58 @@ class AddSitterViewController: NNViewController {
         
         addButton.startLoading()
         
-        let newSitter = SitterItem(
-            id: UUID().uuidString,
-            name: name,
-            email: email
-        )
-        
-        Task {
-            do {
-                try await NestService.shared.addSavedSitter(newSitter.toSavedSitter())
-                
-                try await Task.sleep(for: .seconds(1))
-                
-                await MainActor.run {
-                    addButton.stopLoading()
-                    showToast(text: "Sitter added successfully")
-                    delegate?.addSitterViewController(self, didAddSitter: newSitter)
+        if let existingSitter = existingSitter {
+            // Update existing sitter
+            let updatedSitter = SitterItem(
+                id: existingSitter.id,
+                name: name,
+                email: email
+            )
+            
+            Task {
+                do {
+                    // Delete the old sitter and add the updated one
+                    try await NestService.shared.deleteSavedSitter(existingSitter.toSavedSitter())
+                    try await NestService.shared.addSavedSitter(updatedSitter.toSavedSitter())
+                    
+                    try await Task.sleep(for: .seconds(1))
+                    
+                    await MainActor.run {
+                        addButton.stopLoading()
+                        showToast(text: "Sitter updated successfully")
+                        delegate?.addSitterViewController(self, didAddSitter: updatedSitter)
+                    }
+                } catch {
+                    await MainActor.run {
+                        addButton.stopLoading()
+                        showToast(text: "Failed to update sitter: \(error.localizedDescription)")
+                    }
                 }
-            } catch {
-                await MainActor.run {
-                    addButton.stopLoading()
-                    showToast(text: "Failed to add sitter: \(error.localizedDescription)")
+            }
+        } else {
+            // Add new sitter
+            let newSitter = SitterItem(
+                id: UUID().uuidString,
+                name: name,
+                email: email
+            )
+            
+            Task {
+                do {
+                    try await NestService.shared.addSavedSitter(newSitter.toSavedSitter())
+                    
+                    try await Task.sleep(for: .seconds(1))
+                    
+                    await MainActor.run {
+                        addButton.stopLoading()
+                        showToast(text: "Sitter added successfully")
+                        delegate?.addSitterViewController(self, didAddSitter: newSitter)
+                    }
+                } catch {
+                    await MainActor.run {
+                        addButton.stopLoading()
+                        showToast(text: "Failed to add sitter: \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -224,12 +282,21 @@ class AddSitterViewController: NNViewController {
         let email = emailTextField.text?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
         
         let isValidEmail = email.contains("@") && email.contains(".")
-        addButton.isEnabled = !name.isEmpty && !email.isEmpty && isValidEmail
+        let hasValidData = !name.isEmpty && !email.isEmpty && isValidEmail
+        
+        if let existingSitter = existingSitter {
+            // In edit mode, only enable if there are changes AND data is valid
+            let hasChanges = name != existingSitter.name || email != existingSitter.email
+            addButton.isEnabled = hasValidData && hasChanges
+        } else {
+            // In add mode, enable if data is valid
+            addButton.isEnabled = hasValidData
+        }
     }
 }
 
 // MARK: - UITextFieldDelegate
-extension AddSitterViewController: UITextFieldDelegate {
+extension EditSitterViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == nameTextField {
             emailTextField.becomeFirstResponder()

@@ -368,9 +368,9 @@ class NNTipView: UIView {
         
         // Apply unified shadow to the main view
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.2
-        layer.shadowOffset = CGSize(width: 2, height: 6)
-        layer.shadowRadius = 10
+        layer.shadowOpacity = 0.3
+//        layer.shadowOffset = CGSize(width: 2, height: 0)
+        layer.shadowRadius = 15
         layer.shadowPath = path.cgPath
     }
 }

@@ -6,6 +6,8 @@
 //
 
 import UIKit
+import FirebaseFunctions
+import FirebaseAuth
 
 class InviteDetailViewController: NNViewController {
     
@@ -251,19 +253,25 @@ class InviteDetailViewController: NNViewController {
             do {
                 let invite = try await SessionService.shared.createInvite(
                     sitterEmail: selectedSitter.email,
+                    sitterName: selectedSitter.name,
                     sessionID: sessionID
                 )
                 
+                // Send email invite
+                await self.sendEmailInvite(to: selectedSitter, for: sessionID, inviteCode: invite.code)
+                
                 await MainActor.run {
-                    self.createUpdateButton.stopLoading()
+                    self.createUpdateButton.stopLoading(withSuccess: true)
                     self.inviteCode = invite.code
                     self.inviteID = invite.id
                     self.inviteExists = true
-                    self.updateButtonTitle()
                     self.updateActionButtonsVisibility()
                     self.applySnapshot()
-                    self.showToast(text: "Invite created successfully")
-                    self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter)
+                    self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter, inviteId: invite.id)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        self.updateButtonTitle()
+                        self.createUpdateButton.isEnabled = false
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -299,7 +307,7 @@ class InviteDetailViewController: NNViewController {
                 await MainActor.run {
                     self.createUpdateButton.stopLoading()
                     self.showToast(text: "Invite updated successfully")
-                    self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter)
+                    self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter, inviteId: inviteID)
                     self.navigationController?.dismiss(animated: true)
                 }
             } catch {
@@ -397,10 +405,12 @@ class InviteDetailViewController: NNViewController {
         ) { [weak self] (footerView, string, indexPath) in
             guard let self else { return }
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            if section == .code && !inviteExists {
-                footerView.configure(text: "Invite code becomes available once the session has been created.")
-            } else {
-                footerView.configure(text: "Instruct your sitter to enter this code in their NestNote app to join your session.")
+            if section == .code {
+                if !inviteExists {
+                    footerView.configure(text: "Invite code becomes available once the session has been created.")
+                } else {
+                    footerView.configure(text: "Instruct your sitter to enter this code in their NestNote app to join your session.")
+                }
             }
         }
         
@@ -469,6 +479,63 @@ class InviteDetailViewController: NNViewController {
         
         
         dataSource.apply(snapshot, animatingDifferences: true)
+    }
+    
+    // MARK: - Email Functions
+    
+    private func sendEmailInvite(to sitter: SitterItem, for sessionID: String, inviteCode: String) async {
+        // Check if user is authenticated
+        guard let user = Auth.auth().currentUser else {
+            Logger.log(level: .error, category: .sessionService, message: "User not authenticated for email invite")
+            return
+        }
+        
+        // Refresh the auth token to ensure it's valid
+        do {
+            let idToken = try await user.getIDToken(forcingRefresh: true)
+            Logger.log(level: .info, category: .sessionService, message: "Successfully refreshed auth token for email invite - User ID: \(user.uid)")
+            Logger.log(level: .info, category: .sessionService, message: "Token length: \(idToken.count)")
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Failed to refresh auth token: \(error.localizedDescription)")
+            return
+        }
+        
+        // Create Functions instance after token refresh - explicitly set region
+        let functions = Functions.functions(region: "us-central1")
+        
+        // Create invite link with new format
+        let inviteLink = "https://nestnoteapp.com/invite?code=\(inviteCode)"
+        
+        // Get session details and nest info for the email
+        guard let currentNest = NestService.shared.currentNest else {
+            Logger.log(level: .error, category: .sessionService, message: "No current nest found for email invite")
+            return
+        }
+        
+        do {
+            let session = try await SessionService.shared.getSession(nestID: currentNest.id, sessionID: sessionID)
+            guard let session = session else {
+                Logger.log(level: .error, category: .sessionService, message: "Session not found for email invite")
+                return
+            }
+            
+            let emailData: [String: Any] = [
+                "sitterEmail": sitter.email,
+                "sitterName": sitter.name,
+                "sessionData": [
+                    "title": session.title
+                ],
+                "nestName": currentNest.name,
+                "inviteLink": inviteLink
+            ]
+            
+            Logger.log(level: .info, category: .sessionService, message: "About to call sendSessionInviteEmail with data: \(emailData)")
+            let result = try await functions.httpsCallable("sendSessionInviteEmail").call(emailData)
+            Logger.log(level: .info, category: .sessionService, message: "Email invite sent successfully to \(sitter.email)")
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Failed to send email invite: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .sessionService, message: "Detailed error: \(error)")
+        }
     }
 }
     
@@ -616,7 +683,7 @@ extension InviteDetailViewController {
                     try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
                     
                     await MainActor.run {
-                        self.showToast(text: "Invite deleted successfully")
+                        self.showToast(text: "Invite deleted")
                         self.delegate?.inviteDetailViewControllerDidDeleteInvite()
                         self.navigationController?.dismiss(animated: true)
                     }
