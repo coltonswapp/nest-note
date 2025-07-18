@@ -87,6 +87,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
 
     private var allSitters: [SitterItem] = []
     private var filteredSitters: [SitterItem] = []
+    private var isSearchBarAdded: Bool = false
     
     // used to determine whether can or cannot send invite
     private var isEditingSession: Bool
@@ -138,17 +139,15 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         // Set title based on mode
         title = displayMode == .default ? "Sitters" : "Select a Sitter"
         
-        // Setup search bar if in selectSitter mode
+        // Setup search bar delegate if in selectSitter mode (visibility handled in addSubviews)
         if displayMode == .selectSitter {
             searchBarView.searchBar.delegate = self
         }
     }
     
     override func addSubviews() {
-        // Add search bar if in selectSitter mode
-        if displayMode == .selectSitter {
-            setupPaletteSearch()
-        }
+        // Search bar visibility will be handled in updateSearchBarVisibility() after data loads
+        // since allSitters is empty at this point
         
         setupCollectionView()
         setupBottomButtonStack()
@@ -159,6 +158,19 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     
     func setupPaletteSearch() {
         addNavigationBarPalette(searchBarView)
+        isSearchBarAdded = true
+    }
+    
+    private func updateSearchBarVisibility() {
+        // Only show search bar in selectSitter mode when user has saved sitters
+        if displayMode == .selectSitter {
+            let shouldShowSearchBar = !allSitters.isEmpty
+            
+            // If we should show search bar but it's not added yet, add it
+            if shouldShowSearchBar && !isSearchBarAdded {
+                setupPaletteSearch()
+            }
+        }
     }
     
     override func setupNavigationBarButtons() {
@@ -362,7 +374,7 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         
         // Create buttons
         selectSitterButton = NNPrimaryLabeledButton(title: "Select Sitter", backgroundColor: NNColors.primary, foregroundColor: .white)
-        addSitterButton = NNPrimaryLabeledButton(title: "Add Sitter", backgroundColor: NNColors.primary, foregroundColor: .white)
+        addSitterButton = NNPrimaryLabeledButton(title: "Add Sitter", image: UIImage(systemName: "plus"), backgroundColor: NNColors.primary, foregroundColor: .white)
         
         // Add targets
         selectSitterButton.addTarget(self, action: #selector(selectSitterButtonTapped), for: .touchUpInside)
@@ -446,13 +458,10 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         let hasSitters = !allSitters.isEmpty
         
         if displayMode == .selectSitter {
-            // In selectSitter mode, show both buttons if there are sitters
-            // Show only "Add Sitter" if no sitters exist
-            selectSitterButton.isHidden = !hasSitters
+            // In selectSitter mode, hide "Select Sitter" button (auto-select on tap)
+            // Show only "Add Sitter" button
+            selectSitterButton.isHidden = true
             addSitterButton.isHidden = false
-            
-            // Enable "Select Sitter" only when a sitter is selected
-            selectSitterButton.isEnabled = selectedSitter != nil && hasSitters
             addSitterButton.isEnabled = true
         } else {
             // In default mode, never show "Select Sitter" button
@@ -494,6 +503,9 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         
         // Update button stack state after data loads
         updateBottomButtonStackState()
+        
+        // Update search bar visibility after data loads
+        updateSearchBarVisibility()
     }
     
     func loadData(showLoadingIndicator: Bool = true) async {
@@ -687,9 +699,18 @@ extension SitterListViewController: UICollectionViewDelegate {
         // Always deselect the cell to remove the persistent highlight
         collectionView.deselectItem(at: indexPath, animated: true)
         
-        // If in selectSitter mode, dismiss the search keyboard
+        // If in selectSitter mode, dismiss the search keyboard and auto-select after delay
         if displayMode == .selectSitter {
             searchBarView.searchBar.resignFirstResponder()
+            
+            // Auto-dismiss with delay if a sitter was selected (not deselected)
+            if selectedSitter != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self = self, let selectedSitter = self.selectedSitter else { return }
+                    self.delegate?.sitterListViewController(didSelectSitter: selectedSitter)
+                    self.navigationController?.dismiss(animated: true)
+                }
+            }
         }
     }
     

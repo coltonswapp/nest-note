@@ -96,7 +96,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Add property for save button
     private lazy var saveButton: NNLoadingButton = {
-        let buttonTitle = isEditingSession ? "Save Changes" : "Create Session"
+        let buttonTitle = isEditingSession ? "Save Changes" : "Next"
         let button = NNLoadingButton(title: buttonTitle, titleColor: .white, fillStyle: .fill(NNColors.primary))
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
@@ -238,6 +238,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             sheetPresentationController.detents = [.large()]
             sheetPresentationController.prefersGrabberVisible = false
         }
+        
+        // Hide navigation bar for this view controller
+        navigationItem.preferredNavigationBarVisibility = .hidden
         
         // Fetch events if we're editing an existing session and it's not archived
         if isEditingSession && !isArchivedSession {
@@ -597,8 +600,25 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 if isEditingSession {
                     try await updateSession()
                 } else {
+                    
+                    saveButton.startLoading()
+                    
                     let newSession = try await SessionService.shared.createSession(sessionItem)
-                    delegate?.editSessionViewController(self, didCreateSession: newSession)
+                    sessionItem = newSession // Update sessionItem with the created session
+                    
+                    try await Task.sleep(for: .seconds(0.75))
+                    saveButton.stopLoading(withSuccess: true)
+                    
+                    let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
+                    inviteDetailVC.delegate = self
+                    
+                    // Set the closure to call the delegate when invite creation is complete
+                    inviteDetailVC.onInviteCreation = { [weak self] in
+                        self?.delegate?.editSessionViewController(self!, didCreateSession: newSession)
+                    }
+                    
+                    navigationController?.pushViewController(inviteDetailVC, animated: true)
+                    return
                 }
                 
                 dismiss(animated: true)
@@ -921,8 +941,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            snapshot.appendSections([.sitter, .date, .visibility, .expenses, .events])
-            snapshot.appendItems([.inviteSitter], toSection: .sitter)
+            var sections: [Section] = [.date, .visibility, .expenses, .events]
+            if isEditingSession {
+                sections.insert(.sitter, at: 0)
+            }
+            snapshot.appendSections(sections)
+            
+            if isEditingSession {
+                snapshot.appendItems([.inviteSitter], toSection: .sitter)
+            }
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
             snapshot.appendItems([.expenses], toSection: .expenses)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay), .sessionStatus(sessionItem.status)], toSection: .date)
@@ -1089,7 +1116,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
         
         // Update button title to show state
-        let baseTitle = isEditingSession ? "Save Changes" : "Create Session"
+        let baseTitle = isEditingSession ? "Save Changes" : "Next"
         saveButton.titleLabel.text = baseTitle
         
         // Optionally animate the button if there are changes
