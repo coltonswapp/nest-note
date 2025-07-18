@@ -43,6 +43,7 @@ class EditSitterViewController: NNViewController {
         label.text = "NAME"
         label.font = .bodyM
         label.textColor = .lightGray
+        
         return label
     }()
     

@@ -243,6 +243,13 @@ final class PlacesService {
         imageAssets.removeAll()
     }
     
+    func reset() {
+        Logger.log(level: .info, category: .placesService, message: "Resetting PlacesService...")
+        places = []
+        imageAssets.removeAll()
+        selectedNestId = nil
+    }
+    
     /// Sets the places array directly (used for sitter filtered results)
     func setPlaces(_ newPlaces: [Place]) {
         self.places = newPlaces

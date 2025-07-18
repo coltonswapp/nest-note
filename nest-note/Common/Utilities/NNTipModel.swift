@@ -76,6 +76,13 @@ enum OwnerHomeTips {
         message: "Tap here to finish setting up your nest and unlock all features.",
         systemImageName: "checkmark.circle"
     )
+    
+    static let yourNestTip = NNTipModel(
+        id: "YourNestTip",
+        title: "Tap to view Your Nest",
+        message: "This is where all your entries live, grouped into categories.",
+        systemImageName: "rectangle.stack.fill"
+    )
 }
 
 enum PlaceListTips {

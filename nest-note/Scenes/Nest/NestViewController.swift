@@ -417,9 +417,11 @@ extension NestViewController: UICollectionViewDelegate {
         
         switch section {
         case .main:
+            let sessionVisibilityLevel = (entryRepository as? SitterViewService)?.currentSessionVisibilityLevel
             let nestCategoryViewController = NestCategoryViewController(
                 category: categoryItem.title,
-                entryRepository: entryRepository
+                entryRepository: entryRepository,
+                sessionVisibilityLevel: sessionVisibilityLevel
             )
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
             
