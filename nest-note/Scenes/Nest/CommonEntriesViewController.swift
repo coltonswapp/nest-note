@@ -69,8 +69,8 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable, Pay
     init(category: String, entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil) {
         self.category = category
         self.entryRepository = entryRepository
-        // If it's a NestService (owner), they get comprehensive access. Otherwise use provided level or default to standard
-        self.sessionVisibilityLevel = entryRepository is NestService ? .comprehensive : (sessionVisibilityLevel ?? .standard)
+        // If it's a NestService (owner), they get extended access. Otherwise use provided level or default to halfDay
+        self.sessionVisibilityLevel = entryRepository is NestService ? .extended : (sessionVisibilityLevel ?? .halfDay)
         super.init(nibName: nil, bundle: nil)
         self.title = category
         
@@ -137,146 +137,146 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable, Pay
         case "Household":
             entries = [
                 // Existing entries
-                CommonEntry(title: "Garage Code", content: "8005", category: category, visibility: .essential),
-                CommonEntry(title: "Front Door", content: "2208", category: category, visibility: .essential),
-                CommonEntry(title: "Trash Day", content: "Wednesday", category: category, visibility: .standard),
-                CommonEntry(title: "WiFi Password", content: "SuperStrongPassword", category: category, visibility: .essential),
-                CommonEntry(title: "Alarm Code", content: "4321", category: category, visibility: .essential),
-                CommonEntry(title: "Thermostat", content: "68°F", category: category, visibility: .standard),
-                CommonEntry(title: "Trash Pickup", content: "Wednesday Morning", category: category, visibility: .standard),
+                CommonEntry(title: "Garage Code", content: "8005", category: category, visibility: .always),
+                CommonEntry(title: "Front Door", content: "2208", category: category, visibility: .always),
+                CommonEntry(title: "Trash Day", content: "Wednesday", category: category, visibility: .halfDay),
+                CommonEntry(title: "WiFi Password", content: "SuperStrongPassword", category: category, visibility: .always),
+                CommonEntry(title: "Alarm Code", content: "4321", category: category, visibility: .always),
+                CommonEntry(title: "Thermostat", content: "68°F", category: category, visibility: .halfDay),
+                CommonEntry(title: "Trash Pickup", content: "Wednesday Morning", category: category, visibility: .halfDay),
                 
-                CommonEntry(title: "Shed", content: "1357", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Power Outage", content: "Flashlights in kitchen drawer", category: category, visibility: .standard),
-                CommonEntry(title: "Recycling", content: "Blue bin, Fridays", category: category, visibility: .standard),
-                CommonEntry(title: "Yard Service", content: "Every Monday, 11am-2pm", category: category, visibility: .extended),
-                CommonEntry(title: "Water Shutoff", content: "Basement, north wall", category: category, visibility: .standard),
-                CommonEntry(title: "Gas Shutoff", content: "Outside, east side of house", category: category, visibility: .standard)
+                CommonEntry(title: "Shed", content: "1357", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Power Outage", content: "Flashlights in kitchen drawer", category: category, visibility: .halfDay),
+                CommonEntry(title: "Recycling", content: "Blue bin, Fridays", category: category, visibility: .halfDay),
+                CommonEntry(title: "Yard Service", content: "Every Monday, 11am-2pm", category: category, visibility: .overnight),
+                CommonEntry(title: "Water Shutoff", content: "Basement, north wall", category: category, visibility: .halfDay),
+                CommonEntry(title: "Gas Shutoff", content: "Outside, east side of house", category: category, visibility: .halfDay)
             ]
             
         case "Emergency":
             entries = [
                 // Existing entries
-                CommonEntry(title: "Emergency Contact", content: "John Doe: 555-123-4567", category: category, visibility: .essential),
-                CommonEntry(title: "Nearest Hospital", content: "City General - 10 Main St", category: category, visibility: .essential),
-                CommonEntry(title: "Fire Evacuation", content: "Meet at mailbox", category: category, visibility: .essential),
-                CommonEntry(title: "Poison Control", content: "1-800-222-1222", category: category, visibility: .essential),
-                CommonEntry(title: "Home Doctor", content: "Dr. Smith: 555-987-6543", category: category, visibility: .standard),
+                CommonEntry(title: "Emergency Contact", content: "John Doe: 555-123-4567", category: category, visibility: .always),
+                CommonEntry(title: "Nearest Hospital", content: "City General - 10 Main St", category: category, visibility: .always),
+                CommonEntry(title: "Fire Evacuation", content: "Meet at mailbox", category: category, visibility: .always),
+                CommonEntry(title: "Poison Control", content: "1-800-222-1222", category: category, visibility: .always),
+                CommonEntry(title: "Home Doctor", content: "Dr. Smith: 555-987-6543", category: category, visibility: .halfDay),
                 
                 // New entries
-                CommonEntry(title: "911", content: "Address", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "EpiPen", content: "Top shelf", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "Safe", content: "3456", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "Allergies", content: "Peanuts, penicillin", category: category, visibility: .essential),
-                CommonEntry(title: "Insurance", content: "BlueCross #12345678", category: category, visibility: .standard),
-                CommonEntry(title: "Urgent Care", content: "WalkIn Clinic - 55 Grove St", category: category, visibility: .standard),
-                CommonEntry(title: "Power Company", content: "CityPower: 555-789-0123", category: category, visibility: .standard),
-                CommonEntry(title: "Plumber", content: "Joe's Plumbing: 555-456-7890", category: category, visibility: .standard),
-                CommonEntry(title: "Neighbor Help", content: "Mrs. Wilson: 555-234-5678", category: category, visibility: .standard)
+                CommonEntry(title: "911", content: "Address", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "EpiPen", content: "Top shelf", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "Safe", content: "3456", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "Allergies", content: "Peanuts, penicillin", category: category, visibility: .always),
+                CommonEntry(title: "Insurance", content: "BlueCross #12345678", category: category, visibility: .halfDay),
+                CommonEntry(title: "Urgent Care", content: "WalkIn Clinic - 55 Grove St", category: category, visibility: .halfDay),
+                CommonEntry(title: "Power Company", content: "CityPower: 555-789-0123", category: category, visibility: .halfDay),
+                CommonEntry(title: "Plumber", content: "Joe's Plumbing: 555-456-7890", category: category, visibility: .halfDay),
+                CommonEntry(title: "Neighbor Help", content: "Mrs. Wilson: 555-234-5678", category: category, visibility: .halfDay)
             ]
             
         case "Rules & Guidelines":
             entries = [
                 // Existing entries
-                CommonEntry(title: "Bedtime", content: "9:00 PM on weekdays", category: category, visibility: .standard),
-                CommonEntry(title: "Screen Time", content: "2 hours max per day", category: category, visibility: .standard),
-                CommonEntry(title: "House Rules", content: "No shoes indoors", category: category, visibility: .essential),
-                CommonEntry(title: "Chores", content: "Take out trash on Wednesday", category: category, visibility: .standard),
+                CommonEntry(title: "Bedtime", content: "9:00 PM on weekdays", category: category, visibility: .halfDay),
+                CommonEntry(title: "Screen Time", content: "2 hours max per day", category: category, visibility: .halfDay),
+                CommonEntry(title: "House Rules", content: "No shoes indoors", category: category, visibility: .always),
+                CommonEntry(title: "Chores", content: "Take out trash on Wednesday", category: category, visibility: .halfDay),
                 
                 // New entries
-                CommonEntry(title: "Snacks", content: "After 3pm", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "No TV", content: "After 8pm", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Bath", content: "7:30pm", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Books", content: "2 at bed", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Meal Times", content: "Breakfast 7am, Lunch 12pm, Dinner 6pm", category: category, visibility: .standard),
-                CommonEntry(title: "Off-Limits", content: "Dad's office and workshop", category: category, visibility: .essential),
-                CommonEntry(title: "Study Hour", content: "4pm-5pm weekdays", category: category, visibility: .standard),
-                CommonEntry(title: "Playroom Rules", content: "Clean up before moving to next activity", category: category, visibility: .standard),
-                CommonEntry(title: "Phone Use", content: "Only after homework is completed", category: category, visibility: .standard),
-                CommonEntry(title: "Guest Policy", content: "Parents must approve all visitors", category: category, visibility: .standard),
-                CommonEntry(title: "Allowance", content: "$5 weekly, given on Sunday", category: category, visibility: .extended)
+                CommonEntry(title: "Snacks", content: "After 3pm", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "No TV", content: "After 8pm", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Bath", content: "7:30pm", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Books", content: "2 at bed", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Meal Times", content: "Breakfast 7am, Lunch 12pm, Dinner 6pm", category: category, visibility: .halfDay),
+                CommonEntry(title: "Off-Limits", content: "Dad's office and workshop", category: category, visibility: .always),
+                CommonEntry(title: "Study Hour", content: "4pm-5pm weekdays", category: category, visibility: .halfDay),
+                CommonEntry(title: "Playroom Rules", content: "Clean up before moving to next activity", category: category, visibility: .halfDay),
+                CommonEntry(title: "Phone Use", content: "Only after homework is completed", category: category, visibility: .halfDay),
+                CommonEntry(title: "Guest Policy", content: "Parents must approve all visitors", category: category, visibility: .halfDay),
+                CommonEntry(title: "Allowance", content: "$5 weekly, given on Sunday", category: category, visibility: .overnight)
             ]
             
         case "Pets":
             entries = [
                 // Existing entries
-                CommonEntry(title: "Feeding Schedule", content: "Morning: 7am, Evening: 6pm", category: category, visibility: .standard),
-                CommonEntry(title: "Vet Contact", content: "Dr. Smith: 555-987-6543", category: category, visibility: .standard),
-                CommonEntry(title: "Walking Schedule", content: "Morning and evening", category: category, visibility: .standard),
-                CommonEntry(title: "Medication", content: "Flea medicine on the 1st", category: category, visibility: .essential),
+                CommonEntry(title: "Feeding Schedule", content: "Morning: 7am, Evening: 6pm", category: category, visibility: .halfDay),
+                CommonEntry(title: "Vet Contact", content: "Dr. Smith: 555-987-6543", category: category, visibility: .halfDay),
+                CommonEntry(title: "Walking Schedule", content: "Morning and evening", category: category, visibility: .halfDay),
+                CommonEntry(title: "Medication", content: "Flea medicine on the 1st", category: category, visibility: .always),
                 
                 // New entries
-                CommonEntry(title: "Dog Food", content: "1 cup", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "Cat", content: "Indoor", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "Fish", content: "Feed 2x", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Toys", content: "In bin", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Treat Rules", content: "Max 2 per day", category: category, visibility: .standard),
-                CommonEntry(title: "Pet Names", content: "Dog: Max, Cat: Luna, Fish: Bubbles", category: category, visibility: .essential),
-                CommonEntry(title: "No-Go Areas", content: "Keep pets out of formal dining room", category: category, visibility: .standard),
-                CommonEntry(title: "Pet Sitter", content: "Emily: 555-222-3333", category: category, visibility: .extended),
-                CommonEntry(title: "Leash Location", content: "Hanging by front door", category: category, visibility: .standard),
-                CommonEntry(title: "Pet Emergency", content: "Animal Hospital: 555-789-4561", category: category, visibility: .essential),
-                CommonEntry(title: "Special Needs", content: "Dog afraid of thunderstorms", category: category, visibility: .standard)
+                CommonEntry(title: "Dog Food", content: "1 cup", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "Cat", content: "Indoor", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "Fish", content: "Feed 2x", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Toys", content: "In bin", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Treat Rules", content: "Max 2 per day", category: category, visibility: .halfDay),
+                CommonEntry(title: "Pet Names", content: "Dog: Max, Cat: Luna, Fish: Bubbles", category: category, visibility: .always),
+                CommonEntry(title: "No-Go Areas", content: "Keep pets out of formal dining room", category: category, visibility: .halfDay),
+                CommonEntry(title: "Pet Sitter", content: "Emily: 555-222-3333", category: category, visibility: .overnight),
+                CommonEntry(title: "Leash Location", content: "Hanging by front door", category: category, visibility: .halfDay),
+                CommonEntry(title: "Pet Emergency", content: "Animal Hospital: 555-789-4561", category: category, visibility: .always),
+                CommonEntry(title: "Special Needs", content: "Dog afraid of thunderstorms", category: category, visibility: .halfDay)
             ]
             
         case "School & Education":
             entries = [
                 // Existing entries
-                CommonEntry(title: "School Hours", content: "8:30am - 3:15pm", category: category, visibility: .standard),
-                CommonEntry(title: "Bus Schedule", content: "Pickup: 7:45am, Drop-off: 3:30pm", category: category, visibility: .standard),
-                CommonEntry(title: "Teacher Contact", content: "Ms. Johnson: johnson@school.edu", category: category, visibility: .standard),
-                CommonEntry(title: "Homework Time", content: "4:00pm - 5:30pm", category: category, visibility: .standard),
+                CommonEntry(title: "School Hours", content: "8:30am - 3:15pm", category: category, visibility: .halfDay),
+                CommonEntry(title: "Bus Schedule", content: "Pickup: 7:45am, Drop-off: 3:30pm", category: category, visibility: .halfDay),
+                CommonEntry(title: "Teacher Contact", content: "Ms. Johnson: johnson@school.edu", category: category, visibility: .halfDay),
+                CommonEntry(title: "Homework Time", content: "4:00pm - 5:30pm", category: category, visibility: .halfDay),
                 
                 // New entries
-                CommonEntry(title: "Math Help", content: "Dad", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Books", content: "20 mins", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Band", content: "Tuesdays", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Tutor", content: "Thursdays", category: category, visibility: .extended), // Short entry
-                CommonEntry(title: "School Address", content: "123 Learning Lane", category: category, visibility: .standard),
-                CommonEntry(title: "Principal", content: "Dr. Martinez: 555-321-9876", category: category, visibility: .standard),
-                CommonEntry(title: "Library Day", content: "Wednesday - books due back", category: category, visibility: .standard),
-                CommonEntry(title: "School Nurse", content: "Ms. Garcia: 555-321-8765", category: category, visibility: .standard),
-                CommonEntry(title: "Study Buddies", content: "Alex and Jamie on Mondays", category: category, visibility: .extended),
-                CommonEntry(title: "School Website", content: "www.cityschool.edu/portal", category: category, visibility: .standard),
-                CommonEntry(title: "Class Schedule", content: "In blue folder on desk", category: category, visibility: .standard),
-                CommonEntry(title: "Project Due", content: "Science fair - May 15", category: category, visibility: .standard)
+                CommonEntry(title: "Math Help", content: "Dad", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Books", content: "20 mins", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Band", content: "Tuesdays", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Tutor", content: "Thursdays", category: category, visibility: .overnight), // Short entry
+                CommonEntry(title: "School Address", content: "123 Learning Lane", category: category, visibility: .halfDay),
+                CommonEntry(title: "Principal", content: "Dr. Martinez: 555-321-9876", category: category, visibility: .halfDay),
+                CommonEntry(title: "Library Day", content: "Wednesday - books due back", category: category, visibility: .halfDay),
+                CommonEntry(title: "School Nurse", content: "Ms. Garcia: 555-321-8765", category: category, visibility: .halfDay),
+                CommonEntry(title: "Study Buddies", content: "Alex and Jamie on Mondays", category: category, visibility: .overnight),
+                CommonEntry(title: "School Website", content: "www.cityschool.edu/portal", category: category, visibility: .halfDay),
+                CommonEntry(title: "Class Schedule", content: "In blue folder on desk", category: category, visibility: .halfDay),
+                CommonEntry(title: "Project Due", content: "Science fair - May 15", category: category, visibility: .halfDay)
             ]
             
         case "Social & Interpersonal":
             entries = [
                 // Existing entries
-                CommonEntry(title: "Playdate Rules", content: "No more than 2 friends at a time", category: category, visibility: .extended),
-                CommonEntry(title: "Known Allergies", content: "None", category: category, visibility: .standard),
-                CommonEntry(title: "Approved Friends", content: "Sarah, Jake, Emma", category: category, visibility: .extended),
-                CommonEntry(title: "Parent Contacts", content: "Sarah's mom: 555-111-2222", category: category, visibility: .standard),
+                CommonEntry(title: "Playdate Rules", content: "No more than 2 friends at a time", category: category, visibility: .overnight),
+                CommonEntry(title: "Known Allergies", content: "None", category: category, visibility: .halfDay),
+                CommonEntry(title: "Approved Friends", content: "Sarah, Jake, Emma", category: category, visibility: .overnight),
+                CommonEntry(title: "Parent Contacts", content: "Sarah's mom: 555-111-2222", category: category, visibility: .halfDay),
                 
                 // New entries
-                CommonEntry(title: "Calm Down", content: "Count to 10", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Shy", content: "Be patient", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Upset", content: "Hug helps", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Nap", content: "With bear", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Comfort Item", content: "Blue blanket in bedroom", category: category, visibility: .standard),
-                CommonEntry(title: "Mood Signs", content: "Quiet when overwhelmed", category: category, visibility: .standard),
-                CommonEntry(title: "Social Cues", content: "Needs reminders to share", category: category, visibility: .standard),
-                CommonEntry(title: "Friend Homes", content: "Allowed at Jake and Emma's", category: category, visibility: .extended),
-                CommonEntry(title: "Fears", content: "Afraid of the dark, use night light", category: category, visibility: .standard),
-                CommonEntry(title: "Family Photos", content: "In living room bookshelf", category: category, visibility: .standard),
-                CommonEntry(title: "Cultural Notes", content: "No meat on Fridays", category: category, visibility: .standard),
-                CommonEntry(title: "Conversation", content: "Loves talking about dinosaurs", category: category, visibility: .standard)
+                CommonEntry(title: "Calm Down", content: "Count to 10", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Shy", content: "Be patient", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Upset", content: "Hug helps", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Nap", content: "With bear", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Comfort Item", content: "Blue blanket in bedroom", category: category, visibility: .halfDay),
+                CommonEntry(title: "Mood Signs", content: "Quiet when overwhelmed", category: category, visibility: .halfDay),
+                CommonEntry(title: "Social Cues", content: "Needs reminders to share", category: category, visibility: .halfDay),
+                CommonEntry(title: "Friend Homes", content: "Allowed at Jake and Emma's", category: category, visibility: .overnight),
+                CommonEntry(title: "Fears", content: "Afraid of the dark, use night light", category: category, visibility: .halfDay),
+                CommonEntry(title: "Family Photos", content: "In living room bookshelf", category: category, visibility: .halfDay),
+                CommonEntry(title: "Cultural Notes", content: "No meat on Fridays", category: category, visibility: .halfDay),
+                CommonEntry(title: "Conversation", content: "Loves talking about dinosaurs", category: category, visibility: .halfDay)
             ]
             
         default:
             entries = [
-                CommonEntry(title: "Playdate Rules", content: "No more than 2 friends at a time", category: category, visibility: .extended),
-                CommonEntry(title: "Trash Day", content: "Wednesday", category: category, visibility: .standard),
-                CommonEntry(title: "Water Shutoff", content: "Basement, north wall", category: category, visibility: .standard),
-                CommonEntry(title: "EpiPen", content: "Top shelf", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "Power Company", content: "CityPower: 555-789-0123", category: category, visibility: .standard),
-                CommonEntry(title: "House Rules", content: "No shoes indoors", category: category, visibility: .essential),
-                CommonEntry(title: "No TV", content: "After 8pm", category: category, visibility: .standard), // Short entry
-                CommonEntry(title: "Phone Use", content: "Only after homework is completed", category: category, visibility: .standard),
-                CommonEntry(title: "Dog Food", content: "1 cup", category: category, visibility: .essential), // Short entry
-                CommonEntry(title: "School Address", content: "123 Learning Lane", category: category, visibility: .standard),
-                CommonEntry(title: "Parent Contacts", content: "Sarah's mom: 555-111-2222", category: category, visibility: .standard),
+                CommonEntry(title: "Playdate Rules", content: "No more than 2 friends at a time", category: category, visibility: .overnight),
+                CommonEntry(title: "Trash Day", content: "Wednesday", category: category, visibility: .halfDay),
+                CommonEntry(title: "Water Shutoff", content: "Basement, north wall", category: category, visibility: .halfDay),
+                CommonEntry(title: "EpiPen", content: "Top shelf", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "Power Company", content: "CityPower: 555-789-0123", category: category, visibility: .halfDay),
+                CommonEntry(title: "House Rules", content: "No shoes indoors", category: category, visibility: .always),
+                CommonEntry(title: "No TV", content: "After 8pm", category: category, visibility: .halfDay), // Short entry
+                CommonEntry(title: "Phone Use", content: "Only after homework is completed", category: category, visibility: .halfDay),
+                CommonEntry(title: "Dog Food", content: "1 cup", category: category, visibility: .always), // Short entry
+                CommonEntry(title: "School Address", content: "123 Learning Lane", category: category, visibility: .halfDay),
+                CommonEntry(title: "Parent Contacts", content: "Sarah's mom: 555-111-2222", category: category, visibility: .halfDay),
             ]
         }
     }

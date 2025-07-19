@@ -7,23 +7,23 @@
 import Foundation
 
 enum VisibilityLevel: String, Codable, CaseIterable {
-    case essential
-    case standard
+    case always
+    case halfDay
+    case overnight
     case extended
-    case comprehensive
     
     var title: String {
         switch self {
-        case .essential: return "Essential"
-        case .standard: return "Standard"
+        case .always: return "Always"
+        case .halfDay: return "Half-Day"
+        case .overnight: return "Overnight"
         case .extended: return "Extended"
-        case .comprehensive: return "Comprehensive"
         }
     }
     
     // Returns true if this level has access to the content of the target level
     func hasAccess(to targetLevel: VisibilityLevel) -> Bool {
-        let levels: [VisibilityLevel] = [.essential, .standard, .extended, .comprehensive]
+        let levels: [VisibilityLevel] = [.always, .halfDay, .overnight, .extended]
         guard let currentIndex = levels.firstIndex(of: self),
               let targetIndex = levels.firstIndex(of: targetLevel) else {
             return false
@@ -34,10 +34,28 @@ enum VisibilityLevel: String, Codable, CaseIterable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
-        if let level = VisibilityLevel(rawValue: rawValue) {
-            self = level
-        } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid visibility level: \(rawValue)")
+        
+        // Handle backward compatibility with old enum values
+        switch rawValue {
+        case "essential":
+            self = .always
+        case "standard":
+            self = .halfDay
+        case "extended":
+            self = .overnight
+        case "comprehensive":
+            self = .extended
+        case "always":
+            self = .always
+        case "halfDay":
+            self = .halfDay
+        case "overnight":
+            self = .overnight
+        case "extended":
+            self = .extended
+        default:
+            // Default to always for unknown values
+            self = .always
         }
     }
     

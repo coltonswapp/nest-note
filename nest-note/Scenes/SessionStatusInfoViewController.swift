@@ -6,7 +6,7 @@ final class SessionStatusInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(view, for: .rectanglePattern)
+        NNAssetHelper.configureImageView(view, for: .rectanglePatternSmall, with: NNColors.primary)
         view.alpha = 0.4
         return view
     }()
@@ -36,7 +36,7 @@ final class SessionStatusInfoViewController: NNViewController {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Understand the different states a caregiving session can be in, from scheduling to completion."
+        label.text = "Understand the different states a session can be in, from scheduling to completion."
         label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
@@ -47,7 +47,7 @@ final class SessionStatusInfoViewController: NNViewController {
     
     private let footnoteLabel: UILabel = {
         let label = UILabel()
-        label.text = "Sessions are automatically archived 7 days after completion. Archived sessions are read-only and associated events will no longer be visible."
+        label.text = "Sessions are archived 7 days after completion. Archived sessions are read-only & associated events will no longer be visible."
         label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
@@ -112,12 +112,13 @@ final class SessionStatusInfoViewController: NNViewController {
         containerView.addSubview(titleLabel)
         containerView.addSubview(subtitleLabel)
         containerView.addSubview(infoView)
-        containerView.addSubview(footnoteLabel)
         
         infoView.translatesAutoresizingMaskIntoConstraints = false
+        footnoteLabel.translatesAutoresizingMaskIntoConstraints = false
         
         // Pin the Got It button to the bottom
         gotItButton.pinToBottom(of: view, addBlurEffect: true)
+        view.addSubview(footnoteLabel)
         topImageView.pinToTop(of: view)
         
         NSLayoutConstraint.activate([
@@ -144,10 +145,11 @@ final class SessionStatusInfoViewController: NNViewController {
             infoView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 36),
             infoView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -36),
             
-            footnoteLabel.topAnchor.constraint(equalTo: infoView.bottomAnchor, constant: 24),
-            footnoteLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
-            footnoteLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
-            footnoteLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20)
+            infoView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20),
+            
+            footnoteLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            footnoteLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            footnoteLabel.bottomAnchor.constraint(equalTo: gotItButton.topAnchor, constant: -12)
         ])
     }
     

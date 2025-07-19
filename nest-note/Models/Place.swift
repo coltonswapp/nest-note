@@ -31,7 +31,7 @@ struct Place: Codable, Identifiable, Hashable {
          coordinate: CLLocationCoordinate2D,
          thumbnailURLs: ThumbnailURLs? = nil,
          isTemporary: Bool = false,
-         visibilityLevel: VisibilityLevel = .standard,
+         visibilityLevel: VisibilityLevel = .halfDay,
          createdAt: Date = Date(),
          updatedAt: Date = Date()) {
         self.id = id
@@ -70,8 +70,8 @@ struct Place: Codable, Identifiable, Hashable {
             isTemporary = alias == nil
         }
         
-        // For backward compatibility - if visibilityLevel is missing, default to standard
-        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
+        // For backward compatibility - if visibilityLevel is missing, default to halfDay
+        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .halfDay
     }
     
     // MARK: - Hashable

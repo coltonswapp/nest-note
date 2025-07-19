@@ -59,7 +59,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         return control
     }()
     
-    private var visibilityLevel: VisibilityLevel = .standard
+    private var visibilityLevel: VisibilityLevel = .halfDay
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -73,19 +73,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var visibilityMenu: UIMenu {
         let standard = UIAction(title: "Standard", image: UIImage(systemName: "eye")) { [weak self] _ in
-            self?.updateVisibilityLevel(.standard)
+            self?.updateVisibilityLevel(.halfDay)
         }
         
         let essential = UIAction(title: "Essential", image: UIImage(systemName: "eye.slash")) { [weak self] _ in
-            self?.updateVisibilityLevel(.essential)
+            self?.updateVisibilityLevel(.always)
         }
         
         let extended = UIAction(title: "Extended", image: UIImage(systemName: "eye.fill")) { [weak self] _ in
-            self?.updateVisibilityLevel(.extended)
+            self?.updateVisibilityLevel(.overnight)
         }
         
         let comprehensive = UIAction(title: "Comprehensive", image: UIImage(systemName: "eye.circle.fill")) { [weak self] _ in
-            self?.updateVisibilityLevel(.comprehensive)
+            self?.updateVisibilityLevel(.overnight)
         }
         
         return UIMenu(title: "Select Visibility Level", children: [standard, essential, extended, comprehensive])

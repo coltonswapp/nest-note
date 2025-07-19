@@ -30,8 +30,8 @@ enum EntryDetailTips {
 
     static let entryTitleContentTip = NNTipModel(
         id: "EntryTitleContentTip",
-        title: "Creating an entry is easy",
-        message: "Please add both a title and content.",
+        title: "Entry Tips",
+        message: "Give it a clear title like 'Garage Code' and add the details babysitters need.",
         systemImageName: "doc.text"
     )
 
@@ -65,6 +65,13 @@ enum NestCategoryTips {
         title: "Need Inspiration?",
         message: "Browse our collection of entry suggestions.",
         systemImageName: "sparkles"
+    )
+    
+    static let entriesLiveHereTip = NNTipModel(
+        id: "EntriesLiveHereTip",
+        title: "Entries Live Here",
+        message: "Add information babysitters need - codes, rules, contacts, and more.",
+        systemImageName: "note.text"
     )
 }
 

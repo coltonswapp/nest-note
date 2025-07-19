@@ -6,33 +6,33 @@ final class VisibilityLevelInfoViewController: NNViewController {
     private let topImageView: UIImageView = {
         let view = UIImageView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(view, for: .rectanglePattern, with: NNColors.primary)
+        NNAssetHelper.configureImageView(view, for: .rectanglePatternSmall, with: NNColors.primary)
         view.alpha = 0.4
         return view
     }()
     
     private let infoView = NNBulletStack(items: [
         NNBulletItem(
-            title: "Essential",
-            description: "Critical details always visible to sitters for the safety and basic care of your children.",
+            title: "Always",
+            description: "All the essential information that every sitter needs to know",
             iconName: "exclamationmark.shield.fill"
         ),
         
         NNBulletItem(
-            title: "Standard",
-            description: "Additional guidelines and instructions that appear for typically longer daytime stays.",
+            title: "Half-Day",
+            description: "Additional details for visits of 4+ hours (meals, schedules, routines)",
             iconName: "clock.fill"
         ),
         
         NNBulletItem(
-            title: "Extended",
-            description: "Overnight-specific details that become visible when sitters stay through the night.",
+            title: "Overnight",
+            description: "Information relevant for staying overnight (perhaps instructions to lock doors & put children or pets to bed)",
             iconName: "moon.stars.fill"
         ),
         
         NNBulletItem(
-            title: "Comprehensive",
-            description: "Complete household management information that unlocks for extended multi-day stays.",
+            title: "Extended",
+            description: "Complete household management information for multi-day sessions",
             iconName: "calendar.badge.clock"
         )
     ])
@@ -60,12 +60,22 @@ final class VisibilityLevelInfoViewController: NNViewController {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Organize information into 4 visibility levels, giving sitters exactly what they need for their session length. Short visits focus on essentials, longer stays include comprehensive details."
+        label.text = "Shows sitters exactly what they need based on session length - essential details for short visits, complete guides for longer stays."
         label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let footerLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Each level includes all previous levels - Overnight shows Always + Half-Day + Overnight entries."
+        label.font = .bodyM
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
         return label
     }()
     
@@ -88,16 +98,18 @@ final class VisibilityLevelInfoViewController: NNViewController {
         // Setup scroll view
         view.addSubview(topImageView)
         view.addSubview(scrollView)
-        scrollView.addSubview(containerView)
         
+        scrollView.addSubview(containerView)
         containerView.addSubview(titleLabel)
         containerView.addSubview(subtitleLabel)
         containerView.addSubview(infoView)
         
         infoView.translatesAutoresizingMaskIntoConstraints = false
+        footerLabel.translatesAutoresizingMaskIntoConstraints = false
         
         // Pin the Got It button to the bottom
         gotItButton.pinToBottom(of: view, addBlurEffect: true)
+        view.addSubview(footerLabel)
         topImageView.pinToTop(of: view)
         
         NSLayoutConstraint.activate([
@@ -124,7 +136,11 @@ final class VisibilityLevelInfoViewController: NNViewController {
             infoView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 24),
             infoView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 36),
             infoView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -36),
-            infoView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20)
+            infoView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20),
+            
+            footerLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            footerLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            footerLabel.bottomAnchor.constraint(equalTo: gotItButton.topAnchor, constant: -12)
         ])
     }
     

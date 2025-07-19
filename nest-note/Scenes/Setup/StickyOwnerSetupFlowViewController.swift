@@ -209,7 +209,7 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
         let nestCategoryVC = NestCategoryViewController(
             category: "Household",
             entryRepository: NestService.shared,
-            sessionVisibilityLevel: .comprehensive
+            sessionVisibilityLevel: .overnight
         )
         
         // Wrap in a navigation controller for proper presentation

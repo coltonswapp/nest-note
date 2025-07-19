@@ -78,7 +78,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
         self.entry = entry
-        self.visibilityLevel = entry?.visibility ?? .standard
+        self.visibilityLevel = entry?.visibility ?? .halfDay
         self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
     }
@@ -86,7 +86,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     init(category: String, title: String, content: String, sourceFrame: CGRect? = nil) {
         self.category = category
         self.entry = nil
-        self.visibilityLevel = .standard
+        self.visibilityLevel = .halfDay
         self.isReadOnly = false
         super.init(sourceFrame: sourceFrame)
         

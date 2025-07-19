@@ -538,13 +538,13 @@ class PDFExportService {
     private static func filterEntriesByVisibility(entries: [BaseEntry], visibilityLevel: VisibilityLevel) -> [BaseEntry] {
         return entries.filter { entry in
             switch visibilityLevel {
-            case .essential:
-                return entry.visibility == .essential
-            case .standard:
-                return entry.visibility == .essential || entry.visibility == .standard
+            case .always:
+                return entry.visibility == .always
+            case .halfDay:
+                return entry.visibility == .always || entry.visibility == .halfDay
+            case .overnight:
+                return entry.visibility == .always || entry.visibility == .halfDay || entry.visibility == .overnight
             case .extended:
-                return entry.visibility == .essential || entry.visibility == .standard || entry.visibility == .extended
-            case .comprehensive:
                 return true // All entries
             }
         }

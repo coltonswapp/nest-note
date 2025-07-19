@@ -104,7 +104,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         self.thumbnail = thumbnail
         self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = false
-        self.visibilityLevel = .standard
+        self.visibilityLevel = .halfDay
         super.init(sourceFrame: nil)
     }
     

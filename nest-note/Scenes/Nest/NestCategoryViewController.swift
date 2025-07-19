@@ -45,8 +45,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         self.category = category
         self.entries = entries
         self.entryRepository = entryRepository
-        // If it's a NestService (owner), they get comprehensive access. Otherwise use provided level or default to standard
-        self.sessionVisibilityLevel = entryRepository is NestService ? .comprehensive : (sessionVisibilityLevel ?? .standard)
+        // For nest owners, access level doesn't matter since they bypass all checks. For sitters, use provided level or default to standard
+        self.sessionVisibilityLevel = entryRepository is NestService ? .extended : (sessionVisibilityLevel ?? .halfDay)
         super.init(nibName: nil, bundle: nil)
         title = category
     }
@@ -89,8 +89,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         if entries.isEmpty {
             emptyStateView.isHidden = false
             view.bringSubviewToFront(emptyStateView)
+            addEntryButton?.isHidden = true
         } else {
             emptyStateView.isHidden = true
+            addEntryButton?.isHidden = false
         }
     }
     
@@ -225,7 +227,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         key: entry.title,
                         value: entry.content,
                         entryVisibility: entry.visibility,
-                        sessionVisibility: self.sessionVisibilityLevel
+                        sessionVisibility: self.sessionVisibilityLevel,
+                        isNestOwner: self.entryRepository is NestService
                     )
                     return cell
                 case .other:
@@ -234,7 +237,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         key: entry.title,
                         value: entry.content,
                         entryVisibility: entry.visibility,
-                        sessionVisibility: self.sessionVisibilityLevel
+                        sessionVisibility: self.sessionVisibilityLevel,
+                        isNestOwner: self.entryRepository is NestService
                     )
                     return cell
                 }
@@ -245,7 +249,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     key: entry.title,
                     value: entry.content,
                     entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel
+                    sessionVisibility: self.sessionVisibilityLevel,
+                    isNestOwner: self.entryRepository is NestService
                 )
                 return cell
             }
@@ -369,25 +374,44 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     func showTips() {
-        // Only show suggestion tip for nest owners and if the menu button exists
-        guard entryRepository is NestService, 
-              let menuButton = navigationItem.rightBarButtonItems?.first,
-              NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip) else { return }
-        
-        // Show the tooltip anchored to the navigation bar menu button
-        // Using .bottom edge to show tooltip below the navigation bar
-        guard !(navigationController?.navigationBar.prefersLargeTitles ?? false) else { return }
+        // Only show tips for nest owners
+        guard entryRepository is NestService else { return }
         
         trackScreenVisit()
         
-        if let buttonView = menuButton.value(forKey: "view") as? UIView {
-            NNTipManager.shared.showTip(
-                NestCategoryTips.entrySuggestionTip,
-                sourceView: buttonView,
-                in: self,
-                pinToEdge: .bottom,
-                offset: CGPoint(x: -8, y: 0)
-            )
+        // Show "Entries Live Here" tip first, pointing to the title
+        if NNTipManager.shared.shouldShowTip(NestCategoryTips.entriesLiveHereTip) {
+            // Use the navigation bar title as the source view
+            if let titleView = navigationController?.navigationBar {
+                NNTipManager.shared.showTip(
+                    NestCategoryTips.entriesLiveHereTip,
+                    sourceView: titleView,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: 0, y: 8)
+                )
+                return
+            }
+        }
+        
+        // Show suggestion tip for nest owners and if the menu button exists
+        if let menuButton = navigationItem.rightBarButtonItems?.first,
+           NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip),
+           !NNTipManager.shared.shouldShowTip(NestCategoryTips.entriesLiveHereTip) {
+            
+            // Show the tooltip anchored to the navigation bar menu button
+            // Using .bottom edge to show tooltip below the navigation bar
+            guard !(navigationController?.navigationBar.prefersLargeTitles ?? false) else { return }
+            
+            if let buttonView = menuButton.value(forKey: "view") as? UIView {
+                NNTipManager.shared.showTip(
+                    NestCategoryTips.entrySuggestionTip,
+                    sourceView: buttonView,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: -8, y: 0)
+                )
+            }
         }
     }
     
@@ -497,7 +521,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         emptyStateView = NNEmptyStateView(
             icon: UIImage(systemName: "moon.zzz.fill"),
             title: "It's a little quiet in here",
-            subtitle: "Entries for this category will appear here.",
+            subtitle: "Entries for this category will appear here. Suggestions can be found in the upper-right corner.",
             actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
         )
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
@@ -522,8 +546,8 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         guard let selectedEntry = dataSource.itemIdentifier(for: indexPath),
               let cell = collectionView.cellForItem(at: indexPath) else { return }
         
-        // Check if user has access to this entry
-        if !sessionVisibilityLevel.hasAccess(to: selectedEntry.visibility) {
+        // Check if user has access to this entry (skip check for nest owners)
+        if !(entryRepository is NestService) && !sessionVisibilityLevel.hasAccess(to: selectedEntry.visibility) {
             let alert = UIAlertController(
                 title: "Access Required",
                 message: "This entry requires \(selectedEntry.visibility.title) access level. The current access level for this session is \(sessionVisibilityLevel.title).",

@@ -64,11 +64,11 @@ class HalfWidthCell: UICollectionViewCell {
         valueLabel.numberOfLines = 1
     }
     
-    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel) {
+    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel, isNestOwner: Bool = false) {
         keyLabel.text = key
         
-        // Show actual value or asterisks based on access level
-        if sessionVisibility.hasAccess(to: entryVisibility) {
+        // Show actual value or asterisks based on access level (nest owners bypass all checks)
+        if isNestOwner || sessionVisibility.hasAccess(to: entryVisibility) {
             valueLabel.text = value
         } else {
             valueLabel.text = "****"

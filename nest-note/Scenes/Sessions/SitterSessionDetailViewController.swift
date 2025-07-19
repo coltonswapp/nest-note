@@ -97,7 +97,7 @@ final class SitterSessionDetailViewController: NNViewController {
             endDate: archivedSession.parentSessionCompletedDate ?? archivedSession.archivedDate,
             isMultiDay: false,
             events: [],
-            visibilityLevel: .standard,
+            visibilityLevel: .halfDay,
             status: .completed,
             assignedSitter: nil,
             nestID: archivedSession.nestID,
