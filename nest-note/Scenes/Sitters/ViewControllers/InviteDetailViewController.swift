@@ -13,6 +13,9 @@ class InviteDetailViewController: NNViewController {
     
     weak var delegate: InviteSitterViewControllerDelegate?
     
+    // Closure to call when invite is created or skipped
+    var onInviteCreation: (() -> Void)?
+    
     private var sessionID: String?
     private var inviteID: String?
     private var selectedSitter: SitterItem? {
@@ -41,6 +44,7 @@ class InviteDetailViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
     private var createUpdateButton: NNLoadingButton!
     private var actionButtonsStackView: UIStackView!
+    private var skipButton: UIButton!
     
     private lazy var copyButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "doc.on.doc"),
@@ -92,6 +96,9 @@ class InviteDetailViewController: NNViewController {
         setupActionButtons()
         setupCreateUpdateButton()
         title = "Session Invite"
+        
+        // Hide back button - no need to go back after this point
+        navigationItem.hidesBackButton = true
     }
     
     override func addSubviews() {
@@ -227,12 +234,61 @@ class InviteDetailViewController: NNViewController {
         // Set initial button state
         updateButtonState()
         
-        // Constrain action buttons above the create/update button
+        // Setup skip button
+        setupSkipButton()
+        
+        // Constrain action buttons above the skip button
         NSLayoutConstraint.activate([
             actionButtonsStackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             actionButtonsStackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            actionButtonsStackView.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -24)
+            actionButtonsStackView.bottomAnchor.constraint(equalTo: skipButton.topAnchor, constant: -24)
         ])
+    }
+    
+    private func setupSkipButton() {
+        skipButton = UIButton(type: .system)
+        skipButton.setTitle("Skip for now", for: .normal)
+        skipButton.setTitleColor(.systemBlue, for: .normal)
+        skipButton.titleLabel?.font = .bodyM
+        skipButton.translatesAutoresizingMaskIntoConstraints = false
+        skipButton.addTarget(self, action: #selector(skipButtonTapped), for: .touchUpInside)
+        
+        view.addSubview(skipButton)
+        
+        NSLayoutConstraint.activate([
+            skipButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            skipButton.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -8),
+            skipButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        
+        // Initially hide skip button, only show for new invites
+        updateSkipButtonVisibility()
+    }
+    
+    @objc private func skipButtonTapped() {
+        let alert = UIAlertController(
+            title: "Skip Invite Creation?",
+            message: "You can create an invite for this session later from the session details.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        alert.addAction(UIAlertAction(title: "Skip", style: .default) { [weak self] _ in
+            // Call the closure to notify that invite creation is complete (skipped)
+            self?.onInviteCreation?()
+            self?.dismiss(animated: true)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func updateSkipButtonVisibility() {
+        guard skipButton != nil else { return }
+        
+        // Only show skip button if onInviteCreation closure is set and no invite exists yet
+        let shouldShow = !inviteExists && onInviteCreation != nil
+        skipButton.isHidden = !shouldShow
     }
     
     @objc private func createUpdateButtonTapped() {
@@ -266,8 +322,13 @@ class InviteDetailViewController: NNViewController {
                     self.inviteID = invite.id
                     self.inviteExists = true
                     self.updateActionButtonsVisibility()
+                    self.updateSkipButtonVisibility()
                     self.applySnapshot()
                     self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter, inviteId: invite.id)
+                    
+                    // Call the closure to notify that invite creation is complete
+                    self.onInviteCreation?()
+                    
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         self.updateButtonTitle()
                         self.createUpdateButton.isEnabled = false
@@ -336,6 +397,7 @@ class InviteDetailViewController: NNViewController {
         updateButtonTitle()
         updateButtonState()
         updateActionButtonsVisibility()
+        updateSkipButtonVisibility()
         
         // Only apply snapshot if view has loaded
         if isViewLoaded {
@@ -352,6 +414,7 @@ class InviteDetailViewController: NNViewController {
         updateButtonTitle()
         updateButtonState()
         updateActionButtonsVisibility()
+        updateSkipButtonVisibility()
         
         // Only apply snapshot if view has loaded
         if isViewLoaded {
@@ -407,7 +470,7 @@ class InviteDetailViewController: NNViewController {
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
             if section == .code {
                 if !inviteExists {
-                    footerView.configure(text: "Invite code becomes available once the session has been created.")
+                    footerView.configure(text: "Your invite code will appear here once it is created.")
                 } else {
                     footerView.configure(text: "Instruct your sitter to enter this code in their NestNote app to join your session.")
                 }
@@ -544,13 +607,7 @@ extension InviteDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         
-        // Only allow highlighting for SitterCellItem
-        if item is SitterCellItem {
-            return true
-        }
-        
-        // Disable highlighting for CodeCellItem
-        return false
+        return true
     }
     
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
@@ -561,8 +618,31 @@ extension InviteDetailViewController: UICollectionViewDelegate {
             return true
         }
         
-        // Disable selection for CodeCellItem
+        // Allow selection for CodeCellItem to show alert
+        if item is CodeCellItem {
+            return true
+        }
+        
         return false
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        
+        if item is CodeCellItem {
+            // Show alert when user taps on code cell
+            let alert = UIAlertController(
+                title: "Create Invite",
+                message: "Select a Sitter, then tap the \"Create Invite\" button below.",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            
+            present(alert, animated: true)
+        }
+        
+        collectionView.deselectItem(at: indexPath, animated: true)
     }
 }
 

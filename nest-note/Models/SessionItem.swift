@@ -82,7 +82,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         endDate: Date = Date().addingTimeInterval(60 * 60 * 2).roundedToNext15Minutes(), // 2 hours by default
         isMultiDay: Bool = false,
         events: [SessionEvent] = [],
-        visibilityLevel: VisibilityLevel = .standard,
+        visibilityLevel: VisibilityLevel = .halfDay,
         status: SessionStatus = .upcoming,
         assignedSitter: AssignedSitter? = nil,
         nestID: String = NestService.shared.currentNest!.id,
@@ -175,7 +175,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         isMultiDay = try container.decode(Bool.self, forKey: .isMultiDay)
         // Initialize events as an empty array since we're not decoding it
         events = []
-        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .standard
+        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .halfDay
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
         ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)

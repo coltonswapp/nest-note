@@ -136,7 +136,12 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        
+        #if DEBUG
         snapshot.appendSections([.notifications, .fcmTokens])
+        #else
+        snapshot.appendSections([.notifications])
+        #endif
         
         // Get current notification settings
         let center = UNUserNotificationCenter.current()
@@ -163,6 +168,7 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
                 
                 snapshot.appendItems(notificationItems, toSection: .notifications)
                 
+                #if DEBUG
                 // Fetch FCM tokens from Firestore
                 do {
                     let fcmTokens = try await UserService.shared.fetchStoredFCMTokens()
@@ -174,6 +180,7 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
                     Logger.log(level: .error, category: .general, message: "Failed to fetch FCM tokens: \(error.localizedDescription)")
                     // Continue without FCM tokens on error
                 }
+                #endif
                 
                 await MainActor.run {
                     print("auth status: \(settings.authorizationStatus)")
@@ -228,7 +235,7 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
         var title: String {
             switch self {
             case .notifications: return "Notification Preferences"
-            case .fcmTokens: return "FCM Tokens (Debug)"
+            case .fcmTokens: return "FCM Tokens"
             }
         }
     }

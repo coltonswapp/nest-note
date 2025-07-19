@@ -691,48 +691,8 @@ final class UserService {
     }
     
     // MARK: - Sign out & reset
-    func logout(currentDeviceToken: String?) async throws {
-        var fcmTokenDeletionError: Error?
-        var firestoreTokenRemovalError: Error?
-        
-        // Try to delete the FCM token from Firebase Messaging (don't fail if this fails)
-        do {
-            try await Messaging.messaging().deleteToken()
-            Logger.log(level: .info, category: .userService, message: "FCM token deleted from Firebase Messaging")
-        } catch {
-            fcmTokenDeletionError = error
-            Logger.log(level: .error, category: .userService, message: "FCM token deletion failed (continuing with logout): \(error.localizedDescription)")
-        }
-        
-        // Try to remove the token from Firestore document (don't fail if this fails)
-        if let currentDeviceToken {
-            if let currentUser = currentUser {
-                do {
-                    let docRef = db.collection("users").document(currentUser.id)
-                    let snapshot = try await docRef.getDocument()
-                    
-                    if var fcmTokens = snapshot.data()?["fcmTokens"] as? [[String: Any]] {
-                        // Filter out the current token
-                        fcmTokens.removeAll { tokenData in
-                            return tokenData["token"] as? String == currentDeviceToken
-                        }
-                        
-                        // Update the document with the filtered tokens
-                        try await docRef.updateData([
-                            "fcmTokens": fcmTokens,
-                            "updatedAt": Timestamp(date: Date())
-                        ])
-                        
-                        Logger.log(level: .info, category: .userService, message: "FCM token removed from user document in Firestore")
-                    }
-                } catch {
-                    firestoreTokenRemovalError = error
-                    Logger.log(level: .error, category: .userService, message: "Firestore token removal failed (continuing with logout): \(error.localizedDescription)")
-                }
-            }
-        }
-        
-        // Always attempt to sign out from Firebase Auth - this is critical
+    func logout() async throws {
+        // Sign out from Firebase Auth
         do {
             try auth.signOut()
             currentUser = nil
@@ -741,11 +701,6 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
             Tracker.shared.track(.userLoggedOut)
-            
-            // Log any token cleanup failures as warnings since logout succeeded
-            if fcmTokenDeletionError != nil || firestoreTokenRemovalError != nil {
-                Logger.log(level: .error, category: .userService, message: "Logout succeeded but token cleanup had issues")
-            }
         } catch {
             Logger.log(level: .error, category: .userService, message: "Firebase Auth signOut failed: \(error.localizedDescription)")
             throw AuthError.unknown
@@ -755,7 +710,7 @@ final class UserService {
     func reset() async throws {
         Logger.log(level: .info, category: .userService, message: "Resetting UserService...")
         do {
-            try await logout(currentDeviceToken: Messaging.messaging().fcmToken)
+            try await logout()
             Tracker.shared.clearUserContext()
         } catch {
             throw error

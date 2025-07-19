@@ -21,6 +21,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     // Track whether we've already shown the setup tip in this session
     private var hasShownSetupTip = false
     
+    // Track whether we've already shown the your nest tip in this session
+    private var hasShownYourNestTip = false
+    
     // Track whether we've already shown the happening now tip in this session
     private var hasShownHappeningNowTip = false
     
@@ -369,8 +372,10 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
         
-        // Show tips if either current session or setup progress cell is visible
-        if updatedSnapshot.sectionIdentifiers.contains(.currentSession) || updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
+        // Show tips if current session, setup progress, or nest cell is visible
+        if updatedSnapshot.sectionIdentifiers.contains(.currentSession) || 
+           updatedSnapshot.sectionIdentifiers.contains(.setupProgress) ||
+           updatedSnapshot.sectionIdentifiers.contains(.nest) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.showTips()
                 if updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
@@ -470,7 +475,55 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     func showTips() {
         trackScreenVisit()
         
-        // Check for current session tip first (higher priority)
+        // Priority 1: Setup tip (highest priority)
+        if let setupSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .setupProgress),
+           let _ = dataSource.snapshot().itemIdentifiers(inSection: .setupProgress).first,
+           NNTipManager.shared.shouldShowTip(OwnerHomeTips.finishSetupTip),
+           !hasShownSetupTip {
+            
+            let setupIndexPath = IndexPath(item: 0, section: setupSection)
+            
+            // Make sure the cell is visible
+            if let setupCell = collectionView.cellForItem(at: setupIndexPath) {
+                hasShownSetupTip = true
+                
+                // Show the tip anchored to the bottom of the setup cell
+                NNTipManager.shared.showTip(
+                    OwnerHomeTips.finishSetupTip,
+                    sourceView: setupCell,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: 0, y: 8)
+                )
+                return
+            }
+        }
+        
+        // Priority 2: Your Nest tip (second priority)
+        if let nestSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .nest),
+           let _ = dataSource.snapshot().itemIdentifiers(inSection: .nest).first,
+           NNTipManager.shared.shouldShowTip(OwnerHomeTips.yourNestTip),
+           !hasShownYourNestTip {
+            
+            let nestIndexPath = IndexPath(item: 0, section: nestSection)
+            
+            // Make sure the cell is visible
+            if let nestCell = collectionView.cellForItem(at: nestIndexPath) {
+                hasShownYourNestTip = true
+                
+                // Show the tip anchored to the bottom of the nest cell
+                NNTipManager.shared.showTip(
+                    OwnerHomeTips.yourNestTip,
+                    sourceView: nestCell,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: 0, y: 8)
+                )
+                return
+            }
+        }
+        
+        // Priority 3: Current session tip (lower priority)
         if let currentSessionSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .currentSession),
            let _ = dataSource.snapshot().itemIdentifiers(inSection: .currentSession).first,
            NNTipManager.shared.shouldShowTip(HomeTips.happeningNowTip),
@@ -493,34 +546,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 return
             }
         }
-        
-        // Check if we should show the setup tip (lower priority)
-        guard NNTipManager.shared.shouldShowTip(OwnerHomeTips.finishSetupTip),
-              !hasShownSetupTip else { return }
-        
-        hasShownSetupTip = true
-        
-        // Find the setup progress cell
-        guard let setupSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .setupProgress),
-              let _ = dataSource.snapshot().itemIdentifiers(inSection: .setupProgress).first else {
-            return
-        }
-        
-        let setupIndexPath = IndexPath(item: 0, section: setupSection)
-        
-        // Make sure the cell is visible
-        guard let setupCell = collectionView.cellForItem(at: setupIndexPath) else {
-            return
-        }
-        
-        // Show the tooltip anchored to the bottom of the setup cell
-        NNTipManager.shared.showTip(
-            OwnerHomeTips.finishSetupTip,
-            sourceView: setupCell,
-            in: self,
-            pinToEdge: .bottom,
-            offset: CGPoint(x: 0, y: 8)
-        )
     }
 }
 
@@ -531,6 +556,8 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
         
         switch item {
         case .nest:
+            // Dismiss the your nest tip when the nest cell is tapped
+            NNTipManager.shared.dismissTip(OwnerHomeTips.yourNestTip)
             presentHouseholdView()
         case .quickAccess(let type):
             switch type {

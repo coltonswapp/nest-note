@@ -209,7 +209,7 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
         let nestCategoryVC = NestCategoryViewController(
             category: "Household",
             entryRepository: NestService.shared,
-            sessionVisibilityLevel: .comprehensive
+            sessionVisibilityLevel: .overnight
         )
         
         // Wrap in a navigation controller for proper presentation
@@ -337,6 +337,20 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
                 self.delegate?.setupFlowDidUpdateStepStatus()
                 
                 if granted {
+                    // Update notification preferences to true for both types
+                    Task {
+                        do {
+                            let preferences = NestUser.NotificationPreferences(
+                                sessionNotifications: true,
+                                otherNotifications: true
+                            )
+                            try await UserService.shared.updateNotificationPreferences(preferences)
+                            Logger.log(level: .info, category: .general, message: "Notification preferences enabled during onboarding")
+                        } catch {
+                            Logger.log(level: .error, category: .general, message: "Failed to update notification preferences during onboarding: \(error.localizedDescription)")
+                        }
+                    }
+                    
                     // Show success message
                     let alert = UIAlertController(
                         title: "Notifications Enabled",

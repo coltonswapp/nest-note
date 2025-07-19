@@ -122,7 +122,7 @@
 //        case .completed:
 //            statusText += "Completed"
 //            statusLabel.textColor = .systemGray
-//        case .extended:
+//        case .overnight:
 //            statusText += "Extended"
 //            statusLabel.textColor = .systemOrange
 //        }

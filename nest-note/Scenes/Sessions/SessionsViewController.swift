@@ -441,7 +441,7 @@ class NestSessionsViewController: NNViewController {
         let vc = EditSessionViewController()
         vc.delegate = self
         vc.modalPresentationStyle = .pageSheet
-        present(vc, animated: true)
+        present(UINavigationController(rootViewController: vc), animated: true)
     }
     
     // Helper method to delete a session

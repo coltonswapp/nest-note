@@ -16,7 +16,7 @@ class BaseEntry: Codable, Hashable {
     let createdAt: Date
     var updatedAt: Date
     
-    init(title: String, content: String, visibilityLevel: VisibilityLevel = .essential, category: String) {
+    init(title: String, content: String, visibilityLevel: VisibilityLevel = .always, category: String) {
         self.id = UUID().uuidString
         self.title = title
         self.content = content

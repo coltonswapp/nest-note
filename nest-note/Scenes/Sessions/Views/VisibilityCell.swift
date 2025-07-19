@@ -9,7 +9,7 @@ import UIKit
 
 final class VisibilityCell: UICollectionViewListCell {
     weak var delegate: VisibilityCellDelegate?
-    private var currentLevel: VisibilityLevel = .standard
+    private var currentLevel: VisibilityLevel = .halfDay
     private var isReadOnly: Bool = false
     
     private let iconImageView: UIImageView = {

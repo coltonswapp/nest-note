@@ -66,7 +66,7 @@ final class NestService: EntryRepository {
         isOwner = false
         clearEntriesCache()
         clearSavedSittersCache()
-        PlacesService.shared.selectedNestId = nil
+        PlacesService.shared.reset()
     }
     
     // MARK: - Current Nest Methods

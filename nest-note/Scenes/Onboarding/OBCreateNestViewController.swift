@@ -12,6 +12,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
         let field = NNTextField()
         field.translatesAutoresizingMaskIntoConstraints = false
         field.placeholder = "Smith Nest"
+        field.autocapitalizationType = .words
         return field
     }()
     

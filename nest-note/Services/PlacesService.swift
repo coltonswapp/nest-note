@@ -31,7 +31,7 @@ final class PlacesService {
                     address: String, 
                     coordinate: CLLocationCoordinate2D, 
                     thumbnailAsset: UIImageAsset,
-                    visibilityLevel: VisibilityLevel = .standard) async throws -> Place {
+                    visibilityLevel: VisibilityLevel = .halfDay) async throws -> Place {
         guard let nestId = NestService.shared.currentNest?.id else {
             throw ServiceError.noCurrentNest
         }
@@ -243,6 +243,13 @@ final class PlacesService {
         imageAssets.removeAll()
     }
     
+    func reset() {
+        Logger.log(level: .info, category: .placesService, message: "Resetting PlacesService...")
+        places = []
+        imageAssets.removeAll()
+        selectedNestId = nil
+    }
+    
     /// Sets the places array directly (used for sitter filtered results)
     func setPlaces(_ newPlaces: [Place]) {
         self.places = newPlaces
@@ -428,7 +435,7 @@ final class PlacesService {
             coordinate: coordinate,
             thumbnailURLs: nil,
             isTemporary: true,
-            visibilityLevel: .standard
+            visibilityLevel: .halfDay
         )
         
         Logger.log(level: .info, category: .placesService, message: "In-memory temporary place created ✅")
@@ -473,7 +480,7 @@ extension PlacesService {
                 coordinate: CLLocationCoordinate2D(latitude: 40.7608, longitude: -111.8910),
                 thumbnailURLs: .init(light: "debug_url", dark: "debug_url"),
                 isTemporary: false,
-                visibilityLevel: .standard
+                visibilityLevel: .halfDay
             ),
             Place(
                 nestId: nestId,
@@ -482,7 +489,7 @@ extension PlacesService {
                 coordinate: CLLocationCoordinate2D(latitude: 40.7645, longitude: -111.8465),
                 thumbnailURLs: .init(light: "debug_url", dark: "debug_url"),
                 isTemporary: false,
-                visibilityLevel: .extended
+                visibilityLevel: .overnight
             )
         ]
         
