@@ -46,6 +46,12 @@ final class SubscriptionService {
     /// Checks if the user has an active pro subscription
     /// - Returns: True if user has pro subscription, false otherwise
     func hasProSubscription() async -> Bool {
+        // Check if paywall bypass is enabled (for TestFlight or testing)
+        if FeatureFlagService.shared.shouldBypassPaywall() {
+            Logger.log(level: .info, category: .subscription, message: "Pro subscription status bypassed via feature flag")
+            return true
+        }
+        
         let tier = await getCurrentTier()
         return tier == .pro
     }
@@ -143,6 +149,12 @@ extension SubscriptionService {
     /// - Parameter feature: The feature to check
     /// - Returns: True if feature is available, false otherwise
     func isFeatureAvailable(_ feature: ProFeature) async -> Bool {
+        // Check if paywall bypass is enabled (for TestFlight or testing)
+        if FeatureFlagService.shared.shouldBypassPaywall() {
+            Logger.log(level: .info, category: .subscription, message: "Feature '\(feature.displayName)' allowed via paywall bypass")
+            return true
+        }
+        
         let tier = await getCurrentTier()
         return feature.isAvailable(for: tier)
     }

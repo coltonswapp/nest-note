@@ -45,6 +45,8 @@ class InviteDetailViewController: NNViewController {
     private var createUpdateButton: NNLoadingButton!
     private var actionButtonsStackView: UIStackView!
     private var skipButton: UIButton!
+    private var skipLabel: UILabel!
+    private var skipStack: UIStackView!
     
     private lazy var copyButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "doc.on.doc"),
@@ -120,7 +122,9 @@ class InviteDetailViewController: NNViewController {
     }
     
     private func setupCollectionView() {
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
+        // Create a placeholder layout first
+        let placeholderLayout = UICollectionViewFlowLayout()
+        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: placeholderLayout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
         view.addSubview(collectionView)
@@ -141,6 +145,9 @@ class InviteDetailViewController: NNViewController {
         
         configureDataSource()
         applySnapshot()
+        
+        // Now set the proper layout after data source is configured
+        collectionView.setCollectionViewLayout(createLayout(), animated: false)
         
         // Set delegate to control selection behavior
         collectionView.delegate = self
@@ -241,24 +248,39 @@ class InviteDetailViewController: NNViewController {
         NSLayoutConstraint.activate([
             actionButtonsStackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             actionButtonsStackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            actionButtonsStackView.bottomAnchor.constraint(equalTo: skipButton.topAnchor, constant: -24)
+            actionButtonsStackView.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -24)
         ])
     }
     
     private func setupSkipButton() {
         skipButton = UIButton(type: .system)
         skipButton.setTitle("Skip for now", for: .normal)
-        skipButton.setTitleColor(.systemBlue, for: .normal)
-        skipButton.titleLabel?.font = .bodyM
+        skipButton.setTitleColor(NNColors.primary, for: .normal)
+        skipButton.titleLabel?.font = .bodyL
         skipButton.translatesAutoresizingMaskIntoConstraints = false
         skipButton.addTarget(self, action: #selector(skipButtonTapped), for: .touchUpInside)
         
-        view.addSubview(skipButton)
+        skipLabel = UILabel()
+        skipLabel.font = .preferredFont(forTextStyle: .footnote)
+        skipLabel.textColor = .tertiaryLabel
+        skipLabel.textAlignment = .center
+        skipLabel.numberOfLines = 0
+        skipLabel.text = "You can always invite a sitter later"
+        
+        skipStack = UIStackView()
+        skipStack.translatesAutoresizingMaskIntoConstraints = false
+        skipStack.axis = .vertical
+        skipStack.spacing = 4
+        skipStack.alignment = .center
+        skipStack.addArrangedSubview(skipButton)
+        skipStack.addArrangedSubview(skipLabel)
+        
+        view.addSubview(skipStack)
         
         NSLayoutConstraint.activate([
-            skipButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            skipButton.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -8),
-            skipButton.heightAnchor.constraint(equalToConstant: 44)
+            skipStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            skipStack.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -16),
+            skipButton.heightAnchor.constraint(equalToConstant: 30)
         ])
         
         // Initially hide skip button, only show for new invites
@@ -288,7 +310,7 @@ class InviteDetailViewController: NNViewController {
         
         // Only show skip button if onInviteCreation closure is set and no invite exists yet
         let shouldShow = !inviteExists && onInviteCreation != nil
-        skipButton.isHidden = !shouldShow
+        skipStack.isHidden = !shouldShow
     }
     
     @objc private func createUpdateButtonTapped() {

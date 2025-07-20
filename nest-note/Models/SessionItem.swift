@@ -1,5 +1,39 @@
 import Foundation
 
+enum EarlyAccessDuration: Int, CaseIterable, Codable {
+    case none = 0
+    case short = 3      // 3 hours
+    case halfDay = 12   // 12 hours  
+    case fullDay = 24   // 1 day
+    case extended = 48  // 2 days
+    
+    var displayName: String {
+        switch self {
+        case .none: return "None"
+        case .short: return "\(String(self.rawValue)) hours"
+        case .halfDay: return "\(String(self.rawValue)) hours"
+        case .fullDay: return "\(String(self.rawValue)) hours"
+        case .extended: return "\(String(self.rawValue)) hours"
+        }
+    }
+    
+    var shortDisplayName: String {
+        switch self {
+        case .none: return "None"
+        case .short: return "\(String(self.rawValue))hr"
+        case .halfDay: return "\(String(self.rawValue))hr"
+        case .fullDay: return "\(String(self.rawValue))hr"
+        case .extended: return "\(String(self.rawValue))hr"
+        }
+    }
+    
+    var hours: Int { return rawValue }
+    
+    var timeInterval: TimeInterval {
+        return TimeInterval(hours * 60 * 60) // Convert hours to seconds
+    }
+}
+
 enum SessionInviteStatus: String, Codable {
     case none           // No invite has been created
     case invited        // Invite sent, waiting for response
@@ -68,11 +102,60 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var assignedSitter: AssignedSitter?
     var nestID: String
     var ownerID: String?
+    var earlyAccessDuration: EarlyAccessDuration
+    var earlyAccessEndDate: Date?
     
     // Computed property to check if session has an active invite
     var hasActiveInvite: Bool {
         guard let sitter = assignedSitter else { return false }
         return sitter.inviteStatus == .invited || sitter.inviteStatus == .accepted
+    }
+    
+    // MARK: - Early Access Logic
+    
+    /// Checks if the session is currently within its early access period
+    var isInEarlyAccess: Bool {
+        guard status == .earlyAccess,
+              let earlyAccessEnd = earlyAccessEndDate else {
+            return false
+        }
+        return Date() <= earlyAccessEnd
+    }
+    
+    /// Calculates the remaining time in the early access period
+    var earlyAccessTimeRemaining: TimeInterval? {
+        guard isInEarlyAccess,
+              let earlyAccessEnd = earlyAccessEndDate else {
+            return nil
+        }
+        return max(0, earlyAccessEnd.timeIntervalSinceNow)
+    }
+    
+    /// Initiates the early access period for the session
+    func startEarlyAccess() {
+        guard earlyAccessDuration != .none else {
+            // No early access configured, go directly to completed
+            status = .completed
+            return
+        }
+        
+        status = .earlyAccess
+        earlyAccessEndDate = Date().addingTimeInterval(earlyAccessDuration.timeInterval)
+    }
+    
+    /// Ends the early access period and marks session as completed
+    func endEarlyAccess() {
+        status = .completed
+        earlyAccessEndDate = nil
+    }
+    
+    /// Checks if the early access period has expired and updates status if needed
+    func checkEarlyAccessExpiry() {
+        guard status == .earlyAccess else { return }
+        
+        if !isInEarlyAccess {
+            endEarlyAccess()
+        }
     }
     
     init(
@@ -86,7 +169,9 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         status: SessionStatus = .upcoming,
         assignedSitter: AssignedSitter? = nil,
         nestID: String = NestService.shared.currentNest!.id,
-        ownerID: String? = NestService.shared.currentNest?.ownerId
+        ownerID: String? = NestService.shared.currentNest?.ownerId,
+        earlyAccessDuration: EarlyAccessDuration = .halfDay,
+        earlyAccessEndDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -99,6 +184,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         self.assignedSitter = assignedSitter
         self.nestID = nestID
         self.ownerID = ownerID
+        self.earlyAccessDuration = earlyAccessDuration
+        self.earlyAccessEndDate = earlyAccessEndDate
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -121,6 +208,15 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         // Don't override manually set completed status
         if status == .completed {
             return .completed
+        }
+        
+        // Handle early access status
+        if status == .earlyAccess {
+            // Check if early access has expired
+            if let earlyAccessEnd = earlyAccessEndDate, currentDate > earlyAccessEnd {
+                return .completed
+            }
+            return .earlyAccess
         }
         
         // Don't override manually set active status unless the session is over
@@ -163,6 +259,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case assignedSitter
         case nestID
         case ownerID
+        case earlyAccessDuration
+        case earlyAccessEndDate
     }
     
     required init(from decoder: Decoder) throws {
@@ -179,6 +277,13 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
         ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)
+        // Handle earlyAccessDuration with backwards compatibility for unknown enum values
+        if let earlyAccessRawValue = try container.decodeIfPresent(Int.self, forKey: .earlyAccessDuration) {
+            earlyAccessDuration = EarlyAccessDuration(rawValue: earlyAccessRawValue) ?? .halfDay
+        } else {
+            earlyAccessDuration = .halfDay
+        }
+        earlyAccessEndDate = try container.decodeIfPresent(Date.self, forKey: .earlyAccessEndDate)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
@@ -213,7 +318,9 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             status: self.status,
             assignedSitter: self.assignedSitter, // AssignedSitter is a struct, so it will be copied by value
             nestID: self.nestID,
-            ownerID: self.ownerID
+            ownerID: self.ownerID,
+            earlyAccessDuration: self.earlyAccessDuration,
+            earlyAccessEndDate: self.earlyAccessEndDate
         )
         return copiedSession
     }
@@ -227,6 +334,7 @@ enum SessionStatus: String, Codable, Containable {
     case upcoming
     case inProgress = "inProgress"
     case extended
+    case earlyAccess = "earlyAccess"
     case completed
     case archived
     
@@ -261,6 +369,8 @@ enum SessionStatus: String, Codable, Containable {
             return "calendar.badge.checkmark"
         case .extended:
             return "timer.circle.fill"
+        case .earlyAccess:
+            return "clock.badge.checkmark"
         case .completed:
             return "checkmark.circle.fill"
         case .archived:
@@ -272,6 +382,8 @@ enum SessionStatus: String, Codable, Containable {
         switch self {
         case .inProgress:
             return "In Progress"
+        case .earlyAccess:
+            return "Early Access"
         default:
             return self.rawValue.capitalized
         }

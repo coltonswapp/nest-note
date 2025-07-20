@@ -228,6 +228,19 @@ final class SitterViewService: EntryRepository {
         return false
     }
     
+    /// Temporarily sets the view state for a specific session context
+    /// Used when sitter needs to explore a nest from a session detail view
+    func setTemporarySessionContext(session: SessionItem, nest: NestItem) {
+        Logger.log(level: .info, category: .sitterViewService, message: "Setting temporary session context for nest: \(nest.id)")
+        
+        // Clear any existing caches since we're switching context
+        clearEntriesCache()
+        clearPlacesCache()
+        
+        // Set the view state to the provided session and nest
+        viewState = .ready(session: session, nest: nest)
+    }
+    
     // MARK: - Notifications
     func notifySessionChange() {
         NotificationCenter.default.post(name: .sessionDidChange, object: nil)

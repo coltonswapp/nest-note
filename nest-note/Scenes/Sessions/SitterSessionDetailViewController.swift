@@ -1,4 +1,5 @@
 import UIKit
+import FirebaseFirestore
 
 final class SitterSessionDetailViewController: NNViewController {
     
@@ -25,6 +26,7 @@ final class SitterSessionDetailViewController: NNViewController {
     enum Item: Hashable {
         case nestName(name: String)
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
+        case earlyAccess(EarlyAccessDuration)
         case visibilityLevel(VisibilityLevel)
         case events
         case sessionEvent(SessionEvent)
@@ -41,19 +43,22 @@ final class SitterSessionDetailViewController: NNViewController {
                 hasher.combine(start)
                 hasher.combine(end)
                 hasher.combine(isMultiDay)
-            case .visibilityLevel(let level):
+            case .earlyAccess(let duration):
                 hasher.combine(2)
+                hasher.combine(duration)
+            case .visibilityLevel(let level):
+                hasher.combine(3)
                 hasher.combine(level)
             case .events:
-                hasher.combine(3)
-            case .sessionEvent(let event):
                 hasher.combine(4)
+            case .sessionEvent(let event):
+                hasher.combine(5)
                 hasher.combine(event)
             case .moreEvents(let count):
-                hasher.combine(5)
+                hasher.combine(6)
                 hasher.combine(count)
             case .expenses:
-                hasher.combine(6)
+                hasher.combine(7)
             }
         }
         
@@ -63,6 +68,8 @@ final class SitterSessionDetailViewController: NNViewController {
                 return n1 == n2
             case let (.dateSelection(s1, e1, m1), .dateSelection(s2, e2, m2)):
                 return s1 == s2 && e1 == e2 && m1 == m2
+            case let (.earlyAccess(d1), .earlyAccess(d2)):
+                return d1 == d2
             case let (.visibilityLevel(l1), .visibilityLevel(l2)):
                 return l1 == l2
             case (.events, .events):
@@ -265,15 +272,41 @@ final class SitterSessionDetailViewController: NNViewController {
     }
     
     private func configureDataSource() {
-        let nestNameRegistration = UICollectionView.CellRegistration<NestNameCell, Item> { cell, indexPath, item in
+        let nestNameRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
             if case let .nestName(name: nestName) = item {
-                cell.configure(with: nestName)
+                var content = cell.defaultContentConfiguration()
+                content.text = nestName
+                let image = NNImage.primaryLogo
+                content.image = image
+                
+                content.imageProperties.tintColor = NNColors.primary
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 8
+                
+                content.directionalLayoutMargins.top = 17
+                content.directionalLayoutMargins.bottom = 17
+                
+                content.textProperties.font = .preferredFont(forTextStyle: .body)
+                
+                // Only show disclosure indicator for non-archived sessions
+                if let self = self, !self.isArchivedSession {
+                    cell.accessories = [.disclosureIndicator()]
+                } else {
+                    cell.accessories = []
+                }
+                cell.contentConfiguration = content
             }
         }
         
         let dateRegistration = UICollectionView.CellRegistration<SitterDetailDateCell, Item> { cell, indexPath, item in
             if case let .dateSelection(startDate, endDate, _) = item {
                 cell.configure(startDate: startDate, endDate: endDate)
+            }
+        }
+        
+        let earlyAccessRegistration = UICollectionView.CellRegistration<AccessCell, Item> { cell, indexPath, item in
+            if case let .earlyAccess(duration) = item {
+                cell.configure(with: duration)
             }
         }
         
@@ -334,8 +367,8 @@ final class SitterSessionDetailViewController: NNViewController {
                 content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
                 content.imageToTextPadding = 8
                 
-                content.directionalLayoutMargins.top = 16
-                content.directionalLayoutMargins.bottom = 16
+                content.directionalLayoutMargins.top = 17
+                content.directionalLayoutMargins.bottom = 17
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
@@ -359,6 +392,12 @@ final class SitterSessionDetailViewController: NNViewController {
                 configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
                 configuration.textProperties.color = .tertiaryLabel
                 configuration.textProperties.alignment = .center
+            } else if false {
+                configuration.text = "You can explore the nest during the early access period before your session starts"
+                configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
+                configuration.textProperties.color = .tertiaryLabel
+                configuration.textProperties.alignment = .center
+                configuration.textProperties.numberOfLines = 0
             } else if self.dataSource.sectionIdentifier(for: indexPath.section) == .visibility && self.isArchivedSession {
                 configuration.text = "This session has been archived, as such, it cannot be edited."
                 configuration.textProperties.font = .preferredFont(forTextStyle: .footnote)
@@ -389,6 +428,13 @@ final class SitterSessionDetailViewController: NNViewController {
             case .dateSelection:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: dateRegistration,
+                    for: indexPath,
+                    item: item
+                )
+                
+            case .earlyAccess:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: earlyAccessRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -449,7 +495,12 @@ final class SitterSessionDetailViewController: NNViewController {
             snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
         }
         
-        snapshot.appendItems([.nestName(name: nestName)], toSection: .name)
+        // Add nest name and early access to name section
+        var nameItems: [Item] = [.nestName(name: nestName)]
+        if !isArchivedSession && session.earlyAccessDuration != .none {
+            nameItems.append(.earlyAccess(session.earlyAccessDuration))
+        }
+        snapshot.appendItems(nameItems, toSection: .name)
         
         // Add date selection with initial date
         snapshot.appendItems([.dateSelection(
@@ -589,6 +640,49 @@ final class SitterSessionDetailViewController: NNViewController {
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
+    
+    // MARK: - Helper Methods
+    
+    /// Determines if a sitter can access the nest for the given session
+    private func canSitterAccessNest(for session: SessionItem) -> Bool {
+        let now = Date()
+        
+        Logger.log(level: .info, category: .sessionService, message: "Checking nest access for session: \(session.id)")
+        Logger.log(level: .info, category: .sessionService, message: "Session status: \(session.status.rawValue)")
+        Logger.log(level: .info, category: .sessionService, message: "Early access duration: \(session.earlyAccessDuration.displayName)")
+        
+        // Allow access during active session states
+        if session.status == .inProgress || session.status == .extended {
+            Logger.log(level: .info, category: .sessionService, message: "Access granted: Active session")
+            return true
+        }
+        
+        // Allow access during early access (post-session)
+        if session.status == .earlyAccess && session.isInEarlyAccess {
+            Logger.log(level: .info, category: .sessionService, message: "Access granted: Post-session early access")
+            return true
+        }
+        
+        // Allow access during pre-session early access window
+        if session.status == .upcoming && session.earlyAccessDuration != .none {
+            let earlyAccessStartTime = session.startDate.addingTimeInterval(-session.earlyAccessDuration.timeInterval)
+            let isWithinEarlyAccess = now >= earlyAccessStartTime
+            
+            Logger.log(level: .info, category: .sessionService, message: "Session start date: \(session.startDate)")
+            Logger.log(level: .info, category: .sessionService, message: "Early access start time: \(earlyAccessStartTime)")
+            Logger.log(level: .info, category: .sessionService, message: "Current time: \(now)")
+            Logger.log(level: .info, category: .sessionService, message: "Within pre-session early access: \(isWithinEarlyAccess)")
+            
+            if isWithinEarlyAccess {
+                Logger.log(level: .info, category: .sessionService, message: "Access granted: Pre-session early access")
+            }
+            
+            return isWithinEarlyAccess
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Access denied: Outside allowed windows")
+        return false
+    }
 }
 
 // MARK: - UICollectionViewDelegate
@@ -596,6 +690,9 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
+        case .nestName:
+            // Only allow highlighting nest cell for non-archived sessions
+            return !isArchivedSession
         case .sessionEvent, .expenses:
             return true
         case .events, .moreEvents:
@@ -610,6 +707,69 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         switch item {
+        case .nestName:
+            // Don't allow nest access for archived sessions
+            guard !isArchivedSession else { return }
+            
+            // Check if session allows nest exploration
+            let hasNestAccess = canSitterAccessNest(for: session)
+            guard hasNestAccess else {
+                let alert = UIAlertController(
+                    title: "Nest Access Unavailable",
+                    message: "You can explore the nest during an active session, early access period, or within the early access window before the session starts.",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+                return
+            }
+            
+            // Configure the sitter view service for this specific session
+            let sitterService = SitterViewService.shared
+            
+            // Create a temporary session-specific state for this context
+            Task {
+                do {
+                    // Fetch the nest information for this session
+                    let nestRef = Firestore.firestore().collection("nests").document(session.nestID)
+                    let nestDoc = try await nestRef.getDocument()
+                    var nest = try nestDoc.data(as: NestItem.self)
+                    
+                    // Fetch categories for the nest
+                    let categoriesRef = nestRef.collection("nestCategories")
+                    let categoriesSnapshot = try await categoriesRef.getDocuments()
+                    let categories = try categoriesSnapshot.documents.map { try $0.data(as: NestCategory.self) }
+                    nest.categories = categories
+                    
+                    await MainActor.run {
+                        // Temporarily set the view state for this session context
+                        sitterService.setTemporarySessionContext(session: self.session, nest: nest)
+                        
+                        let nestViewController = NestViewController(entryRepository: sitterService)
+                        let navigationController = UINavigationController(rootViewController: nestViewController)
+                        
+                        // Configure the presentation style
+                        navigationController.modalPresentationStyle = .pageSheet
+                        if let sheet = navigationController.sheetPresentationController {
+                            sheet.detents = [.large()]
+                            sheet.prefersGrabberVisible = true
+                        }
+                        
+                        self.present(navigationController, animated: true)
+                    }
+                } catch {
+                    await MainActor.run {
+                        let alert = UIAlertController(
+                            title: "Error",
+                            message: "Unable to load nest information: \(error.localizedDescription)",
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
+                    }
+                }
+            }
+            
         case .sessionEvent(let event):
             // Present event details in read-only mode
             let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
@@ -733,8 +893,8 @@ final class SitterDetailDateCell: UICollectionViewListCell {
         let verticalPadding: CGFloat = 16
         let labelSpacing: CGFloat = 8
         let dividerWidth: CGFloat = 1
-        let imageHeight: CGFloat = 16
-        let imageWidth: CGFloat = 24
+        let imageHeight: CGFloat = 20
+        let imageWidth: CGFloat = 26
         
         
         NSLayoutConstraint.activate([

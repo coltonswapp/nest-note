@@ -12,6 +12,7 @@ final class SessionEventViewController: NNSheetViewController {
     private let sessionID: String?
     private let event: SessionEvent?
     private let isReadOnly: Bool
+    private var sessionDateRange: DateInterval?
     
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
@@ -117,10 +118,11 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil) {
         self.sessionID = sessionID
         self.event = event
         self.isReadOnly = isReadOnly
+        self.sessionDateRange = sessionDateRange
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
@@ -412,6 +414,26 @@ final class SessionEventViewController: NNSheetViewController {
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
             return false
+        }
+        
+        // Check if event dates are within session date range
+        if let sessionDateRange = sessionDateRange {
+            let eventStart = startControl.date
+            let eventEnd = endControl.date
+            
+            // Check if event falls within session start & end
+            if  eventStart < sessionDateRange.start || eventEnd > sessionDateRange.end {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateStyle = .medium
+                let alert = UIAlertController(
+                    title: "Event Outside Session Range",
+                    message: "Events can only be scheduled during the session; \(dateFormatter.string(from: sessionDateRange.start)) to \(dateFormatter.string(from: sessionDateRange.end)).",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+                return false
+            }
         }
         
         return true

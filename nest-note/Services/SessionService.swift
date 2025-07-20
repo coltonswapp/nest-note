@@ -218,7 +218,7 @@ class SessionService {
                 result.upcoming.append(session)
             case .inProgress, .extended:
                 result.inProgress.append(session)
-            case .completed, .archived:
+            case .earlyAccess, .completed, .archived:
                 result.past.append(session)
             }
         }
@@ -465,6 +465,13 @@ class SessionService {
             guard session.canBeMarkedActive else {
                 throw ServiceError.invalidStatusTransition
             }
+        case .earlyAccess:
+            // Can only transition to early access from inProgress or extended
+            guard session.status == .inProgress || session.status == .extended else {
+                throw ServiceError.invalidStatusTransition
+            }
+            // Start the early access on the session
+            updatedSession.startEarlyAccess()
         case .completed:
             guard session.canBeMarkedCompleted else {
                 throw ServiceError.invalidStatusTransition
@@ -483,6 +490,114 @@ class SessionService {
         
         updatedSession.status = newStatus
         try await updateSession(updatedSession)
+    }
+    
+    /// Completes a session and starts its early access period (if configured)
+    func completeSession(_ session: SessionItem) async throws {
+        Logger.log(level: .info, category: .sessionService, message: "Completing session: \(session.id)")
+        
+        var updatedSession = session
+        
+        // Check if early access is configured
+        if updatedSession.earlyAccessDuration != .none {
+            // Start early access
+            updatedSession.startEarlyAccess()
+            Logger.log(level: .info, category: .sessionService, message: "Session moved to early access: \(updatedSession.earlyAccessDuration.displayName)")
+        } else {
+            // No early access, go directly to completed
+            updatedSession.status = .completed
+            Logger.log(level: .info, category: .sessionService, message: "Session completed (no early access)")
+        }
+        
+        try await updateSession(updatedSession)
+        
+        // Post notification about status change
+        NotificationCenter.default.post(
+            name: .sessionStatusDidChange,
+            object: nil,
+            userInfo: [
+                "sessionId": session.id,
+                "newStatus": updatedSession.status.rawValue
+            ]
+        )
+    }
+    
+    /// Checks all sessions for expired early access periods and updates them
+    func checkExpiredEarlyAccessPeriods() async throws {
+        Logger.log(level: .info, category: .sessionService, message: "Checking for expired early access periods...")
+        
+        let earlyAccessSessions = sessions.filter { $0.status == .earlyAccess }
+        var expiredCount = 0
+        
+        for session in earlyAccessSessions {
+            if !session.isInEarlyAccess {
+                var updatedSession = session
+                updatedSession.endEarlyAccess()
+                try await updateSession(updatedSession)
+                expiredCount += 1
+                
+                Logger.log(level: .info, category: .sessionService, message: "Early access expired for session: \(session.id)")
+                
+                // Post notification about status change
+                NotificationCenter.default.post(
+                    name: .sessionStatusDidChange,
+                    object: nil,
+                    userInfo: [
+                        "sessionId": session.id,
+                        "newStatus": updatedSession.status.rawValue
+                    ]
+                )
+            }
+        }
+        
+        if expiredCount > 0 {
+            Logger.log(level: .info, category: .sessionService, message: "Expired \(expiredCount) early access periods")
+        }
+    }
+    
+    /// Checks all sessions for expired early access periods across all user's nests
+    func checkExpiredEarlyAccessPeriodsForUser() async throws {
+        guard let userID = UserService.shared.currentUser?.id else {
+            Logger.log(level: .debug, category: .sessionService, message: "No current user for early access check")
+            return
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Checking expired early access periods for user: \(userID)")
+        
+        // For sitters, check their active sessions
+        let sitterSessionsRef = db.collection("users").document(userID)
+            .collection("sitterSessions")
+            .limit(to: 50) // Reasonable limit
+        
+        let sitterSessionsSnapshot = try await sitterSessionsRef.getDocuments()
+        let sitterSessions = try sitterSessionsSnapshot.documents.compactMap { try $0.data(as: SitterSession.self) }
+        
+        var expiredCount = 0
+        
+        // Check each sitter session
+        for sitterSession in sitterSessions {
+            if let session = try? await getSession(nestID: sitterSession.nestID, sessionID: sitterSession.id),
+               session.status == .earlyAccess && !session.isInEarlyAccess {
+                
+                var updatedSession = session
+                updatedSession.endEarlyAccess()
+                
+                // Update the session in its nest
+                let sessionRef = db.collection("nests")
+                    .document(sitterSession.nestID)
+                    .collection("sessions")
+                    .document(session.id)
+                
+                try await sessionRef.setData(from: updatedSession, merge: true)
+                expiredCount += 1
+                
+                Logger.log(level: .info, category: .sessionService, message: "Early access expired for sitter session: \(session.id)")
+            }
+        }
+        
+        if expiredCount > 0 {
+            Logger.log(level: .info, category: .sessionService, message: "Expired \(expiredCount) early access periods for user")
+        }
     }
     
     // MARK: - Invite Methods
@@ -1223,8 +1338,13 @@ class SessionService {
         // For each sitter session, fetch the actual session and find the in-progress one
         for sitterSession in sitterSessions {
             if let session = try await getSession(nestID: sitterSession.nestID, sessionID: sitterSession.id),
-               session.status == .inProgress || session.status == .extended {
-                Logger.log(level: .info, category: .sessionService, message: "Found in-progress session ✅")
+               session.status == .inProgress || session.status == .extended || session.status == .earlyAccess {
+                // Check if early access is still valid
+                if session.status == .earlyAccess && !session.isInEarlyAccess {
+                    // Early access expired, skip this session
+                    continue
+                }
+                Logger.log(level: .info, category: .sessionService, message: "Found accessible session ✅")
                 PlacesService.shared.selectedNestId = sitterSession.nestID
                 return session
             }

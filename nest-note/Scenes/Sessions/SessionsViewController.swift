@@ -546,7 +546,7 @@ extension NestSessionsViewController: EditSessionViewControllerDelegate {
         // Optionally, ensure we're showing the appropriate bucket
         let sessionStatus = session.status
         switch sessionStatus {
-        case .upcoming:
+        case .upcoming, .earlyAccess:
             filterView.selectBucket(.upcoming)
         case .inProgress, .extended:
             filterView.selectBucket(.inProgress)
