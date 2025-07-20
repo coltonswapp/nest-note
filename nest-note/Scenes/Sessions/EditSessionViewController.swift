@@ -676,11 +676,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func configureDataSource() {
-        let overviewRegistration = UICollectionView.CellRegistration<SessionOverviewCell, Item> { cell, indexPath, item in
-            if case .overview = item {
-                cell.updateProgress(to: 0) // Start at first step
-            }
-        }
         
         let inviteSitterRegistration = UICollectionView.CellRegistration<SessionInviteSitterCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
@@ -903,8 +898,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
-            case .overview:
-                return collectionView.dequeueConfiguredReusableCell(using: overviewRegistration, for: indexPath, item: item)
             case .inviteSitter:
                 return collectionView.dequeueConfiguredReusableCell(using: inviteSitterRegistration, for: indexPath, item: item)
             case .visibilityLevel(let level):
@@ -1648,7 +1641,6 @@ extension EditSessionViewController {
     }
     
     enum Item: Hashable {
-        case overview
         case inviteSitter
         case visibilityLevel(VisibilityLevel)
         case sessionStatus(SessionStatus)
@@ -1662,8 +1654,6 @@ extension EditSessionViewController {
         
         func hash(into hasher: inout Hasher) {
             switch self {
-            case .overview:
-                hasher.combine(0)
             case .inviteSitter:
                 hasher.combine(1)
             case .visibilityLevel(let level):
@@ -1697,8 +1687,7 @@ extension EditSessionViewController {
         
         static func == (lhs: Item, rhs: Item) -> Bool {
             switch (lhs, rhs) {
-            case (.overview, .overview),
-                 (.inviteSitter, .inviteSitter),
+            case (.inviteSitter, .inviteSitter),
                  (.expenses, .expenses),
                  (.exportPDF, .exportPDF),
                  (.events, .events):
@@ -1774,8 +1763,6 @@ extension EditSessionViewController: UICollectionViewDelegate {
             expenseButtonTapped()
         case .exportPDF:
             exportPDFButtonTapped()
-        case .overview:
-            break
         case .events:
             // Skip handling events if we're still loading them
             if isLoadingEvents { return }
@@ -2005,49 +1992,6 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
         dataSource.apply(newSnapshot, animatingDifferences: false)
         
         checkForChanges()
-    }
-}
-
-final class SessionOverviewCell: UICollectionViewListCell {
-    private lazy var progressView: NNStepProgressView = {
-        let view = NNStepProgressView(steps: ["Setup", "Start", "In progress", "Finish"])
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupCell()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupCell() {
-        contentView.addSubview(progressView)
-        
-        NSLayoutConstraint.activate([
-            progressView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            progressView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            progressView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            progressView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
-        ])
-    }
-    
-    func updateProgress(to step: Int) {
-        // Mark previous steps as complete
-        for i in 0..<step {
-            progressView.updateState(.complete, forStep: i)
-        }
-        
-        // Mark current step as in progress
-        progressView.updateState(.inProgress(progress: 0.33), forStep: step)
-        
-        // Mark remaining steps as incomplete
-        for i in (step + 1)..<4 {
-            progressView.updateState(.incomplete, forStep: i)
-        }
     }
 }
 
