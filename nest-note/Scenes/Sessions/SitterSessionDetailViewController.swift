@@ -272,7 +272,7 @@ final class SitterSessionDetailViewController: NNViewController {
     }
     
     private func configureDataSource() {
-        let nestNameRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+        let nestNameRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
             if case let .nestName(name: nestName) = item {
                 var content = cell.defaultContentConfiguration()
                 content.text = nestName
@@ -288,7 +288,12 @@ final class SitterSessionDetailViewController: NNViewController {
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
-                cell.accessories = [.disclosureIndicator()]
+                // Only show disclosure indicator for non-archived sessions
+                if let self = self, !self.isArchivedSession {
+                    cell.accessories = [.disclosureIndicator()]
+                } else {
+                    cell.accessories = []
+                }
                 cell.contentConfiguration = content
             }
         }
@@ -685,7 +690,10 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
-        case .nestName, .sessionEvent, .expenses:
+        case .nestName:
+            // Only allow highlighting nest cell for non-archived sessions
+            return !isArchivedSession
+        case .sessionEvent, .expenses:
             return true
         case .events, .moreEvents:
             // Don't allow highlighting events if they are currently loading
@@ -700,6 +708,9 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
         
         switch item {
         case .nestName:
+            // Don't allow nest access for archived sessions
+            guard !isArchivedSession else { return }
+            
             // Check if session allows nest exploration
             let hasNestAccess = canSitterAccessNest(for: session)
             guard hasNestAccess else {

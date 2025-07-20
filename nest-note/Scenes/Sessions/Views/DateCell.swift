@@ -40,7 +40,6 @@ final class DateCell: UICollectionViewListCell {
         return label
     }()
     
-    
     let earlyAccessLabel: UILabel = {
         let label = UILabel()
         label.text = "Early Access"
