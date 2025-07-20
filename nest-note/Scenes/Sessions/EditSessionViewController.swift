@@ -1283,19 +1283,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
     }
     
-    // Update calendar presentation
-    private func presentCalendarViewController() {
-        let calendarVC = SessionCalendarViewController(
-            sessionID: sessionItem.id,
-            nestID: sessionItem.nestID,
-            dateRange: dateRange,
-            events: sessionEvents
-        )
-        calendarVC.delegate = self
-        let nav = UINavigationController(rootViewController: calendarVC)
-        present(nav, animated: true)
-    }
-    
     private var statusMenu: UIMenu {
         let actions = [
             UIAction(title: "Upcoming", image: UIImage(systemName: SessionStatus.upcoming.icon)) { [weak self] _ in
@@ -1771,11 +1758,11 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 
                 await MainActor.run {
                     // Always show the calendar view when tapping the events cell
-                    self.presentCalendarViewController()
+                    self.presentSessionCalendarViewController()
                 }
             }
         case .moreEvents:
-            self.presentCalendarViewController()
+            self.presentSessionCalendarViewController()
         case .sessionEvent(let event):
             // Check if user has session events feature (Pro subscription)
             Task {
