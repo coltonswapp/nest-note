@@ -144,71 +144,162 @@ final class SitterViewService: EntryRepository {
     
     // MARK: - Session Management
     func fetchCurrentSession() async throws {
-        viewState = .loading
+        Logger.log(level: .info, category: .sitterViewService, message: "Starting fetchCurrentSession")
+        
+        // Safely update viewState on main actor
+        await MainActor.run {
+            self.viewState = .loading
+        }
         
         // Add artificial delay to make loading state visible
-        try await Task.sleep(nanoseconds: 750_000_000) // 0.75 seconds
+        do {
+            try await Task.sleep(nanoseconds: 750_000_000) // 0.75 seconds
+        } catch {
+            Logger.log(level: .error, category: .sitterViewService, message: "Task sleep interrupted: \(error.localizedDescription)")
+            // Continue anyway
+        }
         
-        guard let userID = UserService.shared.currentUser?.id else {
-            Logger.log(level: .error, category: .sessionService, message: "No current user")
-            viewState = .error(SessionError.userNotAuthenticated)
+        // Validate user ID
+        guard let userID = UserService.shared.currentUser?.id, !userID.isEmpty else {
+            Logger.log(level: .error, category: .sitterViewService, message: "No current user or empty user ID")
+            await MainActor.run {
+                self.viewState = .error(SessionError.userNotAuthenticated)
+            }
             return
         }
         
         Logger.log(level: .info, category: .sitterViewService, message: "Fetching current session for sitter: \(userID)")
         
         do {
-            // Try to get the current session - updated to use optimized query
-            guard let session = try await sessionService.fetchInProgressSitterSession(userID: userID) else {
-                await MainActor.run {
-                    self.viewState = .noSession
+            // Step 1: Try to get the current session with additional validation
+            Logger.log(level: .debug, category: .sitterViewService, message: "Step 1: Fetching in-progress session")
+            
+            let session: SessionItem
+            do {
+                guard let fetchedSession = try await sessionService.fetchInProgressSitterSession(userID: userID) else {
+                    Logger.log(level: .info, category: .sitterViewService, message: "No active session found for user")
+                    await MainActor.run {
+                        self.viewState = .noSession
+                    }
+                    return
                 }
-                Logger.log(level: .info, category: .sitterViewService, message: "No active session found")
-                return
-            }
-            
-            // Get the sitter session to get the nest ID
-            guard let sitterSession = try await sessionService.getSitterSession(sessionID: session.id) else {
+                session = fetchedSession
+                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched session: \(session.id)")
+            } catch {
+                Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch in-progress session: \(error.localizedDescription)")
                 await MainActor.run {
-                    self.viewState = .error(SessionError.sessionNotFound)
+                    self.viewState = .error(error)
                 }
-                return
+                throw error
             }
             
-            // Fetch the full nest information
-            let nestRef = db.collection("nests").document(sitterSession.nestID)
-            let nestDoc = try await nestRef.getDocument()
-            var nest = try nestDoc.data(as: NestItem.self)
+            // Step 2: Get the sitter session to get the nest ID
+            Logger.log(level: .debug, category: .sitterViewService, message: "Step 2: Fetching sitter session for session ID: \(session.id)")
             
-            // Fetch categories for the nest
-            let categoriesRef = nestRef.collection("nestCategories")
-            let categoriesSnapshot = try await categoriesRef.getDocuments()
-            let categories = try categoriesSnapshot.documents.map { try $0.data(as: NestCategory.self) }
-            
-            // Set the categories on the nest
-            nest.categories = categories
-            
-            // Clear caches when switching nests
-            if currentNest?.id != nest.id {
-                clearEntriesCache()
-                clearPlacesCache()
+            let sitterSession: SitterSession
+            do {
+                guard let fetchedSitterSession = try await sessionService.getSitterSession(sessionID: session.id) else {
+                    Logger.log(level: .error, category: .sitterViewService, message: "Sitter session not found for session ID: \(session.id)")
+                    await MainActor.run {
+                        self.viewState = .error(SessionError.sessionNotFound)
+                    }
+                    return
+                }
+                sitterSession = fetchedSitterSession
+                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched sitter session for nest: \(sitterSession.nestID)")
+            } catch {
+                Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch sitter session: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.viewState = .error(error)
+                }
+                throw error
             }
             
-            // Update state with session and nest information first
+            // Step 3: Fetch the full nest information with validation
+            Logger.log(level: .debug, category: .sitterViewService, message: "Step 3: Fetching nest information for ID: \(sitterSession.nestID)")
+            
+            let nest: NestItem
+            do {
+                let nestRef = db.collection("nests").document(sitterSession.nestID)
+                let nestDoc = try await nestRef.getDocument()
+                
+                guard nestDoc.exists else {
+                    Logger.log(level: .error, category: .sitterViewService, message: "Nest document does not exist: \(sitterSession.nestID)")
+                    await MainActor.run {
+                        self.viewState = .error(SessionError.sessionNotFound)
+                    }
+                    return
+                }
+                
+                var fetchedNest = try nestDoc.data(as: NestItem.self)
+                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully decoded nest: \(fetchedNest.name)")
+                
+                // Step 4: Fetch categories for the nest with error handling
+                Logger.log(level: .debug, category: .sitterViewService, message: "Step 4: Fetching categories for nest")
+                
+                do {
+                    let categoriesRef = nestRef.collection("nestCategories")
+                    let categoriesSnapshot = try await categoriesRef.getDocuments()
+                    
+                    var validCategories: [NestCategory] = []
+                    for (index, document) in categoriesSnapshot.documents.enumerated() {
+                        do {
+                            let category = try document.data(as: NestCategory.self)
+                            validCategories.append(category)
+                        } catch {
+                            Logger.log(level: .error, category: .sitterViewService, message: "Failed to decode category at index \(index): \(error.localizedDescription)")
+                            // Continue with other categories
+                        }
+                    }
+                    
+                    fetchedNest.categories = validCategories
+                    Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched \(validCategories.count) categories")
+                } catch {
+                    Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch categories, continuing without them: \(error.localizedDescription)")
+                    fetchedNest.categories = []
+                }
+                
+                nest = fetchedNest
+            } catch {
+                Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch nest information: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.viewState = .error(error)
+                }
+                throw error
+            }
+            
+            // Step 5: Clear caches when switching nests (with nil safety)
+            await MainActor.run {
+                if self.currentNest?.id != nest.id {
+                    Logger.log(level: .debug, category: .sitterViewService, message: "Switching nests, clearing caches")
+                    self.clearEntriesCache()
+                    self.clearPlacesCache()
+                }
+            }
+            
+            // Step 6: Update state with session and nest information
+            Logger.log(level: .debug, category: .sitterViewService, message: "Step 6: Updating view state")
             await MainActor.run {
                 self.viewState = .ready(session: session, nest: nest)
             }
             
-            // Then fetch entries for the nest
-            _ = try await fetchNestEntries()
+            // Step 7: Fetch entries for the nest (non-critical, don't fail if this errors)
+            Logger.log(level: .debug, category: .sitterViewService, message: "Step 7: Fetching nest entries")
+            do {
+                _ = try await fetchNestEntries()
+                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched nest entries")
+            } catch {
+                Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch nest entries (non-critical): \(error.localizedDescription)")
+                // Don't fail the entire operation for this
+            }
             
-            Logger.log(level: .info, category: .sitterViewService, message: "Current session, nest, and entries updated ✅")
+            Logger.log(level: .info, category: .sitterViewService, message: "fetchCurrentSession completed successfully ✅")
             
         } catch {
+            Logger.log(level: .error, category: .sitterViewService, message: "Critical error in fetchCurrentSession: \(error.localizedDescription)")
             await MainActor.run {
                 self.viewState = .error(error)
             }
-            Logger.log(level: .error, category: .sitterViewService, message: "Error fetching session: \(error.localizedDescription)")
             throw error
         }
     }

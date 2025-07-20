@@ -1324,34 +1324,71 @@ class SessionService {
     
     /// Fetches only the in-progress session for a sitter
     func fetchInProgressSitterSession(userID: String) async throws -> SessionItem? {
-        Logger.log(level: .info, category: .sessionService, message: "Fetching sitter sessions...")
+        Logger.log(level: .info, category: .sessionService, message: "Fetching sitter sessions for user: \(userID)")
         
-        // First get all sitter sessions - limit to 20 most recent
-        let sitterSessionsRef = db.collection("users").document(userID)
-            .collection("sitterSessions")
-            .order(by: "inviteAcceptedAt", descending: true)
-            .limit(to: 20)
-        
-        let sitterSessionsSnapshot = try await sitterSessionsRef.getDocuments()
-        let sitterSessions = try sitterSessionsSnapshot.documents.compactMap { try $0.data(as: SitterSession.self) }
-        
-        // For each sitter session, fetch the actual session and find the in-progress one
-        for sitterSession in sitterSessions {
-            if let session = try await getSession(nestID: sitterSession.nestID, sessionID: sitterSession.id),
-               session.status == .inProgress || session.status == .extended || session.status == .earlyAccess {
-                // Check if early access is still valid
-                if session.status == .earlyAccess && !session.isInEarlyAccess {
-                    // Early access expired, skip this session
+        do {
+            // First get all sitter sessions - limit to 20 most recent
+            let sitterSessionsRef = db.collection("users").document(userID)
+                .collection("sitterSessions")
+                .order(by: "inviteAcceptedAt", descending: true)
+                .limit(to: 20)
+            
+            let sitterSessionsSnapshot = try await sitterSessionsRef.getDocuments()
+            Logger.log(level: .info, category: .sessionService, message: "Found \(sitterSessionsSnapshot.documents.count) sitter session documents")
+            
+            // Process each document with error handling
+            var validSitterSessions: [SitterSession] = []
+            for (index, document) in sitterSessionsSnapshot.documents.enumerated() {
+                do {
+                    let sitterSession = try document.data(as: SitterSession.self)
+                    validSitterSessions.append(sitterSession)
+                    Logger.log(level: .debug, category: .sessionService, message: "Successfully decoded sitter session \(index + 1): \(sitterSession.id)")
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to decode sitter session document \(document.documentID) at index \(index): \(error.localizedDescription)")
+                    // Continue processing other documents instead of failing completely
                     continue
                 }
-                Logger.log(level: .info, category: .sessionService, message: "Found accessible session ✅")
-                PlacesService.shared.selectedNestId = sitterSession.nestID
-                return session
             }
+            
+            Logger.log(level: .info, category: .sessionService, message: "Successfully decoded \(validSitterSessions.count) out of \(sitterSessionsSnapshot.documents.count) sitter sessions")
+            
+            // For each valid sitter session, fetch the actual session and find the in-progress one
+            for (index, sitterSession) in validSitterSessions.enumerated() {
+                do {
+                    Logger.log(level: .debug, category: .sessionService, message: "Fetching session \(index + 1): \(sitterSession.id) from nest: \(sitterSession.nestID)")
+                    
+                    guard let session = try await getSession(nestID: sitterSession.nestID, sessionID: sitterSession.id) else {
+                        Logger.log(level: .debug, category: .sessionService, message: "Session \(sitterSession.id) not found or inaccessible")
+                        continue
+                    }
+                    
+                    Logger.log(level: .debug, category: .sessionService, message: "Session \(session.id) has status: \(session.status)")
+                    
+                    if session.status == .inProgress || session.status == .extended || session.status == .earlyAccess {
+                        // Check if early access is still valid
+                        if session.status == .earlyAccess && !session.isInEarlyAccess {
+                            Logger.log(level: .debug, category: .sessionService, message: "Session \(session.id) early access has expired, skipping")
+                            continue
+                        }
+                        
+                        Logger.log(level: .info, category: .sessionService, message: "Found accessible session: \(session.id) with status: \(session.status) ✅")
+                        PlacesService.shared.selectedNestId = sitterSession.nestID
+                        return session
+                    }
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session \(sitterSession.id) from nest \(sitterSession.nestID): \(error.localizedDescription)")
+                    // Continue with other sessions instead of failing completely
+                    continue
+                }
+            }
+            
+            Logger.log(level: .info, category: .sessionService, message: "No in-progress sessions found after checking \(validSitterSessions.count) sessions")
+            return nil
+            
+        } catch {
+            Logger.log(level: .error, category: .sessionService, message: "Critical error in fetchInProgressSitterSession: \(error.localizedDescription)")
+            throw error
         }
-        
-        Logger.log(level: .info, category: .sessionService, message: "No in-progress sessions found")
-        return nil
     }
     
     /// Fetches archived sitter sessions for a user
