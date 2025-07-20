@@ -120,7 +120,9 @@ class InviteDetailViewController: NNViewController {
     }
     
     private func setupCollectionView() {
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
+        // Create a placeholder layout first
+        let placeholderLayout = UICollectionViewFlowLayout()
+        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: placeholderLayout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
         view.addSubview(collectionView)
@@ -141,6 +143,9 @@ class InviteDetailViewController: NNViewController {
         
         configureDataSource()
         applySnapshot()
+        
+        // Now set the proper layout after data source is configured
+        collectionView.setCollectionViewLayout(createLayout(), animated: false)
         
         // Set delegate to control selection behavior
         collectionView.delegate = self
