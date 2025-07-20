@@ -8,6 +8,7 @@
 import UIKit
 import FirebaseCore
 import FirebaseMessaging
+import FirebaseRemoteConfig
 import UserNotifications
 import RevenueCat
 
@@ -29,6 +30,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         Purchases.logLevel = .debug
         Purchases.configure(withAPIKey: "appl_YZcLiFmgCpJbtEmWLRyDmuMuZsY")
+        
+        // Initialize feature flags
+        _ = FeatureFlagService.shared
         
         return true
     }
