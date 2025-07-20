@@ -105,6 +105,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         titleLabel.text = entry == nil ? "New Entry" : isReadOnly ? "View Entry" : "Edit Entry"
         titleField.text = entry?.title
         titleField.placeholder = "Title"
+        titleField.delegate = self
         contentTextView.text = entry?.content
         contentTextView.delegate = self
         
@@ -440,6 +441,17 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+}
+
+// MARK: - UITextFieldDelegate
+extension EntryDetailViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField == titleField {
+            contentTextView.becomeFirstResponder()
+            return false
+        }
+        return true
     }
 }
 
