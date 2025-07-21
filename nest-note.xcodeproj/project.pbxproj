@@ -115,6 +115,7 @@
 				F64DE3E52CB1C893006D21FC /* Sources */,
 				F64DE3E62CB1C893006D21FC /* Frameworks */,
 				F64DE3E72CB1C893006D21FC /* Resources */,
+				F64F4B1F2E2DB77D00F04C46 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -194,6 +195,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		F64F4B1F2E2DB77D00F04C46 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n\"${PODS_ROOT}/FirebaseCrashlytics/run\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F64DE3E52CB1C893006D21FC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -214,7 +237,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "nest-note/nest-note.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
@@ -250,7 +273,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "nest-note/nest-note.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "nest-note/SupportingFiles/Info.plist";
