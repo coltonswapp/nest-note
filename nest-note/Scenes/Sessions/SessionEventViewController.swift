@@ -406,14 +406,7 @@ final class SessionEventViewController: NNSheetViewController {
         }
         
         if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
-            let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start and end times cannot be the same.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return false
+            endControl.date = calendar.date(byAdding: .hour, value: 1, to: startDate) ?? startDate
         }
         
         // Check if event dates are within session date range
@@ -614,7 +607,7 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
             formatter.dateFormat = "h:mm a"
             startControl.timeText = formatter.string(from: date)
             startControl.date = date
-            if startControl.date > endControl.date {
+            if startControl.date >= endControl.date {
                 endControl.date = startControl.date.addingTimeInterval(3600)
             }
             
@@ -628,7 +621,7 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
             endControl.timeText = formatter.string(from: date)
             endControl.date = date
             
-            if endControl.date < startControl.date {
+            if endControl.date <= startControl.date {
                 startControl.date = endControl.date.addingTimeInterval(-3600)
             }
             
