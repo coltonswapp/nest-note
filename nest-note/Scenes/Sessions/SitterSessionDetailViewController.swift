@@ -492,7 +492,14 @@ final class SitterSessionDetailViewController: NNViewController {
         if isArchivedSession {
             snapshot.appendSections([.name, .date, .visibility])
         } else {
-            snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
+            var sections: [Section] = [.name, .date, .visibility, .events]
+            
+            // Only show expenses section if user hasn't voted on the feature
+            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
+                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
+            }
+            
+            snapshot.appendSections(sections)
         }
         
         // Add nest name and early access to name section
@@ -512,8 +519,8 @@ final class SitterSessionDetailViewController: NNViewController {
         // Add visibility level
         snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
 
-        // Add expenses section only for non-archived sessions
-        if !isArchivedSession {
+        // Add expenses section only for non-archived sessions and if user hasn't voted
+        if !isArchivedSession && !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
             snapshot.appendItems([.expenses], toSection: .expenses)
         }
         

@@ -943,7 +943,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            var sections: [Section] = [.date, .status, .visibility, .expenses, .events]
+            var sections: [Section] = [.date, .status, .visibility, .events]
+            
+            // Only show expenses section if user hasn't voted on the feature
+            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
+                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
+            }
+            
             if isEditingSession {
                 sections.insert(.sitter, at: 0)
             }
@@ -955,7 +961,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
-            snapshot.appendItems([.expenses], toSection: .expenses)
+            
+            // Only add expenses item if section exists
+            if sections.contains(.expenses) {
+                snapshot.appendItems([.expenses], toSection: .expenses)
+            }
+            
             snapshot.appendItems([.events], toSection: .events)
             
             if isEditingSession && sessionItem.status != .archived {
