@@ -1004,10 +1004,98 @@ exports.archiveOldSessions = onSchedule("0 6 * * *", async (event) => {
 });
 
 /**
- * Function that automatically archives a sitterSession
- * when its parent session status changes to COMPLETED.
+ * Scheduled function to archive sitter sessions for completed
+ * sessions that are more than 7 days old.
+ * Runs daily at 6:00 AM (same time as archiveOldSessions).
  */
-exports.archiveSitterSessionOnComplete = functions.firestore
+exports.archiveOldSitterSessions = onSchedule("0 6 * * *", async (event) => {
+  const db = admin.firestore();
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  try {
+    logger.info("Starting sitter session archiving process...");
+
+    // Get all completed sessions older than 7 days from all nests
+    const completedSessionsQuery = db.collectionGroup("sessions")
+        .where("status", "==", SessionStatus.COMPLETED)
+        .where("endDate", "<=", sevenDaysAgo);
+
+    const completedSessionsSnapshot = await completedSessionsQuery.get();
+
+    logger.info(
+        `Found ${completedSessionsSnapshot.size} completed sessions to check for sitter sessions`,
+    );
+
+    // Process archiving in batches
+    const batch = db.batch();
+    let sitterSessionsArchived = 0;
+
+    for (const doc of completedSessionsSnapshot.docs) {
+      const sessionData = doc.data();
+      const sessionId = doc.id;
+
+      // Check if this session has an assigned sitter
+      if (sessionData.assignedSitter && sessionData.assignedSitter.userID) {
+        try {
+          const sitterId = sessionData.assignedSitter.userID;
+
+          // Check if the sitterSession exists
+          const sitterSessionRef = db
+              .collection("users")
+              .doc(sitterId)
+              .collection("sitterSessions")
+              .doc(sessionId);
+
+          const sitterSessionDoc = await sitterSessionRef.get();
+
+          if (sitterSessionDoc.exists) {
+            // Create the archived sitter session document
+            const archivedSitterRef = db
+                .collection("users")
+                .doc(sitterId)
+                .collection("archivedSitterSessions")
+                .doc(sessionId);
+
+            // Copy all data and add archivedDate
+            batch.set(archivedSitterRef, {
+              ...sitterSessionDoc.data(),
+              archivedDate: admin.firestore.Timestamp.now(),
+            });
+
+            // Delete original sitter session
+            batch.delete(sitterSessionRef);
+            sitterSessionsArchived++;
+
+            logger.info(`Queued archival of sitterSession for user ${sitterId} and session ${sessionId}`);
+          }
+        } catch (error) {
+          logger.error(
+              `Error processing sitter session for session ${sessionId}: ${error.message}`,
+          );
+        }
+      }
+    }
+
+    // Commit batch if we have updates
+    if (sitterSessionsArchived > 0) {
+      await batch.commit();
+      logger.info(`Sitter session archiving complete: ${sitterSessionsArchived} sitter sessions archived`);
+    } else {
+      logger.info("No sitter sessions to archive");
+    }
+
+    return null;
+  } catch (error) {
+    logger.error(`Error archiving sitter sessions: ${error.message}`);
+    throw new Error(`Failed to archive sitter sessions: ${error.message}`);
+  }
+});
+
+/**
+ * Function that cleans up invite documents when a session is completed
+ */
+exports.cleanupInviteOnComplete = functions.firestore
     .onDocumentUpdated("nests/{nestId}/sessions/{sessionId}", async (event) => {
       const beforeData = event.data.before.data();
       const afterData = event.data.after.data();
@@ -1019,65 +1107,29 @@ exports.archiveSitterSessionOnComplete = functions.firestore
         try {
           const db = admin.firestore();
           logger.info(`Session ${sessionId} status` +
-              ` changed to COMPLETED. Checking for sitterSession to archive.`);
+              ` changed to COMPLETED. Cleaning up invite.`);
 
-          // Check if this session has an assigned sitter
-          if (afterData.assignedSitter && afterData.assignedSitter.userID) {
-            const sitterId = afterData.assignedSitter.userID;
+          // Check if this session has an assigned sitter with invite
+          if (afterData.assignedSitter &&
+              afterData.assignedSitter.userID &&
+              afterData.assignedSitter.inviteID) {
+            const inviteID = afterData.assignedSitter.inviteID;
+            const inviteRef = db.collection("invites").doc(inviteID);
 
-            // Check if the sitterSession exists
-            const sitterSessionRef = db
-                .collection("users")
-                .doc(sitterId)
-                .collection("sitterSessions")
-                .doc(sessionId);
-
-            const sitterSessionDoc = await sitterSessionRef.get();
-
-            if (sitterSessionDoc.exists) {
-              // Create the archived sitter session
-              const archivedSitterRef = db
-                  .collection("users")
-                  .doc(sitterId)
-                  .collection("archivedSitterSessions")
-                  .doc(sessionId);
-
-              // Copy all data and add archivedDate
-              await archivedSitterRef.set({
-                ...sitterSessionDoc.data(),
-                archivedDate: admin.firestore.Timestamp.now(),
-              });
-
-              // Delete original sitter session
-              await sitterSessionRef.delete();
-
-              logger.info(`Successfully archived sitterSession for` +
-                  ` user ${sitterId} and session ${sessionId}`);
-            } else {
-              logger.warn(`No sitterSession found for` +
-                  ` user ${sitterId} and session ${sessionId}`);
-            }
-
-            // Delete invite document if it exists
-            if (afterData.assignedSitter.inviteID) {
-              const inviteID = afterData.assignedSitter.inviteID;
-              const inviteRef = db.collection("invites").doc(inviteID);
-
-              try {
-                await inviteRef.delete();
-                logger.info(`Successfully deleted invite ${inviteID}` +
-                   ` for session ${sessionId}`);
-              } catch (error) {
-                logger.error(`Error deleting invite` +
-                  ` ${inviteID}: ${error.message}`);
-              }
+            try {
+              await inviteRef.delete();
+              logger.info(`Successfully deleted invite ${inviteID}` +
+                 ` for session ${sessionId}`);
+            } catch (error) {
+              logger.error(`Error deleting invite` +
+                ` ${inviteID}: ${error.message}`);
             }
           } else {
             logger.info(`Session ${sessionId} has no` +
-                ` assigned sitter with userID, skipping archiving`);
+                ` assigned sitter with invite, skipping cleanup`);
           }
         } catch (error) {
-          logger.error(`Error archiving sitterSession: ${error.message}`);
+          logger.error(`Error cleaning up invite: ${error.message}`);
         }
       }
 

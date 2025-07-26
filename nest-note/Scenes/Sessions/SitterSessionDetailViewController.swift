@@ -276,7 +276,7 @@ final class SitterSessionDetailViewController: NNViewController {
             if case let .nestName(name: nestName) = item {
                 var content = cell.defaultContentConfiguration()
                 content.text = nestName
-                let image = NNImage.primaryLogo
+                let image = UIImage(systemName: "house.fill")
                 content.image = image
                 
                 content.imageProperties.tintColor = NNColors.primary
@@ -288,12 +288,17 @@ final class SitterSessionDetailViewController: NNViewController {
                 
                 content.textProperties.font = .preferredFont(forTextStyle: .body)
                 
-                // Only show disclosure indicator for non-archived sessions
-                if let self = self, !self.isArchivedSession {
-                    cell.accessories = [.disclosureIndicator()]
-                } else {
-                    cell.accessories = []
+                // Configure disclosure indicator based on session status
+                if let self = self {
+                    if self.isArchivedSession || self.session.status == .completed {
+                        // Hide disclosure indicator for archived and completed sessions
+                        cell.accessories = []
+                    } else {
+                        // Show disclosure indicator for active sessions
+                        cell.accessories = [.disclosureIndicator()]
+                    }
                 }
+                
                 cell.contentConfiguration = content
             }
         }
@@ -304,9 +309,14 @@ final class SitterSessionDetailViewController: NNViewController {
             }
         }
         
-        let earlyAccessRegistration = UICollectionView.CellRegistration<AccessCell, Item> { cell, indexPath, item in
+        let earlyAccessRegistration = UICollectionView.CellRegistration<AccessCell, Item> { [weak self] cell, indexPath, item in
             if case let .earlyAccess(duration) = item {
-                cell.configure(with: duration)
+                if let self = self, self.session.status == .completed {
+                    // Show completion status instead of early access duration
+                    cell.configureAsCompleted()
+                } else {
+                    cell.configure(with: duration)
+                }
             }
         }
         
@@ -492,13 +502,25 @@ final class SitterSessionDetailViewController: NNViewController {
         if isArchivedSession {
             snapshot.appendSections([.name, .date, .visibility])
         } else {
-            snapshot.appendSections([.name, .date, .visibility, .expenses, .events])
+            var sections: [Section] = [.name, .date, .visibility, .events]
+            
+            // Only show expenses section if user hasn't voted on the feature
+            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
+                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
+            }
+            
+            snapshot.appendSections(sections)
         }
         
         // Add nest name and early access to name section
         var nameItems: [Item] = [.nestName(name: nestName)]
-        if !isArchivedSession && session.earlyAccessDuration != .none {
-            nameItems.append(.earlyAccess(session.earlyAccessDuration))
+        if !isArchivedSession {
+            if session.status == .completed {
+                // Show completion status in early access cell for completed sessions
+                nameItems.append(.earlyAccess(.none)) // We'll override the display in the cell registration
+            } else if session.earlyAccessDuration != .none {
+                nameItems.append(.earlyAccess(session.earlyAccessDuration))
+            }
         }
         snapshot.appendItems(nameItems, toSection: .name)
         
@@ -512,8 +534,8 @@ final class SitterSessionDetailViewController: NNViewController {
         // Add visibility level
         snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
 
-        // Add expenses section only for non-archived sessions
-        if !isArchivedSession {
+        // Add expenses section only for non-archived sessions and if user hasn't voted
+        if !isArchivedSession && !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
             snapshot.appendItems([.expenses], toSection: .expenses)
         }
         
@@ -651,6 +673,12 @@ final class SitterSessionDetailViewController: NNViewController {
         Logger.log(level: .info, category: .sessionService, message: "Session status: \(session.status.rawValue)")
         Logger.log(level: .info, category: .sessionService, message: "Early access duration: \(session.earlyAccessDuration.displayName)")
         
+        // Deny access for completed sessions
+        if session.status == .completed {
+            Logger.log(level: .info, category: .sessionService, message: "Access denied: Session completed")
+            return false
+        }
+        
         // Allow access during active session states
         if session.status == .inProgress || session.status == .extended {
             Logger.log(level: .info, category: .sessionService, message: "Access granted: Active session")
@@ -714,13 +742,25 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             // Check if session allows nest exploration
             let hasNestAccess = canSitterAccessNest(for: session)
             guard hasNestAccess else {
+                let title: String
+                let message: String
+                
+                if session.status == .completed {
+                    title = "Session Completed"
+                    message = "This session has ended. Nest access is no longer available. The session will be archived in a few days."
+                } else {
+                    title = "Nest Access Unavailable"
+                    message = "You can explore the nest during an active session, early access period, or within the early access window before the session starts."
+                }
+                
                 let alert = UIAlertController(
-                    title: "Nest Access Unavailable",
-                    message: "You can explore the nest during an active session, early access period, or within the early access window before the session starts.",
+                    title: title,
+                    message: message,
                     preferredStyle: .alert
                 )
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
+                collectionView.deselectItem(at: indexPath, animated: true)
                 return
             }
             

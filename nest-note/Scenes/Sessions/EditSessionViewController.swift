@@ -167,6 +167,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // Add property to store the last known outdated entries count
     private var lastOutdatedCount: Int = 0
     
+    // Add property to track pending status change when date update is required
+    private var pendingStatusChange: SessionStatus?
+    
     // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
@@ -943,7 +946,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            var sections: [Section] = [.date, .status, .visibility, .expenses, .events]
+            var sections: [Section] = [.date, .status, .visibility, .events]
+            
+            // Only show expenses section if user hasn't voted on the feature
+            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
+                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
+            }
+            
             if isEditingSession {
                 sections.insert(.sitter, at: 0)
             }
@@ -955,7 +964,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
             snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
-            snapshot.appendItems([.expenses], toSection: .expenses)
+            
+            // Only add expenses item if section exists
+            if sections.contains(.expenses) {
+                snapshot.appendItems([.expenses], toSection: .expenses)
+            }
+            
             snapshot.appendItems([.events], toSection: .events)
             
             if isEditingSession && sessionItem.status != .archived {
@@ -1291,9 +1305,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             UIAction(title: "In-progress", image: UIImage(systemName: SessionStatus.inProgress.icon)) { [weak self] _ in
                 self?.updateSessionStatus(.inProgress)
             },
-            UIAction(title: "Extended", image: UIImage(systemName: SessionStatus.extended.icon)) { [weak self] _ in
-                self?.updateSessionStatus(.extended)
-            },
             UIAction(title: "Completed", image: UIImage(systemName: SessionStatus.completed.icon)) { [weak self] _ in
                 self?.updateSessionStatus(.completed)
             }
@@ -1303,6 +1314,40 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func updateSessionStatus(_ status: SessionStatus) {
+        // If we're changing FROM completed to inProgress or upcoming, require end date update
+        if sessionItem.status == .completed && (status == .inProgress || status == .upcoming) {
+            let alert = UIAlertController(
+                title: "Update End Date Required",
+                message: "To change a completed session back to active status, you must update the end date to a future time. Would you like to proceed?",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(
+                title: "Cancel",
+                style: .cancel
+            ))
+            
+            alert.addAction(UIAlertAction(
+                title: "Update End Date",
+                style: .default
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                
+                // Present date picker for end date
+                let currentEndDate = self.currentEndDate
+                let futureEndDate = Date().addingTimeInterval(2 * 60 * 60) // 2 hours from now as default
+                
+                self.presentDatePicker(for: currentIsMultiDay ? .endDate : .endTime, initialDate: futureEndDate)
+                
+                // After date is updated, apply the status change
+                // This will be handled in the date picker delegate
+                self.pendingStatusChange = status
+            })
+            
+            present(alert, animated: true)
+            return
+        }
+        
         // If we're marking a session as completed, show a warning alert
         if status == .completed {
             let alert = UIAlertController(
@@ -1320,32 +1365,18 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 title: "Complete Session",
                 style: .destructive
             ) { [weak self] _ in
-                guard let self = self else { return }
-                self.sessionItem.status = status
-                
-                var snapshot = self.dataSource.snapshot()
-                
-                // Update status section
-                let statusItems = snapshot.itemIdentifiers(inSection: .status)
-                snapshot.deleteItems(statusItems)
-                snapshot.appendItems([.sessionStatus(status)], toSection: .status)
-                self.dataSource.apply(snapshot, animatingDifferences: true)
-                
-                self.checkForChanges()
-                
-                // Post notification for status change to update the home screen
-                NotificationCenter.default.post(
-                    name: .sessionStatusDidChange,
-                    object: nil,
-                    userInfo: ["sessionId": self.sessionItem.id, "newStatus": status.rawValue]
-                )
+                self?.applyStatusChange(status)
             })
             
             present(alert, animated: true)
             return
         }
         
-        // For non-completed status changes, proceed as normal
+        // For all other status changes, proceed as normal
+        applyStatusChange(status)
+    }
+    
+    private func applyStatusChange(_ status: SessionStatus) {
         sessionItem.status = status
         
         var snapshot = dataSource.snapshot()
@@ -1954,6 +1985,15 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
         newSnapshot.appendItems([.dateSelection(startDate: newStartDate, endDate: newEndDate, isMultiDay: currentMultiDayState)], toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
         
+        // Check if we need to apply a pending status change
+        if let pendingStatus = pendingStatusChange {
+            // Validate that the new end date is in the future if we're changing to active status
+            if (pendingStatus == .inProgress || pendingStatus == .upcoming) && newEndDate > Date() {
+                pendingStatusChange = nil
+                applyStatusChange(pendingStatus)
+            }
+        }
+        
         checkForChanges()
     }
     
@@ -2231,13 +2271,6 @@ final class StatusCell: UICollectionViewListCell {
                 state: selectedStatus == .inProgress ? .on : .off
             ) { [weak self] _ in
                 self?.updateStatus(.inProgress)
-            },
-            UIAction(
-                title: "Extended",
-                image: UIImage(systemName: SessionStatus.extended.icon),
-                state: selectedStatus == .extended ? .on : .off
-            ) { [weak self] _ in
-                self?.updateStatus(.extended)
             },
             UIAction(
                 title: "Completed",

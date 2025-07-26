@@ -16,7 +16,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "1086"
             endingLineNumber = "1086"
-            landmarkName = "presentSessionCalendarViewController()"
+            landmarkName = "updateEventsSection(with:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

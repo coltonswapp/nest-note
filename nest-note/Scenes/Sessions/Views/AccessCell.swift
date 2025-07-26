@@ -75,6 +75,23 @@ final class AccessCell: UICollectionViewListCell {
     }
     
     func configure(with duration: EarlyAccessDuration) {
+        // Reset to default early access appearance
+        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
+        iconImageView.image = UIImage(systemName: "document.badge.clock.fill", withConfiguration: symbolConfig)
+        iconImageView.tintColor = NNColors.primary
+        titleLabel.text = "Early Access"
+        titleLabel.textColor = .label
         descriptionLabel.text = "\(duration.shortDisplayName) prior to session"
+        descriptionLabel.textColor = .secondaryLabel
+    }
+    
+    func configureAsCompleted() {
+        // Update appearance to show completion status
+        let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
+        iconImageView.image = UIImage(systemName: "checkmark.circle.fill", withConfiguration: symbolConfig)
+        iconImageView.tintColor = .systemGreen
+        titleLabel.text = "Session Completed"
+        titleLabel.textColor = .label
+        descriptionLabel.isHidden = true
     }
 }
