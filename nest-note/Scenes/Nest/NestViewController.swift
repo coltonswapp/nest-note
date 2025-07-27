@@ -39,6 +39,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     var collectionView: UICollectionView!
     
     private var categories: [NestCategory] = []
+    private var currentFolderPath: String = "" // Empty string means root level
+    
+    // MARK: - Folder Support
+    private var folders: [FolderData] {
+        return getFoldersForCurrentPath()
+    }
+    
     private var mainItems: [Item] {
         return categories
             .sorted { cat1, cat2 in
@@ -53,6 +60,67 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     entries: entries?[category.name]
                 )
             }
+    }
+    
+    // MARK: - Folder Parsing Methods
+    
+    private func getFoldersForCurrentPath() -> [FolderData] {
+        guard let entries = entries else { return [] }
+        
+        var folderItems: [FolderData] = []
+        var folderCounts: [String: Int] = [:]
+        
+        // Get all unique folder paths at the current level
+        var currentLevelFolders: Set<String> = []
+        
+        for (categoryName, categoryEntries) in entries {
+            for entry in categoryEntries {
+                let folderPath = parseFolderPath(from: entry.category)
+                
+                // Check if this entry belongs to the current folder level
+                if folderPath.hasPrefix(currentFolderPath) {
+                    let remainingPath = String(folderPath.dropFirst(currentFolderPath.isEmpty ? 0 : currentFolderPath.count + 1))
+                    
+                    if !remainingPath.isEmpty {
+                        // This entry is in a subfolder
+                        let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                        let nextFolderPath = currentFolderPath.isEmpty ? nextFolderComponent : "\(currentFolderPath)/\(nextFolderComponent)"
+                        currentLevelFolders.insert(nextFolderPath)
+                        folderCounts[nextFolderPath, default: 0] += 1
+                    }
+                }
+            }
+        }
+        
+        // Create FolderData objects for each folder
+        for folderPath in currentLevelFolders.sorted() {
+            let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
+            let category = findCategoryForFolder(folderPath: folderPath)
+            let image = category?.symbolName != nil ? UIImage(systemName: category!.symbolName) : UIImage(systemName: "folder")
+            
+            let folderData = FolderData(
+                title: folderName,
+                image: image,
+                itemCount: folderCounts[folderPath] ?? 0,
+                fullPath: folderPath,
+                category: category
+            )
+            folderItems.append(folderData)
+        }
+        
+        return folderItems
+    }
+    
+    private func parseFolderPath(from category: String) -> String {
+        // For backward compatibility, if category doesn't contain "/", 
+        // treat it as the folder path itself
+        return category
+    }
+    
+    private func findCategoryForFolder(folderPath: String) -> NestCategory? {
+        // Find the category that matches the root folder name
+        let rootFolderName = folderPath.components(separatedBy: "/").first ?? folderPath
+        return categories.first { $0.name.lowercased() == rootFolderName.lowercased() }
     }
     
     private let routineItems: [Item] = [
@@ -70,7 +138,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private var entries: [String: [BaseEntry]]?
     
-    private let sectionHeaders = ["", "Information Categories", "Routines", "Misc"]
+    private let sectionHeaders = ["", "", "Routines", "Misc"]
     
     private var newCategoryButton: NNPrimaryLabeledButton?
     
@@ -170,6 +238,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         view.addSubview(collectionView)
         
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
+        collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -203,7 +272,44 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 
                 return section
                 
-            case .main, .routine, .misc:
+            case .main:
+                // Create 2-item grid layout for folders
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(0.5),
+                    heightDimension: .fractionalHeight(1.0)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                item.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+                
+                let groupSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(144) // Height for folder cells (20% smaller than original 180)
+                )
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
+                
+                let section = NSCollectionLayoutSection(group: group)
+                section.interGroupSpacing = 16 // Add vertical spacing between rows
+                section.contentInsets = NSDirectionalEdgeInsets(
+                    top: 8,
+                    leading: 10,
+                    bottom: 16,
+                    trailing: 10
+                )
+                
+                let headerSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(32)
+                )
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: headerSize,
+                    elementKind: UICollectionView.elementKindSectionHeader,
+                    alignment: .top
+                )
+                section.boundarySupplementaryItems = [header]
+                
+                return section
+                
+            case .routine, .misc:
                 // Use existing insetGrouped layout for other sections
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
@@ -252,6 +358,10 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             cell.delegate = self
         }
         
+        let folderRegistration = UICollectionView.CellRegistration<FolderCollectionViewCell, FolderData> { cell, indexPath, folderData in
+            cell.configure(with: folderData)
+        }
+        
         let headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] (headerView, string, indexPath) in
@@ -260,13 +370,22 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { collectionView, indexPath, item in
-            if indexPath.section == Section.address.rawValue {
+            let section = Section(rawValue: indexPath.section)!
+            
+            switch section {
+            case .address:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: addressRegistration,
                     for: indexPath,
                     item: item as? String
                 )
-            } else {
+            case .main:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: folderRegistration,
+                    for: indexPath,
+                    item: item as? FolderData
+                )
+            case .routine, .misc:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: cellRegistration,
                     for: indexPath,
@@ -285,13 +404,27 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         guard entryRepository is NestService else { return }
         
         let pinnedCategoriesAction = UIAction(
-            title: "Pinned Categories",
+            title: "Pinned Folders",
             image: UIImage(systemName: "rectangle.grid.2x2.fill")
         ) { [weak self] _ in
             self?.presentPinnedCategories()
         }
         
-        let menu = UIMenu(title: "", children: [pinnedCategoriesAction])
+        var menuChildren: [UIMenuElement] = [pinnedCategoriesAction]
+        
+        // Only show "Add Folder" if we haven't reached max depth
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+        if currentDepth < 3 {
+            let addFolderAction = UIAction(
+                title: "Add Folder",
+                image: UIImage(systemName: "folder.badge.plus")
+            ) { [weak self] _ in
+                self?.presentAddFolder()
+            }
+            menuChildren.append(addFolderAction)
+        }
+        
+        let menu = UIMenu(title: "", children: menuChildren)
         
         let menuButton = UIBarButtonItem(
             image: UIImage(systemName: "ellipsis"),
@@ -307,6 +440,25 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private func presentPinnedCategories() {
         let pinnedCategoriesVC = PinnedCategoriesViewController(entryRepository: entryRepository)
         present(UINavigationController(rootViewController: pinnedCategoriesVC), animated: true)
+    }
+    
+    private func presentAddFolder() {
+        Task {
+            // Check if user has unlimited categories feature (Pro subscription)
+            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
+            if !hasUnlimitedCategories {
+                await MainActor.run {
+                    self.showCategoryLimitUpgradePrompt()
+                }
+                return
+            }
+            
+            await MainActor.run {
+                let categoryVC = CategoryDetailViewController()
+                categoryVC.categoryDelegate = self
+                self.present(categoryVC, animated: true)
+            }
+        }
     }
     
     @objc private func addButtonTapped() {
@@ -345,26 +497,44 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             snapshot.appendItems([address], toSection: .address)
         }
         
-        snapshot.appendItems(mainItems, toSection: .main)
+        snapshot.appendItems(folders, toSection: .main)
         snapshot.appendItems(routineItems, toSection: .routine)
         snapshot.appendItems(miscItems, toSection: .misc)
         dataSource.apply(snapshot, animatingDifferences: true)
+        
+        // Update UI elements based on current folder depth
+        setupNavigationBar()
+        setupNewCategoryButton()
     }
     
     private func setupNewCategoryButton() {
         // Only show new category button for nest owners
         guard entryRepository is NestService else { return }
         
-        newCategoryButton = NNPrimaryLabeledButton(title: "New Category", image: UIImage(systemName: "plus"))
-        newCategoryButton?.isEnabled = false
-        newCategoryButton?.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        newCategoryButton?.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+        // Check if we've reached max folder depth
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+        guard currentDepth < 3 else { 
+            // Remove existing button if we're at max depth
+            newCategoryButton?.removeFromSuperview()
+            newCategoryButton = nil
+            collectionView.contentInset.bottom = 0
+            collectionView.verticalScrollIndicatorInsets.bottom = 0
+            return 
+        }
         
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 10
-        let totalInset = buttonHeight + buttonPadding * 2
-        collectionView.contentInset.bottom = totalInset
-        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        // Only create button if it doesn't exist
+//        if newCategoryButton == nil {
+//            newCategoryButton = NNPrimaryLabeledButton(title: "New Category", image: UIImage(systemName: "plus"))
+//            newCategoryButton?.isEnabled = false
+//            newCategoryButton?.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+//            newCategoryButton?.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+//            
+//            let buttonHeight: CGFloat = 55
+//            let buttonPadding: CGFloat = 10
+//            let totalInset = buttonHeight + buttonPadding * 2
+//            collectionView.contentInset.bottom = totalInset
+//            collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+//        }
     }
     
     private func loadEntries() async {
@@ -410,22 +580,23 @@ extension NestViewController: UICollectionViewDelegate {
         // Skip navigation for address section
         if indexPath.section == Section.address.rawValue { return }
         
-        // Cast the item to Item type for category sections
-        guard let categoryItem = item as? Item else { return }
-        
         let section = Section(rawValue: indexPath.section)!
         
         switch section {
         case .main:
+            // Handle folder navigation
+            guard let folderData = item as? FolderData else { return }
+            
             let sessionVisibilityLevel = (entryRepository as? SitterViewService)?.currentSessionVisibilityLevel
             let nestCategoryViewController = NestCategoryViewController(
-                category: categoryItem.title,
+                category: folderData.fullPath,
                 entryRepository: entryRepository,
                 sessionVisibilityLevel: sessionVisibilityLevel
             )
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
             
         case .routine:
+            guard let categoryItem = item as? Item else { return }
             let featurePreviewVC = NNFeaturePreviewViewController(
                 feature: .routines
             )
@@ -433,6 +604,7 @@ extension NestViewController: UICollectionViewDelegate {
             present(featurePreviewVC, animated: true)
             
         case .misc:
+            guard let categoryItem = item as? Item else { return }
             switch categoryItem.title {
             case "Places":
                 let isReadOnly = !(entryRepository is NestService)
@@ -466,8 +638,9 @@ extension NestViewController: UICollectionViewDelegate {
 }
 
 extension NestViewController: CategoryDetailViewControllerDelegate {
-    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?) {
+    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?, withIcon icon: String?) {
         guard let categoryName = category,
+              let iconName = icon,
               let nestService = entryRepository as? NestService else {
             // Only NestService can create categories
             showError("Categories can only be created by nest owners")
@@ -476,8 +649,11 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
         
         Task {
             do {
-                // Create and save the new category
-                let newCategory = NestCategory(name: categoryName, symbolName: "folder")
+                // Create full folder path considering current folder location
+                let fullFolderPath = currentFolderPath.isEmpty ? categoryName : "\(currentFolderPath)/\(categoryName)"
+                
+                // Create and save the new category with full path and selected icon
+                let newCategory = NestCategory(name: fullFolderPath, symbolName: iconName)
                 try await nestService.createCategory(newCategory)
                 
                 // Refresh the categories and entries

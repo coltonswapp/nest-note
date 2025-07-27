@@ -38,6 +38,7 @@ enum HomeItem: Hashable {
     case nest(name: String, address: String)
     case quickAccess(HomeQuickAccessType)
     case pinnedCategory(name: String, icon: String)
+    case pinnedFolder(FolderData)
     case currentSession(SessionItem)
     case upcomingSession(SessionItem)
     case events
@@ -58,22 +59,25 @@ enum HomeItem: Hashable {
             hasher.combine(2)
             hasher.combine(name)
             hasher.combine(icon)
-        case .currentSession(let session):
+        case .pinnedFolder(let folderData):
             hasher.combine(3)
-            hasher.combine(session)
-        case .upcomingSession(let session):
+            hasher.combine(folderData)
+        case .currentSession(let session):
             hasher.combine(4)
             hasher.combine(session)
-        case .events:
+        case .upcomingSession(let session):
             hasher.combine(5)
-        case .sessionEvent(let event):
+            hasher.combine(session)
+        case .events:
             hasher.combine(6)
+        case .sessionEvent(let event):
+            hasher.combine(7)
             hasher.combine(event)
         case .moreEvents(let count):
-            hasher.combine(7)
+            hasher.combine(8)
             hasher.combine(count)
         case .setupProgress(let current, let total):
-            hasher.combine(8)
+            hasher.combine(9)
             hasher.combine(current)
             hasher.combine(total)
         }
@@ -87,6 +91,8 @@ enum HomeItem: Hashable {
             return t1 == t2
         case let (.pinnedCategory(n1, i1), .pinnedCategory(n2, i2)):
             return n1 == n2 && i1 == i2
+        case let (.pinnedFolder(f1), .pinnedFolder(f2)):
+            return f1 == f2
         case let (.currentSession(s1), .currentSession(s2)):
             return s1 == s2
         case let (.upcomingSession(s1), .upcomingSession(s2)):

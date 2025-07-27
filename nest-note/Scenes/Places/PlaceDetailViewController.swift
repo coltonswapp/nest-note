@@ -70,17 +70,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         return stackView
     }()
     
-    private lazy var infoButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
-        button.setImage(image, for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.showsMenuAsPrimaryAction = true
-        button.menu = createMenu()
-        return button
-    }()
     
     private var existingPlace: Place?
     private var pendingLocationUpdate: (address: String, coordinate: CLLocationCoordinate2D, thumbnail: UIImage)?
@@ -135,7 +124,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         originalAlias = existingPlace?.alias
         originalVisibilityLevel = existingPlace?.visibilityLevel
         
-        itemsHiddenDuringTransition = [buttonStackView, infoButton]
+        itemsHiddenDuringTransition = [buttonStackView]
         setupContent()
         setupMapView()
         updateSaveButtonState()
@@ -166,11 +155,16 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         self.trackScreenVisit()
     }
     
-    private func setupInfoButton() {
-        infoButton.menu = createMenu()
-    }
     
     // MARK: - Setup Methods
+    
+    override func setupInfoButton() {
+        // Configure the base class info button with place-specific menu
+        infoButton.isHidden = false
+        infoButton.menu = createMenu()
+        infoButton.showsMenuAsPrimaryAction = true
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         
@@ -182,9 +176,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         containerView.addSubview(mapView)
         containerView.addSubview(addressLabel)
         
-        if !isReadOnly {
-            containerView.addSubview(infoButton)
-        }
         containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
@@ -200,13 +191,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             addressLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             addressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
-            // Info button constraints (only if not read-only)
-        ] + (isReadOnly ? [] : [
-            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
-            infoButton.widthAnchor.constraint(equalToConstant: 44),
-            infoButton.heightAnchor.constraint(equalToConstant: 44),
-        ]) + [
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),

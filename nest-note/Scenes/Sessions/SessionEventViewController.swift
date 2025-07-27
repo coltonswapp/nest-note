@@ -58,16 +58,6 @@ final class SessionEventViewController: NNSheetViewController {
         return stackView
     }()
     
-    private lazy var infoButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
-        button.setImage(image, for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-    
     private let locationDividerView: UIView = {
         let view = UIView()
         view.backgroundColor = .quaternaryLabel
@@ -203,6 +193,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Setup Methods
+    
+    override func setupInfoButton() {
+        // SessionEventViewController doesn't need an info button
+        infoButton.isHidden = true
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         
@@ -232,8 +228,6 @@ final class SessionEventViewController: NNSheetViewController {
         containerView.addSubview(colorStack)
         
         setupColorButtons()
-        
-        containerView.addSubview(infoButton)
         containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
@@ -277,12 +271,6 @@ final class SessionEventViewController: NNSheetViewController {
             colorStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             colorStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             colorStack.heightAnchor.constraint(equalToConstant: view.frame.width / 10),
-            
-            // Info button constraints
-            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
-            infoButton.widthAnchor.constraint(equalToConstant: 44),
-            infoButton.heightAnchor.constraint(equalToConstant: 44),
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),

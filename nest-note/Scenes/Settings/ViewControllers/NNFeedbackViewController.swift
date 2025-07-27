@@ -56,11 +56,6 @@ final class NNFeedbackViewController: NNSheetViewController {
         return button
     }()
     
-    private lazy var infoButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: "Feedback Info", image: UIImage(systemName: "info")!, backgroundColor: .systemBlue, foregroundColor: .white)
-        button.addTarget(self, action: #selector(hideKeyboard), for: .touchUpInside)
-        return button
-    }()
     
     private lazy var deleteButton: NNSmallPrimaryButton = {
         let button = NNSmallPrimaryButton(image: UIImage(systemName: "trash.fill")!, backgroundColor: .systemRed, foregroundColor: .white)
@@ -122,6 +117,15 @@ final class NNFeedbackViewController: NNSheetViewController {
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .short
+        setupFeedbackInfoMenu()
+    }
+    
+    private func setupFeedbackInfoMenu() {
+        guard let feedback = feedback else { return }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .short
+        dateFormatter.timeStyle = .short
         let formattedTimestamp = dateFormatter.string(from: feedback.timestamp)
         
         let createdAtAction = UIAction(title: "Created: \(formattedTimestamp)", handler: { _ in 
@@ -141,11 +145,22 @@ final class NNFeedbackViewController: NNSheetViewController {
         infoButton.showsMenuAsPrimaryAction = true
     }
     
+    override func setupInfoButton() {
+        guard let feedback = feedback else {
+            // No feedback data to show, hide the info button
+            infoButton.isHidden = true
+            return
+        }
+        
+        // Show info button and configure menu with feedback metadata
+        infoButton.isHidden = false
+        setupFeedbackInfoMenu()
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         
         if let feedback {
-            buttonStackView.addArrangedSubview(infoButton)
             buttonStackView.addArrangedSubview(deleteButton)
         } else {
             buttonStackView.addArrangedSubview(saveButton)

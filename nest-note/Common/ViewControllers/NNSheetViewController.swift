@@ -35,6 +35,17 @@ class NNSheetViewController: NNViewController {
         return button
     }()
     
+    let infoButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        let image = UIImage(systemName: "ellipsis", withConfiguration: config)
+        button.setImage(image, for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true // Hidden by default, subclasses enable if needed
+        return button
+    }()
+    
     let titleField: UITextField = {
         let field = UITextField()
         field.font = .bodyXL
@@ -87,6 +98,7 @@ class NNSheetViewController: NNViewController {
         view.backgroundColor = .black.withAlphaComponent(0.5)
         setupPanGestureRecognizer()
         setupKeyboardObservers()
+        setupInfoButton()
     }
     
     // MARK: - Setup Methods
@@ -100,6 +112,7 @@ class NNSheetViewController: NNViewController {
         containerView.addSubview(gripView)
         containerView.addSubview(titleLabel)
         containerView.addSubview(closeButton)
+        containerView.addSubview(infoButton)
         containerView.addSubview(titleField)
         containerView.addSubview(dividerView)
         
@@ -127,6 +140,11 @@ class NNSheetViewController: NNViewController {
             closeButton.widthAnchor.constraint(equalToConstant: 36),
             closeButton.heightAnchor.constraint(equalToConstant: 36),
             
+            infoButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            infoButton.widthAnchor.constraint(equalToConstant: 36),
+            infoButton.heightAnchor.constraint(equalToConstant: 36),
+            
             titleField.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
 //            titleField.topAnchor.constraint(greaterThanOrEqualTo: titleLabel.bottomAnchor, constant: 16),
             titleField.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
@@ -142,6 +160,12 @@ class NNSheetViewController: NNViewController {
     // MARK: - Methods for Subclasses to Override
     func addContentToContainer() {
         // Subclasses should override this to add their specific content
+    }
+    
+    func setupInfoButton() {
+        // Subclasses should override this to configure the info button
+        // By default, the info button is hidden
+        infoButton.isHidden = true
     }
     
     func handleDismissalResult() -> Any? {

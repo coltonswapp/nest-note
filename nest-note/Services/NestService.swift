@@ -25,6 +25,9 @@ final class NestService: EntryRepository {
     // Cache for saved sitters
     private var cachedSavedSitters: [SavedSitter]?
     
+    // MARK: - Constants
+    private static let maxFolderDepth = 3
+    
     // MARK: - SavedSitter Model
     struct SavedSitter: Identifiable, Codable, Hashable {
         let id: String  // Firestore document ID
@@ -332,6 +335,7 @@ extension NestService {
         case nestNotFound
         case noCurrentNest
         case entryLimitReached
+        case folderDepthExceeded
         
         var errorDescription: String? {
             switch self {
@@ -341,6 +345,8 @@ extension NestService {
                 return "No nest is currently selected"
             case .entryLimitReached:
                 return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries."
+            case .folderDepthExceeded:
+                return "Folder depth cannot exceed 3 levels. Please create your folder in a shallower location."
             }
         }
     }
@@ -371,9 +377,20 @@ extension NestService {
         Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultCategories.count) default categories")
     }
     
+    // MARK: - Folder Validation
+    private func validateFolderDepth(for folderPath: String) -> Bool {
+        let components = folderPath.components(separatedBy: "/")
+        return components.count <= Self.maxFolderDepth
+    }
+    
     func createCategory(_ category: NestCategory) async throws {
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
+        }
+        
+        // Validate folder depth
+        guard validateFolderDepth(for: category.name) else {
+            throw NestError.folderDepthExceeded
         }
         
         do {
@@ -389,6 +406,9 @@ extension NestService {
                 currentNest = updatedNest
             }
             
+            // Clear the cached categories to force fresh fetch next time
+            cachedCategories = nil
+            
             Logger.log(level: .info, category: .nestService, message: "Category created successfully: \(category.name)")
             
             // Log success event
@@ -396,6 +416,70 @@ extension NestService {
         } catch {
             // Log failure event
             Tracker.shared.track(.nestCategoryAdded, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+    
+    func deleteCategory(_ categoryName: String) async throws {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        do {
+            // First, find and delete all entries that belong to this category or its subfolders
+            let entriesCollection = db.collection("nests").document(nestId).collection("entries")
+            let entriesQuery = entriesCollection.whereField("category", isEqualTo: categoryName)
+            let entriesSnapshot = try await entriesQuery.getDocuments()
+            
+            // Also find entries in subfolders (categories that start with this categoryName + "/")
+            let subfolderQuery = entriesCollection.whereField("category", isGreaterThanOrEqualTo: categoryName + "/")
+                .whereField("category", isLessThan: categoryName + "/\u{f8ff}") // Unicode high character for range query
+            let subfolderSnapshot = try await subfolderQuery.getDocuments()
+            
+            // Delete all entries in this category and its subfolders
+            let batch = db.batch()
+            for document in entriesSnapshot.documents + subfolderSnapshot.documents {
+                batch.deleteDocument(document.reference)
+            }
+            try await batch.commit()
+            
+            // Find the category document to delete
+            let categoriesCollection = db.collection("nests").document(nestId).collection("nestCategories")
+            let categoryQuery = categoriesCollection.whereField("name", isEqualTo: categoryName)
+            let categorySnapshot = try await categoryQuery.getDocuments()
+            
+            // Delete the category document(s)
+            for document in categorySnapshot.documents {
+                try await document.reference.delete()
+            }
+            
+            // Also delete any subcategories
+            let subcategoryQuery = categoriesCollection.whereField("name", isGreaterThanOrEqualTo: categoryName + "/")
+                .whereField("name", isLessThan: categoryName + "/\u{f8ff}")
+            let subcategorySnapshot = try await subcategoryQuery.getDocuments()
+            
+            for document in subcategorySnapshot.documents {
+                try await document.reference.delete()
+            }
+            
+            // Update current nest's categories by removing the deleted category and subcategories
+            if var updatedNest = currentNest {
+                updatedNest.categories?.removeAll { category in
+                    category.name == categoryName || category.name.hasPrefix(categoryName + "/")
+                }
+                currentNest = updatedNest
+            }
+            
+            // Clear the cached categories to force fresh fetch next time
+            cachedCategories = nil
+            
+            Logger.log(level: .info, category: .nestService, message: "Category deleted successfully: \(categoryName)")
+            
+            // Log success event
+            Tracker.shared.track(.nestCategoryDeleted)
+        } catch {
+            // Log failure event  
+            Tracker.shared.track(.nestCategoryDeleted, result: false, error: error.localizedDescription)
             throw error
         }
     }
@@ -615,7 +699,7 @@ extension NestService {
     }
 }
 
-// MARK: - Pinned Categories Methods
+// MARK: - Pinned Folders Methods
 extension NestService {
     func fetchPinnedCategories() async throws -> [String] {
         guard let nestId = currentNest?.id else {
@@ -624,7 +708,7 @@ extension NestService {
         
         // First check if we have it in currentNest
         if let pinnedCategories = currentNest?.pinnedCategories {
-            Logger.log(level: .info, category: .nestService, message: "Using cached pinned categories from currentNest")
+            Logger.log(level: .info, category: .nestService, message: "Using cached Pinned Folders from currentNest")
             return pinnedCategories
         }
         
@@ -634,7 +718,7 @@ extension NestService {
         
         guard let data = document.data(),
               let pinnedCategories = data["pinnedCategories"] as? [String] else {
-            Logger.log(level: .info, category: .nestService, message: "No pinned categories found, returning empty array")
+            Logger.log(level: .info, category: .nestService, message: "No Pinned Folders found, returning empty array")
             return []
         }
         
@@ -644,7 +728,7 @@ extension NestService {
             currentNest = updatedNest
         }
         
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(pinnedCategories.count) pinned categories")
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(pinnedCategories.count) Pinned Folders")
         return pinnedCategories
     }
     
@@ -667,7 +751,7 @@ extension NestService {
                 currentNest = updatedNest
             }
             
-            Logger.log(level: .info, category: .nestService, message: "Pinned categories saved successfully: \(categoryNames)")
+            Logger.log(level: .info, category: .nestService, message: "Pinned Folders saved successfully: \(categoryNames)")
             
             // Log success event
             Tracker.shared.track(.pinnedCategoriesUpdated)

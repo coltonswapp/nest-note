@@ -25,22 +25,25 @@ class PinnedCategoriesViewController: UIViewController {
     
     struct CategoryItem: Hashable {
         let name: String
+        let fullPath: String
         let symbolName: String
         let isPinned: Bool
+        let id: String
         
         func hash(into hasher: inout Hasher) {
             hasher.combine(name)
+            hasher.combine(fullPath)
         }
         
         static func == (lhs: CategoryItem, rhs: CategoryItem) -> Bool {
-            return lhs.name == rhs.name && lhs.isPinned == rhs.isPinned
+            return lhs.name == rhs.name && lhs.isPinned == rhs.isPinned && rhs.id == lhs.id && rhs.fullPath == lhs.fullPath
         }
     }
     
     init(entryRepository: EntryRepository) {
         self.entryRepository = entryRepository
         super.init(nibName: nil, bundle: nil)
-        self.title = "Pinned Categories"
+        self.title = "Pinned Folders"
     }
     
     required init?(coder: NSCoder) {
@@ -138,7 +141,7 @@ class PinnedCategoriesViewController: UIViewController {
     private func setupInstructionLabel() {
         instructionLabel = BlurBackgroundLabel(with: .systemThickMaterial)
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
-        instructionLabel.text = "Pinned categories will be visible to sitters. Limit: 4 categories."
+        instructionLabel.text = "Pinned Folders will be visible to sitters. Limit: 4 categories."
         instructionLabel.font = .bodyL
         instructionLabel.textColor = .secondaryLabel
         
@@ -161,7 +164,7 @@ class PinnedCategoriesViewController: UIViewController {
     private func loadCategories() {
         Task {
             do {
-                // Fetch both categories and pinned categories
+                // Fetch both categories and Pinned Folders
                 async let categoriesTask = entryRepository.fetchCategories()
                 async let pinnedCategoriesTask = (entryRepository as? NestService)?.fetchPinnedCategories() ?? []
                 
@@ -189,17 +192,21 @@ class PinnedCategoriesViewController: UIViewController {
         // Create category items from fetched categories
         var categoryItems = categories.map { category in
             CategoryItem(
-                name: category.name,
+                name: category.name.components(separatedBy: "/").last ?? category.name,
+                fullPath: category.name,
                 symbolName: category.symbolName,
-                isPinned: pinnedCategoryNames.contains(category.name)
+                isPinned: pinnedCategoryNames.contains(category.name),
+                id: category.id
             )
         }
         
         // Always add "Places" as an option
         let placesItem = CategoryItem(
             name: "Places",
+            fullPath: "Places",
             symbolName: "map.fill",
-            isPinned: pinnedCategoryNames.contains("Places")
+            isPinned: pinnedCategoryNames.contains("Places"),
+            id: "123"
         )
         categoryItems.append(placesItem)
         
@@ -220,6 +227,8 @@ class PinnedCategoriesViewController: UIViewController {
             }
             pinnedCategoryNames.insert(categoryName)
         }
+        
+        print(pinnedCategoryNames)
         
         applySnapshot()
         updateSaveButtonState()
@@ -247,13 +256,13 @@ class PinnedCategoriesViewController: UIViewController {
                 
                 await MainActor.run {
                     self.originalPinnedCategoryNames = self.pinnedCategoryNames
-                    self.showToast(text: "Pinned categories saved")
+                    self.showToast(text: "Pinned Folders saved")
                     self.dismiss(animated: true)
                 }
             } catch {
                 await MainActor.run {
                     self.saveButton.stopLoading()
-                    self.showError("Failed to save pinned categories: \(error.localizedDescription)")
+                    self.showError("Failed to save Pinned Folders: \(error.localizedDescription)")
                 }
             }
         }
@@ -267,6 +276,6 @@ extension PinnedCategoriesViewController: UICollectionViewDelegate {
         
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
-        togglePin(for: item.name)
+        togglePin(for: item.fullPath)
     }
 }

@@ -72,7 +72,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable, Pay
         // If it's a NestService (owner), they get extended access. Otherwise use provided level or default to halfDay
         self.sessionVisibilityLevel = entryRepository is NestService ? .extended : (sessionVisibilityLevel ?? .halfDay)
         super.init(nibName: nil, bundle: nil)
-        self.title = category
+        title = category.components(separatedBy: "/").last ?? category
         
         // Load dummy data for the specific category
         loadDummyData()

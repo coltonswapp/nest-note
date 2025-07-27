@@ -141,6 +141,12 @@ final class SessionDetailViewController: NNSheetViewController {
     }
     
     // MARK: - Setup Methods
+    
+    override func setupInfoButton() {
+        // SessionDetailViewController doesn't need an info button
+        infoButton.isHidden = true
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         

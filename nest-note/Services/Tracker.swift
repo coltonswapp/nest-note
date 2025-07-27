@@ -18,6 +18,7 @@ class Tracker {
         case nestAddressUpdated = "nestAddressUpdated"
         case nestNameUpdated = "nestNameUpdated"
         case nestCategoryAdded = "nestCategoryAdded"
+        case nestCategoryDeleted = "nestCategoryDeleted"
         case nestPlaceAdded = "nestPlaceAdded"
         
         // MARK: - Entry Related Events

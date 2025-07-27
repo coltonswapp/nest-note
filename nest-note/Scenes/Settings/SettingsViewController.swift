@@ -439,7 +439,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             present(vc, animated: true)
         case "Test Category Sheet":
             let vc = CategoryDetailViewController(sourceFrame: nil)
-            vc.categoryDelegate = self
             present(vc, animated: true)
         case "Test Entry Sheet":
             let vc = EntryDetailViewController(category: "Test Category", sourceFrame: nil)
@@ -777,14 +776,6 @@ extension SettingsViewController: AuthenticationDelegate {
     func signUpComplete() {
         applyInitialSnapshots()
         self.showToast(text: "Welcome to NestNote")
-    }
-}
-
-extension SettingsViewController: CategoryDetailViewControllerDelegate {
-    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?) {
-        if let category = category {
-            showToast(text: "Category saved: \(category)")
-        }
     }
 }
 

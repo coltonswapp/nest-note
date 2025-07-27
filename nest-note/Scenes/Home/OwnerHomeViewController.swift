@@ -241,6 +241,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             cell.layer.masksToBounds = true
         }
         
+        
         // Configure data source
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item { 
@@ -294,7 +295,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 title = "Your Nest"
                 headerView.configure(title: title)
             case .quickAccess:
-                title = "Pinned Categories"
+                title = "Pinned Folders"
                 headerView.configure(title: title)
             case .setupProgress:
                 // No header for setup progress section
@@ -359,15 +360,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             updatedSnapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
         }
         
-        // Quick access section - use pinned categories
+        // Quick access section - use pinned categories  
         if !pinnedCategories.isEmpty {
             updatedSnapshot.appendSections([.quickAccess])
             
-            let pinnedCategoryItems = pinnedCategories.map { categoryName in
-                HomeItem.pinnedCategory(name: categoryName, icon: iconForCategory(categoryName))
+            let categoryItems = pinnedCategories.map { categoryName in
+                // For categories with "/", extract the display name from the last component
+                let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                let iconName = iconForCategory(categoryName)
+                
+                return HomeItem.pinnedCategory(name: displayName, icon: iconName)
             }
             
-            updatedSnapshot.appendItems(pinnedCategoryItems, toSection: .quickAccess)
+            updatedSnapshot.appendItems(categoryItems, toSection: .quickAccess)
         }
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
@@ -469,6 +474,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         // Fallback to folder icon if category not found
         return "folder.fill"
     }
+    
     
     // MARK: - Tooltip Methods
     
@@ -576,7 +582,12 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
                 let nav = UINavigationController(rootViewController: placesVC)
                 present(nav, animated: true)
             } else {
-                presentCategoryView(category: name)
+                // Find the full path for this display name in pinnedCategories
+                let fullPath = pinnedCategories.first { categoryName in
+                    let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                    return displayName == name
+                } ?? name
+                presentCategoryView(category: fullPath)
             }
         case .currentSession(let session):
             // Dismiss the happening now tip when the current session cell is tapped
