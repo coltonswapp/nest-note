@@ -16,7 +16,7 @@ class PDFExportService {
     // Default section order - easily customizable
     private static let defaultSectionOrder: [PDFSection] = [.events, .entries]
     
-    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, visibilityLevel: VisibilityLevel, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
+    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, visibilityLevel: VisibilityLevel = .always, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
         // Pre-fetch all places for events if needed
         var eventPlaces: [String: Place] = [:]
         for event in events {

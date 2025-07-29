@@ -171,9 +171,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     private func configureFolderLabel() {
         let components = category.components(separatedBy: "/")
         if components.count >= 2 {
-            // Show last 2 components: "Dog / Archie"
-            let lastTwo = components.suffix(2)
-            folderLabel.text = lastTwo.joined(separator: " / ")
+            folderLabel.text = components.joined(separator: " / ")
         } else if components.count == 1 {
             // Show single component
             folderLabel.text = components.first

@@ -114,8 +114,10 @@ class FolderCollectionViewCell: UICollectionViewCell {
     private let paper2View = UIView()
     private let paper3View = UIView()
     
-    private let frontColor: UIColor = UIColor(red: 229/255, green: 229/255, blue: 229/255, alpha: 1.0)
-    private let backColor: UIColor = UIColor(red: 190/255, green: 190/255, blue: 190/255, alpha: 1.0)
+//    private let frontColor: UIColor = UIColor(red: 229/255, green: 229/255, blue: 229/255, alpha: 1.0)
+    private let frontColor: UIColor = NNColors.folderFront
+//    private let backColor: UIColor = UIColor(red: 190/255, green: 190/255, blue: 190/255, alpha: 1.0)
+    private let backColor: UIColor = NNColors.folderBack
     
     override init(frame: CGRect) {
         backFolderView = CustomBackFolderView(color: backColor)
@@ -157,17 +159,17 @@ class FolderCollectionViewCell: UICollectionViewCell {
         
         // Icon
         iconImageView.contentMode = .scaleAspectFit
-        iconImageView.tintColor = .label
+        iconImageView.tintColor = NNColors.folderForeground
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         
         titleLabel.font = .h4
-        titleLabel.textColor = .label
+        titleLabel.textColor = NNColors.folderForeground
         titleLabel.numberOfLines = 2
         titleLabel.lineBreakMode = .byWordWrapping
         
         // Subtitle
         subtitleLabel.font = .bodyS
-        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.textColor = NNColors.folderForeground.withAlphaComponent(0.75)
         
         // Add views to stack
         contentStack.addArrangedSubview(iconImageView)
@@ -207,7 +209,21 @@ class FolderCollectionViewCell: UICollectionViewCell {
     func configure(with data: FolderData) {
         iconImageView.image = data.image
         titleLabel.text = data.title
-        subtitleLabel.text = "\(data.itemCount) items"
+        
+        // Debug logging
+        print("🏷️ Configuring folder cell: '\(data.title)' with \(data.selectedCount) selected, \(data.itemCount) total")
+        
+        // Show selection count if any entries are selected, otherwise show total item count
+        if data.selectedCount > 0 {
+            let entryText = data.selectedCount == 1 ? "selected" : "selected"
+            subtitleLabel.text = "\(data.selectedCount) \(entryText)"
+            subtitleLabel.textColor = NNColors.primary
+            print("   → Showing selection count: '\(subtitleLabel.text ?? "nil")'")
+        } else {
+            subtitleLabel.text = "\(data.itemCount) items"
+            subtitleLabel.textColor = .secondaryLabel
+            print("   → Showing item count: '\(subtitleLabel.text ?? "nil")'")
+        }
         
         addPaper(num: data.itemCount)
         
@@ -240,7 +256,7 @@ class FolderCollectionViewCell: UICollectionViewCell {
     }
     
     private func setupPaperView(_ paperView: UIView, rotation: CGFloat, offsetX: CGFloat, offsetY: CGFloat) {
-        paperView.backgroundColor = UIColor.white
+        paperView.backgroundColor = NNColors.paperWhite
         paperView.layer.cornerRadius = 4
         paperView.layer.shadowColor = UIColor.black.cgColor
         paperView.layer.shadowOffset = CGSize(width: 0, height: 2)

@@ -19,6 +19,10 @@ protocol EntryReviewCellDelegate: AnyObject {
     func didTapReview()
 }
 
+protocol SelectEntriesCellDelegate: AnyObject {
+    func selectEntriesCellDidTapButton(_ cell: SelectEntriesCell)
+}
+
 protocol EditSessionViewControllerDelegate: AnyObject {
     func editSessionViewController(_ controller: EditSessionViewController, didCreateSession session: SessionItem)
     func editSessionViewController(_ controller: EditSessionViewController, didUpdateSession session: SessionItem)
@@ -61,6 +65,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }()
     
     private var visibilityLevel: VisibilityLevel = .halfDay
+    private var selectedEntries: [BaseEntry] = []
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -72,25 +77,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // Keep a copy of the original session for comparison
     private let originalSession: SessionItem
     
-    private var visibilityMenu: UIMenu {
-        let standard = UIAction(title: "Standard", image: UIImage(systemName: "eye")) { [weak self] _ in
-            self?.updateVisibilityLevel(.halfDay)
-        }
-        
-        let essential = UIAction(title: "Essential", image: UIImage(systemName: "eye.slash")) { [weak self] _ in
-            self?.updateVisibilityLevel(.always)
-        }
-        
-        let extended = UIAction(title: "Extended", image: UIImage(systemName: "eye.fill")) { [weak self] _ in
-            self?.updateVisibilityLevel(.overnight)
-        }
-        
-        let comprehensive = UIAction(title: "Comprehensive", image: UIImage(systemName: "eye.circle.fill")) { [weak self] _ in
-            self?.updateVisibilityLevel(.overnight)
-        }
-        
-        return UIMenu(title: "Select Visibility Level", children: [standard, essential, extended, comprehensive])
-    }
     
     private var sessionEvents: [SessionEvent] = []
     private let maxVisibleEvents = 4
@@ -193,7 +179,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         sessionItem.startDate = archivedSession.startDate
         sessionItem.endDate = archivedSession.endDate
         sessionItem.isMultiDay = Calendar.current.dateComponents([.day], from: archivedSession.startDate, to: archivedSession.endDate).day ?? 0 > 0
-        sessionItem.visibilityLevel = archivedSession.visibilityLevel
+        // Note: visibilityLevel is no longer used, will use selectedEntries instead
         sessionItem.status = archivedSession.status
         
         // Set assigned sitter if available
@@ -306,7 +292,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         // Pre-populate other fields if editing
-        visibilityLevel = sessionItem.visibilityLevel
+        // Note: visibilityLevel is no longer used, using selectedEntries instead
         
         // Note: sessionItem.assignedSitter already contains the sitter information
         // No need to fetch additional sitter details since AssignedSitter has all necessary data
@@ -454,10 +440,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func updateDataSourceAfterRefresh() {
         var snapshot = dataSource.snapshot()
         
-        // Update visibility level item
-        if let existingVisibilityItem = snapshot.itemIdentifiers(inSection: .visibility).first {
-            snapshot.deleteItems([existingVisibilityItem])
-            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+        // Update select entries item
+        if let existingSelectEntriesItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
+            snapshot.deleteItems([existingSelectEntriesItem])
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
         }
         
         // Update date selection items
@@ -511,7 +497,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Create alert with PDF export warning
         let alert = UIAlertController(
             title: "Export Session as PDF",
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
+            message: "Selected entries and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -537,7 +523,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 guard let pdfData = await PDFExportService.generateSessionPDF(
                     session: sessionItem,
                     nestItem: nest,
-                    visibilityLevel: sessionItem.visibilityLevel,
                     events: sessionEvents
                 ) else {
                     await showError(message: "Failed to generate PDF")
@@ -603,7 +588,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 sessionItem.startDate = startDate
                 sessionItem.endDate = endDate
                 sessionItem.isMultiDay = isMultiDay
-                sessionItem.visibilityLevel = visibilityLevel
+                // Note: visibilityLevel is no longer used, replaced by selectedEntries
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
                 if isEditingSession {
@@ -795,10 +780,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             cell.contentConfiguration = content
         }
         
-        let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { [weak self] cell, indexPath, item in
+        let selectEntriesRegistration = UICollectionView.CellRegistration<SelectEntriesCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
-            if case let .visibilityLevel(level) = item {
-                cell.configure(with: level, isReadOnly: isArchivedSession)
+            if case let .selectEntries(count) = item {
+                cell.configure(with: count)
                 cell.delegate = self
             }
         }
@@ -912,8 +897,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             switch item {
             case .inviteSitter:
                 return collectionView.dequeueConfiguredReusableCell(using: inviteSitterRegistration, for: indexPath, item: item)
-            case .visibilityLevel(let level):
-                return collectionView.dequeueConfiguredReusableCell(using: visibilityRegistration, for: indexPath, item: item)
+            case .selectEntries(let count):
+                return collectionView.dequeueConfiguredReusableCell(using: selectEntriesRegistration, for: indexPath, item: item)
             case .sessionStatus(let status):
                 return collectionView.dequeueConfiguredReusableCell(using: statusRegistration, for: indexPath, item: item)
             case .nestReview:
@@ -946,7 +931,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            var sections: [Section] = [.date, .status, .visibility, .events]
+            var sections: [Section] = [.date, .status, .selectEntries, .events]
             
             // Only show expenses section if user hasn't voted on the feature
             if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
@@ -963,7 +948,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -979,26 +964,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             
             // We'll add the nest review section later after checking if entries need review
         } else {
-            snapshot.appendSections([.sitter, .date, .status, .visibility])
+            snapshot.appendSections([.sitter, .date, .status, .selectEntries])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.visibilityLevel(sessionItem.visibilityLevel)], toSection: .visibility)
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
         // The fetchOutdatedEntries will be called from viewWillAppear
     }
     
-    private func showVisibilityLevelInfo() {
-        let alert = UIAlertController(
-            title: "Visibility Levels",
-            message: "Essential: Basic information\nStandard: Normal visibility\nExtended: More details\nComprehensive: Full information",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-    }
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
@@ -1043,7 +1019,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Create alert with PDF export warning
         let alert = UIAlertController(
             title: "Export Session as PDF",
-            message: "All entries associated with the \(sessionItem.visibilityLevel.title) visibility level and session events will be included in the PDF export.",
+            message: "Selected entries and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
         
@@ -1056,23 +1032,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(alert, animated: true)
     }
     
-    private func updateVisibilityLevel(_ level: VisibilityLevel) {
-        // Update the session item
-        sessionItem.visibilityLevel = level
-        
-        // Update the UI
-        var snapshot = dataSource.snapshot()
-        
-        // Find the existing visibility item in the snapshot
-        if let existingItem = snapshot.itemIdentifiers(inSection: .visibility).first {
-            // Remove the old item
-            snapshot.deleteItems([existingItem])
-            // Insert the new item
-            snapshot.appendItems([.visibilityLevel(level)], toSection: .visibility)
-            
-            dataSource.apply(snapshot, animatingDifferences: true)
-        }
-    }
     
     private func updateEventsSection(with events: [SessionEvent]) {
         var snapshot = dataSource.snapshot()
@@ -1130,6 +1089,27 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(nav, animated: true)
     }
     
+    private func presentSelectEntriesFlow() {
+        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+        
+        let selectEntriesFlow = SelectEntriesFlowViewController(entryRepository: entryRepository)
+        selectEntriesFlow.delegate = self
+        selectEntriesFlow.modalPresentationStyle = .pageSheet
+        
+        present(selectEntriesFlow, animated: true)
+    }
+    
+    private func updateSelectEntriesSection() {
+        var snapshot = dataSource.snapshot()
+        
+        // Update select entries item
+        if let existingItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
+            snapshot.deleteItems([existingItem])
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
+            dataSource.apply(snapshot, animatingDifferences: true)
+        }
+    }
+    
     private func updateSaveButtonState() {
         saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
         
@@ -1153,7 +1133,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         currentStartDate != originalSession.startDate ||
         currentEndDate != originalSession.endDate ||
         currentIsMultiDay != originalSession.isMultiDay ||
-        visibilityLevel != originalSession.visibilityLevel ||
+        selectedEntries.count != 0 ||
         sessionItem.status != originalSession.status ||
         sessionItem.earlyAccessDuration != originalSession.earlyAccessDuration ||
         !sessionEventsMatch()
@@ -1639,7 +1619,7 @@ extension EditSessionViewController {
     enum Section: Int {
         case overview
         case sitter
-        case visibility
+        case selectEntries
         case nestReview
         case expenses
         case exportPDF
@@ -1652,7 +1632,7 @@ extension EditSessionViewController {
     
     enum Item: Hashable {
         case inviteSitter
-        case visibilityLevel(VisibilityLevel)
+        case selectEntries(count: Int)
         case sessionStatus(SessionStatus)
         case nestReview(count: Int?) // nil = loading, Int = actual count
         case expenses
@@ -1666,9 +1646,9 @@ extension EditSessionViewController {
             switch self {
             case .inviteSitter:
                 hasher.combine(1)
-            case .visibilityLevel(let level):
+            case .selectEntries(let count):
                 hasher.combine(2)
-                hasher.combine(level)
+                hasher.combine(count)
             case .sessionStatus(let status):
                 hasher.combine(3)
                 hasher.combine(status)
@@ -1702,8 +1682,8 @@ extension EditSessionViewController {
                  (.exportPDF, .exportPDF),
                  (.events, .events):
                 return true
-            case let (.visibilityLevel(l1), .visibilityLevel(l2)):
-                return l1 == l2
+            case let (.selectEntries(c1), .selectEntries(c2)):
+                return c1 == c2
             case let (.sessionStatus(s1), .sessionStatus(s2)):
                 return s1 == s2
             case let (.nestReview(c1), .nestReview(c2)):
@@ -1745,8 +1725,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .inviteSitter:
             guard !isArchivedSession && isEditingSession else { break }
             inviteSitterButtonTapped()
-        case .visibilityLevel:
-            break
+        case .selectEntries:
+            presentSelectEntriesFlow()
         case .sessionStatus:
             break
         case .dateSelection:
@@ -2048,16 +2028,24 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
 } 
 
 // Add delegate conformance
-extension EditSessionViewController: VisibilityCellDelegate {
-    func didChangeVisibilityLevel(_ level: VisibilityLevel) {
-        visibilityLevel = level
+extension EditSessionViewController: SelectEntriesFlowDelegate {
+    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry]) {
+        selectedEntries = entries
+        controller.dismiss(animated: true)
+        
+        // Update the UI
+        updateSelectEntriesSection()
         checkForChanges()
     }
     
-    func didRequestVisibilityLevelInfo() {
-        let viewController = VisibilityLevelInfoViewController()
-        present(viewController, animated: true)
-        HapticsHelper.lightHaptic()
+    func selectEntriesFlowDidCancel(_ controller: SelectEntriesFlowViewController) {
+        controller.dismiss(animated: true)
+    }
+}
+
+extension EditSessionViewController: SelectEntriesCellDelegate {
+    func selectEntriesCellDidTapButton(_ cell: SelectEntriesCell) {
+        presentSelectEntriesFlow()
     }
 }
 

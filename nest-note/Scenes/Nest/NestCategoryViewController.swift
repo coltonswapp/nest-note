@@ -53,10 +53,23 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     // Store the index path for context menu preview
     private var contextMenuIndexPath: IndexPath?
     
-    init(category: String, entries: [BaseEntry] = [], entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil) {
+    // Edit mode properties
+    private var isEditingMode: Bool = false {
+        didSet {
+            updateEditModeUI()
+        }
+    }
+    private var selectedEntries: Set<BaseEntry> = []
+    
+    // Select entries mode properties
+    private var isEditOnlyMode: Bool = false
+    weak var selectEntriesDelegate: NestCategoryViewControllerSelectEntriesDelegate?
+    
+    init(category: String, entries: [BaseEntry] = [], entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil, isEditOnlyMode: Bool = false) {
         self.category = category
         self.entries = entries
         self.entryRepository = entryRepository
+        self.isEditOnlyMode = isEditOnlyMode
         // For nest owners, access level doesn't matter since they bypass all checks. For sitters, use provided level or default to standard
         self.sessionVisibilityLevel = entryRepository is NestService ? .extended : (sessionVisibilityLevel ?? .halfDay)
         super.init(nibName: nil, bundle: nil)
@@ -64,6 +77,91 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // Extract the folder name from the full path for the title
         // e.g. "Pets/Donna" becomes "Donna"
         title = category.components(separatedBy: "/").last ?? category
+    }
+    
+    // Convenience initializer for select entries flow
+    convenience init(entryRepository: EntryRepository, initialCategory: String, isEditOnlyMode: Bool) {
+        self.init(category: initialCategory, entries: [], entryRepository: entryRepository, sessionVisibilityLevel: nil, isEditOnlyMode: isEditOnlyMode)
+    }
+    
+    // Method to restore selected entries for persistent selection
+    func restoreSelectedEntries(_ entries: Set<BaseEntry>) {
+        selectedEntries = entries
+        
+        // If we're already loaded, update the UI immediately
+        if isViewLoaded {
+            DispatchQueue.main.async {
+                self.collectionView.reloadData()
+                self.restoreCollectionViewSelection()
+                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: self.selectedEntries)
+            }
+        }
+    }
+    
+    // Helper method to restore collection view selection state
+    private func restoreCollectionViewSelection() {
+        guard isEditingMode, let dataSource = self.dataSource else { return }
+        
+        let snapshot = dataSource.snapshot()
+        
+        // Iterate through all sections and items to find matching entries
+        for sectionIdentifier in snapshot.sectionIdentifiers {
+            let items = snapshot.itemIdentifiers(inSection: sectionIdentifier)
+            
+            for (itemIndex, item) in items.enumerated() {
+                // Check if this item is a BaseEntry and if it's selected
+                if let entry = item as? BaseEntry, selectedEntries.contains(entry) {
+                    // Find the section index
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                }
+            }
+        }
+    }
+    
+    // Helper method to count selected entries in a specific folder
+    private func countSelectedEntriesInFolder(_ folderPath: String) -> Int {
+        let count = selectedEntries.filter { entry in
+            entry.category.hasPrefix(folderPath)
+        }.count
+        
+        // Debug logging
+        if count > 0 {
+            print("🔍 Found \(count) selected entries for folder: \(folderPath)")
+            selectedEntries.forEach { entry in
+                if entry.category.hasPrefix(folderPath) {
+                    print("   - Entry: \(entry.title) in category: \(entry.category)")
+                }
+            }
+        }
+        
+        return count
+    }
+    
+    // Helper method to refresh folder selection counts
+    private func refreshFolderSelectionCounts() {
+        guard isEditOnlyMode else { return }
+        
+        print("🔄 Refreshing folder selection counts...")
+        
+        // Update folder data with new selection counts
+        let updatedFolders = folders.map { folder in
+            let selectionCount = countSelectedEntriesInFolder(folder.fullPath)
+            print("📁 Folder '\(folder.title)' (\(folder.fullPath)): \(selectionCount) selected")
+            
+            return FolderData(
+                title: folder.title,
+                image: folder.image,
+                itemCount: folder.itemCount,
+                fullPath: folder.fullPath,
+                category: folder.category,
+                selectedCount: selectionCount
+            )
+        }
+        
+        self.folders = updatedFolders
     }
     
     required init?(coder: NSCoder) {
@@ -81,6 +179,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         configureDataSource()
         setupEmptyStateView()
         collectionView.delegate = self
+        
+        // If in edit-only mode, automatically enter edit mode
+        if isEditOnlyMode {
+            isEditingMode = true
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -114,6 +217,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         fetchFoldersForCategory(groupedEntries)
         
         refreshEmptyState()
+        
+        // Restore selection state if in edit-only mode
+        if isEditOnlyMode && isEditingMode {
+            DispatchQueue.main.async {
+                self.restoreCollectionViewSelection()
+            }
+        }
     }
     
     private func fetchFoldersForCategory(_ groupedEntries: [String: [BaseEntry]]) {
@@ -188,7 +298,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                             image: image,
                             itemCount: folderCounts[folderPath] ?? 0,
                             fullPath: folderPath,
-                            category: matchingCategory
+                            category: matchingCategory,
+                            selectedCount: isEditOnlyMode ? countSelectedEntriesInFolder(folderPath) : 0
                         )
                         folderItems.append(folderData)
                     }
@@ -246,12 +357,14 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         collectionView.backgroundColor = .systemBackground
         view.addSubview(collectionView)
         
-        // Adjust content inset to prevent button obstruction
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 10
-        let totalInset = buttonHeight + buttonPadding * 2
-        collectionView.contentInset.bottom = totalInset
-        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        // Adjust content inset to prevent button obstruction (only if not in edit-only mode)
+        if !isEditOnlyMode {
+            let buttonHeight: CGFloat = 55
+            let buttonPadding: CGFloat = 10
+            let totalInset = buttonHeight + buttonPadding * 2
+            collectionView.contentInset.bottom = totalInset
+            collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        }
         
         // Register cells
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
@@ -397,8 +510,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         value: entry.content,
                         entryVisibility: entry.visibility,
                         sessionVisibility: self.sessionVisibilityLevel,
-                        isNestOwner: self.entryRepository is NestService
+                        isNestOwner: self.entryRepository is NestService,
+                        isEditMode: self.isEditingMode,
+                        isSelected: self.selectedEntries.contains(entry)
                     )
+                    
                     return cell
                 case .other:
                     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
@@ -407,8 +523,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         value: entry.content,
                         entryVisibility: entry.visibility,
                         sessionVisibility: self.sessionVisibilityLevel,
-                        isNestOwner: self.entryRepository is NestService
+                        isNestOwner: self.entryRepository is NestService,
+                        isEditMode: self.isEditingMode,
+                        isSelected: self.selectedEntries.contains(entry)
                     )
+                    
                     return cell
                 case .folders:
                     // This should not happen with proper snapshot creation - debug and handle gracefully
@@ -421,8 +540,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         value: entry.content,
                         entryVisibility: entry.visibility,
                         sessionVisibility: self.sessionVisibilityLevel,
-                        isNestOwner: self.entryRepository is NestService
+                        isNestOwner: self.entryRepository is NestService,
+                        isEditMode: self.isEditingMode,
+                        isSelected: self.selectedEntries.contains(entry)
                     )
+                    
                     return cell
                 }
             } else {
@@ -433,8 +555,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     value: entry.content,
                     entryVisibility: entry.visibility,
                     sessionVisibility: self.sessionVisibilityLevel,
-                    isNestOwner: self.entryRepository is NestService
+                    isNestOwner: self.entryRepository is NestService,
+                    isEditMode: self.isEditingMode,
+                    isSelected: self.selectedEntries.contains(entry)
                 )
+                
                 return cell
             }
         }
@@ -545,28 +670,93 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private func setupNavigationBar() {
         // Only show menu button for nest owners
         if entryRepository is NestService {
-            var menuChildren: [UIMenuElement] = [
-                UIAction(title: "Entry Suggestions", image: UIImage(systemName: "sparkles")) { _ in
-                    self.showEntrySuggestions()
+            if isEditingMode {
+                // In edit-only mode, don't show any navigation buttons as the flow controller handles navigation
+                if isEditOnlyMode {
+                    navigationItem.rightBarButtonItems = []
+                } else {
+                    // When in edit mode, show a simple "Done" button
+                    let doneButton = UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(doneButtonTapped))
+                    navigationItem.rightBarButtonItems = [doneButton]
                 }
-            ]
-            
-            // Only show "Add Folder" if we haven't reached max depth
-            let currentDepth = category.components(separatedBy: "/").count
-            if currentDepth < 3 {
-                menuChildren.append(
-                    UIAction(title: "Add Folder", image: UIImage(systemName: "folder.badge.plus")) { _ in
-                        self.presentAddFolder()
+            } else {
+                // Create top section actions (suggestions and add folder)
+                var topActions: [UIAction] = [
+                    UIAction(title: "Entry Suggestions", image: UIImage(systemName: "sparkles")) { _ in
+                        self.showEntrySuggestions()
                     }
-                )
+                ]
+                
+                // Only show "Add Folder" if we haven't reached max depth
+                let currentDepth = category.components(separatedBy: "/").count
+                if currentDepth < 3 {
+                    topActions.append(
+                        UIAction(title: "Add Folder", image: UIImage(systemName: "folder.badge.plus")) { _ in
+                            self.presentAddFolder()
+                        }
+                    )
+                }
+                
+                // Create divider section with top actions
+                let topSection = UIMenu(title: "", options: .displayInline, children: topActions)
+                
+                // Create Edit action (separate section)
+                let editAction = UIAction(title: "Select", image: UIImage(systemName: "checkmark.circle")) { _ in
+                    self.toggleEditMode()
+                }
+                
+                // Combine sections with divider
+                let menu = UIMenu(title: "", children: [topSection, editAction])
+                let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: menu)
+                navigationItem.rightBarButtonItems = [menuButton]
             }
-            
-            let menu = UIMenu(title: "", children: menuChildren)
-            let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: menu)
-            navigationItem.rightBarButtonItems = [menuButton]
             navigationController?.navigationBar.tintColor = .label
         }
     }
+    
+    private func updateEditModeUI() {
+        setupNavigationBar() // Refresh navigation bar to update menu
+        collectionView.allowsMultipleSelection = isEditingMode
+        
+        if !isEditingMode {
+            selectedEntries.removeAll()
+        }
+        
+        // Update the add entry button for edit mode
+        updateAddEntryButtonForEditMode()
+        
+        // Reload visible cells to update their appearance
+        DispatchQueue.main.async {
+            self.collectionView.reloadData()
+        }
+    }
+    
+    private func toggleEditMode() {
+        isEditingMode.toggle()
+    }
+    
+    @objc private func doneButtonTapped() {
+        isEditingMode = false
+        addEntryButton.alpha = 1.0
+    }
+    
+    private func updateCellSelection(for entry: BaseEntry) {
+        guard let dataSource = self.dataSource else { return }
+        var snapshot = dataSource.snapshot()
+        
+        // Use reconfigureItems instead of reloadItems for better performance
+        if #available(iOS 15.0, *) {
+            snapshot.reconfigureItems([entry])
+        } else {
+            snapshot.reloadItems([entry])
+        }
+        
+        dataSource.apply(snapshot, animatingDifferences: false)
+        
+        // Update move button state when selection changes
+        updateMoveButtonState()
+    }
+    
     
     
     private func showEntrySuggestions() {
@@ -646,6 +836,22 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    @objc private func moveButtonTapped() {
+        // Handle move action for selected entries
+        // No need to check if entries are selected since button is disabled when none are selected
+        
+        let selectedEntriesArray = Array(selectedEntries)
+        let selectFolderVC = SelectFolderViewController(
+            entryRepository: entryRepository,
+            currentCategory: category,
+            selectedEntries: selectedEntriesArray
+        )
+        selectFolderVC.delegate = self
+        
+        let navController = UINavigationController(rootViewController: selectFolderVC)
+        present(navController, animated: true)
+    }
+    
     // MARK: - Entry Limit Handling
     
     internal func showEntryLimitUpgradePrompt() {
@@ -653,12 +859,44 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func setupAddEntryButton() {
-        // Only show add entry button for nest owners
-        guard entryRepository is NestService else { return }
+        // Only show add entry button for nest owners and not in edit-only mode
+        guard entryRepository is NestService && !isEditOnlyMode else { return }
         
         addEntryButton = NNPrimaryLabeledButton(title: "New Entry", image: UIImage(systemName: "plus"))
         addEntryButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
         addEntryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+    }
+    
+    private func updateAddEntryButtonForEditMode() {
+        guard let addEntryButton = addEntryButton else { return }
+        
+        if isEditingMode {
+            // Change to "Move" button with arrow.right icon
+            addEntryButton.setTitle("Move")
+            addEntryButton.setImage(UIImage(systemName: "arrow.right"))
+            addEntryButton.removeTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+            addEntryButton.addTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
+            
+            // Update button state based on selection
+            updateMoveButtonState()
+        } else {
+            // Change back to "New Entry" button with plus icon
+            addEntryButton.setTitle("New Entry")
+            addEntryButton.setImage(UIImage(systemName: "plus"))
+            addEntryButton.removeTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
+            addEntryButton.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
+            addEntryButton.isEnabled = true // Ensure it's enabled when not in edit mode
+        }
+    }
+    
+    private func updateMoveButtonState() {
+        guard let addEntryButton = addEntryButton, isEditingMode else { return }
+        
+        let hasSelection = !selectedEntries.isEmpty
+        addEntryButton.isEnabled = hasSelection
+        
+        // Update visual appearance based on enabled state
+        addEntryButton.alpha = hasSelection ? 1.0 : 0.6
     }
     
     func showTips() {
@@ -807,15 +1045,27 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func setupEmptyStateView() {
-        emptyStateView = NNEmptyStateView(
-            icon: UIImage(systemName: "moon.zzz.fill"),
-            title: "It's a little quiet in here",
-            subtitle: "Entries for this category will appear here. Suggestions can be found in the upper-right corner.",
-            actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
-        )
+        if isEditOnlyMode {
+            // Edit-only mode: simplified empty state with no action button
+            emptyStateView = NNEmptyStateView(
+                icon: UIImage(systemName: "moon.zzz.fill"),
+                title: "No entries to select",
+                subtitle: "There are no entries in this folder yet.",
+                actionButtonTitle: nil
+            )
+        } else {
+            // Normal mode: standard empty state with action button for nest owners
+            emptyStateView = NNEmptyStateView(
+                icon: UIImage(systemName: "moon.zzz.fill"),
+                title: "It's a little quiet in here",
+                subtitle: "Entries for this category will appear here. Suggestions can be found in the upper-right corner.",
+                actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
+            )
+        }
+        
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         emptyStateView.isHidden = true
-        emptyStateView.isUserInteractionEnabled = true
+        emptyStateView.isUserInteractionEnabled = !isEditOnlyMode // Disable interaction in edit-only mode
         emptyStateView.delegate = self
         
         view.addSubview(emptyStateView)
@@ -875,28 +1125,69 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
 
 extension NestCategoryViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: true)
-        
         guard let selectedItem = dataSource.itemIdentifier(for: indexPath),
               let cell = collectionView.cellForItem(at: indexPath) else { return }
         
         // Handle folder selection
         if let folderData = selectedItem as? FolderData {
-            Logger.log(level: .info, category: .nestService, message: "Selected folder: \(folderData.title)")
+            collectionView.deselectItem(at: indexPath, animated: true)
             
-            // Navigate to the folder (create a new NestCategoryViewController for the subfolder)
-            let subfolderVC = NestCategoryViewController(
-                category: folderData.fullPath,
-                entries: [],
-                entryRepository: entryRepository,
-                sessionVisibilityLevel: sessionVisibilityLevel
-            )
-            navigationController?.pushViewController(subfolderVC, animated: true)
+            if isEditOnlyMode {
+                // In edit-only mode, navigate to subfolder for entry selection
+                Logger.log(level: .info, category: .nestService, message: "Selected folder for entry selection: \(folderData.title)")
+                
+                let subfolderVC = NestCategoryViewController(
+                    entryRepository: entryRepository,
+                    initialCategory: folderData.fullPath,
+                    isEditOnlyMode: true
+                )
+                subfolderVC.selectEntriesDelegate = selectEntriesDelegate
+                subfolderVC.restoreSelectedEntries(selectedEntries)
+                
+                navigationController?.pushViewController(subfolderVC, animated: true)
+            } else if !isEditingMode {
+                // Normal folder navigation (not in edit mode)
+                Logger.log(level: .info, category: .nestService, message: "Selected folder: \(folderData.title)")
+                
+                let subfolderVC = NestCategoryViewController(
+                    category: folderData.fullPath,
+                    entries: [],
+                    entryRepository: entryRepository,
+                    sessionVisibilityLevel: sessionVisibilityLevel
+                )
+                navigationController?.pushViewController(subfolderVC, animated: true)
+            }
             return
         }
         
         // Handle entry selection
         guard let selectedEntry = selectedItem as? BaseEntry else { return }
+        
+        // If in edit mode, toggle selection
+        if isEditingMode {
+            // Add haptic feedback for selection
+            HapticsHelper.superLightHaptic()
+            
+            if selectedEntries.contains(selectedEntry) {
+                selectedEntries.remove(selectedEntry)
+                collectionView.deselectItem(at: indexPath, animated: true)
+            } else {
+                selectedEntries.insert(selectedEntry)
+            }
+            
+            // Notify delegate in edit-only mode
+            if isEditOnlyMode {
+                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+                refreshFolderSelectionCounts()
+            }
+            
+            // Update the cell appearance using diffable data source
+            updateCellSelection(for: selectedEntry)
+            return
+        }
+        
+        // Normal entry selection (not in edit mode)
+        collectionView.deselectItem(at: indexPath, animated: true)
         
         // Check if user has access to this entry (skip check for nest owners)
         if !(entryRepository is NestService) && !sessionVisibilityLevel.hasAccess(to: selectedEntry.visibility) {
@@ -925,8 +1216,29 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         present(editEntryVC, animated: true)
     }
     
+    func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
+        // Handle deselection in edit mode
+        if isEditingMode,
+           let selectedItem = dataSource.itemIdentifier(for: indexPath),
+           let selectedEntry = selectedItem as? BaseEntry {
+            selectedEntries.remove(selectedEntry)
+            
+            // Notify delegate in edit-only mode
+            if isEditOnlyMode {
+                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+                refreshFolderSelectionCounts()
+            }
+            
+            // Update the cell appearance using diffable data source
+            updateCellSelection(for: selectedEntry)
+        }
+    }
+    
     // MARK: - Context Menu Support
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        // Disable context menu in edit-only mode
+        guard !isEditOnlyMode else { return nil }
+        
         guard let item = dataSource.itemIdentifier(for: indexPath),
               let folderData = item as? FolderData,
               entryRepository is NestService else {
@@ -1125,6 +1437,8 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
 // Add delegate conformance for empty state view
 extension NestCategoryViewController: NNEmptyStateViewDelegate {
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
+        // Don't handle action button tap in edit-only mode
+        guard !isEditOnlyMode else { return }
         
         print("Empty state tapped:")
         // Only allow adding entries for nest owners
@@ -1154,6 +1468,61 @@ extension NestCategoryViewController: CommonEntriesViewControllerDelegate {
     
     func showUpgradePrompt() {
         showEntryLimitUpgradePrompt()
+    }
+}
+
+// MARK: - SelectFolderViewControllerDelegate
+extension NestCategoryViewController: SelectFolderViewControllerDelegate {
+    func selectFolderViewController(_ controller: SelectFolderViewController, didSelectFolder folder: String) {
+        Task {
+            do {
+                guard let nestService = entryRepository as? NestService else {
+                    await MainActor.run {
+                        controller.dismiss(animated: true)
+                        self.showToast(text: "Only nest owners can move entries")
+                    }
+                    return
+                }
+                
+                let selectedEntriesArray = Array(selectedEntries)
+                
+                // Move each selected entry to the new folder
+                for entry in selectedEntriesArray {
+                    var updatedEntry = entry
+                    updatedEntry.category = folder
+                    try await nestService.updateEntry(updatedEntry)
+                }
+                
+                // Refresh entries from backend to ensure consistency
+                let refreshedEntries = try await nestService.refreshEntries()
+                
+                await MainActor.run {
+                    controller.dismiss(animated: true)
+                    
+                    // Update local entries with refreshed data
+                    self.handleLoadedEntries(refreshedEntries)
+                    
+                    // Exit edit mode and refresh UI
+                    self.isEditingMode = false
+                    self.selectedEntries.removeAll()
+                    self.refreshEmptyState()
+                    
+                    let entryCount = selectedEntriesArray.count
+                    let entryText = entryCount == 1 ? "entry" : "entries"
+                    self.showToast(text: "Moved \(entryCount) \(entryText) to \(folder)")
+                }
+            } catch {
+                await MainActor.run {
+                    controller.dismiss(animated: true)
+                    Logger.log(level: .error, category: .nestService, message: "Failed to move entries: \(error.localizedDescription)")
+                    self.showToast(text: "Failed to move entries")
+                }
+            }
+        }
+    }
+    
+    func selectFolderViewControllerDidCancel(_ controller: SelectFolderViewController) {
+        controller.dismiss(animated: true)
     }
 }
 
