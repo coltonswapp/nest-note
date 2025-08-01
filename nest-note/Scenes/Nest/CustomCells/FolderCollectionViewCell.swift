@@ -210,19 +210,12 @@ class FolderCollectionViewCell: UICollectionViewCell {
         iconImageView.image = data.image
         titleLabel.text = data.title
         
-        // Debug logging
-        print("🏷️ Configuring folder cell: '\(data.title)' with \(data.selectedCount) selected, \(data.itemCount) total")
-        
         // Show selection count if any entries are selected, otherwise show total item count
         if data.selectedCount > 0 {
             let entryText = data.selectedCount == 1 ? "selected" : "selected"
             subtitleLabel.text = "\(data.selectedCount) \(entryText)"
-            subtitleLabel.textColor = NNColors.primary
-            print("   → Showing selection count: '\(subtitleLabel.text ?? "nil")'")
         } else {
             subtitleLabel.text = "\(data.itemCount) items"
-            subtitleLabel.textColor = .secondaryLabel
-            print("   → Showing item count: '\(subtitleLabel.text ?? "nil")'")
         }
         
         addPaper(num: data.itemCount)

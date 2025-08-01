@@ -440,8 +440,35 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     
     func presentCategoryView(category: String) {
         guard let _ = nestService.currentNest else { return }
-        let categoryVC = NestCategoryViewController(category: category, entryRepository: NestService.shared)
-        navigationController?.pushViewController(categoryVC, animated: true)
+        
+        Task {
+            do {
+                // Use efficient combined fetch to get both entries and places
+                let (_, places) = try await nestService.fetchEntriesAndPlaces()
+                
+                await MainActor.run {
+                    let categoryVC = NestCategoryViewController(
+                        category: category,
+                        places: places,
+                        entryRepository: nestService,
+                        sessionVisibilityLevel: nil
+                    )
+                    navigationController?.pushViewController(categoryVC, animated: true)
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to fetch places for category view: \(error)")
+                // Fallback to empty places if fetch fails
+                await MainActor.run {
+                    let categoryVC = NestCategoryViewController(
+                        category: category,
+                        places: [],
+                        entryRepository: nestService,
+                        sessionVisibilityLevel: nil
+                    )
+                    navigationController?.pushViewController(categoryVC, animated: true)
+                }
+            }
+        }
     }
     
     @objc private func settingsButtonTapped() {

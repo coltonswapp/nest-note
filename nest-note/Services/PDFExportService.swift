@@ -18,11 +18,16 @@ class PDFExportService {
     
     static func generateSessionPDF(session: SessionItem, nestItem: NestItem, visibilityLevel: VisibilityLevel = .always, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
         // Pre-fetch all places for events if needed
-        var eventPlaces: [String: Place] = [:]
+        var eventPlaces: [String: PlaceItem] = [:]
         for event in events {
             if let placeID = event.placeID, !placeID.isEmpty {
-                if let place = await PlacesService.shared.getPlace(for: placeID) {
-                    eventPlaces[placeID] = place
+                do {
+                    if let place = try await NestService.shared.getPlace(for: placeID) {
+                        eventPlaces[placeID] = place
+                    }
+                } catch {
+                    print("PDFExport: Failed to fetch place for event '\(event.title)': \(error)")
+                    // Continue processing other events even if one place fetch fails
                 }
             }
         }
@@ -627,7 +632,7 @@ class PDFExportService {
         visibilityLevel: VisibilityLevel,
         allEntries: [BaseEntry],
         events: [SessionEvent],
-        eventPlaces: [String: Place],
+        eventPlaces: [String: PlaceItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         rightMargin: CGFloat,
@@ -758,7 +763,7 @@ class PDFExportService {
         return y
     }
     
-    private static func drawEventsSection(context: UIGraphicsPDFRendererContext, cgContext: CGContext, events: [SessionEvent], eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
+    private static func drawEventsSection(context: UIGraphicsPDFRendererContext, cgContext: CGContext, events: [SessionEvent], eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
         var y = currentY
         let bottomMargin: CGFloat = 60
         
@@ -820,7 +825,7 @@ class PDFExportService {
         return grouped
     }
     
-    private static func drawEventDateGroup(context: UIGraphicsPDFRendererContext, cgContext: CGContext, dateString: String, events: [SessionEvent], eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+    private static func drawEventDateGroup(context: UIGraphicsPDFRendererContext, cgContext: CGContext, dateString: String, events: [SessionEvent], eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
         var y = currentY
         
         // Date header
@@ -876,7 +881,7 @@ class PDFExportService {
         return titleHeight + timeHeight + placeHeight + 24 // padding
     }
     
-    private static func drawSingleEvent(cgContext: CGContext, event: SessionEvent, eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
+    private static func drawSingleEvent(cgContext: CGContext, event: SessionEvent, eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
         let startY = currentY
         var y = currentY
         let eventContentX = leftMargin + 8 // Align with entries and categories
@@ -956,7 +961,7 @@ class PDFExportService {
     private static func drawPlacesSection(
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
-        eventPlaces: [String: Place],
+        eventPlaces: [String: PlaceItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,

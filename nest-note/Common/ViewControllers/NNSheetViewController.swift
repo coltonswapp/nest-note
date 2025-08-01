@@ -229,6 +229,7 @@ class NNSheetViewController: NNViewController {
         
         UIView.animate(withDuration: 0.3) {
             self.containerBottomConstraint?.constant = -keyboardFrame.height + 24
+            self.onKeyboardShow()
             self.view.layoutIfNeeded()
         }
     }
@@ -236,8 +237,17 @@ class NNSheetViewController: NNViewController {
     @objc private func keyboardWillHide(_ notification: NSNotification) {
         UIView.animate(withDuration: 0.3) {
             self.containerBottomConstraint?.constant = 0
+            self.onKeyboardHide()
             self.view.layoutIfNeeded()
         }
+    }
+    
+    func onKeyboardShow() {
+        
+    }
+    
+    func onKeyboardHide() {
+        
     }
     
     @objc func dismissViewController() {

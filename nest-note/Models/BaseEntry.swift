@@ -7,8 +7,9 @@
 
 import Foundation
 
-class BaseEntry: Codable, Hashable {
+class BaseEntry: BaseItem, Codable, Hashable {
     let id: String
+    let type: ItemType = .entry
     var title: String
     var content: String
     var category: String

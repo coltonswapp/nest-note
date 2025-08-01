@@ -17,6 +17,7 @@ class SelectFolderViewController: UIViewController {
     private let entryRepository: EntryRepository
     private let currentCategory: String
     private let selectedEntries: [BaseEntry]
+    private let selectedPlaces: [PlaceItem]
     weak var delegate: SelectFolderViewControllerDelegate?
     
     private var collectionView: UICollectionView!
@@ -48,10 +49,11 @@ class SelectFolderViewController: UIViewController {
         }
     }
     
-    init(entryRepository: EntryRepository, currentCategory: String, selectedEntries: [BaseEntry]) {
+    init(entryRepository: EntryRepository, currentCategory: String, selectedEntries: [BaseEntry], selectedPlaces: [PlaceItem] = []) {
         self.entryRepository = entryRepository
         self.currentCategory = currentCategory
         self.selectedEntries = selectedEntries
+        self.selectedPlaces = selectedPlaces
         super.init(nibName: nil, bundle: nil)
         self.title = "Move to Folder"
     }
@@ -159,7 +161,16 @@ class SelectFolderViewController: UIViewController {
     private func setupInstructionLabel() {
         instructionLabel = BlurBackgroundLabel(with: .systemThickMaterial)
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
-        instructionLabel.text = "Select a folder to move \(selectedEntries.count) \(selectedEntries.count == 1 ? "entry" : "entries") to."
+        let totalItems = selectedEntries.count + selectedPlaces.count
+        let itemDescriptor: String
+        if selectedEntries.count > 0 && selectedPlaces.count > 0 {
+            itemDescriptor = "items"
+        } else if selectedEntries.count > 0 {
+            itemDescriptor = selectedEntries.count == 1 ? "entry" : "entries"
+        } else {
+            itemDescriptor = selectedPlaces.count == 1 ? "place" : "places"
+        }
+        instructionLabel.text = "Select a folder to move \(totalItems) \(itemDescriptor) to."
         instructionLabel.font = .bodyL
         instructionLabel.textColor = .secondaryLabel
         

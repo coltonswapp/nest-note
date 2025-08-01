@@ -66,20 +66,22 @@ final class PlaceListCell: UICollectionViewCell {
         ])
     }
     
-    func configure(with place: Place) {
+    func configure(with place: PlaceItem) {
         aliasLabel.text = place.alias
         addressLabel.text = place.address
         
-        Task {
-            do {
-                let image = try await PlacesService.shared.loadImages(for: place)
-                if aliasLabel.text == place.alias {  // Ensure cell hasn't been reused
-                    thumbnailImageView.image = image
-                }
-            } catch {
-                thumbnailImageView.image = UIImage(systemName: "photo.fill")
-            }
-        }
+//        Task {
+//            do {
+//                // TODO: Implement image loading in NestService
+//                // let image = try await NestService.shared.loadImages(for: place)
+//                let image: UIImage? = nil // Placeholder until image loading is implemented
+//                if aliasLabel.text == place.alias {  // Ensure cell hasn't been reused
+//                    thumbnailImageView.image = image
+//                }
+//            } catch {
+//                thumbnailImageView.image = UIImage(systemName: "photo.fill")
+//            }
+//        }
     }
     
     override func prepareForReuse() {

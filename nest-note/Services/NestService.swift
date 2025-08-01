@@ -6,21 +6,41 @@
 
 import Foundation
 import FirebaseFirestore
+import FirebaseStorage
+import UIKit
+import CoreImage
+import CoreLocation
 
 final class NestService: EntryRepository {
     
     // MARK: - Properties
     static let shared = NestService()
     private let db = Firestore.firestore()
+    private let storage = Storage.storage()
+    private lazy var storageRef = Storage.storage(url: "gs://nest-note-21a2a.firebasestorage.app").reference()
+    
+    // Cache for place image assets - following PlacesService pattern
+    private var imageAssets: [String: UIImageAsset] = [:]
     
     @Published private(set) var currentNest: NestItem? {
         didSet {
             Logger.log(level: .info, category: .nestService, message: "Current nest set, id: \(currentNest?.id)")
+            // Update ItemRepository when nest changes
+            if let nestId = currentNest?.id {
+                itemRepository = FirebaseItemRepository(nestId: nestId)
+            } else {
+                itemRepository = nil
+            }
+            // Clear image cache when switching nests - following PlacesService pattern
+            clearImageCache()
         }
     }
     @Published private(set) var isOwner: Bool = false
     
-    // Add cached entries
+    // MARK: - ItemRepository Integration
+    private var itemRepository: ItemRepository?
+    
+    // Add cached entries (maintained for backward compatibility)
     private var cachedEntries: [String: [BaseEntry]]?
     // Cache for saved sitters
     private var cachedSavedSitters: [SavedSitter]?
@@ -69,14 +89,12 @@ final class NestService: EntryRepository {
         isOwner = false
         clearEntriesCache()
         clearSavedSittersCache()
-        PlacesService.shared.reset()
     }
     
     // MARK: - Current Nest Methods
     func setCurrentNest(_ nest: NestItem) {
         Logger.log(level: .info, category: .nestService, message: "Setting current nest to: \(nest.name)")
         self.currentNest = nest
-        PlacesService.shared.selectedNestId = nest.id
     }
     
     func fetchAndSetCurrentNest(nestId: String) async throws {
@@ -128,24 +146,34 @@ final class NestService: EntryRepository {
     
     // MARK: - EntryRepository Implementation
     func fetchEntries() async throws -> [String: [BaseEntry]] {
+        Logger.log(level: .info, category: .nestService, message: "fetchEntries() called - using ItemRepository")
+        
         // Return cached entries if available
         if let cachedEntries = cachedEntries {
+            Logger.log(level: .info, category: .nestService, message: "Returning \(cachedEntries.values.flatMap { $0 }.count) cached entries")
             return cachedEntries
         }
         
-        guard let nestId = currentNest?.id else {
+        guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
-        let snapshot = try await db.collection("nests").document(nestId).collection("entries").getDocuments()
-        let entries = try snapshot.documents.map { try $0.data(as: BaseEntry.self) }
+        // Fetch all items using ItemRepository
+        let allItems = try await itemRepository.fetchItems()
+        
+        // Filter to only entry items and convert to BaseEntry
+        let entries = allItems.compactMap { item -> BaseEntry? in
+            guard item.type == .entry, let entryItem = item as? EntryItem else { return nil }
+            return entryItem.toBaseEntry()
+        }
         
         // Group entries by category
         let groupedEntries = Dictionary(grouping: entries) { $0.category }
         
-        // Cache the entries
+        // Cache the entries for backward compatibility
         self.cachedEntries = groupedEntries
         
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(entries.count) entries using ItemRepository")
         return groupedEntries
     }
     
@@ -205,7 +233,9 @@ final class NestService: EntryRepository {
     
     // MARK: - Entry Methods
     func createEntry(_ entry: BaseEntry) async throws {
-        guard let nestId = currentNest?.id else {
+        Logger.log(level: .info, category: .nestService, message: "createEntry() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
@@ -219,10 +249,13 @@ final class NestService: EntryRepository {
         }
         
         do {
-            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-            try await docRef.setData(try Firestore.Encoder().encode(entry))
+            // Convert BaseEntry to EntryItem
+            let entryItem = EntryItem(from: entry)
             
-            // Update cache if it exists
+            // Use ItemRepository for creation
+            try await itemRepository.createItem(entryItem)
+            
+            // Update backward compatibility cache
             if var cachedEntries = cachedEntries {
                 if var categoryEntries = cachedEntries[entry.category] {
                     categoryEntries.append(entry)
@@ -247,15 +280,20 @@ final class NestService: EntryRepository {
     }
     
     func updateEntry(_ entry: BaseEntry) async throws {
-        guard let nestId = currentNest?.id else {
+        Logger.log(level: .info, category: .nestService, message: "updateEntry() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
         do {
-            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-            try await docRef.setData(try Firestore.Encoder().encode(entry))
+            // Convert BaseEntry to EntryItem
+            let entryItem = EntryItem(from: entry)
             
-            // Update cache if it exists
+            // Use ItemRepository for update
+            try await itemRepository.updateItem(entryItem)
+            
+            // Update backward compatibility cache
             if var cachedEntries = cachedEntries {
                 if var categoryEntries = cachedEntries[entry.category] {
                     if let index = categoryEntries.firstIndex(where: { $0.id == entry.id }) {
@@ -266,7 +304,7 @@ final class NestService: EntryRepository {
                 }
             }
             
-            Logger.log(level: .info, category: .nestService, message: "Entry updated successfully in Firestore: \(entry.title)")
+            Logger.log(level: .info, category: .nestService, message: "Entry updated successfully: \(entry.title)")
             
             // Log success event
             Tracker.shared.track(.entryUpdated)
@@ -278,13 +316,15 @@ final class NestService: EntryRepository {
     }
     
     func deleteEntry(_ entry: BaseEntry) async throws {
-        guard let nestId = currentNest?.id else {
+        Logger.log(level: .info, category: .nestService, message: "deleteEntry() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
         do {
-            let docRef = db.collection("nests").document(nestId).collection("entries").document(entry.id)
-            try await docRef.delete()
+            // Use ItemRepository for deletion
+            try await itemRepository.deleteItem(id: entry.id)
             
             // Update cache if it exists
             if var updatedNest = currentNest {
@@ -307,6 +347,532 @@ final class NestService: EntryRepository {
     func clearEntriesCache() {
         Logger.log(level: .info, category: .nestService, message: "Clearing entries cache")
         cachedEntries = nil
+        // Also clear ItemRepository cache
+        itemRepository?.clearItemsCache()
+    }
+    
+    // MARK: - Generic CRUD Methods for All BaseItem Types
+    
+    /// Generic method to create any BaseItem type
+    func createItem<T: BaseItem>(_ item: T) async throws {
+        Logger.log(level: .info, category: .nestService, message: "createItem() called for type: \(item.type.rawValue)")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        try await itemRepository.createItem(item)
+        
+        // Add item to cache instead of clearing entire cache
+        updateItemInCache(item)
+        // Clear entries cache to ensure fresh data (backward compatibility)
+        clearEntriesCache()
+        
+        Logger.log(level: .info, category: .nestService, message: "Item created successfully: \(item.title) (\(item.type.rawValue))")
+    }
+    
+    /// Generic method to update any BaseItem type  
+    func updateItem<T: BaseItem>(_ item: T) async throws {
+        Logger.log(level: .info, category: .nestService, message: "updateItem() called for type: \(item.type.rawValue)")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        try await itemRepository.updateItem(item)
+        
+        // Update item in cache instead of clearing entire cache
+        updateItemInCache(item)
+        // Clear entries cache to ensure fresh data (backward compatibility)
+        clearEntriesCache()
+        
+        Logger.log(level: .info, category: .nestService, message: "Item updated successfully: \(item.title) (\(item.type.rawValue))")
+    }
+    
+    /// Generic method to delete any BaseItem type by ID
+    func deleteItem(id: String) async throws {
+        Logger.log(level: .info, category: .nestService, message: "deleteItem() called for id: \(id)")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        try await itemRepository.deleteItem(id: id)
+        
+        // Remove item from cache instead of clearing entire cache
+        removeItemFromCache(id: id)
+        // Clear entries cache to ensure fresh data (backward compatibility)
+        clearEntriesCache()
+        
+        Logger.log(level: .info, category: .nestService, message: "Item deleted successfully: \(id)")
+    }
+    
+    /// Fetch all items of any type
+    // MARK: - Unified Item Caching
+    private var cachedItems: [BaseItem] = []
+    private var lastFetchTime: Date?
+    private let cacheValidityDuration: TimeInterval = 600 // 10 minutes - more reasonable for navigation
+    
+    private var isCacheValid: Bool {
+        guard let lastFetch = lastFetchTime else { return false }
+        return Date().timeIntervalSince(lastFetch) < cacheValidityDuration
+    }
+    
+    func fetchAllItems() async throws -> [BaseItem] {
+        Logger.log(level: .info, category: .nestService, message: "fetchAllItems() called")
+        
+        // Log cache status for debugging
+        if let lastFetch = lastFetchTime {
+            let cacheAge = Date().timeIntervalSince(lastFetch)
+            Logger.log(level: .info, category: .nestService, message: "Cache age: \(cacheAge)s, valid: \(isCacheValid), items: \(cachedItems.count)")
+        } else {
+            Logger.log(level: .info, category: .nestService, message: "No cache data available")
+        }
+        
+        // Return cached items if cache is still valid
+        if isCacheValid && !cachedItems.isEmpty {
+            Logger.log(level: .info, category: .nestService, message: "✅ CACHE HIT: Returning \(cachedItems.count) cached items")
+            return cachedItems
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "🌐 CACHE MISS: Fetching fresh data from backend")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        let items = try await itemRepository.fetchItems()
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(items.count) total items from repository")
+        
+        // Update cache
+        cachedItems = items
+        lastFetchTime = Date()
+        
+        return items
+    }
+    
+    /// Invalidate the cache (call when items are created/updated/deleted)
+    func invalidateItemsCache() {
+        Logger.log(level: .info, category: .nestService, message: "🗑️ CACHE INVALIDATED: Clearing \(cachedItems.count) cached items")
+        cachedItems = []
+        lastFetchTime = nil
+    }
+    
+    /// Add or update an item in the cache
+    private func updateItemInCache<T: BaseItem>(_ item: T) {
+        // Remove existing item with same ID if it exists
+        cachedItems.removeAll { $0.id == item.id }
+        // Add the updated item
+        cachedItems.append(item)
+        Logger.log(level: .info, category: .nestService, message: "Updated item in cache: \(item.id)")
+    }
+    
+    /// Remove an item from the cache
+    private func removeItemFromCache(id: String) {
+        let initialCount = cachedItems.count
+        cachedItems.removeAll { $0.id == id }
+        let removedCount = initialCount - cachedItems.count
+        Logger.log(level: .info, category: .nestService, message: "Removed \(removedCount) item(s) from cache with id: \(id)")
+    }
+    
+    /// Bulk update multiple items in the cache
+    private func updateItemsInCache<T: BaseItem>(_ items: [T]) {
+        for item in items {
+            updateItemInCache(item)
+        }
+        Logger.log(level: .info, category: .nestService, message: "Bulk updated \(items.count) items in cache")
+    }
+    
+    /// Fetch items filtered by type (uses cached data when possible)
+    func fetchItems<T: BaseItem>(ofType type: ItemType) async throws -> [T] {
+        Logger.log(level: .info, category: .nestService, message: "fetchItems() called for type: \(type.rawValue)")
+        
+        let allItems = try await fetchAllItems() // This uses cache when valid
+        let filteredItems = allItems.compactMap { item -> T? in
+            guard item.type == type else { return nil }
+            return item as? T
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Filtered \(filteredItems.count) items of type: \(type.rawValue)")
+        return filteredItems
+    }
+    
+    // MARK: - Folder Contents Structure
+    struct FolderContents {
+        let entries: [BaseEntry]
+        let places: [PlaceItem]
+        let subfolders: [FolderData]
+        let allPlaces: [PlaceItem] // For passing to child folders
+    }
+    
+    /// Fetch all contents for a specific folder/category
+    func fetchFolderContents(for category: String) async throws -> FolderContents {
+        Logger.log(level: .info, category: .nestService, message: "📁 fetchFolderContents() called for category: '\(category)'")
+        
+        // Get all data in one efficient call - use cached data when possible
+        let (allGroupedEntries, allPlaces) = try await fetchEntriesAndPlaces()
+        let categories = try await fetchCategories()
+        
+        Logger.log(level: .info, category: .nestService, message: "📁 fetchFolderContents data gathered - using cached data when possible")
+        
+        // Filter entries for this exact category
+        let entries: [BaseEntry]
+        if category.contains("/") {
+            // For folder paths, find entries that match this exact path
+            var matchingEntries: [BaseEntry] = []
+            for (_, categoryEntries) in allGroupedEntries {
+                for entry in categoryEntries {
+                    if entry.category == category {
+                        matchingEntries.append(entry)
+                    }
+                }
+            }
+            entries = matchingEntries
+        } else {
+            // For root categories, use the grouped entries
+            entries = allGroupedEntries[category] ?? []
+        }
+        
+        // Filter places for this category
+        let places = allPlaces.filter { $0.category == category }
+        
+        // Build subfolders
+        let subfolders = buildSubfolders(for: category, allEntries: allGroupedEntries, allPlaces: allPlaces, categories: categories)
+        
+        Logger.log(level: .info, category: .nestService, message: "Folder contents for '\(category)': \(entries.count) entries, \(places.count) places, \(subfolders.count) subfolders")
+        
+        return FolderContents(
+            entries: entries,
+            places: places, 
+            subfolders: subfolders,
+            allPlaces: allPlaces
+        )
+    }
+    
+    private func buildSubfolders(for category: String, allEntries: [String: [BaseEntry]], allPlaces: [PlaceItem], categories: [NestCategory]) -> [FolderData] {
+        var folderItems: [FolderData] = []
+        var folderCounts: [String: Int] = [:]
+        var currentLevelFolders: Set<String> = []
+        
+        // Count entries in subfolders
+        for (_, categoryEntries) in allEntries {
+            for entry in categoryEntries {
+                let folderPath = entry.category
+                
+                // Check if this entry belongs to a subfolder of the current category
+                if folderPath.hasPrefix(category + "/") {
+                    let remainingPath = String(folderPath.dropFirst(category.count + 1))
+                    
+                    if !remainingPath.isEmpty {
+                        let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                        let nextFolderPath = "\(category)/\(nextFolderComponent)"
+                        currentLevelFolders.insert(nextFolderPath)
+                        folderCounts[nextFolderPath, default: 0] += 1
+                    }
+                }
+            }
+        }
+        
+        // Count places in subfolders
+        for place in allPlaces {
+            let folderPath = place.category
+            
+            if folderPath.hasPrefix(category + "/") {
+                let remainingPath = String(folderPath.dropFirst(category.count + 1))
+                
+                if !remainingPath.isEmpty {
+                    let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                    let nextFolderPath = "\(category)/\(nextFolderComponent)"
+                    currentLevelFolders.insert(nextFolderPath)
+                    folderCounts[nextFolderPath, default: 0] += 1
+                }
+            }
+        }
+        
+        // Add empty folders from categories
+        for nestCategory in categories {
+            let folderPath = nestCategory.name
+            
+            if folderPath.hasPrefix(category + "/") {
+                let remainingPath = String(folderPath.dropFirst(category.count + 1))
+                
+                if !remainingPath.isEmpty && !remainingPath.contains("/") {
+                    currentLevelFolders.insert(folderPath)
+                    if folderCounts[folderPath] == nil {
+                        folderCounts[folderPath] = 0
+                    }
+                }
+            }
+        }
+        
+        // Create FolderData objects
+        for folderPath in currentLevelFolders.sorted() {
+            let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
+            let matchingCategory = categories.first { $0.name == folderPath }
+            let iconName = matchingCategory?.symbolName ?? "folder"
+            let image = UIImage(systemName: iconName)
+            
+            let folderData = FolderData(
+                title: folderName,
+                image: image,
+                itemCount: folderCounts[folderPath] ?? 0,
+                fullPath: folderPath,
+                category: matchingCategory
+            )
+            folderItems.append(folderData)
+        }
+        
+        return folderItems
+    }
+    
+    // MARK: - Type-Specific Convenience Methods for Places
+    
+    /// Fetch all places (PlaceItems)
+    func fetchPlaces() async throws -> [PlaceItem] {
+        Logger.log(level: .info, category: .nestService, message: "fetchPlaces() called")
+        return try await fetchItems(ofType: .place)
+    }
+    
+    /// Fetch both entries and places in a single efficient call
+    func fetchEntriesAndPlaces() async throws -> (entries: [String: [BaseEntry]], places: [PlaceItem]) {
+        Logger.log(level: .info, category: .nestService, message: "📦 fetchEntriesAndPlaces() called - efficient single fetch")
+        
+        let allItems = try await fetchAllItems() // Single fetch with caching
+        
+        // Filter entries and convert EntryItem to BaseEntry for backward compatibility
+        let entryItems = allItems.compactMap { item -> BaseEntry? in
+            if let entryItem = item as? EntryItem {
+                return entryItem.toBaseEntry()
+            }
+            return item as? BaseEntry // Also support direct BaseEntry if any exist
+        }
+        let groupedEntries = Dictionary(grouping: entryItems) { $0.category }
+        
+        // Filter places
+        let placeItems = allItems.compactMap { $0 as? PlaceItem }
+        
+        Logger.log(level: .info, category: .nestService, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(placeItems.count) places")
+        return (entries: groupedEntries, places: placeItems)
+    }
+    
+    /// Create a new place
+    func createPlace(_ place: PlaceItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "createPlace() called: \(place.title)")
+        try await createItem(place)
+        // Cache already updated by createItem() - no need to invalidate
+    }
+    
+    /// Update an existing place
+    func updatePlace(_ place: PlaceItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "updatePlace() called: \(place.title)")
+        try await updateItem(place)
+        // Cache already updated by updateItem() - no need to invalidate
+    }
+    
+    /// Delete a place by ID
+    func deletePlace(id: String) async throws {
+        Logger.log(level: .info, category: .nestService, message: "deletePlace() called: \(id)")
+        try await deleteItem(id: id)
+        // Cache already updated by deleteItem() - no need to invalidate
+    }
+    
+    /// Delete a place by PlaceItem object
+    func deletePlace(_ place: PlaceItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "deletePlace() called for place: \(place.alias ?? place.title)")
+        
+        // Delete thumbnails first if they exist
+        if place.thumbnailURLs != nil {
+            do {
+                try await deleteThumbnails(for: place)
+                Logger.log(level: .info, category: .nestService, message: "Thumbnails deleted for place: \(place.id)")
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "Failed to delete thumbnails for place: \(error.localizedDescription)")
+                // Continue with place deletion even if thumbnail deletion fails
+            }
+        }
+        
+        try await deletePlace(id: place.id)
+    }
+    
+    /// Load images for a place from thumbnail URLs (patterned after working PlacesService)
+    func loadImages(for place: PlaceItem) async throws -> UIImage {
+        Logger.log(level: .debug, category: .nestService, message: "loadImages() called for place: \(place.alias ?? place.title)")
+        
+        // If the place has no thumbnails (temporary place), return a placeholder
+        guard let thumbnailURLs = place.thumbnailURLs else {
+            Logger.log(level: .debug, category: .nestService, message: "Place has no thumbnails, returning placeholder")
+            return UIImage(systemName: "mappin.circle") ?? UIImage()
+        }
+        
+        // Check cache first - exactly like working PlacesService
+        if let asset = imageAssets[place.id] {
+            Logger.log(level: .debug, category: .nestService, message: "Found cached image asset for place: \(place.alias ?? place.title)")
+            return asset.image(with: .current)
+        }
+        
+        Logger.log(level: .debug, category: .nestService, message: "Cache miss - loading images from URLs - Light: \(thumbnailURLs.light), Dark: \(thumbnailURLs.dark)")
+        
+        // Load both images concurrently - exactly like working PlacesService
+        async let lightImage = loadSingleImage(from: thumbnailURLs.light)
+        async let darkImage = loadSingleImage(from: thumbnailURLs.dark)
+        
+        // Wait for both to complete
+        let (light, dark) = try await (lightImage, darkImage)
+        
+        // Switch to main queue for image registration - matching working pattern
+        return await MainActor.run {
+            // Create a new UIImage with both variants, just like MapThumbnailGenerator
+            let asset = UIImageAsset()
+            
+            // Register light mode image first (important!)
+            asset.register(light, with: UITraitCollection(userInterfaceStyle: .light))
+            
+            // Then register dark mode variant
+            asset.register(dark, with: UITraitCollection(userInterfaceStyle: .dark))
+            
+            // Get the dynamic image with current traits (this is what MapThumbnailGenerator does)
+            let dynamicImage = asset.image(with: UITraitCollection.current)
+            
+            // Cache the asset for future use - following PlacesService pattern
+            self.imageAssets[place.id] = dynamicImage.imageAsset
+            Logger.log(level: .debug, category: .nestService, message: "Cached image asset and created dynamic image for place: \(place.alias ?? place.title)")
+            
+            return dynamicImage
+        }
+    }
+    
+    private func loadSingleImage(from urlString: String) async throws -> UIImage {
+        guard let imageURL = URL(string: urlString) else {
+            throw NestError.invalidImageURL
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: imageURL)
+        
+        guard let image = UIImage(data: data) else {
+            throw NestError.imageConversionFailed
+        }
+        
+        Logger.log(level: .debug, category: .nestService, message: "Loaded image from URL: \(urlString)")
+        return image
+    }
+    
+    /// Clear the image cache - following PlacesService pattern
+    func clearImageCache() {
+        Logger.log(level: .info, category: .nestService, message: "Clearing image cache")
+        imageAssets.removeAll()
+    }
+    
+    /// Fetch places with basic filtering
+    func fetchPlacesWithFilter(includeTemporary: Bool = true) async throws -> [PlaceItem] {
+        Logger.log(level: .info, category: .nestService, message: "fetchPlacesWithFilter() called with includeTemporary: \(includeTemporary)")
+        
+        let placeItems = try await fetchPlaces()
+        var filteredPlaces = placeItems
+        
+        // Filter out temporary places if not requested
+        if !includeTemporary {
+            filteredPlaces = filteredPlaces.filter { !$0.isTemporary }
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Returning \(filteredPlaces.count) places (\(filteredPlaces.filter(\.isTemporary).count) temporary)")
+        return filteredPlaces
+    }
+    
+    /// Get a specific place by ID
+    func getPlace(for id: String) async throws -> PlaceItem? {
+        Logger.log(level: .info, category: .nestService, message: "getPlace() called for id: \(id)")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        // Try ItemRepository first
+        if let item = try await itemRepository.fetchItem(id: id),
+           let placeItem = item as? PlaceItem {
+            return placeItem
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Place not found: \(id)")
+        return nil
+    }
+    
+    /// Create a temporary place in memory (not saved to Firestore)
+    func createTemporaryPlaceInMemory(address: String, coordinate: CLLocationCoordinate2D) -> PlaceItem {
+        Logger.log(level: .info, category: .nestService, message: "createTemporaryPlaceInMemory() called")
+        
+        // Come back to this? 7/30/26
+        let placeItem = PlaceItem(
+            nestId: currentNest?.id ?? "temp-nest",
+            alias: nil, // No alias = temporary
+            address: address,
+            coordinate: coordinate,
+            isTemporary: true
+        )
+        
+        Logger.log(level: .info, category: .nestService, message: "Created temporary place in memory: \(placeItem.id)")
+        return placeItem
+    }
+    
+    /// Create a place with convenient signature
+    func createPlace(alias: String, 
+                    address: String, 
+                    coordinate: CLLocationCoordinate2D, 
+                    category: String = "Places",
+                    thumbnailAsset: UIImageAsset? = nil) async throws -> PlaceItem {
+        Logger.log(level: .info, category: .nestService, message: "createPlace() called with alias: \(alias), category: \(category)")
+        
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        // Generate ID for the place first
+        let placeID = UUID().uuidString
+        
+        // Handle thumbnailAsset upload first if provided
+        var thumbnailURLs: PlaceItem.ThumbnailURLs? = nil
+        if let thumbnailAsset = thumbnailAsset {
+            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Starting thumbnail upload for place ID: \(placeID)")
+            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: ThumbnailAsset received: \(thumbnailAsset)")
+            
+            do {
+                // Upload thumbnails and get URLs using the actual place ID
+                thumbnailURLs = try await uploadThumbnails(placeID: placeID, from: thumbnailAsset)
+                
+                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Upload completed successfully!")
+                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Light URL: \(thumbnailURLs?.light ?? "nil")")
+                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Dark URL: \(thumbnailURLs?.dark ?? "nil")")
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "📷 THUMBNAIL DEBUG: Upload FAILED with error: \(error)")
+                Logger.log(level: .error, category: .nestService, message: "📷 THUMBNAIL DEBUG: Error details: \(error.localizedDescription)")
+                // Continue without thumbnails if upload fails
+            }
+        } else {
+            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: No thumbnailAsset provided - place will be created without thumbnails")
+        }
+        
+        // Create PlaceItem with thumbnails if available
+        let placeItem = PlaceItem(
+            id: placeID,
+            nestId: nestId,
+            category: category,
+            alias: alias,
+            address: address,
+            coordinate: coordinate,
+            thumbnailURLs: thumbnailURLs,
+            isTemporary: false
+        )
+        
+        Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Created PlaceItem with thumbnailURLs: \(placeItem.thumbnailURLs != nil ? "YES" : "NO")")
+        if let urls = placeItem.thumbnailURLs {
+            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: PlaceItem light URL: \(urls.light)")
+            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: PlaceItem dark URL: \(urls.dark)")
+        }
+        
+        // Create using ItemRepository
+        try await createPlace(placeItem)
+        
+        Logger.log(level: .info, category: .nestService, message: "Place created successfully: \(placeItem.alias ?? placeItem.title) with thumbnails: \(thumbnailURLs != nil)")
+        return placeItem
     }
     
     // Add this method to find entries older than a specified timeframe
@@ -336,6 +902,9 @@ extension NestService {
         case noCurrentNest
         case entryLimitReached
         case folderDepthExceeded
+        case imageConversionFailed
+        case imageUploadFailed
+        case invalidImageURL
         
         var errorDescription: String? {
             switch self {
@@ -347,6 +916,12 @@ extension NestService {
                 return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries."
             case .folderDepthExceeded:
                 return "Folder depth cannot exceed 3 levels. Please create your folder in a shallower location."
+            case .imageConversionFailed:
+                return "Failed to convert image to JPEG format"
+            case .imageUploadFailed:
+                return "Failed to upload image to storage"
+            case .invalidImageURL:
+                return "Invalid image URL"
             }
         }
     }
@@ -759,6 +1334,153 @@ extension NestService {
             // Log failure event
             Tracker.shared.track(.pinnedCategoriesUpdated, result: false, error: error.localizedDescription)
             throw error
+        }
+    }
+    
+    // MARK: - Thumbnail Upload Methods
+    
+    private func uploadThumbnails(placeID: String, from asset: UIImageAsset) async throws -> PlaceItem.ThumbnailURLs {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        let imageId = placeID
+        let lightRef = storageRef.child("nests/\(nestId)/places/\(imageId)_light.jpg")
+        let darkRef = storageRef.child("nests/\(nestId)/places/\(imageId)_dark.jpg")
+        
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Uploading thumbnails to nest: \(nestId)")
+        
+        // FORCE the trait collections we want!
+        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+        
+        // Get images with FORCED trait collections
+        let lightImage = asset.image(with: lightTraits)
+        let darkImage = asset.image(with: darkTraits)
+            
+        
+        // Convert to JPEG data
+        guard let lightData = lightImage.jpegData(compressionQuality: 0.7),
+              let darkData = darkImage.jpegData(compressionQuality: 0.7) else {
+            throw NestError.imageConversionFailed
+        }
+        
+        // Debug logging
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Light image data size: \(lightData.count) bytes")
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Dark image data size: \(darkData.count) bytes")
+        
+        let lightHash = lightData.hashValue
+        let darkHash = darkData.hashValue
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Light image hash: \(lightHash)")
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Dark image hash: \(darkHash)")
+        Logger.log(level: .debug, category: .nestService, 
+            message: "Images are different: \(lightHash != darkHash)")
+        
+        // Upload both images
+        let lightURL = try await uploadImage(data: lightData, to: lightRef)
+        let darkURL = try await uploadImage(data: darkData, to: darkRef)
+        
+        return PlaceItem.ThumbnailURLs(light: lightURL, dark: darkURL)
+    }
+    
+    private func uploadImage(data: Data, to ref: StorageReference) async throws -> String {
+        return try await withCheckedThrowingContinuation { continuation in
+            let metadata = StorageMetadata()
+            metadata.contentType = "image/jpeg"
+            
+            // Create the upload task
+            let uploadTask = ref.putData(data, metadata: metadata) { metadata, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard metadata != nil else {
+                    continuation.resume(throwing: NestError.imageUploadFailed)
+                    return
+                }
+                
+                // Get download URL after successful upload
+                ref.downloadURL { url, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    
+                    guard let downloadURL = url else {
+                        continuation.resume(throwing: NestError.imageUploadFailed)
+                        return
+                    }
+                    
+                    continuation.resume(returning: downloadURL.absoluteString)
+                }
+            }
+            
+            // Start the upload
+            uploadTask.resume()
+        }
+    }
+    
+    private func deleteThumbnails(for place: PlaceItem) async throws {
+        guard let nestId = currentNest?.id else {
+            throw NestError.noCurrentNest
+        }
+        
+        let lightRef = storageRef.child("nests/\(nestId)/places/\(place.id)_light.jpg")
+        let darkRef = storageRef.child("nests/\(nestId)/places/\(place.id)_dark.jpg")
+        
+        Logger.log(level: .debug, category: .nestService, message: "Light ref to delete: \(lightRef.fullPath)")
+        Logger.log(level: .debug, category: .nestService, message: "Dark ref to delete: \(darkRef.fullPath)")
+        
+        do {
+            // Delete both thumbnails concurrently, but handle errors individually
+            async let lightDelete: Void = {
+                do {
+                    try await lightRef.delete()
+                } catch {
+                    Logger.log(
+                        level: .error,
+                        category: .nestService,
+                        message: "Failed to delete light thumbnail: \(error.localizedDescription)"
+                    )
+                    // Don't throw - we want to continue with dark thumbnail deletion
+                }
+            }()
+            
+            async let darkDelete: Void = {
+                do {
+                    try await darkRef.delete()
+                } catch {
+                    Logger.log(
+                        level: .error,
+                        category: .nestService,
+                        message: "Failed to delete dark thumbnail: \(error.localizedDescription)"
+                    )
+                    // Don't throw - we want to continue with the update
+                }
+            }()
+            
+            // Wait for both operations to complete
+            _ = try await (lightDelete, darkDelete)
+            
+            Logger.log(
+                level: .info,
+                category: .nestService,
+                message: "Successfully deleted thumbnails"
+            )
+        } catch {
+            Logger.log(
+                level: .error,
+                category: .nestService,
+                message: "Error during thumbnail deletion: \(error.localizedDescription)"
+            )
+            // Continue without throwing - we don't want thumbnail deletion failures 
+            // to prevent place updates/deletions
         }
     }
 } 

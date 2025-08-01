@@ -5,12 +5,12 @@ import RevenueCat
 import RevenueCatUI
 
 protocol PlaceSelectionDelegate: AnyObject {
-    func didSelectPlace(_ place: Place)
+    func didSelectPlace(_ place: PlaceItem)
 }
 
 protocol PlaceListViewControllerDelegate: AnyObject {
-    func placeListViewController(didUpdatePlace place: Place)
-    func placeListViewController(didDeletePlace place: Place)
+    func placeListViewController(didUpdatePlace place: PlaceItem)
+    func placeListViewController(didDeletePlace place: PlaceItem)
 }
 
 protocol TemporaryPlaceSelectionDelegate: AnyObject {
@@ -21,7 +21,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
     
     // MARK: - Properties
     private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Section, Place>!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, PlaceItem>!
     private var showTemporaryPlaces: Bool = false
     private var chooseOnMapButton: NNPrimaryLabeledButton?
     private var newPlaceButton: NNPrimaryLabeledButton?
@@ -52,6 +52,9 @@ final class PlaceListViewController: NNViewController, NNTippable {
     
     private var emptyStateView: NNEmptyStateView?
     
+    // Replace PlacesService.shared.places dependency
+    private var places: [PlaceItem] = []
+    
     init(isSelecting: Bool = false, sitterViewService: SitterViewService? = nil) {
         super.init(nibName: nil, bundle: nil)
         self.isSelecting = isSelecting
@@ -68,7 +71,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
         
         // Enable large titles
         navigationController?.navigationBar.prefersLargeTitles = false
-        fetchPlaces()
+//        fetchPlaces()
     }
     
     // MARK: - Setup
@@ -243,7 +246,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
     }
     
     private func configureDataSource() {
-        dataSource = UICollectionViewDiffableDataSource<Section, Place>(
+        dataSource = UICollectionViewDiffableDataSource<Section, PlaceItem>(
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, place in
             guard let self = self else { return UICollectionViewCell() }
@@ -263,42 +266,40 @@ final class PlaceListViewController: NNViewController, NNTippable {
     }
     
     // MARK: - Data Loading
-    private func fetchPlaces() {
-        isLoading = true
-        
-        Task {
-            do {
-                // Check if we're in sitter mode and need visibility filtering
-                if let sitterService = sitterViewService {
-                    // Use SitterViewService to get filtered places
-                    let filteredPlaces = try await sitterService.fetchNestPlaces()
-                    // Update PlacesService's local cache with the filtered results
-                    PlacesService.shared.setPlaces(filteredPlaces)
-                } else {
-                    // Owner mode - fetch all places including temporary ones
-                    _ = try await PlacesService.shared.fetchPlaces(includeTemporary: true)
-                }
-                applySnapshot()
-            } catch {
-                Logger.log(level: .error, category: .placesService, 
-                    message: "Failed to fetch places: \(error.localizedDescription)")
-                
-                // Show error state in the UI
-                DispatchQueue.main.async { [weak self] in
-                    self?.showToast(text: "Failed to load places", sentiment: .negative)
-                }
-            }
-            
-            isLoading = false
-        }
-    }
+//    private func fetchPlaces() {
+//        isLoading = true
+//        
+//        Task {
+//            do {
+//                // Check if we're in sitter mode and need visibility filtering
+//                if let sitterService = sitterViewService {
+//                    // Use SitterViewService to get filtered places
+//                    self.places = try await sitterService.fetchNestPlaces()
+//                } else {
+//                    // Owner mode - fetch all places including temporary ones using NestService
+//                    self.places = try await NestService.shared.fetchPlacesWithFilter(includeTemporary: true)
+//                }
+//                applySnapshot()
+//            } catch {
+//                Logger.log(level: .error, category: .placesService, 
+//                    message: "Failed to fetch places: \(error.localizedDescription)")
+//                
+//                // Show error state in the UI
+//                DispatchQueue.main.async { [weak self] in
+//                    self?.showToast(text: "Failed to load places", sentiment: .negative)
+//                }
+//            }
+//            
+//            isLoading = false
+//        }
+//    }
     
     private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Place>()
+        var snapshot = NSDiffableDataSourceSnapshot<Section, PlaceItem>()
         snapshot.appendSections([.main])
         
         // Only show non-temporary places in the list view
-        let placesToShow = PlacesService.shared.places.filter { !$0.isTemporary }
+        let placesToShow = places.filter { !$0.isTemporary }
         snapshot.appendItems(placesToShow)
         
         Task { @MainActor in
@@ -312,7 +313,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
         Task {
             let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
             if !hasUnlimitedPlaces {
-                let currentPlaceCount = PlacesService.shared.places.filter { !$0.isTemporary }.count
+                let currentPlaceCount = places.filter { !$0.isTemporary }.count
                 if currentPlaceCount >= 3 {
                     await MainActor.run {
                         self.showPlaceLimitAlert()
@@ -379,7 +380,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
             return
         }
         
-        let isEmpty = PlacesService.shared.places.isEmpty
+        let isEmpty = places.isEmpty
         emptyStateView?.isHidden = !isEmpty
         collectionView.isHidden = isEmpty
         
@@ -418,23 +419,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
         navigationController?.pushViewController(selectPlaceVC, animated: true)
     }
     
-    private func showPlaceLimitAlert() {
-        let alert = UIAlertController(
-            title: ProFeature.unlimitedPlaces.alertTitle,
-            message: ProFeature.unlimitedPlaces.alertMessage,
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
-            let paywallViewController = PaywallViewController()
-            self.present(paywallViewController, animated: true)
-        })
-        
-        present(alert, animated: true)
-    }
-    
-    private func flashCell(for place: Place) {
+    private func flashCell(for place: PlaceItem) {
         guard let indexPath = dataSource?.indexPath(for: place),
               let cell = collectionView.cellForItem(at: indexPath) as? PlaceCell else { return }
         
@@ -507,22 +492,22 @@ extension PlaceListViewController: UICollectionViewDelegate {
 
 // MARK: - PlaceListViewControllerDelegate
 extension PlaceListViewController: PlaceListViewControllerDelegate {
-    func placeListViewController(didUpdatePlace place: Place) {
-        print("Attempting to update place: \(place.alias)")
+    func placeListViewController(didUpdatePlace place: PlaceItem) {
+        print("Attempting to update place: \(place.alias ?? "")")
         
         if navigationController?.viewControllers.count != 1 {
             navigationController?.popToRootViewController(animated: true)
         }
         
         // Check if this is a new place being added or an existing place being updated
-        let isNewPlace = !PlacesService.shared.places.contains { $0.id == place.id }
+        let isNewPlace = !places.contains { $0.id == place.id }
         
         // Create a fresh snapshot with the updated data
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Place>()
+        var snapshot = NSDiffableDataSourceSnapshot<Section, PlaceItem>()
         snapshot.appendSections([.main])
         
         // Only show non-temporary places in the list view
-        let placesToShow = PlacesService.shared.places.filter { !$0.isTemporary }
+        let placesToShow = places.filter { !$0.isTemporary }
         snapshot.appendItems(placesToShow)
         
         // Apply the snapshot on the main actor
@@ -537,7 +522,7 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
         }
     }
     
-    func placeListViewController(didDeletePlace place: Place) {
+    func placeListViewController(didDeletePlace place: PlaceItem) {
         var snapshot = dataSource.snapshot()
         snapshot.deleteItems([place])
         dataSource.apply(snapshot, animatingDifferences: true)
@@ -550,7 +535,7 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
 extension PlaceListViewController: TemporaryPlaceSelectionDelegate {
     func didSelectTemporaryPlace(address: String, coordinate: CLLocationCoordinate2D) {
         // Create a temporary place in memory only (not saved to Firestore yet)
-        let temporaryPlace = PlacesService.shared.createTemporaryPlaceInMemory(
+        let temporaryPlace = NestService.shared.createTemporaryPlaceInMemory(
             address: address,
             coordinate: coordinate
         )

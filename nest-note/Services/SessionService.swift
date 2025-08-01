@@ -1372,7 +1372,6 @@ class SessionService {
                         }
                         
                         Logger.log(level: .info, category: .sessionService, message: "Found accessible session: \(session.id) with status: \(session.status) ✅")
-                        PlacesService.shared.selectedNestId = sitterSession.nestID
                         return session
                     }
                 } catch {

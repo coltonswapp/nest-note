@@ -19,6 +19,9 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     private var placeAlias: String
     private var thumbnail: UIImage?
     private var thumbnailAsset: UIImageAsset?
+    private var category: String
+    
+    var mapHeightConstraint: NSLayoutConstraint?
     
     let addressLabel: UILabel = {
         let label = UILabel()
@@ -49,15 +52,9 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         return button
     }()
     
-    private lazy var visibilityButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
-            title: "Standard",
-            image: UIImage(systemName: "chevron.up.chevron.down"),
-            imagePlacement: .right,
-            backgroundColor: NNColors.offBlack
-        )
-        button.titleLabel?.font = .h4
-        return button
+    private lazy var folderLabel: NNSmallLabel = {
+        let label = NNSmallLabel()
+        return label
     }()
     
     private let buttonStackView: UIStackView = {
@@ -71,13 +68,11 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }()
     
     
-    private var existingPlace: Place?
+    private var existingPlace: PlaceItem?
     private var pendingLocationUpdate: (address: String, coordinate: CLLocationCoordinate2D, thumbnail: UIImage)?
     private var originalAlias: String?
     private let isEditingPlace: Bool
     var isReadOnly: Bool = false
-    private var visibilityLevel: VisibilityLevel
-    private var originalVisibilityLevel: VisibilityLevel?
     
     // Add property to track changes
     private var hasUnsavedChanges: Bool = false {
@@ -87,28 +82,28 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     // MARK: - Initialization
-    init(placemark: CLPlacemark, alias: String, thumbnail: UIImage? = nil) {
+    init(placemark: CLPlacemark, alias: String, category: String = "Places", thumbnail: UIImage? = nil) {
         self.placemark = placemark
         self.placeAlias = alias
+        self.category = category
         self.thumbnail = thumbnail
         self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = false
-        self.visibilityLevel = .halfDay
         super.init(sourceFrame: nil)
     }
     
-    init(place: Place, thumbnail: UIImage? = nil, isReadOnly: Bool = false) {
+    init(place: PlaceItem, thumbnail: UIImage? = nil, isReadOnly: Bool = false) {
         self.placemark = MKPlacemark(
             coordinate: place.locationCoordinate,
             addressDictionary: [CNPostalAddressStreetKey: place.address]
         )
         self.existingPlace = place
         self.placeAlias = place.alias ?? "Temporary Place"
+        self.category = place.category
         self.thumbnail = thumbnail
         self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = true
         self.isReadOnly = isReadOnly
-        self.visibilityLevel = place.visibilityLevel
         super.init(sourceFrame: nil)
     }
     
@@ -122,12 +117,12 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         
         titleLabel.text = existingPlace == nil ? "New Place" : isReadOnly ? "View Place" : "Edit Place"
         originalAlias = existingPlace?.alias
-        originalVisibilityLevel = existingPlace?.visibilityLevel
         
         itemsHiddenDuringTransition = [buttonStackView]
         setupContent()
         setupMapView()
         updateSaveButtonState()
+        configureFolderLabel()
         
         placeDelegate = self
         setupInfoButton()
@@ -148,8 +143,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         if isReadOnly {
             titleField.isUserInteractionEnabled = false
             configureReadOnlyMode()
-        } else {
-            setupVisibilityMenu()
         }
         
         self.trackScreenVisit()
@@ -168,15 +161,16 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     override func addContentToContainer() {
         super.addContentToContainer()
         
-        buttonStackView.addArrangedSubview(visibilityButton)
         if !isReadOnly {
             buttonStackView.addArrangedSubview(saveButton)
         }
         
         containerView.addSubview(mapView)
         containerView.addSubview(addressLabel)
-        
+        containerView.addSubview(folderLabel)
         containerView.addSubview(buttonStackView)
+        
+        mapHeightConstraint = mapView.heightAnchor.constraint(equalToConstant: 200)
         
         NSLayoutConstraint.activate([
             
@@ -184,21 +178,28 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             mapView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 16),
             mapView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             mapView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            mapView.heightAnchor.constraint(equalToConstant: 180),
+            mapHeightConstraint!,
             
             // Address label constraints
             addressLabel.topAnchor.constraint(equalTo: mapView.bottomAnchor, constant: 16),
             addressLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             addressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
+            // Folder label constraints
+            folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
+            folderLabel.heightAnchor.constraint(equalToConstant: 30),
+            
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46),
-            
-            visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6)
-        ] + (isReadOnly ? [] : [
-            saveButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.4)
+        ] + (isReadOnly ? [
+            buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+        ] : [
+            buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            saveButton.widthAnchor.constraint(equalTo: buttonStackView.widthAnchor)
         ]))
     }
     
@@ -221,27 +222,37 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                 
                 if let existingPlace = existingPlace {
                     // Update existing place
-                    var updatedPlace = existingPlace
-                    updatedPlace.alias = placeAlias
-                    updatedPlace.visibilityLevel = visibilityLevel
+                    var updatedPlace = PlaceItem(
+                        id: existingPlace.id,
+                        nestId: existingPlace.nestId,
+                        category: existingPlace.category,
+                        alias: placeAlias,
+                        address: existingPlace.address,
+                        coordinate: existingPlace.locationCoordinate,
+                        thumbnailURLs: existingPlace.thumbnailURLs,
+                        isTemporary: existingPlace.isTemporary,
+                        createdAt: existingPlace.createdAt,
+                        updatedAt: Date()
+                    )
                     
                     // Apply pending location update if exists
                     if let locationUpdate = pendingLocationUpdate {
-                        updatedPlace.address = locationUpdate.address
-                        updatedPlace.coordinate = .init(
-                            latitude: locationUpdate.coordinate.latitude,
-                            longitude: locationUpdate.coordinate.longitude
+                        updatedPlace = PlaceItem(
+                            id: existingPlace.id,
+                            nestId: existingPlace.nestId,
+                            category: existingPlace.category,
+                            alias: placeAlias,
+                            address: locationUpdate.address,
+                            coordinate: locationUpdate.coordinate,
+                            thumbnailURLs: existingPlace.thumbnailURLs,
+                            isTemporary: existingPlace.isTemporary,
+                            createdAt: existingPlace.createdAt,
+                            updatedAt: Date()
                         )
-                        
-                        // Update with new thumbnail
-                        try await PlacesService.shared.updatePlace(
-                            updatedPlace,
-                            thumbnailAsset: thumbnailAsset
-                        )
-                    } else {
-                        // Just update the alias and visibility
-                        try await PlacesService.shared.updatePlace(updatedPlace)
                     }
+                    
+                    // Update using new method
+                    try await NestService.shared.updatePlace(updatedPlace)
                     
                     await MainActor.run {
                         self.placeListDelegate?.placeListViewController(didUpdatePlace: updatedPlace)
@@ -266,19 +277,26 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         finalThumbnail = try await generateThumbnail(for: coordinate)
                     }
                     
+                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: self.thumbnailAsset is \(self.thumbnailAsset != nil ? "NOT NIL" : "NIL")")
+                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: finalThumbnail size: \(finalThumbnail.size)")
+                    
                     let asset = thumbnailAsset ?? {
+                        Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: Creating new UIImageAsset with light/dark variants")
                         let asset = UIImageAsset()
                         asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .light))
                         asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .dark))
+                        Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: UIImageAsset created successfully")
                         return asset
                     }()
                     
-                    let newPlace = try await PlacesService.shared.createPlace(
+                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: About to call createPlace with asset: \(asset)")
+                    
+                    let newPlace = try await NestService.shared.createPlace(
                         alias: placeAlias,
                         address: address,
                         coordinate: coordinate,
-                        thumbnailAsset: asset,
-                        visibilityLevel: visibilityLevel
+                        category: category,
+                        thumbnailAsset: asset
                     )
                     
                     await MainActor.run {
@@ -354,6 +372,19 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         addressLabel.addGestureRecognizer(tapGesture)
     }
     
+    private func configureFolderLabel() {
+        let components = category.components(separatedBy: "/")
+        if components.count >= 2 {
+            folderLabel.text = components.joined(separator: " / ")
+        } else if components.count == 1 {
+            // Show single component
+            folderLabel.text = components.first
+        } else {
+            // Fallback
+            folderLabel.text = category
+        }
+    }
+    
     @objc private func addressTapped() {
         placeDelegate?.placeAddressCellAddressTapped(addressLabel, place: existingPlace)
     }
@@ -373,6 +404,14 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             longitudinalMeters: 300
         )
         mapView.setRegion(region, animated: false)
+    }
+    
+    override func onKeyboardShow() {
+        mapHeightConstraint?.constant = mapView.frame.height - 60.0
+    }
+    
+    override func onKeyboardHide() {
+        mapHeightConstraint?.constant = mapView.frame.height + 60.0
     }
     
     // MARK: - Helper Methods
@@ -459,7 +498,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         
         Task {
             do {
-                try await PlacesService.shared.deletePlace(place)
+                try await NestService.shared.deletePlace(place)
                 
                 await MainActor.run {
                     self.placeListDelegate?.placeListViewController(didDeletePlace: place)
@@ -514,64 +553,10 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         }
     }
     
-    // MARK: - Visibility Level Methods
-    private func setupVisibilityMenu() {
-        let infoAction = UIAction(title: "Learn about Levels", image: UIImage(systemName: "info.circle")) { [weak self] _ in
-            self?.showVisibilityLevelInfo()
-        }
-        
-        let visibilityActions = VisibilityLevel.allCases.map { level in
-            UIAction(title: level.title, state: level == self.visibilityLevel ? .on : .off) { [weak self] action in
-                HapticsHelper.lightHaptic()
-                self?.visibilityLevel = level
-                self?.updateVisibilityButton()
-                self?.checkForUnsavedChanges()
-            }
-        }
-        
-        let visibilitySection = UIMenu(title: "Select Visibility", options: .displayInline, children: visibilityActions)
-        let infoSection = UIMenu(title: "What level is right for me?", options: .displayInline, children: [infoAction])
-        
-        visibilityButton.menu = UIMenu(children: [visibilitySection, infoSection])
-        visibilityButton.showsMenuAsPrimaryAction = true
-        
-        updateVisibilityButton()
-    }
-    
-    private func updateVisibilityButton() {
-        var container = AttributeContainer()
-        container.font = .h4
-        visibilityButton.configuration?.attributedTitle = AttributedString(visibilityLevel.title, attributes: container)
-        
-        if let menu = visibilityButton.menu {
-            let updatedActions = menu.children.compactMap { $0 as? UIMenu }.flatMap { $0.children }.map { action in
-                guard let action = action as? UIAction else { return action }
-                if VisibilityLevel.allCases.map({ $0.title }).contains(action.title) {
-                    action.state = action.title == visibilityLevel.title ? .on : .off
-                }
-                return action
-            }
-            
-            visibilityButton.menu = UIMenu(children: [
-                UIMenu(title: "Select Visibility", options: .displayInline, children: updatedActions.filter { VisibilityLevel.allCases.map({ $0.title }).contains($0.title) }),
-                UIMenu(title: "", options: .displayInline, children: updatedActions.filter { $0.title == "Learn about Levels" })
-            ])
-        }
-    }
-    
-    private func showVisibilityLevelInfo() {
-        let viewController = VisibilityLevelInfoViewController()
-        present(viewController, animated: true)
-        HapticsHelper.lightHaptic()
-    }
     
     private func configureReadOnlyMode() {
         // Disable editing
         titleField.isEnabled = false
-        
-        // Configure visibility button for read-only mode
-        visibilityButton.isEnabled = false
-        updateVisibilityButton()
     }
     
     func showTips() {
@@ -596,11 +581,11 @@ extension PlaceDetailViewController: PlaceAddressCellDelegate {
         //
     }
     
-    func placeAddressCellAddressTapped(_ view: UIView, place: Place?) {
+    func placeAddressCellAddressTapped(_ view: UIView, place: PlaceItem?) {
         let address = formatAddress(from: placemark)
         var coordinate: CLLocationCoordinate2D?
         if let existingPlace {
-            coordinate = CLLocationCoordinate2D(latitude: self.existingPlace!.coordinate.latitude, longitude: self.existingPlace!.coordinate.longitude)
+            coordinate = existingPlace.locationCoordinate
         }
         
         if let view = view as? UILabel {
@@ -620,7 +605,7 @@ extension PlaceDetailViewController: PlaceAddressCellDelegate {
 // MARK: - SelectPlaceLocationDelegate
 extension PlaceDetailViewController: SelectPlaceLocationDelegate {
     func didUpdatePlaceLocation(
-        _ place: Place,
+        _ place: PlaceItem,
         newAddress: String,
         newCoordinate: CLLocationCoordinate2D,
         newThumbnail: UIImage
@@ -670,10 +655,9 @@ private extension PlaceDetailViewController {
     
     func checkForUnsavedChanges() {
         let aliasChanged = placeAlias != originalAlias
-        let visibilityChanged = originalVisibilityLevel != nil && visibilityLevel != originalVisibilityLevel
         let locationChanged = pendingLocationUpdate != nil
         
-        hasUnsavedChanges = aliasChanged || visibilityChanged || locationChanged
+        hasUnsavedChanges = aliasChanged || locationChanged
     }
     
     func updateSaveButtonState() {

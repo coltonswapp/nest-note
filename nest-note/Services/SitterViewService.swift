@@ -11,6 +11,9 @@ final class SitterViewService: EntryRepository {
     
     @Published private(set) var viewState: ViewState = .loading
     
+    // MARK: - ItemRepository Integration
+    private var itemRepository: ItemRepository?
+    
     enum ViewState {
         case loading
         case ready(session: SessionItem, nest: NestItem)
@@ -47,10 +50,12 @@ final class SitterViewService: EntryRepository {
     
     // MARK: - Nest Entries
     private var cachedEntries: [String: [BaseEntry]]?
-    private var cachedPlaces: [Place]?
+    private var cachedPlaces: [PlaceItem]?
     
     /// Fetches entries for the current nest, using cache if available
     func fetchNestEntries() async throws -> [String: [BaseEntry]] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestEntries() called - using ItemRepository")
+        
         // Return cached entries if available
         if let cachedEntries = cachedEntries {
             Logger.log(level: .info, category: .sitterViewService, message: "Using cached entries")
@@ -62,12 +67,25 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
+        // Initialize ItemRepository if needed
+        if itemRepository == nil {
+            itemRepository = FirebaseItemRepository(nestId: nest.id)
+        }
+        
+        guard let itemRepository = itemRepository else {
+            throw SessionError.noCurrentNest
+        }
+        
         Logger.log(level: .info, category: .sitterViewService, message: "Fetching entries for nest: \(nest.id)")
         
-        // Fetch entries from Firestore
-        let entriesRef = db.collection("nests").document(nest.id).collection("entries")
-        let snapshot = try await entriesRef.getDocuments()
-        let entries = try snapshot.documents.map { try $0.data(as: BaseEntry.self) }
+        // Fetch all items using ItemRepository
+        let allItems = try await itemRepository.fetchItems()
+        
+        // Filter to only entry items and convert to BaseEntry
+        let entries = allItems.compactMap { item -> BaseEntry? in
+            guard item.type == .entry, let entryItem = item as? EntryItem else { return nil }
+            return entryItem.toBaseEntry()
+        }
         
         // Group entries by category
         let groupedEntries = Dictionary(grouping: entries) { $0.category }
@@ -75,7 +93,7 @@ final class SitterViewService: EntryRepository {
         // Cache the entries
         self.cachedEntries = groupedEntries
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(entries.count) entries ✅")
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(entries.count) entries using ItemRepository ✅")
         return groupedEntries
     }
     
@@ -83,12 +101,15 @@ final class SitterViewService: EntryRepository {
     func clearEntriesCache() {
         Logger.log(level: .info, category: .sitterViewService, message: "Clearing entries cache")
         cachedEntries = nil
+        // Also clear ItemRepository cache
+        itemRepository?.clearItemsCache()
     }
     
     /// Clears the places cache
     func clearPlacesCache() {
         Logger.log(level: .info, category: .sitterViewService, message: "Clearing places cache")
         cachedPlaces = nil
+        // ItemRepository cache is shared, so clearing entries cache also clears places
     }
     
     /// Forces a refresh of the entries
@@ -99,45 +120,60 @@ final class SitterViewService: EntryRepository {
     
     // MARK: - Places
     
-    /// Fetches places for the current nest, filtered by visibility level
-    func fetchNestPlaces() async throws -> [Place] {
-        // Return cached places if available
-        if let cachedPlaces = cachedPlaces {
-            Logger.log(level: .info, category: .sitterViewService, message: "Using cached places")
-            return cachedPlaces
-        }
-        
-        // Get the current session and nest from our viewState
-        guard case .ready(let session, let nest) = viewState else {
-            throw SessionError.noCurrentNest
-        }
-        
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetching places for nest: \(nest.id)")
-        
-        // Fetch places from Firestore
-        let placesRef = db.collection("nests").document(nest.id).collection("places")
-        let snapshot = try await placesRef.getDocuments()
-        let allPlaces = try snapshot.documents.map { try $0.data(as: Place.self) }
-        
-        // Filter places based on sitter's visibility level from the session
-        let sitterVisibilityLevel = session.visibilityLevel
-        let filteredPlaces = allPlaces.filter { place in
-            sitterVisibilityLevel.hasAccess(to: place.visibilityLevel)
-        }
-        
-        // Cache the filtered places
-        self.cachedPlaces = filteredPlaces
-        
-        Logger.log(level: .info, category: .sitterViewService, 
-                  message: "Fetched \(allPlaces.count) places, filtered to \(filteredPlaces.count) based on \(sitterVisibilityLevel.title) access level ✅")
-        return filteredPlaces
-    }
+//    /// Fetches places for the current nest, filtered by visibility level
+//    func fetchNestPlaces() async throws -> [PlaceItem] {
+//        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestPlaces() called - using ItemRepository")
+//        
+//        // Return cached places if available
+//        if let cachedPlaces = cachedPlaces {
+//            Logger.log(level: .info, category: .sitterViewService, message: "Using cached places")
+//            return cachedPlaces
+//        }
+//        
+//        // Get the current session and nest from our viewState
+//        guard case .ready(let session, let nest) = viewState else {
+//            throw SessionError.noCurrentNest
+//        }
+//        
+//        // Initialize ItemRepository if needed
+//        if itemRepository == nil {
+//            itemRepository = FirebaseItemRepository(nestId: nest.id)
+//        }
+//        
+//        guard let itemRepository = itemRepository else {
+//            throw SessionError.noCurrentNest
+//        }
+//        
+//        Logger.log(level: .info, category: .sitterViewService, message: "Fetching places for nest: \(nest.id)")
+//        
+//        // Fetch all items using ItemRepository
+//        let allItems = try await itemRepository.fetchItems()
+//        
+//        // Filter to only place items and convert to Place
+//        let allPlaces = allItems.compactMap { item -> PlaceItem? in
+//            guard item.type == .place, let placeItem = item as? PlaceItem else { return nil }
+//            return placeItem.toPlace()
+//        }
+//        
+//        // Filter places based on sitter's visibility level from the session
+//        let sitterVisibilityLevel = session.visibilityLevel
+//        let filteredPlaces = allPlaces.filter { place in
+//            sitterVisibilityLevel.hasAccess(to: place.visibilityLevel)
+//        }
+//        
+//        // Cache the filtered places
+//        self.cachedPlaces = filteredPlaces
+//        
+//        Logger.log(level: .info, category: .sitterViewService, 
+//                  message: "Fetched \(allPlaces.count) places, filtered to \(filteredPlaces.count) based on \(sitterVisibilityLevel.title) access level using ItemRepository ✅")
+//        return filteredPlaces
+//    }
     
     /// Forces a refresh of the places
-    func refreshPlaces() async throws -> [Place] {
-        clearPlacesCache()
-        return try await fetchNestPlaces()
-    }
+//    func refreshPlaces() async throws -> [PlaceItem] {
+//        clearPlacesCache()
+//        return try await fetchNestPlaces()
+//    }
     
     // MARK: - Initialization
     private init() {}
@@ -309,6 +345,8 @@ final class SitterViewService: EntryRepository {
         viewState = .loading
         clearEntriesCache()
         clearPlacesCache()
+        // Clear ItemRepository reference
+        itemRepository = nil
     }
     
     // MARK: - Session Access
@@ -343,32 +381,67 @@ final class SitterViewService: EntryRepository {
     }
     
     func createEntry(_ entry: BaseEntry) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "createEntry() called - using ItemRepository")
+        
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
         }
         
-        let entriesRef = db.collection("nests").document(nest.id).collection("entries")
-        try await entriesRef.document(entry.id).setData(from: entry)
+        // Initialize ItemRepository if needed
+        if itemRepository == nil {
+            itemRepository = FirebaseItemRepository(nestId: nest.id)
+        }
+        
+        guard let itemRepository = itemRepository else {
+            throw SessionError.noCurrentNest
+        }
+        
+        // Convert BaseEntry to EntryItem and create
+        let entryItem = EntryItem(from: entry)
+        try await itemRepository.createItem(entryItem)
         clearEntriesCache()
     }
     
     func updateEntry(_ entry: BaseEntry) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "updateEntry() called - using ItemRepository")
+        
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
         }
         
-        let entriesRef = db.collection("nests").document(nest.id).collection("entries")
-        try await entriesRef.document(entry.id).setData(from: entry)
+        // Initialize ItemRepository if needed
+        if itemRepository == nil {
+            itemRepository = FirebaseItemRepository(nestId: nest.id)
+        }
+        
+        guard let itemRepository = itemRepository else {
+            throw SessionError.noCurrentNest
+        }
+        
+        // Convert BaseEntry to EntryItem and update
+        let entryItem = EntryItem(from: entry)
+        try await itemRepository.updateItem(entryItem)
         clearEntriesCache()
     }
     
     func deleteEntry(_ entry: BaseEntry) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "deleteEntry() called - using ItemRepository")
+        
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
         }
         
-        let entriesRef = db.collection("nests").document(nest.id).collection("entries")
-        try await entriesRef.document(entry.id).delete()
+        // Initialize ItemRepository if needed
+        if itemRepository == nil {
+            itemRepository = FirebaseItemRepository(nestId: nest.id)
+        }
+        
+        guard let itemRepository = itemRepository else {
+            throw SessionError.noCurrentNest
+        }
+        
+        // Delete using ItemRepository
+        try await itemRepository.deleteItem(id: entry.id)
         clearEntriesCache()
     }
     

@@ -139,12 +139,13 @@
   Phase 2: Service Migration
 
   1. Update NestService to use ItemRepository internally
-  2. Add generic CRUD methods for all BaseItem types
-  3. Add type-specific convenience methods for places
-  4. Maintain existing method signatures for compatibility
-  5. Remove PlacesService entirely - consolidate into NestService
-  6. Remove any PlacesService imports and references throughout codebase
-  7. Add logic to handle documents without type field (assume entry type)
+  2. Update SitterViewService to use ItemRepository internally
+  3. Add generic CRUD methods for all BaseItem types
+  4. Add type-specific convenience methods for places
+  5. Maintain existing method signatures for compatibility
+  6. Remove PlacesService entirely - consolidate into NestService
+  7. Remove any PlacesService imports and references throughout codebase
+  8. Add logic to handle documents without type field (assume entry type)
 
   Phase 3: UI Integration
 
@@ -162,6 +163,61 @@
   3. Use "Find Call Hierarchy" to identify and remove unreferenced methods
   4. Eliminate any remaining duplicate caching mechanisms
   5. Performance testing and optimization
+
+---
+
+## Sitter Session Entry Filtering
+
+### Problem Statement
+
+Currently, sitters using SitterViewService see ALL entries in a nest when viewing an active session. However, owners should be able to control which specific entries are relevant and visible to sitters for each babysitting session.
+
+### Solution Overview
+
+Enhance the existing SitterViewService to filter entries based on a session-specific `entryIds` array, providing sitters with only the entries relevant to their current session while maintaining the existing architectural patterns.
+
+### Technical Implementation
+
+#### Session Model Enhancement
+- Ensure `SessionItem` includes `entryIds: [String]?` property for storing selected entry IDs
+- Entry selection UI already exists and handles this array
+
+#### SitterViewService Filtering Enhancement
+Update `fetchNestEntries()` method in SitterViewService to:
+1. Check if current session has `entryIds` array populated
+2. Filter fetched entries to only include those with IDs in the allowed list
+3. Maintain backward compatibility: if `entryIds` is nil/empty, show all entries
+4. Preserve existing caching and performance patterns
+
+#### Filtering Logic
+```swift
+// In SitterViewService.fetchNestEntries()
+let allEntries = // ... existing fetch logic
+let allowedEntryIds = currentSession?.entryIds
+
+if let allowedIds = allowedEntryIds, !allowedIds.isEmpty {
+    // Filter entries to only those in the session's allowed list
+    filteredEntries = allEntries.filter { allowedIds.contains($0.id) }
+} else {
+    // Backward compatibility: show all entries if no filtering specified
+    filteredEntries = allEntries
+}
+```
+
+### Implementation Benefits
+
+- **Minimal Code Changes**: Leverages existing SitterViewService architecture
+- **Consistent UI**: NestViewController continues using EntryRepository protocol
+- **Performance**: Same caching and network patterns maintained
+- **Owner Control**: Owners can precisely control what sitters see per session
+
+### Integration with Unified Collection Architecture
+
+This sitter filtering enhancement works seamlessly with the unified collection architecture:
+- SitterViewService already uses ItemRepository internally
+- Filtering applies to converted BaseEntry objects after ItemRepository fetch
+- Places can also be filtered using the same pattern if needed in future
+- No additional repository layers or architectural changes required
 
 ---
 

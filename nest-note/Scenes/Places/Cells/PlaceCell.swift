@@ -55,6 +55,20 @@ final class PlaceCell: UICollectionViewCell {
         return view
     }()
     
+    // Add checkmark for edit mode selection
+    private let checkmarkImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = NNColors.primary
+        imageView.isHidden = true
+        return imageView
+    }()
+    
+    // Edit mode properties
+    private var isInEditMode: Bool = false
+    private var isPlaceSelected: Bool = false
+    
     private var gridConstraints: [NSLayoutConstraint] = []
     private var listConstraints: [NSLayoutConstraint] = []
     
@@ -84,6 +98,7 @@ final class PlaceCell: UICollectionViewCell {
         contentView.addSubview(blurEffectView)
         contentView.addSubview(labelStack)
         contentView.addSubview(highlightOverlay)  // Add overlay
+        contentView.addSubview(checkmarkImageView)  // Add checkmark
         
         // Add overlay constraints
         NSLayoutConstraint.activate([
@@ -91,6 +106,14 @@ final class PlaceCell: UICollectionViewCell {
             highlightOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             highlightOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             highlightOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+        
+        // Add checkmark constraints
+        NSLayoutConstraint.activate([
+            checkmarkImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            checkmarkImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            checkmarkImageView.widthAnchor.constraint(equalToConstant: 24),
+            checkmarkImageView.heightAnchor.constraint(equalToConstant: 24)
         ])
         
         // Apply the blur effect
@@ -131,21 +154,29 @@ final class PlaceCell: UICollectionViewCell {
         ]
     }
     
-    func configure(with place: Place, isGridLayout: Bool) {
+    func configure(with place: PlaceItem, isGridLayout: Bool, isEditMode: Bool = false, isSelected: Bool = false) {
         // Update labels immediately
         aliasLabel.text = place.alias
         addressLabel.text = place.address
         
+        // Store edit mode and selection state
+        self.isInEditMode = isEditMode
+        self.isPlaceSelected = isSelected
+        
         // Load thumbnail
         Task {
             do {
-                let image = try await PlacesService.shared.loadImages(for: place)
+                let image = try await NestService.shared.loadImages(for: place)
                 await MainActor.run {
                     thumbnailImageView.image = image
                 }
             } catch {
                 Logger.log(level: .error, category: .placesService, 
                     message: "Failed to load image for place: \(error.localizedDescription)")
+                // Set placeholder image on error
+                await MainActor.run {
+                    thumbnailImageView.image = UIImage(systemName: "mappin.circle")
+                }
             }
         }
         
@@ -153,6 +184,9 @@ final class PlaceCell: UICollectionViewCell {
         NSLayoutConstraint.deactivate(gridConstraints + listConstraints)
         NSLayoutConstraint.activate(isGridLayout ? gridConstraints : listConstraints)
         blurEffectView.isHidden = !isGridLayout
+        
+        // Update selection appearance
+        updateSelectionAppearance()
         
         setNeedsLayout()
         layoutIfNeeded()
@@ -163,6 +197,32 @@ final class PlaceCell: UICollectionViewCell {
         thumbnailImageView.image = nil
         aliasLabel.text = nil
         addressLabel.text = nil
+        isInEditMode = false
+        isPlaceSelected = false
+        updateSelectionAppearance()
+    }
+    
+    private func updateSelectionAppearance() {
+        if isInEditMode {
+            checkmarkImageView.isHidden = false
+            checkmarkImageView.image = UIImage(systemName: isPlaceSelected ? "checkmark.circle.fill" : "circle")
+            checkmarkImageView.tintColor = isPlaceSelected ? NNColors.primary : .tertiaryLabel
+            
+            if isPlaceSelected {
+                contentView.backgroundColor = NNColors.primary.withAlphaComponent(0.15)
+                contentView.layer.borderColor = NNColors.primary.cgColor
+                contentView.layer.borderWidth = 1.5
+            } else {
+                contentView.backgroundColor = .clear
+                contentView.layer.borderColor = UIColor.clear.cgColor
+                contentView.layer.borderWidth = 0
+            }
+        } else {
+            checkmarkImageView.isHidden = true
+            contentView.backgroundColor = .clear
+            contentView.layer.borderColor = UIColor.clear.cgColor
+            contentView.layer.borderWidth = 0
+        }
     }
     
     // Update highlighting behavior

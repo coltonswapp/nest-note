@@ -163,7 +163,14 @@ final class SessionEventViewController: NNSheetViewController {
             
             Task {
                 if let placeID = event.placeID {
-                    await locationView.configureWith(PlacesService.shared.getPlace(for: placeID))
+                    do {
+                        let place = try await NestService.shared.getPlace(for: placeID)
+                        await MainActor.run {
+                            locationView.configureWith(place)
+                        }
+                    } catch {
+                        Logger.log(level: .error, category: .sessionService, message: "Failed to load place: \(error.localizedDescription)")
+                    }
                 }
             }
             
@@ -356,6 +363,14 @@ final class SessionEventViewController: NNSheetViewController {
         return formatter.string(from: date)
     }
     
+    override func onKeyboardShow() {
+        colorStack.alpha = 0.0
+    }
+    
+    override func onKeyboardHide() {
+        colorStack.alpha = 1.0
+    }
+    
     // MARK: - Actions
     @objc private func startDateTapped() {
         activeControl = .startDate
@@ -452,7 +467,7 @@ final class SessionEventViewController: NNSheetViewController {
             do {
                 // First, if we have a temporary place that hasn't been saved yet, save it
                 if let place = locationView.place, place.isTemporary {
-                    try await PlacesService.shared.saveTemporaryPlace(place)
+                    try await NestService.shared.createPlace(place)
                 }
                 
                 // Then save the event
@@ -627,7 +642,7 @@ extension SessionEventViewController: UITextFieldDelegate {
 }
 
 extension SessionEventViewController: PlaceSelectionDelegate {
-    func didSelectPlace(_ place: Place) {
+    func didSelectPlace(_ place: PlaceItem) {
         locationView.configureWith(place)
         locationView.thumbnailImageView.bounce()
         Tracker.shared.track(.sessionEventPlaceAttached)
@@ -641,7 +656,7 @@ extension SessionEventViewController: PlaceAddressCellDelegate {
         present(viewController, animated: true)
     }
     
-    func placeAddressCellAddressTapped(_ view: UIView, place: Place?) {
+    func placeAddressCellAddressTapped(_ view: UIView, place: PlaceItem?) {
         guard let place else { return }
         if let view = view as? PlaceAddressCell {
             AddressActionHandler.presentAddressOptions(
@@ -718,9 +733,9 @@ class SessionEventLocationView: UIView {
     
     weak var delegate: PlaceAddressCellDelegate?
     
-    var place: Place?
+    var place: PlaceItem?
     
-    init(place: Place?) {
+    init(place: PlaceItem?) {
         super.init(frame: .zero)
         addSubviews()
         constrainSubviews()
@@ -763,7 +778,7 @@ class SessionEventLocationView: UIView {
         ])
     }
     
-    func configureWith(_ place: Place?) {
+    func configureWith(_ place: PlaceItem?) {
         if let place {
             self.place = place
             
@@ -806,12 +821,10 @@ class SessionEventLocationView: UIView {
             addressLabel.attributedText = attributedString
                 Task {
                     do {
-                        let image = try await PlacesService.shared.loadImages(for: place)
-                        if aliasLabel.text == place.displayName {
-                            thumbnailImageView.image = image
-                        }
-                    } catch {
+                        // TODO: Implement image loading in NestService
+                        // For now, show a placeholder icon
                         thumbnailImageView.image = UIImage(systemName: "photo.fill")
+                        thumbnailImageView.tintColor = .systemGray
                     }
                 }
             }

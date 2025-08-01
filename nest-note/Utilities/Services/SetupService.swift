@@ -236,7 +236,7 @@ final class SetupService {
             
         case .addFirstPlace:
             // Check if user has at least one place
-            return checkIfUserHasPlaces()
+            return true
             
         case .exploreVisibilityLevels:
             // Check if user has explored visibility levels
@@ -263,11 +263,6 @@ final class SetupService {
         // Placeholder - implement based on your data model
         // Example: return EntryService.shared.entriesCount > 0
         return isStepComplete(.addFirstEntry)
-    }
-    
-    private func checkIfUserHasPlaces() -> Bool {
-        // Check if user has at least one non-temporary place
-        return PlacesService.shared.places.filter { !$0.isTemporary }.count > 0
     }
     
     private func checkIfUserExploredVisibilityLevels() -> Bool {
