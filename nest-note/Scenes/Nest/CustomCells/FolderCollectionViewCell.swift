@@ -104,10 +104,10 @@ class FolderCollectionViewCell: UICollectionViewCell {
     private let backFolderView: CustomBackFolderView
     private let frontFolderView = UIView()
     private let silhouetteView: CustomBackFolderView
-    private let iconImageView = UIImageView()
-    private let titleLabel = UILabel()
+    internal let iconImageView = UIImageView()
+    internal let titleLabel = UILabel()
     private let chevronImageView = UIImageView()
-    private let subtitleLabel = UILabel()
+    internal let subtitleLabel = UILabel()
     
     // paper stacks
     private let paper1View = UIView()

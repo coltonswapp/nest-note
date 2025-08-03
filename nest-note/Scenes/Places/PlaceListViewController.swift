@@ -71,7 +71,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
         
         // Enable large titles
         navigationController?.navigationBar.prefersLargeTitles = false
-//        fetchPlaces()
+        fetchPlaces()
     }
     
     // MARK: - Setup
@@ -266,33 +266,33 @@ final class PlaceListViewController: NNViewController, NNTippable {
     }
     
     // MARK: - Data Loading
-//    private func fetchPlaces() {
-//        isLoading = true
-//        
-//        Task {
-//            do {
-//                // Check if we're in sitter mode and need visibility filtering
-//                if let sitterService = sitterViewService {
-//                    // Use SitterViewService to get filtered places
-//                    self.places = try await sitterService.fetchNestPlaces()
-//                } else {
-//                    // Owner mode - fetch all places including temporary ones using NestService
-//                    self.places = try await NestService.shared.fetchPlacesWithFilter(includeTemporary: true)
-//                }
-//                applySnapshot()
-//            } catch {
-//                Logger.log(level: .error, category: .placesService, 
-//                    message: "Failed to fetch places: \(error.localizedDescription)")
-//                
-//                // Show error state in the UI
-//                DispatchQueue.main.async { [weak self] in
-//                    self?.showToast(text: "Failed to load places", sentiment: .negative)
-//                }
-//            }
-//            
-//            isLoading = false
-//        }
-//    }
+    private func fetchPlaces() {
+        isLoading = true
+        
+        Task {
+            do {
+                // Check if we're in sitter mode and need visibility filtering
+                if let sitterService = sitterViewService {
+                    // Use SitterViewService to get filtered places
+                    self.places = try await sitterService.fetchNestPlaces()
+                } else {
+                    // Owner mode - fetch all places including temporary ones using NestService
+                    self.places = try await NestService.shared.fetchPlacesWithFilter(includeTemporary: true)
+                }
+                applySnapshot()
+            } catch {
+                Logger.log(level: .error, category: .nestService, 
+                    message: "Failed to fetch places: \(error.localizedDescription)")
+                
+                // Show error state in the UI
+                DispatchQueue.main.async { [weak self] in
+                    self?.showToast(text: "Failed to load places", sentiment: .negative)
+                }
+            }
+            
+            isLoading = false
+        }
+    }
     
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, PlaceItem>()
@@ -502,32 +502,31 @@ extension PlaceListViewController: PlaceListViewControllerDelegate {
         // Check if this is a new place being added or an existing place being updated
         let isNewPlace = !places.contains { $0.id == place.id }
         
-        // Create a fresh snapshot with the updated data
-        var snapshot = NSDiffableDataSourceSnapshot<Section, PlaceItem>()
-        snapshot.appendSections([.main])
-        
-        // Only show non-temporary places in the list view
-        let placesToShow = places.filter { !$0.isTemporary }
-        snapshot.appendItems(placesToShow)
-        
-        // Apply the snapshot on the main actor
-        Task { @MainActor in
-            await dataSource.apply(snapshot, animatingDifferences: true)
-            updateEmptyState()
-            
-            // Flash the cell after the snapshot is applied
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                self.flashCell(for: place)
+        // Update local places array
+        if isNewPlace {
+            places.append(place)
+        } else {
+            if let index = places.firstIndex(where: { $0.id == place.id }) {
+                places[index] = place
             }
+        }
+        
+        // Apply updated snapshot
+        applySnapshot()
+        
+        // Flash the cell after the snapshot is applied
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            self.flashCell(for: place)
         }
     }
     
     func placeListViewController(didDeletePlace place: PlaceItem) {
-        var snapshot = dataSource.snapshot()
-        snapshot.deleteItems([place])
-        dataSource.apply(snapshot, animatingDifferences: true)
+        // Remove from local places array
+        places.removeAll { $0.id == place.id }
+        
+        // Apply updated snapshot
+        applySnapshot()
         showToast(text: "Place deleted", sentiment: .positive)
-        updateEmptyState()
     }
 }
 

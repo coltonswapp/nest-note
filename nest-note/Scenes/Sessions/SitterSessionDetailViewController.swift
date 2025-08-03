@@ -812,7 +812,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             
         case .sessionEvent(let event):
             // Present event details in read-only mode
-            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
+            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true, entryRepository: SitterViewService.shared)
             present(eventVC, animated: true)
             
         case .events, .moreEvents:

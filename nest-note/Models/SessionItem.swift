@@ -104,6 +104,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var ownerID: String?
     var earlyAccessDuration: EarlyAccessDuration
     var earlyAccessEndDate: Date?
+    var entryIds: [String]? // Now stores IDs for all selected items (entries, places, etc.)
     
     // Computed property to check if session has an active invite
     var hasActiveInvite: Bool {
@@ -171,7 +172,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         nestID: String = NestService.shared.currentNest!.id,
         ownerID: String? = NestService.shared.currentNest?.ownerId,
         earlyAccessDuration: EarlyAccessDuration = .halfDay,
-        earlyAccessEndDate: Date? = nil
+        earlyAccessEndDate: Date? = nil,
+        entryIds: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -186,6 +188,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         self.ownerID = ownerID
         self.earlyAccessDuration = earlyAccessDuration
         self.earlyAccessEndDate = earlyAccessEndDate
+        self.entryIds = entryIds
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -261,6 +264,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case ownerID
         case earlyAccessDuration
         case earlyAccessEndDate
+        case entryIds
     }
     
     required init(from decoder: Decoder) throws {
@@ -284,6 +288,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             earlyAccessDuration = .halfDay
         }
         earlyAccessEndDate = try container.decodeIfPresent(Date.self, forKey: .earlyAccessEndDate)
+        entryIds = try container.decodeIfPresent([String].self, forKey: .entryIds)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
@@ -320,7 +325,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             nestID: self.nestID,
             ownerID: self.ownerID,
             earlyAccessDuration: self.earlyAccessDuration,
-            earlyAccessEndDate: self.earlyAccessEndDate
+            earlyAccessEndDate: self.earlyAccessEndDate,
+            entryIds: self.entryIds
         )
         return copiedSession
     }

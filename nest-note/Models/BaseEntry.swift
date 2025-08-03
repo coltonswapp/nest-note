@@ -27,6 +27,16 @@ class BaseEntry: BaseItem, Codable, Hashable {
         self.updatedAt = Date()
     }
     
+    init(id: String, title: String, content: String, visibilityLevel: VisibilityLevel = .always, category: String, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.visibility = visibilityLevel
+        self.category = category
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+    
     // Add hash function for Hashable conformance
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)

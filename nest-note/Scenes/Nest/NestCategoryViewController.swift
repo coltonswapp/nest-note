@@ -87,6 +87,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private var isEditOnlyMode: Bool = false
     weak var selectEntriesDelegate: NestCategoryViewControllerSelectEntriesDelegate?
     
+    // Dynamic logging category based on repository type
+    private var logCategory: Logger.Category {
+        return entryRepository is NestService ? .nestService : .sitterViewService
+    }
+    
     init(category: String, entries: [BaseEntry] = [], places: [PlaceItem] = [], entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil, isEditOnlyMode: Bool = false) {
         self.category = category
         self.entries = entries
@@ -99,14 +104,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // Store all places for passing to subfolders
         self.allPlaces = places
         
-        // Filter places for this category instead of fetching
-        Logger.log(level: .info, category: .nestService, message: "DEBUGGING PLACES FILTER: Category='\(category)', Total places passed=\(places.count)")
-        for (index, place) in places.enumerated() {
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING PLACES FILTER[\(index)]: alias='\(place.alias ?? "nil")', category='\(place.category)'")
-        }
-        
         self.places = places.filter { $0.category == category }
-        Logger.log(level: .info, category: .nestService, message: "DEBUGGING PLACES FILTER: Filtered to \(self.places.count) places for category '\(category)'")
         
         // Extract the folder name from the full path for the title
         // e.g. "Pets/Donna" becomes "Donna"
@@ -132,6 +130,20 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    // Method to restore selected places for persistent selection
+    func restoreSelectedPlaces(_ places: Set<PlaceItem>) {
+        selectedPlaces = places
+        
+        // If we're already loaded, update the UI immediately
+        if isViewLoaded {
+            DispatchQueue.main.async {
+                self.collectionView.reloadData()
+                self.restoreCollectionViewSelection()
+                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
+            }
+        }
+    }
+    
     // Helper method to restore collection view selection state
     private func restoreCollectionViewSelection() {
         guard isEditingMode, let dataSource = self.dataSource else { return }
@@ -145,6 +157,14 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             for (itemIndex, item) in items.enumerated() {
                 // Check if this item is a BaseEntry and if it's selected
                 if let entry = item as? BaseEntry, selectedEntries.contains(entry) {
+                    // Find the section index
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                }
+                // Check if this item is a PlaceItem and if it's selected
+                else if let place = item as? PlaceItem, selectedPlaces.contains(place) {
                     // Find the section index
                     if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
                         let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
@@ -260,13 +280,20 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func loadFolderContents() async {
-        guard let nestService = entryRepository as? NestService else {
-            // For non-NestService repositories, fall back to basic entry loading
-            return
-        }
-        
         do {
-            let folderContents = try await nestService.fetchFolderContents(for: category)
+            let folderContents: (entries: [BaseEntry], places: [PlaceItem], subfolders: [FolderData], allPlaces: [PlaceItem])
+            
+            if let nestService = entryRepository as? NestService {
+                let contents = try await nestService.fetchFolderContents(for: category)
+                folderContents = (contents.entries, contents.places, contents.subfolders, contents.allPlaces)
+            } else if let sitterService = entryRepository as? SitterViewService {
+                let contents = try await sitterService.fetchFolderContents(for: category)
+                folderContents = (contents.entries, contents.places, contents.subfolders, contents.allPlaces)
+            } else {
+                // Fallback for other repository types
+                await loadBasicEntries()
+                return
+            }
             
             await MainActor.run {
                 // Disable automatic snapshots during data loading
@@ -291,9 +318,48 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 }
             }
         } catch {
-            Logger.log(level: .error, category: .nestService, message: "Failed to load folder contents: \(error)")
+            Logger.log(level: .error, category: logCategory, message: "Failed to load folder contents: \(error)")
             await MainActor.run {
                 self.showError("Failed to load folder contents")
+            }
+        }
+    }
+    
+    private func loadBasicEntries() async {
+        do {
+            let groupedEntries = try await entryRepository.fetchEntries()
+            let entriesForCategory = groupedEntries[category] ?? []
+            
+            await MainActor.run {
+                // Disable automatic snapshots during data loading
+                self.shouldApplySnapshotAutomatically = false
+                
+                // Set the entries data
+                self.entries = entriesForCategory
+                
+                // For sitter view, we don't have folders or places management
+                // These should be empty as folders are not navigable for sitters
+                self.folders = []
+                
+                // Places could be loaded here if needed, but for now keep them as initialized
+                // self.places remains as passed in the initializer
+                
+                // Re-enable automatic snapshots and apply
+                self.shouldApplySnapshotAutomatically = true
+                self.applySnapshot()
+                
+                // Update UI state
+                self.refreshEmptyState()
+                
+                // Restore selection state if in edit-only mode
+                if self.isEditOnlyMode && self.isEditingMode {
+                    self.restoreCollectionViewSelection()
+                }
+            }
+        } catch {
+            Logger.log(level: .error, category: logCategory, message: "Failed to load basic entries: \(error)")
+            await MainActor.run {
+                self.showError("Failed to load entries")
             }
         }
     }
@@ -365,7 +431,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             
             // Use the stored section order to get the correct section
             guard sectionIndex < self.sectionOrder.count else { 
-                Logger.log(level: .error, category: .nestService, message: "❌ LAYOUT ERROR: sectionIndex \(sectionIndex) >= sectionOrder.count \(self.sectionOrder.count). SectionOrder: \(self.sectionOrder.map { $0.rawValue })")
+                Logger.log(level: .error, category: logCategory, message: "❌ LAYOUT ERROR: sectionIndex \(sectionIndex) >= sectionOrder.count \(self.sectionOrder.count). SectionOrder: \(self.sectionOrder.map { $0.rawValue })")
                 return self.createInsetGroupedSection() // Fallback section
             }
             let section = self.sectionOrder[sectionIndex]
@@ -519,7 +585,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             // Handle entries
             guard let entry = item as? BaseEntry else {
                 // Log unexpected item type for debugging
-                Logger.log(level: .error, category: .nestService, message: "Unexpected item type in cell provider: \(type(of: item)) at section \(section) indexPath \(indexPath)")
+                Logger.log(level: .error, category: logCategory, message: "Unexpected item type in cell provider: \(type(of: item)) at section \(section) indexPath \(indexPath)")
                 return nil
             }
             
@@ -530,11 +596,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel,
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
-                    isSelected: self.selectedEntries.contains(entry)
+                    isSelected: self.selectedEntries.contains(entry),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
                 )
                 
                 return cell
@@ -543,28 +608,26 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel,
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
-                    isSelected: self.selectedEntries.contains(entry)
+                    isSelected: self.selectedEntries.contains(entry),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
                 )
                 
                 return cell
             case .folders:
                 // This should not happen with proper snapshot creation - debug and handle gracefully
-                Logger.log(level: .error, category: .nestService, message: "DEBUGGING: BaseEntry '\(entry.title)' found in folders section at indexPath \(indexPath). Entry category: '\(entry.category)'. Current category: '\(self.category)'")
+                Logger.log(level: .error, category: logCategory, message: "DEBUGGING: BaseEntry '\(entry.title)' found in folders section at indexPath \(indexPath). Entry category: '\(entry.category)'. Current category: '\(self.category)'")
                 
                 // Use fallback cell to prevent crash
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel,
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
-                    isSelected: self.selectedEntries.contains(entry)
+                    isSelected: self.selectedEntries.contains(entry),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
                 )
                 
                 return cell
@@ -578,7 +641,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
         
         // Debug logging
-        Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Creating snapshot for category '\(category)'. Folders: \(folders.count), Entries: \(entries.count), Places: \(places.count)")
+        Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Creating snapshot for category '\(category)'. Folders: \(folders.count), Entries: \(entries.count), Places: \(places.count)")
         
         // Determine which sections we need based on content
         var sectionsToAdd: [Section] = []
@@ -586,7 +649,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // Add folders section if we have folders
         if !folders.isEmpty {
             sectionsToAdd.append(.folders)
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding .folders section with \(folders.count) folders")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .folders section with \(folders.count) folders")
         }
         
         // Filter entries based on cell type (title + content < 15 characters)
@@ -595,45 +658,45 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let otherEntries = entries.filter { !$0.shouldUseHalfWidthCell }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         
-        Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Category '\(category)' - Codes: \(codesEntries.count), Other: \(otherEntries.count)")
+        Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Category '\(category)' - Codes: \(codesEntries.count), Other: \(otherEntries.count)")
         
         // Only add sections that have content
         if !codesEntries.isEmpty {
             sectionsToAdd.append(.codes)
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding .codes section")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .codes section")
         }
         if !otherEntries.isEmpty {
             sectionsToAdd.append(.other)
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding .other section")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .other section")
         }
         
         // Add places section LAST if we have places
         if !places.isEmpty {
             sectionsToAdd.append(.places)
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding .places section with \(places.count) places")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .places section with \(places.count) places")
         }
         
         // Add the sections to snapshot
         snapshot.appendSections(sectionsToAdd)
-        Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Final sections in snapshot: \(sectionsToAdd.map { $0.rawValue })")
+        Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Final sections in snapshot: \(sectionsToAdd.map { $0.rawValue })")
         
         // Add content to sections
         if !folders.isEmpty {
             let sortedFolders = folders.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding \(sortedFolders.count) folders to .folders section: \(sortedFolders.map { $0.title })")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(sortedFolders.count) folders to .folders section: \(sortedFolders.map { $0.title })")
             snapshot.appendItems(sortedFolders, toSection: .folders)
         }
         if !places.isEmpty {
             let sortedPlaces = places.sorted { $0.alias?.localizedCaseInsensitiveCompare($1.alias ?? "") == .orderedAscending }
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding \(sortedPlaces.count) places to .places section: \(sortedPlaces.map { $0.alias ?? "Unnamed" })")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(sortedPlaces.count) places to .places section: \(sortedPlaces.map { $0.alias ?? "Unnamed" })")
             snapshot.appendItems(sortedPlaces, toSection: .places)
         }
         if !codesEntries.isEmpty {
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding \(codesEntries.count) entries to .codes section: \(codesEntries.map { $0.title })")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(codesEntries.count) entries to .codes section: \(codesEntries.map { $0.title })")
             snapshot.appendItems(codesEntries, toSection: .codes)
         }
         if !otherEntries.isEmpty {
-            Logger.log(level: .info, category: .nestService, message: "DEBUGGING: Adding \(otherEntries.count) entries to .other section: \(otherEntries.map { $0.title })")
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(otherEntries.count) entries to .other section: \(otherEntries.map { $0.title })")
             snapshot.appendItems(otherEntries, toSection: .other)
         }
         
@@ -645,29 +708,29 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func applySnapshot(animated: Bool = false) {
         guard let dataSource = self.dataSource else { 
-            Logger.log(level: .error, category: .nestService, message: "❌ CRASH DEBUG: DataSource is nil!")
+            Logger.log(level: .error, category: logCategory, message: "❌ CRASH DEBUG: DataSource is nil!")
             return 
         }
         
         // Prevent concurrent snapshot applications
         guard !isApplyingSnapshot else {
-            Logger.log(level: .info, category: .nestService, message: "Snapshot application already in progress, skipping")
+            Logger.log(level: .info, category: logCategory, message: "Snapshot application already in progress, skipping")
             return
         }
         
-        Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Starting snapshot application...")
+        Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Starting snapshot application...")
         isApplyingSnapshot = true
         
         do {
             let snapshot = createSnapshot()
             
             // Log section information for debugging
-            Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Created snapshot with sections: \(sectionOrder.map { $0.rawValue })")
-            Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Snapshot has \(snapshot.numberOfSections) sections, \(snapshot.numberOfItems) total items")
+            Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Created snapshot with sections: \(sectionOrder.map { $0.rawValue })")
+            Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Snapshot has \(snapshot.numberOfSections) sections, \(snapshot.numberOfItems) total items")
             
             // Validate snapshot before applying
             if snapshot.numberOfSections == 0 && (entries.isEmpty && folders.isEmpty && places.isEmpty) {
-                Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Empty snapshot - showing empty state")
+                Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Empty snapshot - showing empty state")
                 isApplyingSnapshot = false
                 refreshEmptyState()
                 return
@@ -678,24 +741,25 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             
             // Apply snapshot 
             dataSource.apply(snapshot, animatingDifferences: shouldAnimate) { [weak self] in
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
                     // Only update layout after snapshot is successfully applied and if composition changed
-                    let layoutNeedsUpdate = self?.sectionOrder != self?.previousSectionOrder
+                    let layoutNeedsUpdate = sectionOrder != previousSectionOrder
                     if layoutNeedsUpdate {
-                        Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Section composition changed after apply. Previous: \(self?.previousSectionOrder.map { $0.rawValue } ?? []), New: \(self?.sectionOrder.map { $0.rawValue } ?? [])")
-                        self?.collectionView.setCollectionViewLayout(self?.createLayout() ?? UICollectionViewFlowLayout(), animated: false)
-                        self?.previousSectionOrder = self?.sectionOrder ?? []
+                        Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Section composition changed after apply. Previous: \(previousSectionOrder.map { $0.rawValue } ?? []), New: \(sectionOrder.map { $0.rawValue } ?? [])")
+                        collectionView.setCollectionViewLayout(createLayout() ?? UICollectionViewFlowLayout(), animated: false)
+                        previousSectionOrder = sectionOrder ?? []
                     } else {
-                        Logger.log(level: .info, category: .nestService, message: "🔄 CRASH DEBUG: Section composition unchanged, skipping layout update")
+                        Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Section composition unchanged, skipping layout update")
                     }
                     
-                    self?.isApplyingSnapshot = false
-                    self?.collectionView.layoutIfNeeded()
-                    Logger.log(level: .info, category: .nestService, message: "✅ CRASH DEBUG: Snapshot applied successfully")
+                    isApplyingSnapshot = false
+                    collectionView.layoutIfNeeded()
+                    Logger.log(level: .info, category: logCategory, message: "✅ CRASH DEBUG: Snapshot applied successfully")
                 }
             }
         } catch {
-            Logger.log(level: .error, category: .nestService, message: "❌ CRASH DEBUG: Snapshot application failed: \(error)")
+            Logger.log(level: .error, category: logCategory, message: "❌ CRASH DEBUG: Snapshot application failed: \(error)")
             isApplyingSnapshot = false
             
             // Force reload as fallback
@@ -763,6 +827,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         if !isEditingMode {
             selectedEntries.removeAll()
             selectedPlaces.removeAll()
+            
+            // Notify delegate when clearing selections in edit-only mode
+            if isEditOnlyMode {
+                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+            }
         }
         
         // Update the add entry button for edit mode
@@ -882,7 +952,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         return
                     }
                 } catch {
-                    Logger.log(level: .error, category: .nestService, message: "Failed to check entry count: \(error.localizedDescription)")
+                    Logger.log(level: .error, category: logCategory, message: "Failed to check entry count: \(error.localizedDescription)")
                 }
             }
             
@@ -1058,7 +1128,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 }
             }
         } else {
-            Logger.log(level: .error, category: .nestService, message: "Entry not found for update: \(entry.id)")
+            Logger.log(level: .error, category: logCategory, message: "Entry not found for update: \(entry.id)")
         }
     }
     
@@ -1143,6 +1213,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             // Invalidate cache to ensure fresh data
             if let nestService = entryRepository as? NestService {
                 nestService.invalidateItemsCache()
+            } else if let sitterService = entryRepository as? SitterViewService {
+                sitterService.clearEntriesCache()
+                sitterService.clearPlacesCache()
             }
             
             // Use the new streamlined folder contents loading
@@ -1168,7 +1241,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             emptyStateView = NNEmptyStateView(
                 icon: UIImage(systemName: "moon.zzz.fill"),
                 title: "It's a little quiet in here",
-                subtitle: "Items for this category will appear here. Suggestions can be found in the upper-right corner.",
+                subtitle: entryRepository is NestService ? "Items for this folder will appear here. Suggestions can be found in the upper-right corner." :
+                    "This folder either has no items in it or none of the items were shared with you.",
                 actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
             )
             
@@ -1211,7 +1285,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func deleteFolder(_ folderData: FolderData) {
         guard let nestService = entryRepository as? NestService else {
-            Logger.log(level: .error, category: .nestService, message: "Only nest owners can delete folders")
+            Logger.log(level: .error, category: logCategory, message: "Only nest owners can delete folders")
             return
         }
         
@@ -1221,7 +1295,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 try await nestService.deleteCategory(folderData.fullPath)
                 
                 await MainActor.run {
-                    Logger.log(level: .info, category: .nestService, message: "Folder deleted: \(folderData.fullPath)")
+                    Logger.log(level: .info, category: logCategory, message: "Folder deleted: \(folderData.fullPath)")
                     self.showToast(text: "Folder Deleted")
                     
                     // Simply remove the deleted folder from the local folders array
@@ -1229,7 +1303,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 }
             } catch {
                 await MainActor.run {
-                    Logger.log(level: .error, category: .nestService, message: "Failed to delete folder: \(error.localizedDescription)")
+                    Logger.log(level: .error, category: logCategory, message: "Failed to delete folder: \(error.localizedDescription)")
                     self.showToast(text: "Failed to delete folder")
                 }
             }
@@ -1261,7 +1335,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                             return
                         }
                     } catch {
-                        Logger.log(level: .error, category: .nestService, message: "Failed to check place count: \(error.localizedDescription)")
+                        Logger.log(level: .error, category: logCategory, message: "Failed to check place count: \(error.localizedDescription)")
                     }
                 }
             }
@@ -1318,7 +1392,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             
             if isEditOnlyMode {
                 // In edit-only mode, navigate to subfolder for entry selection
-                Logger.log(level: .info, category: .nestService, message: "Selected folder for entry selection: \(folderData.title)")
+                Logger.log(level: .info, category: logCategory, message: "Selected folder for entry selection: \(folderData.title)")
                 
                 let subfolderVC = NestCategoryViewController(
                     entryRepository: entryRepository,
@@ -1332,7 +1406,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 navigationController?.pushViewController(subfolderVC, animated: true)
             } else if !isEditingMode {
                 // Normal folder navigation (not in edit mode)
-                Logger.log(level: .info, category: .nestService, message: "Selected folder: \(folderData.title)")
+                Logger.log(level: .info, category: logCategory, message: "Selected folder: \(folderData.title)")
                 
                 let subfolderVC = NestCategoryViewController(
                     category: folderData.fullPath,
@@ -1362,6 +1436,11 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Update the cell appearance
                 updatePlaceCellSelection(for: selectedPlace)
+                
+                // Notify delegate in edit-only mode
+                if isEditOnlyMode {
+                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                }
                 return
             }
             
@@ -1369,7 +1448,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             collectionView.deselectItem(at: indexPath, animated: true)
             
             // Normal place selection (not in edit mode) - navigate to PlaceDetailViewController
-            Logger.log(level: .info, category: .nestService, message: "Selected place for viewing: \(selectedPlace.alias ?? "Unnamed")")
+            Logger.log(level: .info, category: logCategory, message: "Selected place for viewing: \(selectedPlace.alias ?? "Unnamed")")
             
             let cellFrame = collectionView.convert(cell.frame, to: nil)
             let isReadOnly = !(entryRepository is NestService)
@@ -1413,19 +1492,8 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         // Normal entry selection (not in edit mode)
         collectionView.deselectItem(at: indexPath, animated: true)
         
-        // Check if user has access to this entry (skip check for nest owners)
-        if !(entryRepository is NestService) && !sessionVisibilityLevel.hasAccess(to: selectedEntry.visibility) {
-            let alert = UIAlertController(
-                title: "Access Required",
-                message: "This entry requires \(selectedEntry.visibility.title) access level. The current access level for this session is \(sessionVisibilityLevel.title).",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return
-        }
         
-        Logger.log(level: .info, category: .nestService, message: "Selected entry for editing: \(selectedEntry.title)")
+        Logger.log(level: .info, category: logCategory, message: "Selected entry for editing: \(selectedEntry.title)")
         
         let cellFrame = collectionView.convert(cell.frame, to: nil)
         let isReadOnly = !(entryRepository is NestService)
@@ -1449,6 +1517,11 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             if let selectedPlace = selectedItem as? PlaceItem {
                 selectedPlaces.remove(selectedPlace)
                 updatePlaceCellSelection(for: selectedPlace)
+                
+                // Notify delegate in edit-only mode
+                if isEditOnlyMode {
+                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                }
                 return
             }
             
@@ -1592,7 +1665,7 @@ extension NestCategoryViewController: EntryDetailViewControllerDelegate {
     func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
         if let entry = entry {
             // Handle save/update
-            Logger.log(level: .info, category: .nestService, message: "Delegate received saved entry: \(entry.title)")
+            Logger.log(level: .info, category: logCategory, message: "Delegate received saved entry: \(entry.title)")
             
             if entries.contains(where: { $0.id == entry.id }) {
                 updateLocalEntry(entry)
@@ -1604,7 +1677,7 @@ extension NestCategoryViewController: EntryDetailViewControllerDelegate {
     }
     
     func entryDetailViewController(didDeleteEntry entry: BaseEntry) {
-        Logger.log(level: .info, category: .nestService, message: "Delegate received deletion")
+        Logger.log(level: .info, category: logCategory, message: "Delegate received deletion")
         
         if let index = entries.firstIndex(where: { $0.id == entry.id }) {
             // Remove from local array (this will trigger didSet and applySnapshot)
@@ -1646,7 +1719,7 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
                 try await nestService.createCategory(newCategory)
                 
                 await MainActor.run {
-                    Logger.log(level: .info, category: .nestService, message: "New folder created: \(fullFolderPath) with icon: \(iconName)")
+                    Logger.log(level: .info, category: logCategory, message: "New folder created: \(fullFolderPath) with icon: \(iconName)")
                     self.showToast(text: "Folder Created")
                 }
                 
@@ -1654,7 +1727,7 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
                 await self.loadFolderContents()
             } catch {
                 await MainActor.run {
-                    Logger.log(level: .error, category: .nestService, message: "Failed to create folder: \(error.localizedDescription)")
+                    Logger.log(level: .error, category: logCategory, message: "Failed to create folder: \(error.localizedDescription)")
                     self.showToast(text: "Failed to create folder")
                 }
             }
@@ -1740,6 +1813,12 @@ extension NestCategoryViewController: SelectFolderViewControllerDelegate {
                     self.selectedEntries.removeAll()
                     self.selectedPlaces.removeAll()
                     
+                    // Notify delegate when clearing selections after move operation
+                    if self.isEditOnlyMode {
+                        self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: self.selectedEntries)
+                        self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
+                    }
+                    
                     let totalCount = selectedEntriesArray.count + selectedPlacesArray.count
                     let itemText: String
                     
@@ -1760,7 +1839,7 @@ extension NestCategoryViewController: SelectFolderViewControllerDelegate {
             } catch {
                 await MainActor.run {
                     controller.dismiss(animated: true)
-                    Logger.log(level: .error, category: .nestService, message: "Failed to move items: \(error.localizedDescription)")
+                    Logger.log(level: .error, category: logCategory, message: "Failed to move items: \(error.localizedDescription)")
                     self.showToast(text: "Failed to move items")
                 }
             }
@@ -1790,7 +1869,7 @@ extension NestCategoryViewController: SelectPlaceLocationDelegate {
 extension NestCategoryViewController {
     func placeListViewController(didUpdatePlace place: PlaceItem) {
         // Handle place creation or update
-        Logger.log(level: .info, category: .nestService, message: "Delegate received saved place: \(place.alias ?? "Unnamed")")
+        Logger.log(level: .info, category: logCategory, message: "Delegate received saved place: \(place.alias ?? "Unnamed")")
         
         // For new places created from this view, ensure they have the correct category
         var updatedPlace = place
@@ -1815,7 +1894,7 @@ extension NestCategoryViewController {
                     do {
                         try await nestService.updatePlace(updatedPlace)
                     } catch {
-                        Logger.log(level: .error, category: .nestService, message: "Failed to update place category: \(error.localizedDescription)")
+                        Logger.log(level: .error, category: logCategory, message: "Failed to update place category: \(error.localizedDescription)")
                     }
                 }
             }
@@ -1838,19 +1917,26 @@ extension NestCategoryViewController {
     
     func placeListViewController(didDeletePlace place: PlaceItem) {
         // Handle place deletion
-        Logger.log(level: .info, category: .nestService, message: "Delegate received place deletion: \(place.alias ?? "Unnamed")")
+        Logger.log(level: .info, category: logCategory, message: "Delegate received place deletion: \(place.alias ?? "Unnamed")")
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            
             if let index = self.places.firstIndex(where: { $0.id == place.id }) {
-                Logger.log(level: .info, category: .nestService, message: "Removing place at index \(index), places count before: \(self.places.count)")
+                Logger.log(level: .info, category: logCategory, message: "Removing place at index \(index), places count before: \(self.places.count)")
                 
                 // Remove from selected places if it was selected
                 self.selectedPlaces.remove(place)
                 
+                // Notify delegate if place was selected and we're in edit-only mode
+                if self.isEditOnlyMode {
+                    self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
+                }
+                
                 // Remove from local array (this will trigger didSet and applySnapshot)
                 self.places.remove(at: index)
                 
-                Logger.log(level: .info, category: .nestService, message: "Place removed, places count after: \(self.places.count)")
+                Logger.log(level: .info, category: logCategory, message: "Place removed, places count after: \(self.places.count)")
                 
                 // No need to manually apply snapshot here since places.didSet will handle it
                 // The didSet will create a proper snapshot with correct sections
@@ -1858,7 +1944,7 @@ extension NestCategoryViewController {
                 self.showToast(text: "Place Deleted")
                 self.refreshEmptyState()
             } else {
-                Logger.log(level: .info, category: .nestService, message: "Place not found in local array for deletion: \(place.id)")
+                Logger.log(level: .info, category: logCategory, message: "Place not found in local array for deletion: \(place.id)")
             }
         }
     }

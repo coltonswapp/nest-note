@@ -231,6 +231,11 @@ final class NestService: EntryRepository {
         cachedCategories = nil
     }
     
+    func clearPlacesCache() {
+        // Places are computed from cachedItems, so clear the items cache
+        invalidateItemsCache()
+    }
+    
     // MARK: - Entry Methods
     func createEntry(_ entry: BaseEntry) async throws {
         Logger.log(level: .info, category: .nestService, message: "createEntry() called - using ItemRepository")
@@ -412,6 +417,12 @@ final class NestService: EntryRepository {
     private var cachedItems: [BaseItem] = []
     private var lastFetchTime: Date?
     private let cacheValidityDuration: TimeInterval = 600 // 10 minutes - more reasonable for navigation
+    
+    // Computed property that filters places from cached items
+    private var cachedPlaces: [PlaceItem]? {
+        guard !cachedItems.isEmpty else { return nil }
+        return cachedItems.compactMap { $0 as? PlaceItem }
+    }
     
     private var isCacheValid: Bool {
         guard let lastFetch = lastFetchTime else { return false }

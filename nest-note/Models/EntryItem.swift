@@ -46,14 +46,14 @@ struct EntryItem: BaseItem {
     
     // MARK: - Conversion to BaseEntry
     func toBaseEntry() -> BaseEntry {
-        let baseEntry = BaseEntry(title: title, content: content, visibilityLevel: visibility, category: category)
-        // Update the mutable properties to match our values
-        baseEntry.title = title
-        baseEntry.content = content
-        baseEntry.category = category
-        baseEntry.visibility = visibility
-        baseEntry.updatedAt = updatedAt
-        // Note: id and createdAt cannot be changed after initialization in BaseEntry
-        return baseEntry
+        return BaseEntry(
+            id: id,
+            title: title,
+            content: content,
+            visibilityLevel: visibility,
+            category: category,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 }

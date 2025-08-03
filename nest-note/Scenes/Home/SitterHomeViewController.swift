@@ -747,7 +747,7 @@ extension SitterHomeViewController: UICollectionViewDelegate {
         case .sessionEvent(let event):
             // Present event details
             if let session = sitterViewService.currentSession {
-                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false)
+                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false, entryRepository: SitterViewService.shared)
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }

@@ -82,19 +82,19 @@ class FullWidthCell: UICollectionViewCell {
         checkmarkImageView.isHidden = true
     }
     
-    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel, isNestOwner: Bool = false, isEditMode: Bool = false, isSelected: Bool = false) {
+    func configure(key: String, value: String, isNestOwner: Bool = false, isEditMode: Bool = false, isSelected: Bool = false, isModalInPresentation: Bool = false) {
         keyLabel.text = key
         
-        // Show actual value or asterisks based on access level (nest owners bypass all checks)
-        if isNestOwner || sessionVisibility.hasAccess(to: entryVisibility) {
-            valueLabel.text = value
-        } else {
-            // For full width cells, we'll show multiple lines of asterisks to indicate more content
-            valueLabel.text = "********"
-        }
+        valueLabel.text = value
         
         self.isInEditMode = isEditMode
         self.isEntrySelected = isSelected
+
+        if isModalInPresentation {
+            valueContainerBackgroundColor = .secondarySystemBackground
+        } else {
+            valueContainerBackgroundColor = NNColors.groupedBackground
+        }
         
         updateSelectionAppearance()
     }

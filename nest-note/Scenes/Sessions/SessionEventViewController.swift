@@ -13,6 +13,7 @@ final class SessionEventViewController: NNSheetViewController {
     private let event: SessionEvent?
     private let isReadOnly: Bool
     private var sessionDateRange: DateInterval?
+    private let entryRepository: EntryRepository?
     
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
@@ -66,7 +67,7 @@ final class SessionEventViewController: NNSheetViewController {
     }()
     
     private lazy var locationView: SessionEventLocationView = {
-        let view = SessionEventLocationView(place: nil)
+        let view = SessionEventLocationView(place: nil, entryRepository: entryRepository)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.editButton.addTarget(self, action: #selector(showLocationSelector), for: .touchUpInside)
         view.delegate = self
@@ -108,11 +109,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, entryRepository: EntryRepository? = nil) {
         self.sessionID = sessionID
         self.event = event
         self.isReadOnly = isReadOnly
         self.sessionDateRange = sessionDateRange
+        self.entryRepository = entryRepository
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
@@ -164,7 +166,9 @@ final class SessionEventViewController: NNSheetViewController {
             Task {
                 if let placeID = event.placeID {
                     do {
-                        let place = try await NestService.shared.getPlace(for: placeID)
+                        // Use the provided repository or fall back to NestService
+                        let repository = entryRepository ?? NestService.shared
+                        let place = try await repository.getPlace(for: placeID)
                         await MainActor.run {
                             locationView.configureWith(place)
                         }
@@ -717,7 +721,7 @@ class SessionEventLocationView: UIView {
     private let aliasLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .h4
+        label.font = .h3
         label.textColor = .label
         return label
     }()
@@ -732,10 +736,12 @@ class SessionEventLocationView: UIView {
     }()
     
     weak var delegate: PlaceAddressCellDelegate?
+    private let entryRepository: EntryRepository?
     
     var place: PlaceItem?
     
-    init(place: PlaceItem?) {
+    init(place: PlaceItem?, entryRepository: EntryRepository? = nil) {
+        self.entryRepository = entryRepository
         super.init(frame: .zero)
         addSubviews()
         constrainSubviews()
@@ -786,7 +792,7 @@ class SessionEventLocationView: UIView {
                 string: place.address,
                 attributes: [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .font: UIFont.bodyXL
+                    .font: UIFont.bodyM
                 ]
             )
             
@@ -812,19 +818,23 @@ class SessionEventLocationView: UIView {
                 thumbnailImageView.addGestureRecognizer(imageTapGesture)
                 thumbnailImageView.isHidden = false
                 thumbnailImageView.contentMode = .scaleAspectFill
-            
-            
-            aliasLabel.text = place.alias
-            addressLabel.attributedText = attributedString
                 
-            aliasLabel.text = place.alias
-            addressLabel.attributedText = attributedString
+                // Load place thumbnail using the provided repository
                 Task {
                     do {
-                        // TODO: Implement image loading in NestService
-                        // For now, show a placeholder icon
-                        thumbnailImageView.image = UIImage(systemName: "photo.fill")
-                        thumbnailImageView.tintColor = .systemGray
+                        // Use the provided repository or fall back to NestService
+                        let repository = entryRepository ?? NestService.shared
+                        let image = try await repository.loadImages(for: place)
+                        await MainActor.run {
+                            thumbnailImageView.image = image
+                        }
+                    } catch {
+                        // Show placeholder icon on error
+                        await MainActor.run {
+                            thumbnailImageView.image = UIImage(systemName: "photo.fill")
+                            thumbnailImageView.tintColor = .systemGray
+                        }
+                        Logger.log(level: .error, category: .sessionService, message: "Failed to load place image: \(error.localizedDescription)")
                     }
                 }
             }

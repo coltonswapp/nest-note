@@ -53,7 +53,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         }
         
         // Step 2: Count all entries and places for each folder
-        Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Counting items for currentFolderPath='\(currentFolderPath)'")
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Counting items for currentFolderPath='\(currentFolderPath)'")
         
         // Count entries - iterate through ALL entries in ALL categories
         for (_, categoryEntries) in entries {
@@ -64,7 +64,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     // At root level, count entries that belong to top-level categories
                     if !entryCategory.contains("/") && currentLevelFolders.contains(entryCategory) {
                         folderCounts[entryCategory, default: 0] += 1
-                        Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Entry '\(entry.title.prefix(20))' counted for root category '\(entryCategory)'")
+                        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Entry '\(entry.title.prefix(20))' counted for root category '\(entryCategory)'")
                     }
                 } else {
                     // For deeper levels, identify subfolders and count appropriately
@@ -93,13 +93,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         // Count places
         for place in places {
             let placeCategory = place.category
-            Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' has category '\(placeCategory)'")
+            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' has category '\(placeCategory)'")
             
             if currentFolderPath.isEmpty {
                 // At root level, count places that belong to top-level categories
                 if !placeCategory.contains("/") && currentLevelFolders.contains(placeCategory) {
                     folderCounts[placeCategory, default: 0] += 1
-                    Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' counted for root category '\(placeCategory)'")
+                    Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' counted for root category '\(placeCategory)'")
                 }
             } else {
                 // For deeper levels, identify subfolders and count appropriately
@@ -125,7 +125,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         }
         
         // Create FolderData objects for each folder
-        Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Final folder counts: \(folderCounts)")
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Final folder counts: \(folderCounts)")
         for folderPath in currentLevelFolders.sorted() {
             let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
             let category = findCategoryForFolder(folderPath: folderPath)
@@ -138,7 +138,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 fullPath: folderPath,
                 category: category
             )
-            Logger.log(level: .info, category: .general, message: "FOLDER COUNT DEBUG: Created folder '\(folderName)' with count \(folderCounts[folderPath] ?? 0)")
+            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Created folder '\(folderName)' with count \(folderCounts[folderPath] ?? 0)")
             folderItems.append(folderData)
         }
         
@@ -165,6 +165,11 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var newCategoryButton: NNPrimaryLabeledButton?
     
     internal let entryRepository: EntryRepository
+    
+    // Dynamic logging category based on repository type
+    private var logCategory: Logger.Category {
+        return entryRepository is NestService ? .nestService : .sitterViewService
+    }
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -228,7 +233,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     @objc private func refreshEntries() {
         Task {
             do {
-                Logger.log(level: .info, category: .nestService, message: "Refreshing entries, categories, and places")
+                Logger.log(level: .info, category: logCategory, message: "Refreshing entries, categories, and places")
                 
                 // Invalidate cache first for refresh
                 if let nestService = entryRepository as? NestService {
@@ -243,7 +248,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 if let nestService = entryRepository as? NestService {
                     do {
                         let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
-                        Logger.log(level: .info, category: .nestService, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places")
                         
                         await MainActor.run {
                             self.entries = groupedEntries
@@ -252,7 +257,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                             self.refreshControl.endRefreshing()
                         }
                     } catch {
-                        Logger.log(level: .error, category: .nestService, message: "Failed to refresh entries and places: \(error)")
+                        Logger.log(level: .error, category: logCategory, message: "Failed to refresh entries and places: \(error)")
                         // Fallback to separate refresh
                         let groupedEntries = try await entryRepository.refreshEntries()
                         
@@ -263,10 +268,24 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                             self.refreshControl.endRefreshing()
                         }
                     }
+                } else if let sitterService = entryRepository as? SitterViewService {
+                    // For SitterViewService, refresh both entries and places
+                    sitterService.clearEntriesCache()
+                    sitterService.clearPlacesCache()
+                    let groupedEntries = try await entryRepository.refreshEntries()
+                    let places = try await sitterService.fetchNestPlaces()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups and \(places.count) places")
+                    
+                    await MainActor.run {
+                        self.entries = groupedEntries
+                        self.places = places
+                        self.applyInitialSnapshots()
+                        self.refreshControl.endRefreshing()
+                    }
                 } else {
                     // For other repository types, refresh entries only
                     let groupedEntries = try await entryRepository.refreshEntries()
-                    Logger.log(level: .info, category: .nestService, message: "Refreshed \(groupedEntries.count) entry groups")
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups")
                     
                     await MainActor.run {
                         self.entries = groupedEntries
@@ -276,7 +295,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     }
                 }
             } catch {
-                Logger.log(level: .error, category: .nestService, message: "Failed to refresh: \(error)")
+                Logger.log(level: .error, category: logCategory, message: "Failed to refresh: \(error)")
                 await MainActor.run {
                     self.refreshControl.endRefreshing()
                     self.showError(error.localizedDescription)
@@ -534,7 +553,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         navigationItem.rightBarButtonItem?.isEnabled = false
         
         do {
-            Logger.log(level: .info, category: .general, message: "Starting to load entries, categories, and places")
+            Logger.log(level: .info, category: logCategory, message: "Starting to load entries, categories, and places")
             
             // Fetch categories first
             let categories = try await entryRepository.fetchCategories()
@@ -544,20 +563,27 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             if let nestService = entryRepository as? NestService {
                 do {
                     let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
-                    Logger.log(level: .info, category: .general, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                    Logger.log(level: .info, category: logCategory, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places")
                     self.entries = groupedEntries
                     self.places = places
                 } catch {
-                    Logger.log(level: .error, category: .general, message: "Failed to fetch entries and places: \(error)")
+                    Logger.log(level: .error, category: logCategory, message: "Failed to fetch entries and places: \(error)")
                     // Fallback to separate fetches
                     let groupedEntries = try await entryRepository.fetchEntries()
                     self.entries = groupedEntries
                     self.places = []
                 }
+            } else if let sitterService = entryRepository as? SitterViewService {
+                // For SitterViewService, fetch both entries and places
+                let groupedEntries = try await entryRepository.fetchEntries()
+                let places = try await sitterService.fetchNestPlaces()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups and \(places.count) places")
+                self.entries = groupedEntries
+                self.places = places
             } else {
                 // For other repository types, fetch entries only
                 let groupedEntries = try await entryRepository.fetchEntries()
-                Logger.log(level: .info, category: .general, message: "Fetched \(groupedEntries.count) entry groups")
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups")
                 self.entries = groupedEntries
                 self.places = []
             }
@@ -570,7 +596,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 navigationItem.rightBarButtonItem?.isEnabled = true
             }
         } catch {
-            Logger.log(level: .error, category: .general, message: "Failed to load entries and categories: \(error)")
+            Logger.log(level: .error, category: logCategory, message: "Failed to load entries and categories: \(error)")
             await MainActor.run {
                 self.newCategoryButton?.isEnabled = false
                 self.loadingIndicator.stopAnimating()
@@ -643,7 +669,7 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                     self.showToast(text: "Category Created")
                 }
             } catch {
-                Logger.log(level: .error, category: .general, message: "Failed to create category: \(error)")
+                Logger.log(level: .error, category: logCategory, message: "Failed to create category: \(error)")
                 await MainActor.run {
                     self.showError(error.localizedDescription)
                 }

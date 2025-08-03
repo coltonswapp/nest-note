@@ -367,9 +367,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable, Pay
                 cell.valueLabelBackgroundColor = .tertiaryLabel
                 cell.configure(
                     key: entry.title,
-                    value: entry.content,
-                    entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel
+                    value: entry.content
                 )
                 
                 return cell
@@ -379,9 +377,7 @@ class CommonEntriesViewController: UIViewController, CollectionViewLoadable, Pay
                 cell.valueLabelBackgroundColor = .tertiaryLabel
                 cell.configure(
                     key: entry.title,
-                    value: entry.content,
-                    entryVisibility: entry.visibility,
-                    sessionVisibility: self.sessionVisibilityLevel
+                    value: entry.content
                 )
                 
                 return cell

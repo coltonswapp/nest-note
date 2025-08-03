@@ -2,6 +2,7 @@ import UIKit
 import Foundation
 import RevenueCat
 import RevenueCatUI
+import QuickLook
 
 // MARK: - Protocols
 protocol DatePresentationDelegate: AnyObject {
@@ -40,7 +41,7 @@ protocol InviteSitterViewControllerDelegate: AnyObject {
 }
 
 // MARK: - EditSessionViewController
-class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate {
+class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate, QLPreviewControllerDataSource {
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -66,6 +67,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var visibilityLevel: VisibilityLevel = .halfDay
     private var selectedEntries: [BaseEntry] = []
+    private var selectedPlaces: [PlaceItem] = []
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -79,6 +81,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     
     private var sessionEvents: [SessionEvent] = []
+    private var pdfURL: URL?
     private let maxVisibleEvents = 4
     
     // Add property for save button
@@ -121,15 +124,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private var currentStartDate: Date {
-        return currentDateSelection?.startDate ?? Date()
+        return currentDateSelection?.startDate ?? originalSession.startDate
     }
     
     private var currentEndDate: Date {
-        return currentDateSelection?.endDate ?? Date().addingTimeInterval(60 * 60 * 2)
+        return currentDateSelection?.endDate ?? originalSession.endDate
     }
     
     private var currentIsMultiDay: Bool {
-        return currentDateSelection?.isMultiDay ?? false
+        return currentDateSelection?.isMultiDay ?? originalSession.isMultiDay
     }
     
     // Add dateRange property for consistency
@@ -244,6 +247,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             name: .sessionStatusDidChange,
             object: nil
         )
+        
+        // Restore selected entries if editing an existing session
+        restoreSelectedEntriesFromSession()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -276,6 +282,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Update UI based on editing state
         titleTextField.text = sessionItem.title
+        
+        // Debug logging for initial state
+        Logger.log(level: .debug, category: .sessionService, message: "=== Initial Setup Debug ===")
+        Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
+        Logger.log(level: .debug, category: .sessionService, message: "sessionItem.entryIds: \(sessionItem.entryIds?.description ?? "nil")")
+        Logger.log(level: .debug, category: .sessionService, message: "originalSession.entryIds: \(originalSession.entryIds?.description ?? "nil")")
+        Logger.log(level: .debug, category: .sessionService, message: "selectedEntries count: \(selectedEntries.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "=== End Initial Setup Debug ===")
+        
         updateSaveButtonState()
         
         // If editing, pre-populate the date selection
@@ -403,11 +418,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     }
                 }
                 
+                // Update originalSession entryIds to match refreshed data
+                self.originalSession.entryIds = refreshedSession.entryIds
+                
                 // Update data source with refreshed session data
                 self.updateDataSourceAfterRefresh()
                 
-                // Check for changes after refresh
-                self.checkForChanges()
+                // Restore selected entries from refreshed session
+                self.restoreSelectedEntriesFromSession()
+                
+                // Note: checkForChanges() is now called within restoreSelectedEntriesFromSession() 
+                // after proper synchronization, so we don't need to call it again here
                 
                 // Refresh session events if needed
                 if !self.isArchivedSession {
@@ -431,6 +452,86 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 )
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 self.present(alert, animated: true)
+            }
+        }
+    }
+    
+    // MARK: - Entry Selection Restoration
+    
+    private func restoreSelectedEntriesFromSession() {
+        Logger.log(level: .info, category: .general, message: "restoreSelectedEntriesFromSession called - isEditingSession: \(isEditingSession)")
+        Logger.log(level: .info, category: .general, message: "sessionItem.entryIds: \(sessionItem.entryIds?.description ?? "nil")")
+        
+        guard isEditingSession, let entryIds = sessionItem.entryIds, !entryIds.isEmpty else {
+            Logger.log(level: .info, category: .general, message: "No entries to restore - early return")
+            return
+        }
+        
+        Logger.log(level: .info, category: .general, message: "Attempting to restore \(entryIds.count) entry IDs: \(entryIds)")
+        
+        Task {
+            do {
+                // Fetch both entries and places to match with the stored IDs
+                let nestService = NestService.shared
+                let entriesDict = try await nestService.fetchEntries()
+                let allPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
+                
+                Logger.log(level: .info, category: .general, message: "Fetched entries from \(entriesDict.count) categories and \(allPlaces.count) places")
+                
+                // Flatten all entries from all categories
+                let allEntries = entriesDict.values.flatMap { $0 }
+                Logger.log(level: .info, category: .general, message: "Total entries available: \(allEntries.count)")
+                
+                // Log available IDs for debugging
+                let availableEntryIds = allEntries.map { $0.id }
+                let availablePlaceIds = allPlaces.map { $0.id }
+                Logger.log(level: .info, category: .general, message: "Available entry IDs: \(availableEntryIds)")
+                Logger.log(level: .info, category: .general, message: "Available place IDs: \(availablePlaceIds)")
+                Logger.log(level: .info, category: .general, message: "Looking for item IDs: \(entryIds)")
+                
+                // Filter to entries and places that match the stored IDs
+                let matchingEntries = allEntries.filter { entryIds.contains($0.id) }
+                let matchingPlaces = allPlaces.filter { entryIds.contains($0.id) }
+                
+                Logger.log(level: .info, category: .general, message: "Found \(matchingEntries.count) matching entries")
+                Logger.log(level: .info, category: .general, message: "Found \(matchingPlaces.count) matching places")
+                Logger.log(level: .info, category: .general, message: "Matching entry titles: \(matchingEntries.map { $0.title })")
+                Logger.log(level: .info, category: .general, message: "Matching place aliases: \(matchingPlaces.map { $0.alias ?? "Unnamed"})")
+                
+                // If no matching items found, the stored items may have been deleted
+                if matchingEntries.isEmpty && matchingPlaces.isEmpty && !entryIds.isEmpty {
+                    Logger.log(level: .info, category: .general, message: "No matching items found for stored IDs - items may have been deleted. Clearing session entryIds.")
+                    
+                    await MainActor.run {
+                        // Clear the stored entryIds since they're no longer valid
+                        self.sessionItem.entryIds = nil
+                        self.selectedEntries = []
+                        self.selectedPlaces = []
+                        self.updateSelectEntriesSection()
+                        Logger.log(level: .info, category: .general, message: "Cleared invalid entryIds from session")
+                    }
+                } else {
+                    await MainActor.run {
+                        self.selectedEntries = matchingEntries
+                        self.selectedPlaces = matchingPlaces
+                        Logger.log(level: .info, category: .general, message: "Updated selectedEntries count to: \(self.selectedEntries.count)")
+                        Logger.log(level: .info, category: .general, message: "Updated selectedPlaces count to: \(self.selectedPlaces.count)")
+                        Logger.log(level: .info, category: .general, message: "Restored entry IDs: \(matchingEntries.map { $0.id }.sorted())")
+                        Logger.log(level: .info, category: .general, message: "Restored place IDs: \(matchingPlaces.map { $0.id }.sorted())")
+                        self.updateSelectEntriesSection()
+                        
+                        // Update originalSession.entryIds to match the restored entries to prevent false change detection
+                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id }
+                        self.originalSession.entryIds = restoredIds.isEmpty ? nil : restoredIds
+                        
+                        // Now check for changes after restoration - should show no changes since we just synced
+                        Logger.log(level: .info, category: .general, message: "Calling checkForChanges() after item restoration and originalSession sync")
+                        self.checkForChanges()
+                    }
+                }
+                
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to restore selected entries: \(error.localizedDescription)")
             }
         }
     }
@@ -535,18 +636,14 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 
                 try pdfData.write(to: tempURL)
                 
-                // Present share sheet
+                // Store PDF URL for QuickLook
+                self.pdfURL = tempURL
+                
+                // Present QuickLook preview
                 await MainActor.run {
-                    let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
-                    
-                    // Configure for iPad
-                    if let popover = activityVC.popoverPresentationController {
-                        popover.sourceView = view
-                        popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
-                        popover.permittedArrowDirections = []
-                    }
-                    
-                    present(activityVC, animated: true)
+                    let previewController = QLPreviewController()
+                    previewController.dataSource = self
+                    present(previewController, animated: true)
                 }
                 
             } catch {
@@ -560,6 +657,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let alert = UIAlertController(title: "Export Error", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+    
+    // MARK: - QLPreviewControllerDataSource
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        return pdfURL != nil ? 1 : 0
+    }
+    
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+        return pdfURL! as QLPreviewItem
     }
     
     @objc private func saveButtonTapped() {
@@ -590,6 +696,14 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 sessionItem.isMultiDay = isMultiDay
                 // Note: visibilityLevel is no longer used, replaced by selectedEntries
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
+                
+                // Store combined entry IDs and place IDs in the session
+                let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id }
+                if !allSelectedIds.isEmpty {
+                    sessionItem.entryIds = allSelectedIds
+                } else {
+                    sessionItem.entryIds = nil // Clear entryIds if no items selected
+                }
                 
                 if isEditingSession {
                     try await updateSession()
@@ -979,7 +1093,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
         let selectedDate = sessionItem.isMultiDay ? nil : sessionItem.startDate
-        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate)
+        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate, entryRepository: NestService.shared)
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -1096,22 +1210,34 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         selectEntriesFlow.delegate = self
         selectEntriesFlow.modalPresentationStyle = .pageSheet
         
+        // Pass current selected entries and places to restore selection state
+        selectEntriesFlow.setInitialSelectedEntries(selectedEntries)
+        selectEntriesFlow.setInitialSelectedPlaces(selectedPlaces)
+        
         present(selectEntriesFlow, animated: true)
     }
     
     private func updateSelectEntriesSection() {
         var snapshot = dataSource.snapshot()
         
-        // Update select entries item
+        // Update select entries item with combined count of entries and places
         if let existingItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
             snapshot.deleteItems([existingItem])
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
+            let totalCount = selectedEntries.count + selectedPlaces.count
+            snapshot.appendItems([.selectEntries(count: totalCount)], toSection: .selectEntries)
             dataSource.apply(snapshot, animatingDifferences: true)
         }
     }
     
     private func updateSaveButtonState() {
         saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
+        
+        // Debug logging for save button state
+        Logger.log(level: .debug, category: .sessionService, message: "=== Save Button State Debug ===")
+        Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
+        Logger.log(level: .debug, category: .sessionService, message: "hasUnsavedChanges: \(hasUnsavedChanges)")
+        Logger.log(level: .debug, category: .sessionService, message: "saveButton.isEnabled: \(saveButton.isEnabled)")
+        Logger.log(level: .debug, category: .sessionService, message: "=== End Save Button Debug ===")
         
         // Update button title to show state
         let baseTitle = isEditingSession ? "Save Changes" : "Next"
@@ -1127,16 +1253,41 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func checkForChanges() {
-        let hasChanges =
-        titleTextField.text != originalSession.title ||
-        sessionItem.assignedSitter?.id != originalSession.assignedSitter?.id ||
-        currentStartDate != originalSession.startDate ||
-        currentEndDate != originalSession.endDate ||
-        currentIsMultiDay != originalSession.isMultiDay ||
-        selectedEntries.count != 0 ||
-        sessionItem.status != originalSession.status ||
-        sessionItem.earlyAccessDuration != originalSession.earlyAccessDuration ||
-        !sessionEventsMatch()
+        // Compare current selected item IDs (entries + places) with original session's entryIds
+        let currentItemIds = Set(selectedEntries.map { $0.id } + selectedPlaces.map { $0.id })
+        let originalItemIds = Set(originalSession.entryIds ?? [])
+        let itemsChanged = currentItemIds != originalItemIds
+        
+        // Enhanced debug logging for item selection changes
+        Logger.log(level: .debug, category: .sessionService, message: "=== checkForChanges() Debug ===")
+        Logger.log(level: .debug, category: .sessionService, message: "Current selected entry count: \(selectedEntries.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "Current selected place count: \(selectedPlaces.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "Current item IDs: \(Array(currentItemIds).sorted())")
+        Logger.log(level: .debug, category: .sessionService, message: "Original item IDs: \(Array(originalItemIds).sorted())")
+        Logger.log(level: .debug, category: .sessionService, message: "Items changed: \(itemsChanged)")
+        Logger.log(level: .debug, category: .sessionService, message: "=== End Debug ===")
+        
+        // Individual change checks for debugging
+        let titleChanged = titleTextField.text != originalSession.title
+        let sitterChanged = sessionItem.assignedSitter?.id != originalSession.assignedSitter?.id
+        let startDateChanged = currentStartDate != originalSession.startDate
+        let endDateChanged = currentEndDate != originalSession.endDate
+        let multiDayChanged = currentIsMultiDay != originalSession.isMultiDay
+        let statusChanged = sessionItem.status != originalSession.status
+        let earlyAccessChanged = sessionItem.earlyAccessDuration != originalSession.earlyAccessDuration
+        let eventsChanged = !sessionEventsMatch()
+        
+        // Log each comparison for debugging
+        Logger.log(level: .debug, category: .sessionService, message: "Title changed: \(titleChanged) (current: '\(titleTextField.text ?? "nil")' vs original: '\(originalSession.title)')")
+        Logger.log(level: .debug, category: .sessionService, message: "Sitter changed: \(sitterChanged) (current: '\(sessionItem.assignedSitter?.id ?? "nil")' vs original: '\(originalSession.assignedSitter?.id ?? "nil")')")
+        Logger.log(level: .debug, category: .sessionService, message: "Start date changed: \(startDateChanged) (current: \(currentStartDate) vs original: \(originalSession.startDate))")
+        Logger.log(level: .debug, category: .sessionService, message: "End date changed: \(endDateChanged) (current: \(currentEndDate) vs original: \(originalSession.endDate))")
+        Logger.log(level: .debug, category: .sessionService, message: "Multi-day changed: \(multiDayChanged) (current: \(currentIsMultiDay) vs original: \(originalSession.isMultiDay))")
+        Logger.log(level: .debug, category: .sessionService, message: "Status changed: \(statusChanged) (current: \(sessionItem.status) vs original: \(originalSession.status))")
+        Logger.log(level: .debug, category: .sessionService, message: "Early access changed: \(earlyAccessChanged) (current: \(sessionItem.earlyAccessDuration) vs original: \(originalSession.earlyAccessDuration))")
+        Logger.log(level: .debug, category: .sessionService, message: "Events changed: \(eventsChanged)")
+        
+        let hasChanges = titleChanged || sitterChanged || startDateChanged || endDateChanged || multiDayChanged || itemsChanged || statusChanged || earlyAccessChanged || eventsChanged
         
         hasUnsavedChanges = hasChanges
     }
@@ -1787,7 +1938,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 
                 await MainActor.run {
                     // Present event details
-                    let eventVC = SessionEventViewController(sessionID: self.sessionItem.id, event: event)
+                    let eventVC = SessionEventViewController(sessionID: self.sessionItem.id, event: event, entryRepository: NestService.shared)
                     eventVC.eventDelegate = self
                     self.present(eventVC, animated: true)
                 }
@@ -2029,9 +2180,18 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
 
 // Add delegate conformance
 extension EditSessionViewController: SelectEntriesFlowDelegate {
-    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry]) {
+    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem]) {
         selectedEntries = entries
+        selectedPlaces = places
         controller.dismiss(animated: true)
+        
+        // Combine both entry IDs and place IDs into the entryIds array
+        let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id }
+        if !allSelectedIds.isEmpty {
+            sessionItem.entryIds = allSelectedIds
+        } else {
+            sessionItem.entryIds = nil // Clear entryIds if no items selected
+        }
         
         // Update the UI
         updateSelectEntriesSection()
