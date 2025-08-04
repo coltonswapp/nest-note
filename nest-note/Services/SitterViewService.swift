@@ -222,13 +222,8 @@ final class SitterViewService: EntryRepository {
         return places
     }
     
-    // MARK: - Folder Contents Structure
-    struct FolderContents {
-        let entries: [BaseEntry]
-        let places: [PlaceItem]
-        let subfolders: [FolderData]
-        let allPlaces: [PlaceItem] // For passing to child folders
-    }
+    // MARK: - Folder Contents Structure (using shared FolderUtility)
+    typealias FolderContents = FolderUtility.FolderContents
     
     /// Fetch all contents for a specific folder/category
     func fetchFolderContents(for category: String) async throws -> FolderContents {
@@ -249,38 +244,15 @@ final class SitterViewService: EntryRepository {
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 fetchFolderContents data gathered")
         
-        // Filter entries for this exact category
-        let entries: [BaseEntry]
-        if category.contains("/") {
-            // For folder paths, find entries that match this exact path
-            var matchingEntries: [BaseEntry] = []
-            for (_, categoryEntries) in allGroupedEntries {
-                for entry in categoryEntries {
-                    if entry.category == category {
-                        matchingEntries.append(entry)
-                    }
-                }
-            }
-            entries = matchingEntries
-        } else {
-            // For root categories, use the grouped entries
-            entries = allGroupedEntries[category] ?? []
-        }
-        
-        // Filter places for this category
-        let places = allPlaces.filter { $0.category == category }
-        
-        // Build subfolders
-        let subfolders = buildSubfolders(for: category, allEntries: allGroupedEntries, allPlaces: allPlaces, categories: categories)
-        
-        Logger.log(level: .info, category: .sitterViewService, message: "Folder contents for '\(category)': \(entries.count) entries, \(places.count) places, \(subfolders.count) subfolders")
-        
-        let folderContents = FolderContents(
-            entries: entries,
-            places: places, 
-            subfolders: subfolders,
-            allPlaces: allPlaces
+        // Build folder contents using shared utility
+        let folderContents = FolderUtility.buildFolderContents(
+            for: category,
+            allGroupedEntries: allGroupedEntries,
+            allPlaces: allPlaces,
+            categories: categories
         )
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "Folder contents for '\(category)': \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.subfolders.count) subfolders")
         
         // Cache the result to speed up future requests
         cachedFolderContents[category] = folderContents
@@ -289,81 +261,6 @@ final class SitterViewService: EntryRepository {
         return folderContents
     }
     
-    private func buildSubfolders(for category: String, allEntries: [String: [BaseEntry]], allPlaces: [PlaceItem], categories: [NestCategory]) -> [FolderData] {
-        var folderItems: [FolderData] = []
-        var folderCounts: [String: Int] = [:]
-        var currentLevelFolders: Set<String> = []
-        
-        // Count entries in subfolders
-        for (_, categoryEntries) in allEntries {
-            for entry in categoryEntries {
-                let folderPath = entry.category
-                
-                // Check if this entry belongs to a subfolder of the current category
-                if folderPath.hasPrefix(category + "/") {
-                    let remainingPath = String(folderPath.dropFirst(category.count + 1))
-                    
-                    if !remainingPath.isEmpty {
-                        let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
-                        let nextFolderPath = "\(category)/\(nextFolderComponent)"
-                        currentLevelFolders.insert(nextFolderPath)
-                        folderCounts[nextFolderPath, default: 0] += 1
-                    }
-                }
-            }
-        }
-        
-        // Count places in subfolders
-        for place in allPlaces {
-            let folderPath = place.category
-            
-            if folderPath.hasPrefix(category + "/") {
-                let remainingPath = String(folderPath.dropFirst(category.count + 1))
-                
-                if !remainingPath.isEmpty {
-                    let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
-                    let nextFolderPath = "\(category)/\(nextFolderComponent)"
-                    currentLevelFolders.insert(nextFolderPath)
-                    folderCounts[nextFolderPath, default: 0] += 1
-                }
-            }
-        }
-        
-        // Add empty folders from categories
-        for nestCategory in categories {
-            let folderPath = nestCategory.name
-            
-            if folderPath.hasPrefix(category + "/") {
-                let remainingPath = String(folderPath.dropFirst(category.count + 1))
-                
-                if !remainingPath.isEmpty && !remainingPath.contains("/") {
-                    currentLevelFolders.insert(folderPath)
-                    if folderCounts[folderPath] == nil {
-                        folderCounts[folderPath] = 0
-                    }
-                }
-            }
-        }
-        
-        // Create FolderData objects
-        for folderPath in currentLevelFolders.sorted() {
-            let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
-            let matchingCategory = categories.first { $0.name == folderPath }
-            let iconName = matchingCategory?.symbolName ?? "folder"
-            let image = UIImage(systemName: iconName)
-            
-            let folderData = FolderData(
-                title: folderName,
-                image: image,
-                itemCount: folderCounts[folderPath] ?? 0,
-                fullPath: folderPath,
-                category: matchingCategory
-            )
-            folderItems.append(folderData)
-        }
-        
-        return folderItems
-    }
     
     // MARK: - Initialization
     private init() {}

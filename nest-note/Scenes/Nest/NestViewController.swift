@@ -25,124 +25,107 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var categories: [NestCategory] = []
     private var currentFolderPath: String = "" // Empty string means root level
     
+    // Simple cache for folder calculations
+    private var cachedFolders: [FolderData] = []
+    private var lastDataHash: Int = 0
+    
     // MARK: - Folder Support
     private var folders: [FolderData] {
-        return getFoldersForCurrentPath()
+        // Check if we can use cached folders
+        let currentDataHash = calculateDataHash()
+        if currentDataHash == lastDataHash && !cachedFolders.isEmpty {
+            Logger.log(level: .debug, category: logCategory, message: "Using cached folders")
+            return cachedFolders
+        }
+        
+        // Calculate fresh folders and cache them
+        let freshFolders = getFoldersForCurrentPath()
+        cachedFolders = freshFolders
+        lastDataHash = currentDataHash
+        
+        return freshFolders
+    }
+    
+    private func calculateDataHash() -> Int {
+        var hasher = Hasher()
+        hasher.combine(currentFolderPath)
+        hasher.combine(entries?.keys.count ?? 0)
+        hasher.combine(places.count)
+        hasher.combine(categories.count)
+        return hasher.finalize()
+    }
+    
+    private func clearFolderCache() {
+        cachedFolders = []
+        lastDataHash = 0
     }
     
     
-    // MARK: - Folder Parsing Methods
+    // MARK: - Folder Parsing Methods (using shared FolderUtility)
     
     private func getFoldersForCurrentPath() -> [FolderData] {
         guard let entries = entries else { return [] }
         
-        var folderItems: [FolderData] = []
-        var folderCounts: [String: Int] = [:]
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Getting folders for currentFolderPath='\(currentFolderPath)'")
         
-        // Get all unique folder paths at the current level
-        var currentLevelFolders: Set<String> = []
-        
-        // Step 1: Add only top-level categories as potential folders at root level
         if currentFolderPath.isEmpty {
-            // At root level, show only top-level categories (no "/" in name)
-            for category in categories {
-                if !category.name.contains("/") {
-                    currentLevelFolders.insert(category.name)
-                }
-            }
+            // At root level, show only top-level categories using FolderUtility
+            return getTopLevelFolders()
+        } else {
+            // For deeper levels, use FolderUtility to build subfolders
+            return getSubfoldersForCurrentPath()
         }
+    }
+    
+    private func getTopLevelFolders() -> [FolderData] {
+        guard let entries = entries else { return [] }
         
-        // Step 2: Count all entries and places for each folder
-        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Counting items for currentFolderPath='\(currentFolderPath)'")
+        // Get top-level categories (no "/" in name)
+        let topLevelCategories = categories.filter { !$0.name.contains("/") }
+        let categoryNames = topLevelCategories.map { $0.name }
         
-        // Count entries - iterate through ALL entries in ALL categories
-        for (_, categoryEntries) in entries {
-            for entry in categoryEntries {
-                let entryCategory = entry.category
-                
-                if currentFolderPath.isEmpty {
-                    // At root level, count entries that belong to top-level categories
-                    if !entryCategory.contains("/") && currentLevelFolders.contains(entryCategory) {
-                        folderCounts[entryCategory, default: 0] += 1
-                        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Entry '\(entry.title.prefix(20))' counted for root category '\(entryCategory)'")
-                    }
-                } else {
-                    // For deeper levels, identify subfolders and count appropriately
-                    if entryCategory.hasPrefix(currentFolderPath) {
-                        let remainingPath = String(entryCategory.dropFirst(currentFolderPath.count + 1))
-                        
-                        if !remainingPath.isEmpty {
-                            // This entry is in a subfolder
-                            let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
-                            let nextFolderPath = "\(currentFolderPath)/\(nextFolderComponent)"
-                            currentLevelFolders.insert(nextFolderPath)
-                            
-                            // Count entries that are DIRECTLY in this subfolder (not in deeper nests)
-                            if entryCategory == nextFolderPath {
-                                folderCounts[nextFolderPath, default: 0] += 1
-                            }
-                        } else if entryCategory == currentFolderPath {
-                            // Count entries directly in the current folder (shouldn't happen at root)
-                            folderCounts[currentFolderPath, default: 0] += 1
-                        }
-                    }
-                }
-            }
-        }
+        // Efficiently get counts for all categories in one pass
+        let folderCounts = FolderUtility.buildFolderCounts(
+            for: categoryNames,
+            allGroupedEntries: entries,
+            allPlaces: places,
+            categories: categories
+        )
         
-        // Count places
-        for place in places {
-            let placeCategory = place.category
-            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' has category '\(placeCategory)'")
-            
-            if currentFolderPath.isEmpty {
-                // At root level, count places that belong to top-level categories
-                if !placeCategory.contains("/") && currentLevelFolders.contains(placeCategory) {
-                    folderCounts[placeCategory, default: 0] += 1
-                    Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' counted for root category '\(placeCategory)'")
-                }
-            } else {
-                // For deeper levels, identify subfolders and count appropriately
-                if placeCategory.hasPrefix(currentFolderPath) {
-                    let remainingPath = String(placeCategory.dropFirst(currentFolderPath.count + 1))
-                    
-                    if !remainingPath.isEmpty {
-                        // This place is in a subfolder
-                        let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
-                        let nextFolderPath = "\(currentFolderPath)/\(nextFolderComponent)"
-                        currentLevelFolders.insert(nextFolderPath)
-                        
-                        // Count places that are DIRECTLY in this subfolder
-                        if placeCategory == nextFolderPath {
-                            folderCounts[nextFolderPath, default: 0] += 1
-                        }
-                    } else if placeCategory == currentFolderPath {
-                        // Count places directly in the current folder
-                        folderCounts[currentFolderPath, default: 0] += 1
-                    }
-                }
-            }
-        }
-        
-        // Create FolderData objects for each folder
-        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Final folder counts: \(folderCounts)")
-        for folderPath in currentLevelFolders.sorted() {
-            let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
-            let category = findCategoryForFolder(folderPath: folderPath)
-            let image = category?.symbolName != nil ? UIImage(systemName: category!.symbolName) : UIImage(systemName: "folder")
+        // Build folder data objects
+        var folderItems: [FolderData] = []
+        for category in topLevelCategories {
+            let itemCount = folderCounts[category.name] ?? 0
+            let image = UIImage(systemName: category.symbolName) ?? UIImage(systemName: "folder")
             
             let folderData = FolderData(
-                title: folderName,
+                title: category.name,
                 image: image,
-                itemCount: folderCounts[folderPath] ?? 0,
-                fullPath: folderPath,
+                itemCount: itemCount,
+                fullPath: category.name,
                 category: category
             )
-            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Created folder '\(folderName)' with count \(folderCounts[folderPath] ?? 0)")
+            
+            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Top-level folder '\(category.name)' has \(itemCount) items (including subfolders)")
             folderItems.append(folderData)
         }
         
-        return folderItems
+        return folderItems.sorted { $0.title < $1.title }
+    }
+    
+    private func getSubfoldersForCurrentPath() -> [FolderData] {
+        guard let entries = entries else { return [] }
+        
+        // Use FolderUtility to build subfolders for current path
+        let subfolders = FolderUtility.buildSubfolders(
+            for: currentFolderPath,
+            allEntries: entries,
+            allPlaces: places,
+            categories: categories
+        )
+        
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Found \(subfolders.count) subfolders for path '\(currentFolderPath)'")
+        return subfolders
     }
     
     private func parseFolderPath(from category: String) -> String {
@@ -209,6 +192,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]]) {
         self.entries = groupedEntries
+        clearFolderCache() // Clear cache when data changes
         applyInitialSnapshots()
     }
     
@@ -253,6 +237,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                         await MainActor.run {
                             self.entries = groupedEntries
                             self.places = places
+                            self.clearFolderCache() // Clear cache when data refreshes
                             self.applyInitialSnapshots()
                             self.refreshControl.endRefreshing()
                         }
@@ -264,6 +249,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                         await MainActor.run {
                             self.entries = groupedEntries
                             self.places = []
+                            self.clearFolderCache()
                             self.applyInitialSnapshots()
                             self.refreshControl.endRefreshing()
                         }
@@ -279,6 +265,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     await MainActor.run {
                         self.entries = groupedEntries
                         self.places = places
+                        self.clearFolderCache()
                         self.applyInitialSnapshots()
                         self.refreshControl.endRefreshing()
                     }
@@ -290,6 +277,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     await MainActor.run {
                         self.entries = groupedEntries
                         self.places = []
+                        self.clearFolderCache()
                         self.applyInitialSnapshots()
                         self.refreshControl.endRefreshing()
                     }
