@@ -219,6 +219,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             cell.layer.masksToBounds = true
         }
         
+        
         let currentSessionCellRegistration = UICollectionView.CellRegistration<CurrentSessionCell, HomeItem> { cell, indexPath, item in
             if case let .currentSession(session) = item {
                 // Format duration manually since we can't access formattedDuration
@@ -346,7 +347,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 // headerView.configure(title: title)
                 return
             case .quickAccess:
-                title = "Pinned Categories"
+                title = "Pinned Folders"
                 headerView.configure(title: title)
             case .upcomingSessions:
                 return
@@ -555,11 +556,15 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         if !pinnedCategories.isEmpty {
             snapshot.appendSections([.quickAccess])
             
-            let pinnedCategoryItems = pinnedCategories.map { categoryName in
-                HomeItem.pinnedCategory(name: categoryName, icon: iconForCategory(categoryName))
+            let categoryItems = pinnedCategories.map { categoryName in
+                // For categories with "/", extract the display name from the last component
+                let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                let iconName = iconForCategory(categoryName)
+                
+                return HomeItem.pinnedCategory(name: displayName, icon: iconName)
             }
             
-            snapshot.appendItems(pinnedCategoryItems, toSection: .quickAccess)
+            snapshot.appendItems(categoryItems, toSection: .quickAccess)
         }
         
         // Finally add events section
@@ -616,7 +621,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             return
         }
         
-        let categoryVC = NestCategoryViewController(category: category, entryRepository: SitterViewService.shared, sessionVisibilityLevel: SitterViewService.shared.currentSessionVisibilityLevel)
+        let categoryVC = NestCategoryViewController(category: category, entryRepository: SitterViewService.shared)
         navigationController?.pushViewController(categoryVC, animated: true)
     }
     
@@ -712,7 +717,12 @@ extension SitterHomeViewController: UICollectionViewDelegate {
                 let nav = UINavigationController(rootViewController: placesVC)
                 present(nav, animated: true)
             } else {
-                presentCategoryView(category: name)
+                // Find the full path for this display name in pinnedCategories
+                let fullPath = pinnedCategories.first { categoryName in
+                    let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                    return displayName == name
+                } ?? name
+                presentCategoryView(category: fullPath)
             }
             
         case .currentSession(let session):
@@ -737,7 +747,7 @@ extension SitterHomeViewController: UICollectionViewDelegate {
         case .sessionEvent(let event):
             // Present event details
             if let session = sitterViewService.currentSession {
-                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false)
+                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false, entryRepository: SitterViewService.shared)
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }

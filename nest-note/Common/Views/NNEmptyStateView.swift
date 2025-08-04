@@ -117,4 +117,9 @@ class NNEmptyStateView: UIView {
     @objc private func actionButtonTapped() {
         delegate?.emptyStateViewDidTapActionButton(self)
     }
-} 
+    
+    func addMenuToActionButton(menu: UIMenu) {
+        actionButton.showsMenuAsPrimaryAction = true
+        actionButton.menu = menu
+    }
+}

@@ -13,7 +13,7 @@ import RevenueCatUI
 
 protocol SelectPlaceLocationDelegate: AnyObject {
     func didUpdatePlaceLocation(
-        _ place: Place,
+        _ place: PlaceItem,
         newAddress: String,
         newCoordinate: CLLocationCoordinate2D,
         newThumbnail: UIImage
@@ -128,7 +128,7 @@ class SelectPlaceViewController: NNViewController {
     
     
     // For Editing an existing Place location
-    private var existingPlace: Place?
+    private var existingPlace: PlaceItem?
     private var isEditingLocation: Bool = false
     
     // Add state tracking
@@ -142,12 +142,13 @@ class SelectPlaceViewController: NNViewController {
     // Add properties for temporary place selection
     var isTemporarySelection = false
     var suggestedPlaceName: String?
+    var category: String = "Places"
     
     init() {
         super.init(nibName: nil, bundle: nil)
     }
     
-    init(placeToEdit: Place) {
+    init(placeToEdit: PlaceItem) {
         self.existingPlace = placeToEdit
         super.init(nibName: nil, bundle: nil)
     }
@@ -439,7 +440,8 @@ class SelectPlaceViewController: NNViewController {
                         Task {
                             let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
                             if !hasUnlimitedPlaces {
-                                let currentPlaceCount = PlacesService.shared.places.filter { !$0.isTemporary }.count
+                                let places = try await NestService.shared.fetchPlacesWithFilter(includeTemporary: true)
+                                let currentPlaceCount = places.filter { !$0.isTemporary }.count
                                 if currentPlaceCount >= 3 {
                                     await MainActor.run {
                                         self.showPlaceLimitAlert()
@@ -453,6 +455,7 @@ class SelectPlaceViewController: NNViewController {
                                 let newPlaceVC = PlaceDetailViewController(
                                     placemark: placemark,
                                     alias: self.suggestedPlaceName ?? "",
+                                    category: self.category,
                                     thumbnail: thumbnail
                                 )
                                 
@@ -470,22 +473,6 @@ class SelectPlaceViewController: NNViewController {
     
     @objc private func clearButtonTapped() {
         clearSelection()
-    }
-    
-    private func showPlaceLimitAlert() {
-        let alert = UIAlertController(
-            title: ProFeature.unlimitedPlaces.alertTitle,
-            message: ProFeature.unlimitedPlaces.alertMessage,
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
-            let paywallViewController = PaywallViewController()
-            self.present(paywallViewController, animated: true)
-        })
-        
-        present(alert, animated: true)
     }
     
     // Replace tap handler with long press handler
@@ -666,7 +653,7 @@ class SelectPlaceViewController: NNViewController {
         // No need to invalidate any timers in the new implementation
     }
     
-    private func setupExistingLocation(for place: Place) {
+    private func setupExistingLocation(for place: PlaceItem) {
         // Hide the center pin since we're showing a draggable pin
         centerPinView.isHidden = true
         

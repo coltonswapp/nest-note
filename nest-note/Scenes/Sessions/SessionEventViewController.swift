@@ -13,6 +13,7 @@ final class SessionEventViewController: NNSheetViewController {
     private let event: SessionEvent?
     private let isReadOnly: Bool
     private var sessionDateRange: DateInterval?
+    private let entryRepository: EntryRepository?
     
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
@@ -58,16 +59,6 @@ final class SessionEventViewController: NNSheetViewController {
         return stackView
     }()
     
-    private lazy var infoButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
-        button.setImage(image, for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-    
     private let locationDividerView: UIView = {
         let view = UIView()
         view.backgroundColor = .quaternaryLabel
@@ -76,7 +67,7 @@ final class SessionEventViewController: NNSheetViewController {
     }()
     
     private lazy var locationView: SessionEventLocationView = {
-        let view = SessionEventLocationView(place: nil)
+        let view = SessionEventLocationView(place: nil, entryRepository: entryRepository)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.editButton.addTarget(self, action: #selector(showLocationSelector), for: .touchUpInside)
         view.delegate = self
@@ -118,11 +109,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, entryRepository: EntryRepository? = nil) {
         self.sessionID = sessionID
         self.event = event
         self.isReadOnly = isReadOnly
         self.sessionDateRange = sessionDateRange
+        self.entryRepository = entryRepository
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
@@ -173,7 +165,16 @@ final class SessionEventViewController: NNSheetViewController {
             
             Task {
                 if let placeID = event.placeID {
-                    await locationView.configureWith(PlacesService.shared.getPlace(for: placeID))
+                    do {
+                        // Use the provided repository or fall back to NestService
+                        let repository = entryRepository ?? NestService.shared
+                        let place = try await repository.getPlace(for: placeID)
+                        await MainActor.run {
+                            locationView.configureWith(place)
+                        }
+                    } catch {
+                        Logger.log(level: .error, category: .sessionService, message: "Failed to load place: \(error.localizedDescription)")
+                    }
                 }
             }
             
@@ -203,6 +204,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Setup Methods
+    
+    override func setupInfoButton() {
+        // SessionEventViewController doesn't need an info button
+        infoButton.isHidden = true
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         
@@ -232,8 +239,6 @@ final class SessionEventViewController: NNSheetViewController {
         containerView.addSubview(colorStack)
         
         setupColorButtons()
-        
-        containerView.addSubview(infoButton)
         containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
@@ -277,12 +282,6 @@ final class SessionEventViewController: NNSheetViewController {
             colorStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             colorStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             colorStack.heightAnchor.constraint(equalToConstant: view.frame.width / 10),
-            
-            // Info button constraints
-            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
-            infoButton.widthAnchor.constraint(equalToConstant: 44),
-            infoButton.heightAnchor.constraint(equalToConstant: 44),
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
@@ -366,6 +365,14 @@ final class SessionEventViewController: NNSheetViewController {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+    
+    override func onKeyboardShow() {
+        colorStack.alpha = 0.0
+    }
+    
+    override func onKeyboardHide() {
+        colorStack.alpha = 1.0
     }
     
     // MARK: - Actions
@@ -464,7 +471,7 @@ final class SessionEventViewController: NNSheetViewController {
             do {
                 // First, if we have a temporary place that hasn't been saved yet, save it
                 if let place = locationView.place, place.isTemporary {
-                    try await PlacesService.shared.saveTemporaryPlace(place)
+                    try await NestService.shared.createPlace(place)
                 }
                 
                 // Then save the event
@@ -639,7 +646,7 @@ extension SessionEventViewController: UITextFieldDelegate {
 }
 
 extension SessionEventViewController: PlaceSelectionDelegate {
-    func didSelectPlace(_ place: Place) {
+    func didSelectPlace(_ place: PlaceItem) {
         locationView.configureWith(place)
         locationView.thumbnailImageView.bounce()
         Tracker.shared.track(.sessionEventPlaceAttached)
@@ -653,7 +660,7 @@ extension SessionEventViewController: PlaceAddressCellDelegate {
         present(viewController, animated: true)
     }
     
-    func placeAddressCellAddressTapped(_ view: UIView, place: Place?) {
+    func placeAddressCellAddressTapped(_ view: UIView, place: PlaceItem?) {
         guard let place else { return }
         if let view = view as? PlaceAddressCell {
             AddressActionHandler.presentAddressOptions(
@@ -714,7 +721,7 @@ class SessionEventLocationView: UIView {
     private let aliasLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .h4
+        label.font = .h3
         label.textColor = .label
         return label
     }()
@@ -729,10 +736,12 @@ class SessionEventLocationView: UIView {
     }()
     
     weak var delegate: PlaceAddressCellDelegate?
+    private let entryRepository: EntryRepository?
     
-    var place: Place?
+    var place: PlaceItem?
     
-    init(place: Place?) {
+    init(place: PlaceItem?, entryRepository: EntryRepository? = nil) {
+        self.entryRepository = entryRepository
         super.init(frame: .zero)
         addSubviews()
         constrainSubviews()
@@ -775,7 +784,7 @@ class SessionEventLocationView: UIView {
         ])
     }
     
-    func configureWith(_ place: Place?) {
+    func configureWith(_ place: PlaceItem?) {
         if let place {
             self.place = place
             
@@ -783,7 +792,7 @@ class SessionEventLocationView: UIView {
                 string: place.address,
                 attributes: [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .font: UIFont.bodyXL
+                    .font: UIFont.bodyM
                 ]
             )
             
@@ -809,21 +818,23 @@ class SessionEventLocationView: UIView {
                 thumbnailImageView.addGestureRecognizer(imageTapGesture)
                 thumbnailImageView.isHidden = false
                 thumbnailImageView.contentMode = .scaleAspectFill
-            
-            
-            aliasLabel.text = place.alias
-            addressLabel.attributedText = attributedString
                 
-            aliasLabel.text = place.alias
-            addressLabel.attributedText = attributedString
+                // Load place thumbnail using the provided repository
                 Task {
                     do {
-                        let image = try await PlacesService.shared.loadImages(for: place)
-                        if aliasLabel.text == place.displayName {
+                        // Use the provided repository or fall back to NestService
+                        let repository = entryRepository ?? NestService.shared
+                        let image = try await repository.loadImages(for: place)
+                        await MainActor.run {
                             thumbnailImageView.image = image
                         }
                     } catch {
-                        thumbnailImageView.image = UIImage(systemName: "photo.fill")
+                        // Show placeholder icon on error
+                        await MainActor.run {
+                            thumbnailImageView.image = UIImage(systemName: "photo.fill")
+                            thumbnailImageView.tintColor = .systemGray
+                        }
+                        Logger.log(level: .error, category: .sessionService, message: "Failed to load place image: \(error.localizedDescription)")
                     }
                 }
             }

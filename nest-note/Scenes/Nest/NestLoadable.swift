@@ -1,8 +1,8 @@
 import UIKit
 
 protocol NestLoadable: CollectionViewLoadable {
+    var entryRepository: EntryRepository { get }
     var hasLoadedInitialData: Bool { get set }
-    
     func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]])
 }
 
@@ -41,4 +41,26 @@ extension NestLoadable {
             Logger.log(level: .error, category: .nestService, message: "Error refreshing entries: \(error.localizedDescription)")
         }
     }
-} 
+}
+
+
+//import RevenueCatUI
+extension NNViewController {
+    
+    func showPlaceLimitAlert() {
+        let alert = UIAlertController(
+            title: ProFeature.unlimitedPlaces.alertTitle,
+            message: ProFeature.unlimitedPlaces.alertMessage,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
+//            let paywallViewController = PaywallViewController()
+//            self.present(paywallViewController, animated: true)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+}

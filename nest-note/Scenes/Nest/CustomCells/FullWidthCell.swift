@@ -12,9 +12,12 @@ class FullWidthCell: UICollectionViewCell {
     private let containerView = UIView()
     private let keyLabel = UILabel()
     private let valueLabel = UILabel()
+    private let checkmarkImageView = UIImageView()
     
     var valueContainerBackgroundColor: UIColor = NNColors.groupedBackground
     var valueLabelBackgroundColor: UIColor = .label
+    private var isInEditMode: Bool = false
+    private var isEntrySelected: Bool = false
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -29,6 +32,7 @@ class FullWidthCell: UICollectionViewCell {
         contentView.addSubview(containerView)
         containerView.addSubview(keyLabel)
         containerView.addSubview(valueLabel)
+        containerView.addSubview(checkmarkImageView)
         
         containerView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -53,6 +57,14 @@ class FullWidthCell: UICollectionViewCell {
             valueLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -12)
         ])
         
+        checkmarkImageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            checkmarkImageView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+            checkmarkImageView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
+            checkmarkImageView.widthAnchor.constraint(equalToConstant: 20),
+            checkmarkImageView.heightAnchor.constraint(equalToConstant: 20)
+        ])
+        
         containerView.clipsToBounds = true
         containerView.backgroundColor = valueContainerBackgroundColor
         containerView.layer.cornerRadius = 10
@@ -63,21 +75,53 @@ class FullWidthCell: UICollectionViewCell {
         valueLabel.font = UIFont.systemFont(ofSize: 17, weight: .medium)
         valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 2
+        
+        // Setup checkmark image view
+        checkmarkImageView.contentMode = .scaleAspectFit
+        checkmarkImageView.tintColor = NNColors.primary
+        checkmarkImageView.isHidden = true
     }
     
-    func configure(key: String, value: String, entryVisibility: VisibilityLevel, sessionVisibility: VisibilityLevel, isNestOwner: Bool = false) {
+    func configure(key: String, value: String, isNestOwner: Bool = false, isEditMode: Bool = false, isSelected: Bool = false, isModalInPresentation: Bool = false) {
         keyLabel.text = key
         
-        // Show actual value or asterisks based on access level (nest owners bypass all checks)
-        if isNestOwner || sessionVisibility.hasAccess(to: entryVisibility) {
-            valueLabel.text = value
+        valueLabel.text = value
+        
+        self.isInEditMode = isEditMode
+        self.isEntrySelected = isSelected
+
+        if isModalInPresentation {
+            valueContainerBackgroundColor = .secondarySystemBackground
         } else {
-            // For full width cells, we'll show multiple lines of asterisks to indicate more content
-            valueLabel.text = "********"
+            valueContainerBackgroundColor = NNColors.groupedBackground
+        }
+        
+        updateSelectionAppearance()
+    }
+    
+    private func updateSelectionAppearance() {
+        if isInEditMode {
+            checkmarkImageView.isHidden = false
+            checkmarkImageView.image = UIImage(systemName: isEntrySelected ? "checkmark.circle.fill" : "circle")
+            checkmarkImageView.tintColor = isEntrySelected ? NNColors.primary : .tertiaryLabel
+            
+            if isEntrySelected {
+                containerView.backgroundColor = NNColors.primary.withAlphaComponent(0.15)
+                containerView.layer.borderColor = NNColors.primary.cgColor
+                containerView.layer.borderWidth = 1.5
+            } else {
+                containerView.backgroundColor = valueContainerBackgroundColor
+                containerView.layer.borderColor = UIColor.clear.cgColor
+                containerView.layer.borderWidth = 0
+            }
+        } else {
+            checkmarkImageView.isHidden = true
+            containerView.backgroundColor = valueContainerBackgroundColor
+            containerView.layer.borderColor = UIColor.clear.cgColor
+            containerView.layer.borderWidth = 0
         }
         
         valueLabel.textColor = valueLabelBackgroundColor
-        containerView.backgroundColor = valueContainerBackgroundColor
     }
     
     override var isHighlighted: Bool {

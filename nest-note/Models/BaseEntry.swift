@@ -7,23 +7,31 @@
 
 import Foundation
 
-class BaseEntry: Codable, Hashable {
+class BaseEntry: BaseItem, Codable, Hashable {
     let id: String
+    let type: ItemType = .entry
     var title: String
     var content: String
     var category: String
-    var visibility: VisibilityLevel
     let createdAt: Date
     var updatedAt: Date
     
-    init(title: String, content: String, visibilityLevel: VisibilityLevel = .always, category: String) {
+    init(title: String, content: String, category: String) {
         self.id = UUID().uuidString
         self.title = title
         self.content = content
-        self.visibility = visibilityLevel
         self.category = category
         self.createdAt = Date()
         self.updatedAt = Date()
+    }
+    
+    init(id: String, title: String, content: String, category: String, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.category = category
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
     
     // Add hash function for Hashable conformance

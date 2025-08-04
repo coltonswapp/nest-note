@@ -11,5 +11,4 @@ protocol SessionDisplayable: Identifiable, Hashable {
     var assignedSitter: AssignedSitter? { get }
     var nestID: String { get }
     var ownerID: String? { get }
-    var visibilityLevel: VisibilityLevel { get }
 }

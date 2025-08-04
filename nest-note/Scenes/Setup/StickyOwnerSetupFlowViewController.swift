@@ -180,10 +180,6 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             // Navigate to add a place
             presentAddFirstPlace()
             
-        case .exploreVisibilityLevels:
-            // Navigate to explore visibility levels
-            presentExploreVisibility()
-            
         case .enableNotifications:
             // Request notification permissions
             requestNotifications()
@@ -208,8 +204,7 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
         // Create a NestCategoryViewController for the Household category
         let nestCategoryVC = NestCategoryViewController(
             category: "Household",
-            entryRepository: NestService.shared,
-            sessionVisibilityLevel: .overnight
+            entryRepository: NestService.shared
         )
         
         // Wrap in a navigation controller for proper presentation
@@ -274,14 +269,6 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
                 self?.placeObserver = nil
             }
         }
-    }
-    
-    private func presentExploreVisibility() {
-        // Example implementation
-        let view = VisibilityLevelInfoViewController()
-        present(view, animated: true, completion: { 
-            self.setupService.markStepComplete(.exploreVisibilityLevels)
-        })
     }
     
     private func presentHowToFeedback() {

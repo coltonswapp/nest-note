@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 protocol EntryRepository {
     /// Fetches all entries grouped by category
@@ -28,6 +29,26 @@ protocol EntryRepository {
     /// Fetches entries that haven't been updated in a specified timeframe
     /// Default implementation provided in extension
     func fetchOutdatedEntries(olderThan days: Int) async throws -> [BaseEntry]
+    
+    // MARK: - Place Management
+    /// Fetches all places for the current nest
+    func fetchPlaces() async throws -> [PlaceItem]
+    
+    /// Fetches places with filtering options
+    func fetchPlacesWithFilter(includeTemporary: Bool) async throws -> [PlaceItem]
+    
+    /// Gets a specific place by ID
+    func getPlace(for id: String) async throws -> PlaceItem?
+    
+    /// Clears any cached places
+    func clearPlacesCache()
+    
+    // MARK: - Image Management
+    /// Loads images for a place with caching
+    func loadImages(for place: PlaceItem) async throws -> UIImage
+    
+    /// Clears the image cache
+    func clearImageCache()
 } 
 
 // Default implementation for fetchOutdatedEntries

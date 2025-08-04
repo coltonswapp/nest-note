@@ -27,7 +27,6 @@ final class SitterSessionDetailViewController: NNViewController {
         case nestName(name: String)
         case dateSelection(startDate: Date, endDate: Date, isMultiDay: Bool)
         case earlyAccess(EarlyAccessDuration)
-        case visibilityLevel(VisibilityLevel)
         case events
         case sessionEvent(SessionEvent)
         case moreEvents(Int)
@@ -46,19 +45,16 @@ final class SitterSessionDetailViewController: NNViewController {
             case .earlyAccess(let duration):
                 hasher.combine(2)
                 hasher.combine(duration)
-            case .visibilityLevel(let level):
-                hasher.combine(3)
-                hasher.combine(level)
             case .events:
-                hasher.combine(4)
+                hasher.combine(3)
             case .sessionEvent(let event):
-                hasher.combine(5)
+                hasher.combine(4)
                 hasher.combine(event)
             case .moreEvents(let count):
-                hasher.combine(6)
+                hasher.combine(5)
                 hasher.combine(count)
             case .expenses:
-                hasher.combine(7)
+                hasher.combine(6)
             }
         }
         
@@ -70,8 +66,6 @@ final class SitterSessionDetailViewController: NNViewController {
                 return s1 == s2 && e1 == e2 && m1 == m2
             case let (.earlyAccess(d1), .earlyAccess(d2)):
                 return d1 == d2
-            case let (.visibilityLevel(l1), .visibilityLevel(l2)):
-                return l1 == l2
             case (.events, .events):
                 return true
             case let (.sessionEvent(e1), .sessionEvent(e2)):
@@ -104,7 +98,6 @@ final class SitterSessionDetailViewController: NNViewController {
             endDate: archivedSession.parentSessionCompletedDate ?? archivedSession.archivedDate,
             isMultiDay: false,
             events: [],
-            visibilityLevel: .halfDay,
             status: .completed,
             assignedSitter: nil,
             nestID: archivedSession.nestID,
@@ -320,12 +313,6 @@ final class SitterSessionDetailViewController: NNViewController {
             }
         }
         
-        let visibilityRegistration = UICollectionView.CellRegistration<VisibilityCell, Item> { cell, indexPath, item in
-            if case let .visibilityLevel(level) = item {
-                cell.configure(with: level, isReadOnly: true)
-            }
-        }
-        
         let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
             if case .events = item {
                 // If we're still loading events, show loading indicator
@@ -449,13 +436,6 @@ final class SitterSessionDetailViewController: NNViewController {
                     item: item
                 )
                 
-            case .visibilityLevel:
-                return collectionView.dequeueConfiguredReusableCell(
-                    using: visibilityRegistration,
-                    for: indexPath,
-                    item: item
-                )
-                
             case .events:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: eventsCellRegistration,
@@ -530,9 +510,6 @@ final class SitterSessionDetailViewController: NNViewController {
             endDate: session.endDate,
             isMultiDay: session.isMultiDay
         )], toSection: .date)
-        
-        // Add visibility level
-        snapshot.appendItems([.visibilityLevel(session.visibilityLevel)], toSection: .visibility)
 
         // Add expenses section only for non-archived sessions and if user hasn't voted
         if !isArchivedSession && !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
@@ -812,7 +789,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             
         case .sessionEvent(let event):
             // Present event details in read-only mode
-            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true)
+            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true, entryRepository: SitterViewService.shared)
             present(eventVC, animated: true)
             
         case .events, .moreEvents:

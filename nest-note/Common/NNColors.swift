@@ -21,6 +21,11 @@ class NNColors {
     /// Light is the same as .systemGray6, dark is slightly lighter than .systemGray6
     static let NNSystemBackground6 = UIColor(named: "NNSystemBackground6")!
     
+    static let folderFront = UIColor(named: "NNFolderFront")!
+    static let folderBack = UIColor(named: "NNFolderBack")!
+    static let folderForeground = UIColor(named: "NNFolderForeground")!
+    static let paperWhite = UIColor(named: "NNFolderPaperBackColor")
+    
     static let NNToolTipBackground = UIColor(named: "NNToolTipBackground")!
     
     // Faux Colors

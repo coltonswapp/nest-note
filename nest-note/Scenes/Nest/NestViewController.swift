@@ -17,64 +17,159 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private enum Section: Int, CaseIterable {
         case address
         case main
-        case routine
-        case misc
-    }
-    
-    private struct Item: Hashable {
-        let title: String
-        let icon: String
-        var entries: [BaseEntry]?
-        
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(title)
-        }
-        
-        static func == (lhs: Item, rhs: Item) -> Bool {
-            return lhs.title == rhs.title
-        }
     }
     
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
     var collectionView: UICollectionView!
     
     private var categories: [NestCategory] = []
-    private var mainItems: [Item] {
-        return categories
-            .sorted { cat1, cat2 in
-                if cat1.name == "Other" { return false }
-                if cat2.name == "Other" { return true }
-                return cat1.name < cat2.name
-            }
-            .map { category in
-                Item(
-                    title: category.name,
-                    icon: category.symbolName,
-                    entries: entries?[category.name]
-                )
-            }
+    private var currentFolderPath: String = "" // Empty string means root level
+    
+    // MARK: - Folder Support
+    private var folders: [FolderData] {
+        return getFoldersForCurrentPath()
     }
     
-    private let routineItems: [Item] = [
-        Item(title: "Wake Up", icon: "sunrise.fill"),
-        Item(title: "Night Time", icon: "moon.stars.fill"),
-        Item(title: "School", icon: "backpack.fill"),
-        Item(title: "Extra Curricular", icon: "figure.run")
-    ]
     
-    private let miscItems: [Item] = [
-        Item(title: "Places", icon: "map.fill"),
-        Item(title: "Contacts", icon: "person.2.fill"),
-        Item(title: "Activity Suggestions", icon: "lightbulb.fill")
-    ]
+    // MARK: - Folder Parsing Methods
+    
+    private func getFoldersForCurrentPath() -> [FolderData] {
+        guard let entries = entries else { return [] }
+        
+        var folderItems: [FolderData] = []
+        var folderCounts: [String: Int] = [:]
+        
+        // Get all unique folder paths at the current level
+        var currentLevelFolders: Set<String> = []
+        
+        // Step 1: Add only top-level categories as potential folders at root level
+        if currentFolderPath.isEmpty {
+            // At root level, show only top-level categories (no "/" in name)
+            for category in categories {
+                if !category.name.contains("/") {
+                    currentLevelFolders.insert(category.name)
+                }
+            }
+        }
+        
+        // Step 2: Count all entries and places for each folder
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Counting items for currentFolderPath='\(currentFolderPath)'")
+        
+        // Count entries - iterate through ALL entries in ALL categories
+        for (_, categoryEntries) in entries {
+            for entry in categoryEntries {
+                let entryCategory = entry.category
+                
+                if currentFolderPath.isEmpty {
+                    // At root level, count entries that belong to top-level categories
+                    if !entryCategory.contains("/") && currentLevelFolders.contains(entryCategory) {
+                        folderCounts[entryCategory, default: 0] += 1
+                        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Entry '\(entry.title.prefix(20))' counted for root category '\(entryCategory)'")
+                    }
+                } else {
+                    // For deeper levels, identify subfolders and count appropriately
+                    if entryCategory.hasPrefix(currentFolderPath) {
+                        let remainingPath = String(entryCategory.dropFirst(currentFolderPath.count + 1))
+                        
+                        if !remainingPath.isEmpty {
+                            // This entry is in a subfolder
+                            let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                            let nextFolderPath = "\(currentFolderPath)/\(nextFolderComponent)"
+                            currentLevelFolders.insert(nextFolderPath)
+                            
+                            // Count entries that are DIRECTLY in this subfolder (not in deeper nests)
+                            if entryCategory == nextFolderPath {
+                                folderCounts[nextFolderPath, default: 0] += 1
+                            }
+                        } else if entryCategory == currentFolderPath {
+                            // Count entries directly in the current folder (shouldn't happen at root)
+                            folderCounts[currentFolderPath, default: 0] += 1
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Count places
+        for place in places {
+            let placeCategory = place.category
+            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' has category '\(placeCategory)'")
+            
+            if currentFolderPath.isEmpty {
+                // At root level, count places that belong to top-level categories
+                if !placeCategory.contains("/") && currentLevelFolders.contains(placeCategory) {
+                    folderCounts[placeCategory, default: 0] += 1
+                    Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Place '\(place.alias ?? "Unnamed")' counted for root category '\(placeCategory)'")
+                }
+            } else {
+                // For deeper levels, identify subfolders and count appropriately
+                if placeCategory.hasPrefix(currentFolderPath) {
+                    let remainingPath = String(placeCategory.dropFirst(currentFolderPath.count + 1))
+                    
+                    if !remainingPath.isEmpty {
+                        // This place is in a subfolder
+                        let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                        let nextFolderPath = "\(currentFolderPath)/\(nextFolderComponent)"
+                        currentLevelFolders.insert(nextFolderPath)
+                        
+                        // Count places that are DIRECTLY in this subfolder
+                        if placeCategory == nextFolderPath {
+                            folderCounts[nextFolderPath, default: 0] += 1
+                        }
+                    } else if placeCategory == currentFolderPath {
+                        // Count places directly in the current folder
+                        folderCounts[currentFolderPath, default: 0] += 1
+                    }
+                }
+            }
+        }
+        
+        // Create FolderData objects for each folder
+        Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Final folder counts: \(folderCounts)")
+        for folderPath in currentLevelFolders.sorted() {
+            let folderName = folderPath.components(separatedBy: "/").last ?? folderPath
+            let category = findCategoryForFolder(folderPath: folderPath)
+            let image = category?.symbolName != nil ? UIImage(systemName: category!.symbolName) : UIImage(systemName: "folder")
+            
+            let folderData = FolderData(
+                title: folderName,
+                image: image,
+                itemCount: folderCounts[folderPath] ?? 0,
+                fullPath: folderPath,
+                category: category
+            )
+            Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Created folder '\(folderName)' with count \(folderCounts[folderPath] ?? 0)")
+            folderItems.append(folderData)
+        }
+        
+        return folderItems
+    }
+    
+    private func parseFolderPath(from category: String) -> String {
+        // For backward compatibility, if category doesn't contain "/", 
+        // treat it as the folder path itself
+        return category
+    }
+    
+    private func findCategoryForFolder(folderPath: String) -> NestCategory? {
+        // Find the category that matches the root folder name
+        let rootFolderName = folderPath.components(separatedBy: "/").first ?? folderPath
+        return categories.first { $0.name.lowercased() == rootFolderName.lowercased() }
+    }
     
     private var entries: [String: [BaseEntry]]?
+    private var places: [PlaceItem] = []
     
-    private let sectionHeaders = ["", "Information Categories", "Routines", "Misc"]
+    private let sectionHeaders = ["", "Folders"]
     
     private var newCategoryButton: NNPrimaryLabeledButton?
     
-    private let entryRepository: EntryRepository
+    internal let entryRepository: EntryRepository
+    
+    // Dynamic logging category based on repository type
+    private var logCategory: Logger.Category {
+        return entryRepository is NestService ? .nestService : .sitterViewService
+    }
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -138,24 +233,69 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     @objc private func refreshEntries() {
         Task {
             do {
-                Logger.log(level: .info, category: .nestService, message: "Refreshing entries and categories")
+                Logger.log(level: .info, category: logCategory, message: "Refreshing entries, categories, and places")
                 
-                // Refresh both entries and categories
-                async let entriesTask = entryRepository.refreshEntries()
-                async let categoriesTask = entryRepository.refreshCategories()
+                // Invalidate cache first for refresh
+                if let nestService = entryRepository as? NestService {
+                    nestService.invalidateItemsCache()
+                }
                 
-                let (groupedEntries, categories) = try await (entriesTask, categoriesTask)
-                Logger.log(level: .info, category: .nestService, message: "Refreshed \(groupedEntries.count) entry groups and \(categories.count) categories")
-                
+                // Refresh categories
+                let categories = try await entryRepository.refreshCategories()
                 self.categories = categories
                 
-                await MainActor.run {
-                    self.entries = groupedEntries
-                    self.applyInitialSnapshots()
-                    self.refreshControl.endRefreshing()
+                // For NestService, use efficient combined fetch (cache already invalidated)
+                if let nestService = entryRepository as? NestService {
+                    do {
+                        let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
+                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                        
+                        await MainActor.run {
+                            self.entries = groupedEntries
+                            self.places = places
+                            self.applyInitialSnapshots()
+                            self.refreshControl.endRefreshing()
+                        }
+                    } catch {
+                        Logger.log(level: .error, category: logCategory, message: "Failed to refresh entries and places: \(error)")
+                        // Fallback to separate refresh
+                        let groupedEntries = try await entryRepository.refreshEntries()
+                        
+                        await MainActor.run {
+                            self.entries = groupedEntries
+                            self.places = []
+                            self.applyInitialSnapshots()
+                            self.refreshControl.endRefreshing()
+                        }
+                    }
+                } else if let sitterService = entryRepository as? SitterViewService {
+                    // For SitterViewService, refresh both entries and places
+                    sitterService.clearEntriesCache()
+                    sitterService.clearPlacesCache()
+                    let groupedEntries = try await entryRepository.refreshEntries()
+                    let places = try await sitterService.fetchNestPlaces()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups and \(places.count) places")
+                    
+                    await MainActor.run {
+                        self.entries = groupedEntries
+                        self.places = places
+                        self.applyInitialSnapshots()
+                        self.refreshControl.endRefreshing()
+                    }
+                } else {
+                    // For other repository types, refresh entries only
+                    let groupedEntries = try await entryRepository.refreshEntries()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups")
+                    
+                    await MainActor.run {
+                        self.entries = groupedEntries
+                        self.places = []
+                        self.applyInitialSnapshots()
+                        self.refreshControl.endRefreshing()
+                    }
                 }
             } catch {
-                Logger.log(level: .error, category: .nestService, message: "Failed to refresh: \(error)")
+                Logger.log(level: .error, category: logCategory, message: "Failed to refresh: \(error)")
                 await MainActor.run {
                     self.refreshControl.endRefreshing()
                     self.showError(error.localizedDescription)
@@ -170,6 +310,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         view.addSubview(collectionView)
         
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
+        collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -203,12 +344,29 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 
                 return section
                 
-            case .main, .routine, .misc:
-                // Use existing insetGrouped layout for other sections
-                var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-                config.headerMode = .supplementary
+            case .main:
+                // Create 2-item grid layout for folders
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(0.5),
+                    heightDimension: .fractionalHeight(1.0)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                item.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
                 
-                let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
+                let groupSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(144) // Height for folder cells (20% smaller than original 180)
+                )
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
+                
+                let section = NSCollectionLayoutSection(group: group)
+                section.interGroupSpacing = 16 // Add vertical spacing between rows
+                section.contentInsets = NSDirectionalEdgeInsets(
+                    top: 8,
+                    leading: 10,
+                    bottom: 16,
+                    trailing: 10
+                )
                 
                 let headerSize = NSCollectionLayoutSize(
                     widthDimension: .fractionalWidth(1.0),
@@ -222,34 +380,19 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 section.boundarySupplementaryItems = [header]
                 
                 return section
+                
             }
         }
     }
     
     private func configureDataSource() {
-        let cellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
-            var content = cell.defaultContentConfiguration()
-            content.text = item.title
-            
-            let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
-            let image = UIImage(systemName: item.icon, withConfiguration: symbolConfiguration)?
-                .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-            content.image = image
-            
-            content.imageProperties.tintColor = NNColors.primary
-            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-            content.imageToTextPadding = 16
-            
-            content.directionalLayoutMargins.top = 16
-            content.directionalLayoutMargins.bottom = 16
-            
-            cell.contentConfiguration = content
-            cell.accessories = [.disclosureIndicator()]
-        }
-        
         let addressRegistration = UICollectionView.CellRegistration<AddressCell, String> { [weak self] cell, indexPath, address in
             cell.configure(address: address)
             cell.delegate = self
+        }
+        
+        let folderRegistration = UICollectionView.CellRegistration<FolderCollectionViewCell, FolderData> { cell, indexPath, folderData in
+            cell.configure(with: folderData)
         }
         
         let headerRegistration = UICollectionView.SupplementaryRegistration<NNSectionHeaderView>(
@@ -260,17 +403,20 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { collectionView, indexPath, item in
-            if indexPath.section == Section.address.rawValue {
+            let section = Section(rawValue: indexPath.section)!
+            
+            switch section {
+            case .address:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: addressRegistration,
                     for: indexPath,
                     item: item as? String
                 )
-            } else {
+            case .main:
                 return collectionView.dequeueConfiguredReusableCell(
-                    using: cellRegistration,
+                    using: folderRegistration,
                     for: indexPath,
-                    item: item as? Item
+                    item: item as? FolderData
                 )
             }
         }
@@ -285,13 +431,27 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         guard entryRepository is NestService else { return }
         
         let pinnedCategoriesAction = UIAction(
-            title: "Pinned Categories",
+            title: "Pinned Folders",
             image: UIImage(systemName: "rectangle.grid.2x2.fill")
         ) { [weak self] _ in
             self?.presentPinnedCategories()
         }
         
-        let menu = UIMenu(title: "", children: [pinnedCategoriesAction])
+        var menuChildren: [UIMenuElement] = [pinnedCategoriesAction]
+        
+        // Only show "Add Folder" if we haven't reached max depth
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+        if currentDepth < 3 {
+            let addFolderAction = UIAction(
+                title: "Add Folder",
+                image: UIImage(systemName: "folder.badge.plus")
+            ) { [weak self] _ in
+                self?.presentAddFolder()
+            }
+            menuChildren.append(addFolderAction)
+        }
+        
+        let menu = UIMenu(title: "", children: menuChildren)
         
         let menuButton = UIBarButtonItem(
             image: UIImage(systemName: "ellipsis"),
@@ -307,6 +467,25 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private func presentPinnedCategories() {
         let pinnedCategoriesVC = PinnedCategoriesViewController(entryRepository: entryRepository)
         present(UINavigationController(rootViewController: pinnedCategoriesVC), animated: true)
+    }
+    
+    private func presentAddFolder() {
+        Task {
+            // Check if user has unlimited categories feature (Pro subscription)
+            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
+            if !hasUnlimitedCategories {
+                await MainActor.run {
+                    self.showCategoryLimitUpgradePrompt()
+                }
+                return
+            }
+            
+            await MainActor.run {
+                let categoryVC = CategoryDetailViewController()
+                categoryVC.categoryDelegate = self
+                self.present(categoryVC, animated: true)
+            }
+        }
     }
     
     @objc private func addButtonTapped() {
@@ -331,7 +510,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
-        snapshot.appendSections([.address, .main, .routine, .misc])
+        snapshot.appendSections([.address, .main])
         
         // Get address from the appropriate service
         var address: String?
@@ -345,26 +524,28 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             snapshot.appendItems([address], toSection: .address)
         }
         
-        snapshot.appendItems(mainItems, toSection: .main)
-        snapshot.appendItems(routineItems, toSection: .routine)
-        snapshot.appendItems(miscItems, toSection: .misc)
+        snapshot.appendItems(folders, toSection: .main)
         dataSource.apply(snapshot, animatingDifferences: true)
+        
+        // Update UI elements based on current folder depth
+        setupNavigationBar()
+        setupNewCategoryButton()
     }
     
     private func setupNewCategoryButton() {
         // Only show new category button for nest owners
         guard entryRepository is NestService else { return }
         
-        newCategoryButton = NNPrimaryLabeledButton(title: "New Category", image: UIImage(systemName: "plus"))
-        newCategoryButton?.isEnabled = false
-        newCategoryButton?.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
-        newCategoryButton?.addTarget(self, action: #selector(addButtonTapped), for: .touchUpInside)
-        
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 10
-        let totalInset = buttonHeight + buttonPadding * 2
-        collectionView.contentInset.bottom = totalInset
-        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        // Check if we've reached max folder depth
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+        guard currentDepth < 3 else { 
+            // Remove existing button if we're at max depth
+            newCategoryButton?.removeFromSuperview()
+            newCategoryButton = nil
+            collectionView.contentInset.bottom = 0
+            collectionView.verticalScrollIndicatorInsets.bottom = 0
+            return 
+        }
     }
     
     private func loadEntries() async {
@@ -372,26 +553,50 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         navigationItem.rightBarButtonItem?.isEnabled = false
         
         do {
-            Logger.log(level: .info, category: .general, message: "Starting to load entries and categories")
+            Logger.log(level: .info, category: logCategory, message: "Starting to load entries, categories, and places")
             
-            // Fetch both entries and categories
-            async let entriesTask = entryRepository.fetchEntries()
-            async let categoriesTask = entryRepository.fetchCategories()
-            
-            let (groupedEntries, categories) = try await (entriesTask, categoriesTask)
-            Logger.log(level: .info, category: .general, message: "Fetched \(groupedEntries.count) entry groups and \(categories.count) categories")
-            
+            // Fetch categories first
+            let categories = try await entryRepository.fetchCategories()
             self.categories = categories
+            
+            // For NestService, use efficient combined fetch
+            if let nestService = entryRepository as? NestService {
+                do {
+                    let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
+                    Logger.log(level: .info, category: logCategory, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                    self.entries = groupedEntries
+                    self.places = places
+                } catch {
+                    Logger.log(level: .error, category: logCategory, message: "Failed to fetch entries and places: \(error)")
+                    // Fallback to separate fetches
+                    let groupedEntries = try await entryRepository.fetchEntries()
+                    self.entries = groupedEntries
+                    self.places = []
+                }
+            } else if let sitterService = entryRepository as? SitterViewService {
+                // For SitterViewService, fetch both entries and places
+                let groupedEntries = try await entryRepository.fetchEntries()
+                let places = try await sitterService.fetchNestPlaces()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups and \(places.count) places")
+                self.entries = groupedEntries
+                self.places = places
+            } else {
+                // For other repository types, fetch entries only
+                let groupedEntries = try await entryRepository.fetchEntries()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups")
+                self.entries = groupedEntries
+                self.places = []
+            }
             
             await MainActor.run {
                 self.newCategoryButton?.isEnabled = true
                 self.hasLoadedInitialData = true
-                self.handleLoadedEntries(groupedEntries)
+                self.handleLoadedEntries(self.entries ?? [:])
                 self.loadingIndicator.stopAnimating()
                 navigationItem.rightBarButtonItem?.isEnabled = true
             }
         } catch {
-            Logger.log(level: .error, category: .general, message: "Failed to load entries and categories: \(error)")
+            Logger.log(level: .error, category: logCategory, message: "Failed to load entries and categories: \(error)")
             await MainActor.run {
                 self.newCategoryButton?.isEnabled = false
                 self.loadingIndicator.stopAnimating()
@@ -410,64 +615,26 @@ extension NestViewController: UICollectionViewDelegate {
         // Skip navigation for address section
         if indexPath.section == Section.address.rawValue { return }
         
-        // Cast the item to Item type for category sections
-        guard let categoryItem = item as? Item else { return }
-        
         let section = Section(rawValue: indexPath.section)!
         
-        switch section {
-        case .main:
-            let sessionVisibilityLevel = (entryRepository as? SitterViewService)?.currentSessionVisibilityLevel
+        if section == .main {
+            // Handle folder navigation
+            guard let folderData = item as? FolderData else { return }
+            
             let nestCategoryViewController = NestCategoryViewController(
-                category: categoryItem.title,
-                entryRepository: entryRepository,
-                sessionVisibilityLevel: sessionVisibilityLevel
+                category: folderData.fullPath,
+                places: places,
+                entryRepository: entryRepository
             )
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
-            
-        case .routine:
-            let featurePreviewVC = NNFeaturePreviewViewController(
-                feature: .routines
-            )
-            featurePreviewVC.modalPresentationStyle = .formSheet
-            present(featurePreviewVC, animated: true)
-            
-        case .misc:
-            switch categoryItem.title {
-            case "Places":
-                let isReadOnly = !(entryRepository is NestService)
-                let sitterService = entryRepository as? SitterViewService
-                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: sitterService)
-                placesVC.isReadOnly = isReadOnly
-                let nav = UINavigationController(rootViewController: placesVC)
-                present(nav, animated: true)
-            default:
-                let feature: SurveyService.Feature
-                switch categoryItem.title {
-                case "Contacts":
-                    feature = .contacts
-                case "Activity Suggestions":
-                    feature = .activitySuggestions
-                default:
-                    return
-                }
-                
-                let featurePreviewVC = NNFeaturePreviewViewController(
-                    feature: feature
-                )
-                featurePreviewVC.modalPresentationStyle = .formSheet
-                present(featurePreviewVC, animated: true)
-            }
-            
-        default:
-            break
         }
     }
 }
 
 extension NestViewController: CategoryDetailViewControllerDelegate {
-    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?) {
+    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?, withIcon icon: String?) {
         guard let categoryName = category,
+              let iconName = icon,
               let nestService = entryRepository as? NestService else {
             // Only NestService can create categories
             showError("Categories can only be created by nest owners")
@@ -476,24 +643,31 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
         
         Task {
             do {
-                // Create and save the new category
-                let newCategory = NestCategory(name: categoryName, symbolName: "folder")
+                // Create full folder path considering current folder location
+                let fullFolderPath = currentFolderPath.isEmpty ? categoryName : "\(currentFolderPath)/\(categoryName)"
+                
+                // Create and save the new category with full path and selected icon
+                let newCategory = NestCategory(name: fullFolderPath, symbolName: iconName)
                 try await nestService.createCategory(newCategory)
                 
-                // Refresh the categories and entries
+                // Refresh the categories, entries, and places
                 async let categoriesTask = nestService.fetchCategories()
                 async let entriesTask = entryRepository.refreshEntries()
                 
                 let (newCategories, groupedEntries) = try await (categoriesTask, entriesTask)
                 
+                // Refresh places too
+                let refreshedPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
+                
                 await MainActor.run {
                     self.categories = newCategories
                     self.entries = groupedEntries
+                    self.places = refreshedPlaces
                     self.applyInitialSnapshots()
                     self.showToast(text: "Category Created")
                 }
             } catch {
-                Logger.log(level: .error, category: .general, message: "Failed to create category: \(error)")
+                Logger.log(level: .error, category: logCategory, message: "Failed to create category: \(error)")
                 await MainActor.run {
                     self.showError(error.localizedDescription)
                 }

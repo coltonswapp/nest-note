@@ -222,7 +222,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     
     @objc private func addEventTapped() {
         let dateToUse = selectedDate ?? dateRange.start
-        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange)
+        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -670,7 +670,8 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 sessionID: sessionID,
                 event: item,
                 sourceFrame: sourceFrame,
-                sessionDateRange: dateRange
+                sessionDateRange: dateRange,
+                entryRepository: NestService.shared
             )
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
@@ -683,7 +684,7 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 dateToUse = selectedDate ?? dateRange.start
             }
             
-            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange)
+            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }

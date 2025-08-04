@@ -33,7 +33,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
     let title: String
     let startDate: Date
     let endDate: Date
-    let visibilityLevel: VisibilityLevel
     let assignedSitter: AssignedSitter?
     let status: SessionStatus
     let archivedDate: Date
@@ -45,7 +44,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
         title: String,
         startDate: Date,
         endDate: Date,
-        visibilityLevel: VisibilityLevel,
         assignedSitter: AssignedSitter?,
         status: SessionStatus = .completed,
         archivedDate: Date = Date()
@@ -56,7 +54,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
         self.title = title
         self.startDate = startDate
         self.endDate = endDate
-        self.visibilityLevel = visibilityLevel
         self.assignedSitter = assignedSitter
         self.status = status
         self.archivedDate = archivedDate
@@ -70,7 +67,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
         self.title = sessionItem.title
         self.startDate = sessionItem.startDate
         self.endDate = sessionItem.endDate
-        self.visibilityLevel = sessionItem.visibilityLevel
         self.assignedSitter = sessionItem.assignedSitter
         self.status = .completed // Archived sessions are always completed
         self.archivedDate = Date()
@@ -108,7 +104,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
         title = try container.decode(String.self, forKey: .title)
         startDate = try container.decode(Date.self, forKey: .startDate)
         endDate = try container.decode(Date.self, forKey: .endDate)
-        visibilityLevel = try container.decode(VisibilityLevel.self, forKey: .visibilityLevel)
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         status = try container.decode(SessionStatus.self, forKey: .status)
         archivedDate = try container.decode(Date.self, forKey: .archivedDate)
@@ -123,7 +118,6 @@ class ArchivedSession: Identifiable, Codable, Hashable, SessionDisplayable {
         try container.encode(title, forKey: .title)
         try container.encode(startDate, forKey: .startDate)
         try container.encode(endDate, forKey: .endDate)
-        try container.encode(visibilityLevel, forKey: .visibilityLevel)
         try container.encode(assignedSitter, forKey: .assignedSitter)
         try container.encode(status, forKey: .status)
         try container.encode(archivedDate, forKey: .archivedDate)

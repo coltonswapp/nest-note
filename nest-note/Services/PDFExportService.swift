@@ -16,15 +16,36 @@ class PDFExportService {
     // Default section order - easily customizable
     private static let defaultSectionOrder: [PDFSection] = [.events, .entries]
     
-    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, visibilityLevel: VisibilityLevel, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
-        // Pre-fetch all places for events if needed
-        var eventPlaces: [String: Place] = [:]
-        for event in events {
-            if let placeID = event.placeID, !placeID.isEmpty {
-                if let place = await PlacesService.shared.getPlace(for: placeID) {
-                    eventPlaces[placeID] = place
+    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
+        // Fetch all places from NestService and pre-load their images
+        var allPlaces: [PlaceItem] = []
+        var eventPlaces: [String: PlaceItem] = [:]
+        var placeImages: [String: UIImage] = [:]
+        do {
+            allPlaces = try await NestService.shared.fetchPlaces()
+            print("PDFExport: Fetched \(allPlaces.count) places from NestService")
+            
+            // Pre-load images for places that have thumbnails
+            for place in allPlaces {
+                eventPlaces[place.id] = place
+                
+                if place.thumbnailURLs != nil {
+                    do {
+                        let imageAsset = try await NestService.shared.loadImages(for: place)
+                        // Force light mode for PDF export
+                        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+                        let lightImage = imageAsset.imageAsset?.image(with: lightTraits) ?? imageAsset
+                        placeImages[place.id] = lightImage
+                        print("PDFExport: Loaded light mode image for place: \(place.displayName)")
+                    } catch {
+                        print("PDFExport: Failed to load image for place \(place.displayName): \(error)")
+                        // Continue without image for this place
+                    }
                 }
             }
+        } catch {
+            print("PDFExport: Failed to fetch places: \(error)")
+            // Continue without places if fetch fails
         }
         // Fetch entries from EntryRepository first
         var allEntries: [BaseEntry] = []
@@ -78,10 +99,11 @@ class PDFExportService {
                     cgContext: cgContext,
                     session: session,
                     nestItem: nestItem,
-                    visibilityLevel: visibilityLevel,
                     allEntries: allEntries,
                     events: events,
                     eventPlaces: eventPlaces,
+                    allPlaces: allPlaces,
+                    placeImages: placeImages,
                     currentY: currentY,
                     leftMargin: leftMargin,
                     rightMargin: rightMargin,
@@ -284,7 +306,7 @@ class PDFExportService {
         context.strokePath()
     }
     
-    private static func drawCategorySectionWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, categoryName: String, entries: [BaseEntry], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
+    private static func drawCategorySectionWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, categoryName: String, entries: [BaseEntry], places: [PlaceItem], placeImages: [String: UIImage], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
         var y = currentY
         let bottomMargin: CGFloat = 60
         
@@ -306,13 +328,19 @@ class PDFExportService {
         categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
         y += categoryHeight
         
-        // Separate grid items from full-width items
-        let gridItems = entries.filter { isGridItem($0) }
+        // Separate grid items from full-width items (entries only)
+        let gridEntries = entries.filter { isGridItem($0) }
         let fullWidthItems = entries.filter { !isGridItem($0) }
         
-        // Draw grid items with page breaks
-        if !gridItems.isEmpty {
-            y = drawGridItemsWithPageBreaks(context: context, cgContext: cgContext, items: gridItems, currentY: y, leftMargin: leftMargin, contentWidth: contentWidth, pageSize: pageSize, bottomMargin: bottomMargin)
+        // Draw grid entries first (3-column layout)
+        if !gridEntries.isEmpty {
+            y = drawGridItemsWithPageBreaks(context: context, cgContext: cgContext, items: gridEntries, currentY: y, leftMargin: leftMargin, contentWidth: contentWidth, pageSize: pageSize, bottomMargin: bottomMargin)
+            y += 16
+        }
+        
+        // Draw places separately (2-item row layout)
+        if !places.isEmpty {
+            y = drawPlacesGridWithPageBreaks(context: context, cgContext: cgContext, places: places, placeImages: placeImages, currentY: y, leftMargin: leftMargin, contentWidth: contentWidth, pageSize: pageSize, bottomMargin: bottomMargin)
             y += 16
         }
         
@@ -493,6 +521,196 @@ class PDFExportService {
         return y
     }
     
+    private static func drawMixedGridItemsWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, items: [Any], placeImages: [String: UIImage], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+        let columnsPerRow = 3
+        let rowHeight: CGFloat = 90 // Increased to accommodate 80x80 places
+        let columnWidth = contentWidth / CGFloat(columnsPerRow)
+        let itemSpacing: CGFloat = 8
+        
+        var y = currentY
+        var currentRowItems: [Any] = []
+        
+        for (index, item) in items.enumerated() {
+            currentRowItems.append(item)
+            
+            // Check if we've completed a row or reached the end
+            if currentRowItems.count == columnsPerRow || index == items.count - 1 {
+                // Check if this row fits on the current page
+                if y + rowHeight > pageSize.height - bottomMargin {
+                    context.beginPage()
+                    y = 60 // Reset to top margin
+                }
+                
+                // Draw the current row
+                for (columnIndex, rowItem) in currentRowItems.enumerated() {
+                    let x = leftMargin + CGFloat(columnIndex) * columnWidth
+                    let availableWidth = columnWidth - (columnIndex < columnsPerRow - 1 ? itemSpacing : 0)
+                    
+                    if let entry = rowItem as? BaseEntry {
+                        // Draw entry item
+                        let titleFont = UIFont.systemFont(ofSize: 12, weight: .medium)
+                        let titleAttributes: [NSAttributedString.Key: Any] = [
+                            .font: titleFont,
+                            .foregroundColor: UIColor.gray
+                        ]
+                        let titleRect = CGRect(x: x, y: y + 8, width: availableWidth, height: 16)
+                        entry.title.uppercased().draw(in: titleRect, withAttributes: titleAttributes)
+                        
+                        let contentFont = UIFont.systemFont(ofSize: 14, weight: .regular)
+                        let contentAttributes: [NSAttributedString.Key: Any] = [
+                            .font: contentFont,
+                            .foregroundColor: UIColor.black
+                        ]
+                        let contentRect = CGRect(x: x, y: y + 32, width: availableWidth, height: 30)
+                        entry.content.draw(in: contentRect, withAttributes: contentAttributes)
+                        
+                    } else if let place = rowItem as? PlaceItem {
+                        // Draw place item with 80x80 thumbnail
+                        drawSinglePlaceInGrid(
+                            cgContext: cgContext,
+                            place: place,
+                            placeImages: placeImages,
+                            itemX: x,
+                            itemY: y,
+                            itemWidth: availableWidth
+                        )
+                    }
+                }
+                
+                y += rowHeight
+                currentRowItems.removeAll()
+            }
+        }
+        
+        return y
+    }
+    
+    private static func drawPlacesGridWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, places: [PlaceItem], placeImages: [String: UIImage], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+        let itemsPerRow = 2 // 2-item row layout for places
+        let rowHeight: CGFloat = 90 // Height for each place row
+        let itemSpacing: CGFloat = 20 // Space between items in a row
+        let itemWidth = (contentWidth - itemSpacing) / CGFloat(itemsPerRow)
+        
+        var y = currentY
+        var currentRowItems: [PlaceItem] = []
+        
+        for (index, place) in places.enumerated() {
+            currentRowItems.append(place)
+            
+            // Check if we've completed a row or reached the end
+            if currentRowItems.count == itemsPerRow || index == places.count - 1 {
+                // Check if this row fits on the current page
+                if y + rowHeight > pageSize.height - bottomMargin {
+                    context.beginPage()
+                    y = 60 // Reset to top margin
+                }
+                
+                // Draw the current row
+                for (columnIndex, place) in currentRowItems.enumerated() {
+                    let x = leftMargin + CGFloat(columnIndex) * (itemWidth + itemSpacing)
+                    
+                    // Draw place item with wider layout
+                    drawSinglePlaceInGrid(
+                        cgContext: cgContext,
+                        place: place,
+                        placeImages: placeImages,
+                        itemX: x,
+                        itemY: y,
+                        itemWidth: itemWidth
+                    )
+                }
+                
+                y += rowHeight
+                currentRowItems.removeAll()
+            }
+        }
+        
+        return y
+    }
+    
+    private static func drawSinglePlaceInGrid(
+        cgContext: CGContext,
+        place: PlaceItem,
+        placeImages: [String: UIImage],
+        itemX: CGFloat,
+        itemY: CGFloat,
+        itemWidth: CGFloat
+    ) {
+        let thumbnailSize: CGFloat = 80 // Updated to 80x80
+        let cornerRadius: CGFloat = 18 // 18pt corner radius
+        let textMarginLeft: CGFloat = thumbnailSize + 12 // Space between thumbnail and text
+        let availableTextWidth = itemWidth - textMarginLeft
+        
+        // Draw thumbnail with corner radius
+        let thumbnailRect = CGRect(x: itemX, y: itemY, width: thumbnailSize, height: thumbnailSize)
+        
+        // Check if we have a pre-loaded image for this place
+        if let thumbnailImage = placeImages[place.id] {
+            // Save and restore graphics state for image drawing
+            cgContext.saveGState()
+            
+            // Create a clipping path with rounded corners
+            let path = UIBezierPath(roundedRect: thumbnailRect, cornerRadius: cornerRadius)
+            cgContext.addPath(path.cgPath)
+            cgContext.clip()
+            
+            // Flip coordinate system for proper image orientation
+            cgContext.translateBy(x: 0, y: thumbnailRect.maxY)
+            cgContext.scaleBy(x: 1.0, y: -1.0)
+            
+            // Draw the thumbnail image
+            if let cgImage = thumbnailImage.cgImage {
+                let flippedRect = CGRect(x: thumbnailRect.minX, y: 0, width: thumbnailRect.width, height: thumbnailRect.height)
+                cgContext.draw(cgImage, in: flippedRect)
+            }
+            
+            cgContext.restoreGState()
+        } else {
+            // Draw placeholder background with corner radius
+            let path = UIBezierPath(roundedRect: thumbnailRect, cornerRadius: cornerRadius)
+            cgContext.setFillColor(UIColor.lightGray.cgColor)
+            cgContext.addPath(path.cgPath)
+            cgContext.fillPath()
+            
+            cgContext.setStrokeColor(UIColor.gray.cgColor)
+            cgContext.setLineWidth(1)
+            cgContext.addPath(path.cgPath)
+            cgContext.strokePath()
+            
+            // Draw mappin icon as placeholder
+            let iconSize: CGFloat = 32 // Larger icon for 80x80 thumbnail
+            let iconX = thumbnailRect.midX - iconSize/2
+            let iconY = thumbnailRect.midY - iconSize/2
+            
+            cgContext.setFillColor(UIColor.darkGray.cgColor)
+            
+            // Draw circle for map pin
+            let circleRect = CGRect(x: iconX + iconSize/4, y: iconY + iconSize/3, width: iconSize/2, height: iconSize/2)
+            cgContext.fillEllipse(in: circleRect)
+        }
+        
+        // Draw alias (name) to the right of thumbnail
+        let nameFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        let nameAttributes: [NSAttributedString.Key: Any] = [
+            .font: nameFont,
+            .foregroundColor: UIColor.black
+        ]
+        
+        let displayName = place.alias ?? place.displayName
+        let nameRect = CGRect(x: itemX + textMarginLeft, y: itemY, width: availableTextWidth, height: 20)
+        displayName.draw(in: nameRect, withAttributes: nameAttributes)
+        
+        // Draw address below the alias
+        let addressFont = UIFont.systemFont(ofSize: 12, weight: .regular)
+        let addressAttributes: [NSAttributedString.Key: Any] = [
+            .font: addressFont,
+            .foregroundColor: UIColor.darkGray
+        ]
+        
+        let addressRect = CGRect(x: itemX + textMarginLeft, y: itemY + 22, width: availableTextWidth, height: 58) // Remaining height
+        place.address.draw(in: addressRect, withAttributes: addressAttributes)
+    }
+    
     private static func drawFullWidthItemWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, entry: BaseEntry, currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
         var y = currentY
         
@@ -533,21 +751,6 @@ class PDFExportService {
         y += contentSize.height
         
         return y
-    }
-    
-    private static func filterEntriesByVisibility(entries: [BaseEntry], visibilityLevel: VisibilityLevel) -> [BaseEntry] {
-        return entries.filter { entry in
-            switch visibilityLevel {
-            case .always:
-                return entry.visibility == .always
-            case .halfDay:
-                return entry.visibility == .always || entry.visibility == .halfDay
-            case .overnight:
-                return entry.visibility == .always || entry.visibility == .halfDay || entry.visibility == .overnight
-            case .extended:
-                return true // All entries
-            }
-        }
     }
     
     private static func generateQRCodeWithLogo(text: String, logo: UIImage) -> UIImage? {
@@ -624,10 +827,11 @@ class PDFExportService {
         cgContext: CGContext,
         session: SessionItem,
         nestItem: NestItem,
-        visibilityLevel: VisibilityLevel,
         allEntries: [BaseEntry],
         events: [SessionEvent],
-        eventPlaces: [String: Place],
+        eventPlaces: [String: PlaceItem],
+        allPlaces: [PlaceItem],
+        placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
         rightMargin: CGFloat,
@@ -641,7 +845,8 @@ class PDFExportService {
                 context: context,
                 cgContext: cgContext,
                 allEntries: allEntries,
-                visibilityLevel: visibilityLevel,
+                allPlaces: allPlaces,
+                placeImages: placeImages,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -675,7 +880,8 @@ class PDFExportService {
             return drawPlacesSection(
                 context: context,
                 cgContext: cgContext,
-                eventPlaces: eventPlaces,
+                allPlaces: allPlaces,
+                placeImages: placeImages,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -700,7 +906,8 @@ class PDFExportService {
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
         allEntries: [BaseEntry],
-        visibilityLevel: VisibilityLevel,
+        allPlaces: [PlaceItem],
+        placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
@@ -709,42 +916,48 @@ class PDFExportService {
         
         var y = currentY
         
-        // Filter entries based on visibility level
-        let filteredEntries = filterEntriesByVisibility(entries: allEntries, visibilityLevel: visibilityLevel)
-        
-        // Debug logging
+        // Use all entries regardless of visibility level
         print("PDFExport: Total entries: \(allEntries.count)")
-        print("PDFExport: Filtered entries: \(filteredEntries.count)")
-        print("PDFExport: Visibility level: \(visibilityLevel)")
         
         for entry in allEntries {
-            print("PDFExport: Entry '\(entry.title)' - visibility: \(entry.visibility.rawValue), category: '\(entry.category)'")
+            print("PDFExport: Entry '\(entry.title)' - category: '\(entry.category)'")
         }
         
         // Group entries by category
-        let entriesByCategory = Dictionary(grouping: filteredEntries) { $0.category }
+        let entriesByCategory = Dictionary(grouping: allEntries) { $0.category }
+        
+        // Group places by category  
+        let placesByCategory = Dictionary(grouping: allPlaces) { $0.category }
+        
+        // Get all unique categories from both entries and places
+        let allCategories = Set(entriesByCategory.keys).union(Set(placesByCategory.keys))
         
         // Draw categories
-        if entriesByCategory.isEmpty {
+        if allCategories.isEmpty {
             // Show a message if no entries are available
             let noEntriesFont = UIFont.systemFont(ofSize: 16, weight: .regular)
             let noEntriesAttributes: [NSAttributedString.Key: Any] = [
                 .font: noEntriesFont,
                 .foregroundColor: UIColor.gray
             ]
-            let noEntriesText = "No entries available for \(visibilityLevel.rawValue) visibility level"
+            let noEntriesText = "No entries or places available"
             noEntriesText.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: noEntriesAttributes)
             y += noEntriesFont.lineHeight
         } else {
-            for (categoryName, entries) in entriesByCategory.sorted(by: { $0.key < $1.key }) {
-                if !entries.isEmpty {
-                    print("PDFExport: Drawing category '\(categoryName)' with \(entries.count) entries")
+            for categoryName in allCategories.sorted() {
+                let entries = entriesByCategory[categoryName] ?? []
+                let places = placesByCategory[categoryName] ?? []
+                
+                if !entries.isEmpty || !places.isEmpty {
+                    print("PDFExport: Drawing category '\(categoryName)' with \(entries.count) entries and \(places.count) places")
                     
                     y = drawCategorySectionWithPageBreaks(
                         context: context,
                         cgContext: cgContext,
                         categoryName: categoryName,
                         entries: entries,
+                        places: places,
+                        placeImages: placeImages,
                         currentY: y,
                         leftMargin: leftMargin,
                         contentWidth: contentWidth,
@@ -758,7 +971,7 @@ class PDFExportService {
         return y
     }
     
-    private static func drawEventsSection(context: UIGraphicsPDFRendererContext, cgContext: CGContext, events: [SessionEvent], eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
+    private static func drawEventsSection(context: UIGraphicsPDFRendererContext, cgContext: CGContext, events: [SessionEvent], eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
         var y = currentY
         let bottomMargin: CGFloat = 60
         
@@ -820,7 +1033,7 @@ class PDFExportService {
         return grouped
     }
     
-    private static func drawEventDateGroup(context: UIGraphicsPDFRendererContext, cgContext: CGContext, dateString: String, events: [SessionEvent], eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+    private static func drawEventDateGroup(context: UIGraphicsPDFRendererContext, cgContext: CGContext, dateString: String, events: [SessionEvent], eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
         var y = currentY
         
         // Date header
@@ -876,7 +1089,7 @@ class PDFExportService {
         return titleHeight + timeHeight + placeHeight + 24 // padding
     }
     
-    private static func drawSingleEvent(cgContext: CGContext, event: SessionEvent, eventPlaces: [String: Place], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
+    private static func drawSingleEvent(cgContext: CGContext, event: SessionEvent, eventPlaces: [String: PlaceItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
         let startY = currentY
         var y = currentY
         let eventContentX = leftMargin + 8 // Align with entries and categories
@@ -956,15 +1169,182 @@ class PDFExportService {
     private static func drawPlacesSection(
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
-        eventPlaces: [String: Place],
+        allPlaces: [PlaceItem],
+        placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
         pageSize: CGRect
     ) -> CGFloat {
-        // TODO: Implement places section
-        // Could show all places referenced in the session
-        return currentY
+        var y = currentY
+        let bottomMargin: CGFloat = 60
+        
+        // Skip empty places section
+        guard !allPlaces.isEmpty else {
+            return y
+        }
+        
+        // Section title
+        let titleFont = UIFont.systemFont(ofSize: 22, weight: .bold)
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.black
+        ]
+        
+        let titleHeight = "Places".size(withAttributes: titleAttributes).height + 20
+        
+        // Check if title fits
+        if y + titleHeight > pageSize.height - bottomMargin {
+            context.beginPage()
+            y = 60
+        }
+        
+        "Places".draw(at: CGPoint(x: leftMargin, y: y), withAttributes: titleAttributes)
+        y += titleHeight
+        
+        // Draw places in 2-item row grid
+        y = drawPlacesGrid(
+            context: context,
+            cgContext: cgContext,
+            places: allPlaces,
+            placeImages: placeImages,
+            currentY: y,
+            leftMargin: leftMargin,
+            contentWidth: contentWidth,
+            pageSize: pageSize,
+            bottomMargin: bottomMargin
+        )
+        
+        return y
+    }
+    
+    private static func drawPlacesGrid(
+        context: UIGraphicsPDFRendererContext,
+        cgContext: CGContext,
+        places: [PlaceItem],
+        placeImages: [String: UIImage],
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
+        let itemsPerRow = 2
+        let rowHeight: CGFloat = 80 // Height for each place row
+        let itemSpacing: CGFloat = 20 // Space between items in a row
+        let itemWidth = (contentWidth - itemSpacing) / CGFloat(itemsPerRow)
+        let thumbnailSize: CGFloat = 60 // 1x1 aspect ratio square
+        
+        var y = currentY
+        
+        for (index, place) in places.enumerated() {
+            let row = index / itemsPerRow
+            let column = index % itemsPerRow
+            
+            // Check if we need a new page for this row
+            if column == 0 { // First item in row
+                if y + rowHeight > pageSize.height - bottomMargin {
+                    context.beginPage()
+                    y = 60 // Reset to top margin
+                }
+            }
+            
+            // Calculate position for this item
+            let itemX = leftMargin + CGFloat(column) * (itemWidth + itemSpacing)
+            let itemY = y + CGFloat(row - (index / itemsPerRow == 0 ? 0 : index / itemsPerRow)) * rowHeight
+            
+            // Draw place item
+            drawSinglePlace(
+                cgContext: cgContext,
+                place: place,
+                placeImages: placeImages,
+                itemX: itemX,
+                itemY: itemY,
+                itemWidth: itemWidth,
+                thumbnailSize: thumbnailSize
+            )
+            
+            // Update y position after completing a row or at the end
+            if column == itemsPerRow - 1 || index == places.count - 1 {
+                y += rowHeight
+            }
+        }
+        
+        return y
+    }
+    
+    private static func drawSinglePlace(
+        cgContext: CGContext,
+        place: PlaceItem,
+        placeImages: [String: UIImage],
+        itemX: CGFloat,
+        itemY: CGFloat,
+        itemWidth: CGFloat,
+        thumbnailSize: CGFloat
+    ) {
+        let textMarginLeft: CGFloat = thumbnailSize + 12 // Space between thumbnail and text
+        let availableTextWidth = itemWidth - textMarginLeft
+        
+        // Draw thumbnail
+        let thumbnailRect = CGRect(x: itemX, y: itemY, width: thumbnailSize, height: thumbnailSize)
+        
+        // Check if we have a pre-loaded image for this place
+        if let thumbnailImage = placeImages[place.id] {
+            // Save and restore graphics state for image drawing
+            cgContext.saveGState()
+            
+            // Flip coordinate system for proper image orientation
+            cgContext.translateBy(x: 0, y: thumbnailRect.maxY)
+            cgContext.scaleBy(x: 1.0, y: -1.0)
+            
+            // Draw the thumbnail image
+            if let cgImage = thumbnailImage.cgImage {
+                let flippedRect = CGRect(x: thumbnailRect.minX, y: 0, width: thumbnailRect.width, height: thumbnailRect.height)
+                cgContext.draw(cgImage, in: flippedRect)
+            }
+            
+            cgContext.restoreGState()
+        } else {
+            // Draw placeholder background and border if no image available
+            cgContext.setFillColor(UIColor.lightGray.cgColor)
+            cgContext.fill(thumbnailRect)
+            
+            cgContext.setStrokeColor(UIColor.gray.cgColor)
+            cgContext.setLineWidth(1)
+            cgContext.stroke(thumbnailRect)
+            
+            // Draw mappin icon as placeholder
+            let iconSize: CGFloat = 24
+            let iconX = thumbnailRect.midX - iconSize/2
+            let iconY = thumbnailRect.midY - iconSize/2
+            
+            cgContext.setFillColor(UIColor.darkGray.cgColor)
+            
+            // Draw circle for map pin
+            let circleRect = CGRect(x: iconX + iconSize/4, y: iconY + iconSize/3, width: iconSize/2, height: iconSize/2)
+            cgContext.fillEllipse(in: circleRect)
+        }
+        
+        // Draw name (alias or display name)
+        let nameFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        let nameAttributes: [NSAttributedString.Key: Any] = [
+            .font: nameFont,
+            .foregroundColor: UIColor.black
+        ]
+        
+        let displayName = place.alias ?? place.displayName
+        let nameRect = CGRect(x: itemX + textMarginLeft, y: itemY, width: availableTextWidth, height: 20)
+        displayName.draw(in: nameRect, withAttributes: nameAttributes)
+        
+        // Draw address
+        let addressFont = UIFont.systemFont(ofSize: 12, weight: .regular)
+        let addressAttributes: [NSAttributedString.Key: Any] = [
+            .font: addressFont,
+            .foregroundColor: UIColor.darkGray
+        ]
+        
+        let addressRect = CGRect(x: itemX + textMarginLeft, y: itemY + 22, width: availableTextWidth, height: 40)
+        place.address.draw(in: addressRect, withAttributes: addressAttributes)
     }
     
     private static func drawRoutinesSection(

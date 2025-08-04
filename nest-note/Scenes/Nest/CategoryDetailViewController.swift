@@ -2,7 +2,7 @@ import UIKit
 import Foundation
 
 protocol CategoryDetailViewControllerDelegate: AnyObject {
-    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?)
+    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?, withIcon icon: String?)
 }
 
 // MARK: - CategoryIconCell
@@ -69,7 +69,7 @@ final class CategoryDetailViewController: NNSheetViewController {
     }()
     
     private lazy var saveButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: "Save")
+        let button = NNSmallPrimaryButton(title: category == nil ? "Create Folder" : "Update Folder")
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
     }()
@@ -117,24 +117,65 @@ final class CategoryDetailViewController: NNSheetViewController {
     // MARK: - Icons Array
     private let icons = [
         // Home & Security
-        "house.fill", "door.left.hand.closed", "key.fill", "lock.fill", "wifi",
+        "door.left.hand.closed", "key.fill", "lock.fill",
         "bed.double.fill", "window.horizontal", "spigot.fill",
         
         // Time & Schedule
-        "clock.fill", "calendar", "alarm", "moon.fill", "sun.max.fill",
+        "clock.fill", "calendar", "alarm",
         
         // Info & Rules
         "list.bullet", "checkmark.square", "exclamationmark.triangle", "bell.fill",
         
-        // Family & Social
-        "figure.2.and.child.holdinghands", "person.2.fill", "figure.wave",
-        "figure.play", "figure.american.football", "person.3.fill", "heart.fill",
-        "heart.text.clipboard", "pills.fill",
-        
-        // Objects & Activities
-        "pencil", "book.fill", "car.fill", "bicycle", "fork.knife",
-        "gamecontroller.fill", "tv.fill", "phone.fill", "cross.case.fill",
-        "pawprint.fill"
+        "figure.walk",
+        "figure.wave",
+        "bus",
+        "bicycle",
+        "tram.fill",
+        "binoculars.fill",
+        "sun.max.fill",
+        "sparkles",
+        "moon.stars",
+        "wind",
+        "phone.fill",
+        "trash.fill",
+        "folder.fill",
+        "paperplane.fill",
+        "magazine.fill",
+        "backpack.fill",
+        "studentdesk",
+        "american.football.fill",
+        "basketball.fill",
+        "baseball.fill",
+        "tennis.racket",
+        "tennisball.fill",
+        "volleyball.fill",
+        "surfboard.fill",
+        "beach.umbrella.fill",
+        "dishwasher.fill",
+        "refrigerator.fill",
+        "key.2.on.ring.fill",
+        "stroller.fill",
+        "helmet.fill",
+        "shoe.2.fill",
+        "gamecontroller.fill",
+        "arcade.stick.console.fill",
+        "wifi.circle.fill",
+        "house.fill",
+        "tortoise.fill",
+        "dog.fill",
+        "bird.fill",
+        "lizard.fill",
+        "ant.fill",
+        "fish.fill",
+        "pawprint.fill",
+        "bubbles.and.sparkles.fill",
+        "pills.fill",
+        "cross.vial.fill",
+        "staroflife.fill",
+        "leaf.fill",
+        "tree.fill",
+        "list.bullet.clipboard.fill",
+        "heart.fill"
     ]
     
     // MARK: - Initialization
@@ -150,9 +191,9 @@ final class CategoryDetailViewController: NNSheetViewController {
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
-        titleLabel.text = category == nil ? "New Category" : "Edit Category"
+        titleLabel.text = category == nil ? "New Folder" : "Edit Folder"
         titleField.text = category
-        titleField.placeholder = "Category name"
+        titleField.placeholder = "Folder name"
         
         iconCollectionView.delegate = self
         iconCollectionView.dataSource = self
@@ -165,6 +206,12 @@ final class CategoryDetailViewController: NNSheetViewController {
     }
     
     // MARK: - Setup Methods
+    
+    override func setupInfoButton() {
+        // CategoryDetailViewController doesn't need an info button
+        infoButton.isHidden = true
+    }
+    
     override func addContentToContainer() {
         super.addContentToContainer()
         
@@ -204,7 +251,8 @@ final class CategoryDetailViewController: NNSheetViewController {
             return
         }
         
-        categoryDelegate?.categoryDetailViewController(self, didSaveCategory: categoryName)
+        // Pass both the folder name and selected icon to the delegate
+        categoryDelegate?.categoryDetailViewController(self, didSaveCategory: categoryName, withIcon: selectedIcon!)
         dismiss(animated: true)
     }
     

@@ -87,6 +87,17 @@ class NNBaseControl: UIControl {
         self.titleLabel.text = title
     }
     
+    func setImage(_ image: UIImage?) {
+        if let image {
+            self.imageView.image = image
+            self.imageView.isHidden = false
+        } else {
+            self.imageView.isHidden = true
+            self.imageView.image = nil
+        }
+        
+    }
+    
     // MARK: - Setup
     private func setupControl(title: String, image: UIImage?, backgroundColor: UIColor) {
         setupAppearance(backgroundColor: backgroundColor)

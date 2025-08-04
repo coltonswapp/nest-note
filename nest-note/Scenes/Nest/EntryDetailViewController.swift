@@ -39,16 +39,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         return button
     }()
     
-    private lazy var visibilityButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
-            title: "Test",
-            image: UIImage(systemName: "chevron.up.chevron.down"),
-            imagePlacement: .right,
-            backgroundColor: NNColors.offBlack
-        )
-        button.titleLabel?.font = .h4
-        return button
-    }()
     
     private let buttonStackView: UIStackView = {
         let stackView = UIStackView()
@@ -60,17 +50,12 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         return stackView
     }()
     
-    private lazy var infoButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        let image = UIImage(systemName: "ellipsis.circle.fill", withConfiguration: config)
-        button.setImage(image, for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
+    
+    private lazy var folderLabel: NNSmallLabel = {
+        let label = NNSmallLabel()
+        return label
     }()
     
-    private var visibilityLevel: VisibilityLevel
     let entry: BaseEntry?
     private let category: String
     
@@ -78,7 +63,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
         self.entry = entry
-        self.visibilityLevel = entry?.visibility ?? .halfDay
         self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
     }
@@ -86,7 +70,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     init(category: String, title: String, content: String, sourceFrame: CGRect? = nil) {
         self.category = category
         self.entry = nil
-        self.visibilityLevel = .halfDay
         self.isReadOnly = false
         super.init(sourceFrame: sourceFrame)
         
@@ -109,16 +92,16 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         contentTextView.text = entry?.content
         contentTextView.delegate = self
         
+        // Configure folder label with last 2 components
+        configureFolderLabel()
+        
         // Remove automatic tip dismissal - let user dismiss manually
         
         if isReadOnly {
             configureReadOnlyMode()
-        } else {
-            setupVisibilityMenu()
-            setupInfoMenu()
         }
         
-        itemsHiddenDuringTransition = [buttonStackView, infoButton]
+        itemsHiddenDuringTransition = [saveButton, infoButton]
         
         if entry == nil && !isReadOnly {
             titleField.becomeFirstResponder()
@@ -131,72 +114,75 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     override func addContentToContainer() {
         super.addContentToContainer()
         
-        buttonStackView.addArrangedSubview(visibilityButton)
+        containerView.addSubview(contentTextView)
+        containerView.addSubview(folderLabel)
         if !isReadOnly {
-            buttonStackView.addArrangedSubview(saveButton)
+            containerView.addSubview(saveButton)
         }
         
-        containerView.addSubview(contentTextView)
-        containerView.addSubview(buttonStackView)
-        containerView.addSubview(infoButton)
-        
-        NSLayoutConstraint.activate([
+        var constraints: [NSLayoutConstraint] = [
+            // Content text view
             contentTextView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
             contentTextView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
             contentTextView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            contentTextView.bottomAnchor.constraint(equalTo: infoButton.topAnchor, constant: -16),
             
-            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-            infoButton.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -8),
-            infoButton.widthAnchor.constraint(equalToConstant: 44),
-            infoButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
-            buttonStackView.heightAnchor.constraint(equalToConstant: 46),
-            
-            visibilityButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6),
-            
-        ])
+            // Folder label - positioned where details button was
+            folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
+            folderLabel.heightAnchor.constraint(equalToConstant: 30),
+        ]
         
         if !isReadOnly {
-            NSLayoutConstraint.activate([
-                saveButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.4)
+            // Full width save button
+            constraints.append(contentsOf: [
+                contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
+                folderLabel.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -16),
+                
+                saveButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+                saveButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+                saveButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                saveButton.heightAnchor.constraint(equalToConstant: 46),
             ])
+        } else {
+            // Read-only mode - no save button
+            constraints.append(contentsOf: [
+                contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
+                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+            ])
+        }
+        
+        NSLayoutConstraint.activate(constraints)
+    }
+    
+    // MARK: - NNSheetViewController Override
+    
+    override func setupInfoButton() {
+        infoButton.isHidden = false
+        
+        if isReadOnly {
+            setupReadOnlyInfoMenu()
+        } else {
+            setupEditableInfoMenu()
         }
     }
     
     // MARK: - Private Methods
-    private func setupVisibilityMenu() {
-        let infoAction = UIAction(title: "Learn about Levels", image: UIImage(systemName: "info.circle")) { [weak self] _ in
-            self?.showVisibilityLevelInfo()
+    
+    private func configureFolderLabel() {
+        let components = category.components(separatedBy: "/")
+        if components.count >= 2 {
+            folderLabel.text = components.joined(separator: " / ")
+        } else if components.count == 1 {
+            // Show single component
+            folderLabel.text = components.first
+        } else {
+            // Fallback
+            folderLabel.text = category
         }
-        
-        let visibilityActions = VisibilityLevel.allCases.map { level in
-            UIAction(title: level.title, state: level == self.visibilityLevel ? .on : .off) { [weak self] action in
-                HapticsHelper.lightHaptic()
-                self?.visibilityLevel = level
-                self?.updateVisibilityButton()
-                
-                // Mark visibility tip as completed when visibility is changed
-                if let self = self,
-                   let visibilityTip = EntryDetailTips.tipGroup.tips.first(where: { $0.id == "VisibilityLevelTip" }) {
-                    NNTipManager.shared.dismissTip(visibilityTip)
-                }
-            }
-        }
-        
-        let visibilitySection = UIMenu(title: "Select Visibility", options: .displayInline, children: visibilityActions)
-        let infoSection = UIMenu(title: "What level is right for me?", options: .displayInline, children: [infoAction])
-        
-        visibilityButton.menu = UIMenu(children: [visibilitySection, infoSection])
-        visibilityButton.showsMenuAsPrimaryAction = true
-        
-        updateVisibilityButton()
     }
     
-    private func setupInfoMenu() {
+    
+    private func setupEditableInfoMenu() {
         let createdAt = entry?.createdAt ?? Date()
         let modifiedAt = entry?.updatedAt ?? Date()
         
@@ -223,33 +209,17 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         infoButton.showsMenuAsPrimaryAction = true
     }
     
-    private func updateVisibilityButton() {
+    private func setupReadOnlyInfoMenu() {
+        let createdAt = entry?.createdAt ?? Date()
+        let modifiedAt = entry?.updatedAt ?? Date()
         
-        var container = AttributeContainer()
-        container.font = .h4
-        visibilityButton.configuration?.attributedTitle = AttributedString(visibilityLevel.title, attributes: container)
+        let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
+        let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
         
-        if let menu = visibilityButton.menu {
-            let updatedActions = menu.children.compactMap { $0 as? UIMenu }.flatMap { $0.children }.map { action in
-                guard let action = action as? UIAction else { return action }
-                if VisibilityLevel.allCases.map({ $0.title }).contains(action.title) {
-                    action.state = action.title == visibilityLevel.title ? .on : .off
-                }
-                return action
-            }
-            
-            visibilityButton.menu = UIMenu(children: [
-                UIMenu(title: "Select Visibility", options: .displayInline, children: updatedActions.filter { VisibilityLevel.allCases.map({ $0.title }).contains($0.title) }),
-                UIMenu(title: "", options: .displayInline, children: updatedActions.filter { $0.title == "Learn about Levels" })
-            ])
-        }
+        infoButton.menu = UIMenu(title: "", children: [createdAtAction, modifiedAtAction])
+        infoButton.showsMenuAsPrimaryAction = true
     }
     
-    private func showVisibilityLevelInfo() {
-        let viewController = VisibilityLevelInfoViewController()
-        present(viewController, animated: true)
-        HapticsHelper.lightHaptic()
-    }
     
     private func handleDeleteTapped() {
         guard let entry = entry else { return }
@@ -296,23 +266,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         // Disable editing
         titleField.isEnabled = false
         contentTextView.isEditable = false
-        
-        // Hide buttons that modify content
-        visibilityButton.isHidden = false
-        visibilityButton.isEnabled = false
-        updateVisibilityButton()
-        saveButton.isHidden = false
-        saveButton.isEnabled = false
-        
-        // Update info button menu to only show metadata
-        let createdAt = entry?.createdAt ?? Date()
-        let modifiedAt = entry?.updatedAt ?? Date()
-        
-        let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
-        let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
-        
-        infoButton.menu = UIMenu(title: "", children: [createdAtAction, modifiedAtAction])
-        infoButton.showsMenuAsPrimaryAction = true
     }
     
     // MARK: - Actions
@@ -329,7 +282,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         saveButton.startLoading()
         titleField.isUserInteractionEnabled = false
         contentTextView.isUserInteractionEnabled = false
-        visibilityButton.isUserInteractionEnabled = false
         
         Task {
             
@@ -339,7 +291,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                 if let existingEntry = entry {
                     existingEntry.title = title
                     existingEntry.content = content
-                    existingEntry.visibility = visibilityLevel
                     existingEntry.updatedAt = Date()
                     
                     try await NestService.shared.updateEntry(existingEntry)
@@ -348,7 +299,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                     let newEntry = BaseEntry(
                         title: title,
                         content: content,
-                        visibilityLevel: visibilityLevel,
                         category: category
                     )
                     
@@ -373,7 +323,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                     saveButton.stopLoading(withSuccess: false)
                     titleField.isUserInteractionEnabled = true
                     contentTextView.isUserInteractionEnabled = true
-                    visibilityButton.isUserInteractionEnabled = true
                     // Handle errors (entry limit is checked before showing this VC)
                     self.showErrorAlert(message: error.localizedDescription)
                 }
@@ -404,20 +353,8 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
             return // Don't show other tips
         }
         
-        // Priority 2: Visibility tip (after 5 visits)
-        let visibilityTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.visibilityLevelTip)
-        if visibilityTipShouldShow {
-            NNTipManager.shared.showTip(
-                EntryDetailTips.visibilityLevelTip,
-                sourceView: visibilityButton,
-                in: self,
-                pinToEdge: .top,
-                offset: CGPoint(x: 0, y: 8)
-            )
-            return // Don't show other tips
-        }
         
-        // Priority 3: Entry details tip (after 10 visits)
+        // Priority 2: Entry details tip (after 10 visits)
         let detailsTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryDetailsTip)
         if detailsTipShouldShow {
             NNTipManager.shared.showTip(
@@ -480,5 +417,3 @@ extension EntryDetailViewController: UITextViewDelegate {
         return true
     }
 }
-
- 

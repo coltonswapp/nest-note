@@ -386,7 +386,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Place List", "list.star"),
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
-            ("Test Visibility Levels", "eye.circle"),
             ("Toast Test", "text.bubble.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Reset Tooltips", "questionmark.circle.fill"),
@@ -439,7 +438,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             present(vc, animated: true)
         case "Test Category Sheet":
             let vc = CategoryDetailViewController(sourceFrame: nil)
-            vc.categoryDelegate = self
             present(vc, animated: true)
         case "Test Entry Sheet":
             let vc = EntryDetailViewController(category: "Test Category", sourceFrame: nil)
@@ -458,7 +456,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
         case "Test Event Creation":
-            let vc = SessionEventViewController()
+            let vc = SessionEventViewController(entryRepository: NestService.shared)
             present(vc, animated: true)
         case "Glassy Button Playground":
             navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
@@ -493,10 +491,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Invite Card":
             let vc = InviteCardDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
-        case "Test Visibility Levels":
-            let infoVC = VisibilityLevelInfoViewController()
-            let nav = UINavigationController(rootViewController: infoVC)
-            present(nav, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)
@@ -777,14 +771,6 @@ extension SettingsViewController: AuthenticationDelegate {
     func signUpComplete() {
         applyInitialSnapshots()
         self.showToast(text: "Welcome to NestNote")
-    }
-}
-
-extension SettingsViewController: CategoryDetailViewControllerDelegate {
-    func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?) {
-        if let category = category {
-            showToast(text: "Category saved: \(category)")
-        }
     }
 }
 

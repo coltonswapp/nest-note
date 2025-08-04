@@ -109,6 +109,8 @@ public extension Logger {
         case sitterViewService = "🧘‍♂️ SitterViewService"
         case sessionService = "📅 SessionService"
         
+        case firebaseItemRepo = "🔥 FirebaseItemRepo"
+        
         case placesService = "🏙️ PlaceService"
 
         case cachedImageController = "🗾 CachedImageController"

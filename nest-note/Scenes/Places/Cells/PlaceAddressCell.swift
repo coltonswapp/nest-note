@@ -2,7 +2,7 @@ import UIKit
 
 protocol PlaceAddressCellDelegate: AnyObject {
     func placeAddressCell(didTapThumbnail viewController: ImageViewerController)
-    func placeAddressCellAddressTapped(_ view: UIView, place: Place?)
+    func placeAddressCellAddressTapped(_ view: UIView, place: PlaceItem?)
 }
 
 final class PlaceAddressCell: UICollectionViewListCell {
