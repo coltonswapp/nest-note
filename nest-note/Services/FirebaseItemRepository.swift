@@ -177,11 +177,11 @@ final class FirebaseItemRepository: ItemRepository {
         guard let itemType = ItemType(rawValue: typeString) else {
             Logger.log(level: .info, category: .firebaseItemRepo, message: "Unknown item type: \(typeString) for document \(documentID), defaulting to entry")
             
-            // Try to decode as EntryItem for unknown types
+            // Try to decode as BaseEntry for unknown types
             if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: EntryItem.self)
+                return try queryDoc.data(as: BaseEntry.self)
             } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: EntryItem.self)
+                return try doc.data(as: BaseEntry.self)
             } else {
                 throw ItemRepositoryError.unsupportedDocumentType
             }
@@ -192,9 +192,9 @@ final class FirebaseItemRepository: ItemRepository {
         switch itemType {
         case .entry:
             if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: EntryItem.self)
+                return try queryDoc.data(as: BaseEntry.self)
             } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: EntryItem.self)
+                return try doc.data(as: BaseEntry.self)
             } else {
                 throw ItemRepositoryError.unsupportedDocumentType
             }

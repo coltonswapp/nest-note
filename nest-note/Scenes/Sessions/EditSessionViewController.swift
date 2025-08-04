@@ -12,7 +12,6 @@ protocol DatePresentationDelegate: AnyObject {
 }
 
 protocol VisibilityCellDelegate: AnyObject {
-    func didChangeVisibilityLevel(_ level: VisibilityLevel)
     func didRequestVisibilityLevelInfo()
 }
 
@@ -65,7 +64,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         return control
     }()
     
-    private var visibilityLevel: VisibilityLevel = .halfDay
     private var selectedEntries: [BaseEntry] = []
     private var selectedPlaces: [PlaceItem] = []
     
@@ -403,7 +401,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 
                 // Update UI elements that depend on session data
                 self.titleTextField.text = refreshedSession.title
-                self.visibilityLevel = refreshedSession.visibilityLevel
                 
                 // Update assigned sitter from refreshed session
                 if let assignedSitter = refreshedSession.assignedSitter {

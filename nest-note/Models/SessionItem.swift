@@ -97,7 +97,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var endDate: Date
     var isMultiDay: Bool
     var events: [SessionEvent]
-    var visibilityLevel: VisibilityLevel
     var status: SessionStatus
     var assignedSitter: AssignedSitter?
     var nestID: String
@@ -166,7 +165,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         endDate: Date = Date().addingTimeInterval(60 * 60 * 2).roundedToNext15Minutes(), // 2 hours by default
         isMultiDay: Bool = false,
         events: [SessionEvent] = [],
-        visibilityLevel: VisibilityLevel = .halfDay,
         status: SessionStatus = .upcoming,
         assignedSitter: AssignedSitter? = nil,
         nestID: String = NestService.shared.currentNest!.id,
@@ -181,7 +179,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         self.endDate = endDate
         self.isMultiDay = isMultiDay
         self.events = events
-        self.visibilityLevel = visibilityLevel
         self.status = status
         self.assignedSitter = assignedSitter
         self.nestID = nestID
@@ -257,7 +254,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case endDate
         case isMultiDay
         // Exclude 'events' from CodingKeys to prevent encoding/decoding
-        case visibilityLevel
         case status
         case assignedSitter
         case nestID
@@ -277,7 +273,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         isMultiDay = try container.decode(Bool.self, forKey: .isMultiDay)
         // Initialize events as an empty array since we're not decoding it
         events = []
-        visibilityLevel = try container.decodeIfPresent(VisibilityLevel.self, forKey: .visibilityLevel) ?? .halfDay
         assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
         ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)
@@ -319,7 +314,6 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             endDate: self.endDate,
             isMultiDay: self.isMultiDay,
             events: self.events, // Shallow copy of events array
-            visibilityLevel: self.visibilityLevel,
             status: self.status,
             assignedSitter: self.assignedSitter, // AssignedSitter is a struct, so it will be copied by value
             nestID: self.nestID,

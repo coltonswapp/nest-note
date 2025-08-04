@@ -450,8 +450,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: places,
-                        entryRepository: nestService,
-                        sessionVisibilityLevel: nil
+                        entryRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -462,8 +461,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: [],
-                        entryRepository: nestService,
-                        sessionVisibilityLevel: nil
+                        entryRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }

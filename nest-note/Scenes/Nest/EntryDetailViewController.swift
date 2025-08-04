@@ -299,7 +299,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                     let newEntry = BaseEntry(
                         title: title,
                         content: content,
-                        visibilityLevel: .halfDay, // Default visibility level
                         category: category
                     )
                     

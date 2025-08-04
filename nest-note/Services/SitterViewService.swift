@@ -44,33 +44,39 @@ final class SitterViewService: EntryRepository {
         currentNest?.address
     }
     
-    var currentSessionVisibilityLevel: VisibilityLevel? {
-        currentSession?.visibilityLevel
-    }
-    
     // MARK: - Nest Entries
     private var cachedEntries: [String: [BaseEntry]]?
     
     // MARK: - Unified Item Caching (following NestService pattern)
     private var cachedItems: [BaseItem] = []
+    private var sessionFilteredItems: [BaseItem] = []
     
-    // Computed property that filters places from cached items
+    // Computed property that filters places from session-filtered items
     private var cachedPlaces: [PlaceItem]? {
-        guard !cachedItems.isEmpty else { return nil }
-        return cachedItems.compactMap { $0 as? PlaceItem }
+        guard !sessionFilteredItems.isEmpty else { return nil }
+        return sessionFilteredItems.compactMap { $0 as? PlaceItem }
     }
+    
+    // Computed property that filters entries from session-filtered items
+    private var cachedEntriesItems: [BaseEntry]? {
+        guard !sessionFilteredItems.isEmpty else { return nil }
+        return sessionFilteredItems.compactMap { $0 as? BaseEntry }
+    }
+    
+    // MARK: - Folder Contents Cache (optimizes expensive folder traversals)
+    private var cachedFolderContents: [String: FolderContents] = [:]
     
     // MARK: - Image Cache (following NestService pattern)
     private var imageAssets: [String: UIImageAsset] = [:]
     
-    /// Fetches entries for the current nest, using cache if available
-    func fetchNestEntries() async throws -> [String: [BaseEntry]] {
-        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestEntries() called - using ItemRepository")
+    /// Unified method to fetch all items with session filtering applied once
+    private func fetchAllFilteredItems() async throws -> [BaseItem] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchAllFilteredItems() called")
         
-        // Return cached entries if available
-        if let cachedEntries = cachedEntries {
-            Logger.log(level: .info, category: .sitterViewService, message: "Using cached entries")
-            return cachedEntries
+        // Return cached session-filtered items if available
+        if !sessionFilteredItems.isEmpty {
+            Logger.log(level: .info, category: .sitterViewService, message: "Using cached session-filtered items (count: \(sessionFilteredItems.count))")
+            return sessionFilteredItems
         }
         
         // Get the current nest from our viewState
@@ -87,28 +93,52 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetching entries for nest: \(nest.id)")
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetching all items for nest: \(nest.id)")
         
-        // Fetch all items using ItemRepository and cache them
+        // Fetch all items using ItemRepository ONCE
         let allItems = try await itemRepository.fetchItems()
         self.cachedItems = allItems
         
-        // Filter to only entry items and convert to BaseEntry
-        let allEntries = allItems.compactMap { item -> BaseEntry? in
-            guard item.type == .entry, let entryItem = item as? EntryItem else { return nil }
-            return entryItem.toBaseEntry()
+        // Apply session-specific filtering if specified
+        let filteredItems: [BaseItem]
+        if let allowedItemIds = currentSession?.entryIds, !allowedItemIds.isEmpty {
+            // Filter all items to only those in the session's allowed list
+            filteredItems = allItems.filter { allowedItemIds.contains($0.id) }
+            Logger.log(level: .info, category: .sitterViewService, message: "Filtered \(allItems.count) items to \(filteredItems.count) based on session entryIds")
+            Logger.log(level: .info, category: .sitterViewService, message: "Session entryIds: \(allowedItemIds)")
+            Logger.log(level: .info, category: .sitterViewService, message: "All item IDs: \(allItems.map { $0.id })")
+            Logger.log(level: .info, category: .sitterViewService, message: "Filtered item IDs: \(filteredItems.map { $0.id })")
+        } else {
+            // Backward compatibility: show all items if no filtering specified
+            filteredItems = allItems
+            Logger.log(level: .info, category: .sitterViewService, message: "No item filtering applied - showing all \(filteredItems.count) items")
+            Logger.log(level: .info, category: .sitterViewService, message: "Session entryIds is nil or empty: \(currentSession?.entryIds?.description ?? "nil")")
         }
         
-        // Apply session-specific entry filtering if specified
-        let entries: [BaseEntry]
-        if let allowedEntryIds = currentSession?.entryIds, !allowedEntryIds.isEmpty {
-            // Filter entries to only those in the session's allowed list
-            entries = allEntries.filter { allowedEntryIds.contains($0.id) }
-            Logger.log(level: .info, category: .sitterViewService, message: "Filtered \(allEntries.count) entries to \(entries.count) based on session entryIds")
-        } else {
-            // Backward compatibility: show all entries if no filtering specified
-            entries = allEntries
-            Logger.log(level: .info, category: .sitterViewService, message: "No entry filtering applied - showing all \(entries.count) entries")
+        // Cache the session-filtered items
+        self.sessionFilteredItems = filteredItems
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "Cached \(filteredItems.count) session-filtered items ✅")
+        return filteredItems
+    }
+    
+    /// Fetches entries for the current nest, using cache if available
+    func fetchNestEntries() async throws -> [String: [BaseEntry]] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestEntries() called - using unified approach")
+        
+        // Return cached entries if available
+        if let cachedEntries = cachedEntries {
+            Logger.log(level: .info, category: .sitterViewService, message: "Using cached entries")
+            return cachedEntries
+        }
+        
+        // Get session-filtered items using unified method
+        let filteredItems = try await fetchAllFilteredItems()
+        
+        // Filter to only entry items (already BaseEntry from repository)
+        let entries = filteredItems.compactMap { item -> BaseEntry? in
+            guard item.type == .entry, let baseEntry = item as? BaseEntry else { return nil }
+            return baseEntry
         }
         
         // Group entries by category
@@ -117,7 +147,7 @@ final class SitterViewService: EntryRepository {
         // Cache the entries
         self.cachedEntries = groupedEntries
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(entries.count) entries using ItemRepository ✅")
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(entries.count) entries using unified approach ✅")
         return groupedEntries
     }
     
@@ -125,14 +155,19 @@ final class SitterViewService: EntryRepository {
     func clearEntriesCache() {
         Logger.log(level: .info, category: .sitterViewService, message: "Clearing entries cache")
         cachedEntries = nil
+        // Clear folder contents cache since entries changed
+        clearFolderContentsCache()
         // Also clear ItemRepository cache
         itemRepository?.clearItemsCache()
     }
     
     /// Clears the items cache (places are computed from this)
     func clearItemsCache() {
-        Logger.log(level: .info, category: .sitterViewService, message: "Clearing items cache")
+        Logger.log(level: .info, category: .sitterViewService, message: "Clearing items cache and session-filtered cache")
         cachedItems = []
+        sessionFilteredItems = []
+        // Clear folder contents cache since items changed
+        clearFolderContentsCache()
         // Also clear ItemRepository cache
         itemRepository?.clearItemsCache()
     }
@@ -140,7 +175,14 @@ final class SitterViewService: EntryRepository {
     /// Clears the places cache (now a no-op since places are computed)
     func clearPlacesCache() {
         // Places are now computed from cachedItems, so just clear that
+        Logger.log(level: .info, category: .sitterViewService, message: "🐕 DEBUG: Clearing places cache - forcing fresh fetch")
         clearItemsCache()
+    }
+    
+    /// Clears the folder contents cache
+    func clearFolderContentsCache() {
+        Logger.log(level: .info, category: .sitterViewService, message: "📁 Clearing folder contents cache")
+        cachedFolderContents.removeAll()
     }
     
     /// Forces a refresh of the entries
@@ -149,57 +191,34 @@ final class SitterViewService: EntryRepository {
         return try await fetchNestEntries()
     }
     
+    /// Forces a refresh of the places
+    func refreshPlaces() async throws -> [PlaceItem] {
+        clearPlacesCache()
+        return try await fetchNestPlaces()
+    }
+    
     // MARK: - Places
     
     /// Fetches places for the current nest, using cache if available
     func fetchNestPlaces() async throws -> [PlaceItem] {
-        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestPlaces() called - using ItemRepository")
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestPlaces() called - using unified approach")
         
         // Return cached places if available
         if let cachedPlaces = cachedPlaces {
-            Logger.log(level: .info, category: .sitterViewService, message: "Using cached places")
+            Logger.log(level: .info, category: .sitterViewService, message: "Using cached places (count: \(cachedPlaces.count))")
             return cachedPlaces
         }
         
-        // Get the current nest from our viewState
-        guard case .ready(_, let nest) = viewState else {
-            throw SessionError.noCurrentNest
-        }
+        // Get session-filtered items using unified method
+        let filteredItems = try await fetchAllFilteredItems()
         
-        // Initialize ItemRepository if needed
-        if itemRepository == nil {
-            itemRepository = FirebaseItemRepository(nestId: nest.id)
-        }
-        
-        guard let itemRepository = itemRepository else {
-            throw SessionError.noCurrentNest
-        }
-        
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetching places for nest: \(nest.id)")
-        
-        // Fetch all items using ItemRepository and cache them
-        let allItems = try await itemRepository.fetchItems()
-        self.cachedItems = allItems
-        
-        // Filter to only place items from cached items
-        let allPlaces = cachedItems.compactMap { item -> PlaceItem? in
+        // Filter to only place items from session-filtered items
+        let places = filteredItems.compactMap { item -> PlaceItem? in
             guard item.type == .place, let placeItem = item as? PlaceItem else { return nil }
             return placeItem
         }
         
-        // Apply session-specific place filtering if specified
-        let places: [PlaceItem]
-        if let allowedItemIds = currentSession?.entryIds, !allowedItemIds.isEmpty {
-            // Filter places to only those in the session's allowed list
-            places = allPlaces.filter { allowedItemIds.contains($0.id) }
-            Logger.log(level: .info, category: .sitterViewService, message: "Filtered \(allPlaces.count) places to \(places.count) based on session entryIds")
-        } else {
-            // Backward compatibility: show all places if no filtering specified
-            places = allPlaces
-            Logger.log(level: .info, category: .sitterViewService, message: "No place filtering applied - showing all \(places.count) places")
-        }
-        
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(places.count) places using ItemRepository ✅")
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(places.count) places using unified approach ✅")
         return places
     }
     
@@ -214,6 +233,14 @@ final class SitterViewService: EntryRepository {
     /// Fetch all contents for a specific folder/category
     func fetchFolderContents(for category: String) async throws -> FolderContents {
         Logger.log(level: .info, category: .sitterViewService, message: "📁 fetchFolderContents() called for category: '\(category)'")
+        
+        // Check cache first to avoid expensive folder traversals
+        if let cachedContents = cachedFolderContents[category] {
+            Logger.log(level: .info, category: .sitterViewService, message: "📁 Using cached folder contents for '\(category)' - \(cachedContents.entries.count) entries, \(cachedContents.places.count) places, \(cachedContents.subfolders.count) subfolders")
+            return cachedContents
+        }
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "📁 Cache miss - performing folder traversal for '\(category)'")
         
         // Get all data in one efficient call
         let allGroupedEntries = try await fetchNestEntries()
@@ -248,12 +275,18 @@ final class SitterViewService: EntryRepository {
         
         Logger.log(level: .info, category: .sitterViewService, message: "Folder contents for '\(category)': \(entries.count) entries, \(places.count) places, \(subfolders.count) subfolders")
         
-        return FolderContents(
+        let folderContents = FolderContents(
             entries: entries,
             places: places, 
             subfolders: subfolders,
             allPlaces: allPlaces
         )
+        
+        // Cache the result to speed up future requests
+        cachedFolderContents[category] = folderContents
+        Logger.log(level: .info, category: .sitterViewService, message: "📁 Cached folder contents for '\(category)'")
+        
+        return folderContents
     }
     
     private func buildSubfolders(for category: String, allEntries: [String: [BaseEntry]], allPlaces: [PlaceItem], categories: [NestCategory]) -> [FolderData] {
@@ -503,6 +536,7 @@ final class SitterViewService: EntryRepository {
         viewState = .loading
         clearEntriesCache()
         clearItemsCache()
+        clearFolderContentsCache()
         clearImageCache()
         // Clear ItemRepository reference
         itemRepository = nil
@@ -524,10 +558,22 @@ final class SitterViewService: EntryRepository {
         // Clear any existing caches since we're switching context
         clearEntriesCache()
         clearItemsCache()
+        clearFolderContentsCache()
         clearImageCache()
         
         // Set the view state to the provided session and nest
         viewState = .ready(session: session, nest: nest)
+    }
+    
+    /// Force clears all caches to ensure fresh data with proper session filtering
+    func forceRefreshAllCaches() {
+        Logger.log(level: .info, category: .sitterViewService, message: "🐕 DEBUG: Force clearing ALL caches to refresh session filtering")
+        clearEntriesCache()
+        clearItemsCache()
+        clearFolderContentsCache()
+        clearImageCache()
+        // Also clear ItemRepository cache
+        itemRepository?.clearItemsCache()
     }
     
     // MARK: - Notifications
@@ -556,10 +602,9 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
-        // Convert BaseEntry to EntryItem and create
-        let entryItem = EntryItem(from: entry)
-        try await itemRepository.createItem(entryItem)
-        clearEntriesCache()
+        // Create BaseEntry directly
+        try await itemRepository.createItem(entry)
+        clearEntriesCache() // This also clears folder contents cache
     }
     
     func updateEntry(_ entry: BaseEntry) async throws {
@@ -578,10 +623,9 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
-        // Convert BaseEntry to EntryItem and update
-        let entryItem = EntryItem(from: entry)
-        try await itemRepository.updateItem(entryItem)
-        clearEntriesCache()
+        // Update BaseEntry directly
+        try await itemRepository.updateItem(entry)
+        clearEntriesCache() // This also clears folder contents cache
     }
     
     func deleteEntry(_ entry: BaseEntry) async throws {
@@ -602,7 +646,7 @@ final class SitterViewService: EntryRepository {
         
         // Delete using ItemRepository
         try await itemRepository.deleteItem(id: entry.id)
-        clearEntriesCache()
+        clearEntriesCache() // This also clears folder contents cache
     }
     
     // MARK: - Category Methods

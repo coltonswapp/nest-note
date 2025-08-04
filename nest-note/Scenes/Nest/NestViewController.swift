@@ -621,12 +621,10 @@ extension NestViewController: UICollectionViewDelegate {
             // Handle folder navigation
             guard let folderData = item as? FolderData else { return }
             
-            let sessionVisibilityLevel = (entryRepository as? SitterViewService)?.currentSessionVisibilityLevel
             let nestCategoryViewController = NestCategoryViewController(
                 category: folderData.fullPath,
                 places: places,
-                entryRepository: entryRepository,
-                sessionVisibilityLevel: sessionVisibilityLevel
+                entryRepository: entryRepository
             )
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
         }

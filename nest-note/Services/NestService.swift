@@ -161,10 +161,10 @@ final class NestService: EntryRepository {
         // Fetch all items using ItemRepository
         let allItems = try await itemRepository.fetchItems()
         
-        // Filter to only entry items and convert to BaseEntry
+        // Filter to only entry items (already BaseEntry from repository)
         let entries = allItems.compactMap { item -> BaseEntry? in
-            guard item.type == .entry, let entryItem = item as? EntryItem else { return nil }
-            return entryItem.toBaseEntry()
+            guard item.type == .entry, let baseEntry = item as? BaseEntry else { return nil }
+            return baseEntry
         }
         
         // Group entries by category
@@ -254,11 +254,8 @@ final class NestService: EntryRepository {
         }
         
         do {
-            // Convert BaseEntry to EntryItem
-            let entryItem = EntryItem(from: entry)
-            
-            // Use ItemRepository for creation
-            try await itemRepository.createItem(entryItem)
+            // Use ItemRepository for creation (BaseEntry directly)
+            try await itemRepository.createItem(entry)
             
             // Update backward compatibility cache
             if var cachedEntries = cachedEntries {
@@ -292,11 +289,8 @@ final class NestService: EntryRepository {
         }
         
         do {
-            // Convert BaseEntry to EntryItem
-            let entryItem = EntryItem(from: entry)
-            
-            // Use ItemRepository for update
-            try await itemRepository.updateItem(entryItem)
+            // Use ItemRepository for update (BaseEntry directly)
+            try await itemRepository.updateItem(entry)
             
             // Update backward compatibility cache
             if var cachedEntries = cachedEntries {
@@ -650,12 +644,10 @@ final class NestService: EntryRepository {
         
         let allItems = try await fetchAllItems() // Single fetch with caching
         
-        // Filter entries and convert EntryItem to BaseEntry for backward compatibility
+        // Filter entries (already BaseEntry from repository)
         let entryItems = allItems.compactMap { item -> BaseEntry? in
-            if let entryItem = item as? EntryItem {
-                return entryItem.toBaseEntry()
-            }
-            return item as? BaseEntry // Also support direct BaseEntry if any exist
+            guard item.type == .entry else { return nil }
+            return item as? BaseEntry
         }
         let groupedEntries = Dictionary(grouping: entryItems) { $0.category }
         

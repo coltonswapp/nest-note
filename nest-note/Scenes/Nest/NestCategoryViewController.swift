@@ -14,7 +14,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     // MARK: - Properties
     internal let entryRepository: EntryRepository
     private let category: String
-    private let sessionVisibilityLevel: VisibilityLevel
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -92,13 +91,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         return entryRepository is NestService ? .nestService : .sitterViewService
     }
     
-    init(category: String, entries: [BaseEntry] = [], places: [PlaceItem] = [], entryRepository: EntryRepository, sessionVisibilityLevel: VisibilityLevel? = nil, isEditOnlyMode: Bool = false) {
+    init(category: String, entries: [BaseEntry] = [], places: [PlaceItem] = [], entryRepository: EntryRepository, isEditOnlyMode: Bool = false) {
         self.category = category
         self.entries = entries
         self.entryRepository = entryRepository
         self.isEditOnlyMode = isEditOnlyMode
         // For nest owners, access level doesn't matter since they bypass all checks. For sitters, use provided level or default to standard
-        self.sessionVisibilityLevel = entryRepository is NestService ? .extended : (sessionVisibilityLevel ?? .halfDay)
         super.init(nibName: nil, bundle: nil)
         
         // Store all places for passing to subfolders
@@ -113,7 +111,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     // Convenience initializer for select entries flow
     convenience init(entryRepository: EntryRepository, initialCategory: String, isEditOnlyMode: Bool, places: [PlaceItem] = []) {
-        self.init(category: initialCategory, entries: [], places: places, entryRepository: entryRepository, sessionVisibilityLevel: nil, isEditOnlyMode: isEditOnlyMode)
+        self.init(category: initialCategory, entries: [], places: places, entryRepository: entryRepository, isEditOnlyMode: isEditOnlyMode)
     }
     
     // Method to restore selected entries for persistent selection
@@ -892,7 +890,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
         
         // Present CommonEntriesViewController as a sheet with medium and large detents
-        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository, sessionVisibilityLevel: sessionVisibilityLevel)
+        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository)
         let navController = UINavigationController(rootViewController: commonEntriesVC)
         
         // Set this view controller as the delegate
@@ -1412,8 +1410,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     category: folderData.fullPath,
                     entries: [],
                     places: allPlaces,
-                    entryRepository: entryRepository,
-                    sessionVisibilityLevel: sessionVisibilityLevel
+                    entryRepository: entryRepository
                 )
                 navigationController?.pushViewController(subfolderVC, animated: true)
             }

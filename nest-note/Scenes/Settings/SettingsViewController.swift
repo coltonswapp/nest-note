@@ -386,7 +386,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Place List", "list.star"),
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
-            ("Test Visibility Levels", "eye.circle"),
             ("Toast Test", "text.bubble.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Reset Tooltips", "questionmark.circle.fill"),
@@ -492,10 +491,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Invite Card":
             let vc = InviteCardDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
-        case "Test Visibility Levels":
-            let infoVC = VisibilityLevelInfoViewController()
-            let nav = UINavigationController(rootViewController: infoVC)
-            present(nav, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)

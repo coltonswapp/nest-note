@@ -621,7 +621,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             return
         }
         
-        let categoryVC = NestCategoryViewController(category: category, entryRepository: SitterViewService.shared, sessionVisibilityLevel: SitterViewService.shared.currentSessionVisibilityLevel)
+        let categoryVC = NestCategoryViewController(category: category, entryRepository: SitterViewService.shared)
         navigationController?.pushViewController(categoryVC, animated: true)
     }
     

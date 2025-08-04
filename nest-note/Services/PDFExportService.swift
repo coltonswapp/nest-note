@@ -16,7 +16,7 @@ class PDFExportService {
     // Default section order - easily customizable
     private static let defaultSectionOrder: [PDFSection] = [.events, .entries]
     
-    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, visibilityLevel: VisibilityLevel = .always, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
+    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
         // Fetch all places from NestService and pre-load their images
         var allPlaces: [PlaceItem] = []
         var eventPlaces: [String: PlaceItem] = [:]
@@ -99,7 +99,6 @@ class PDFExportService {
                     cgContext: cgContext,
                     session: session,
                     nestItem: nestItem,
-                    visibilityLevel: visibilityLevel,
                     allEntries: allEntries,
                     events: events,
                     eventPlaces: eventPlaces,
@@ -754,21 +753,6 @@ class PDFExportService {
         return y
     }
     
-    private static func filterEntriesByVisibility(entries: [BaseEntry], visibilityLevel: VisibilityLevel) -> [BaseEntry] {
-        return entries.filter { entry in
-            switch visibilityLevel {
-            case .always:
-                return entry.visibility == .always
-            case .halfDay:
-                return entry.visibility == .always || entry.visibility == .halfDay
-            case .overnight:
-                return entry.visibility == .always || entry.visibility == .halfDay || entry.visibility == .overnight
-            case .extended:
-                return true // All entries
-            }
-        }
-    }
-    
     private static func generateQRCodeWithLogo(text: String, logo: UIImage) -> UIImage? {
         // Generate base QR code
         guard let data = text.data(using: String.Encoding.ascii),
@@ -843,7 +827,6 @@ class PDFExportService {
         cgContext: CGContext,
         session: SessionItem,
         nestItem: NestItem,
-        visibilityLevel: VisibilityLevel,
         allEntries: [BaseEntry],
         events: [SessionEvent],
         eventPlaces: [String: PlaceItem],
@@ -864,7 +847,6 @@ class PDFExportService {
                 allEntries: allEntries,
                 allPlaces: allPlaces,
                 placeImages: placeImages,
-                visibilityLevel: visibilityLevel,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -926,7 +908,6 @@ class PDFExportService {
         allEntries: [BaseEntry],
         allPlaces: [PlaceItem],
         placeImages: [String: UIImage],
-        visibilityLevel: VisibilityLevel,
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,

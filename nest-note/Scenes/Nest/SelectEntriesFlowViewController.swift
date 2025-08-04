@@ -248,6 +248,7 @@ class ModifiedSelectFolderViewController: UIViewController {
     private var selectedEntries: Set<BaseEntry> = []
     private var selectedPlaces: Set<PlaceItem> = []
     private var pendingUpdateNeeded = false
+    private var folderItemCounts: [String: Int] = [:]
     
     enum Section: Int, CaseIterable {
         case folders
@@ -336,20 +337,48 @@ class ModifiedSelectFolderViewController: UIViewController {
         return countSelectedEntriesInFolder(folderPath) + countSelectedPlacesInFolder(folderPath)
     }
     
-    // Helper method to count total items in a specific folder (simulated for now)
-    private func countTotalItemsInFolder(_ folderPath: String) -> Int {
-        // For now, we'll simulate the total count based on the category name
-        // In a real implementation, this would come from the backend
-        // This is a placeholder that shows different counts for different folders
-        switch folderPath {
-        case "Pets":
-            return 5
-        case "Home":
-            return 8
-        case "Work":
-            return 3
-        default:
-            return 4
+    // Helper method to get cached total items count for a specific folder
+    private func getTotalItemsInFolder(_ folderPath: String) -> Int {
+        return folderItemCounts[folderPath] ?? 0
+    }
+    
+    // Async method to load all folder item counts
+    private func loadFolderItemCounts() async {
+        do {
+            // Fetch all entries and places for counting
+            let allEntries = try await entryRepository.fetchEntries()
+            let allPlaces = try await entryRepository.fetchPlaces()
+            
+            var counts: [String: Int] = [:]
+            
+            // Count items for each top-level category
+            for category in categories {
+                // Only count top-level folders (no "/" in the name)
+                guard !category.name.contains("/") else { continue }
+                
+                let folderPath = category.name
+                
+                // Count entries in this exact folder path
+                let entriesCount = allEntries.values.flatMap { $0 }.filter { $0.category == folderPath }.count
+                
+                // Count places in this exact folder path
+                let placesCount = allPlaces.filter { $0.category == folderPath }.count
+                
+                counts[folderPath] = entriesCount + placesCount
+            }
+            
+            await MainActor.run {
+                self.folderItemCounts = counts
+                // Refresh the snapshot now that we have counts
+                self.applySnapshot()
+            }
+            
+        } catch {
+            // If there's an error, use empty counts
+            await MainActor.run {
+                self.folderItemCounts = [:]
+                self.applySnapshot()
+            }
         }
     }
     
@@ -445,6 +474,10 @@ class ModifiedSelectFolderViewController: UIViewController {
                         self.pendingUpdateNeeded = false
                     }
                 }
+                
+                // Load folder item counts after categories are loaded
+                await loadFolderItemCounts()
+                
             } catch {
                 await MainActor.run {
                     self.showError(error.localizedDescription)
@@ -476,7 +509,7 @@ class ModifiedSelectFolderViewController: UIViewController {
                 symbolName: category.symbolName,
                 id: category.id,
                 selectedCount: countSelectedItemsInFolder(category.name),
-                totalItemCount: countTotalItemsInFolder(category.name)
+                totalItemCount: getTotalItemsInFolder(category.name)
             )
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }

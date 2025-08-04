@@ -7,10 +7,9 @@ enum SetupStepType: Int, CaseIterable {
     case setupNest = 1
     case addFirstEntry = 2
     case addFirstPlace = 3
-    case exploreVisibilityLevels = 4
-    case enableNotifications = 5
-    case feedback = 6
-    case finalStep = 7
+    case enableNotifications = 4
+    case feedback = 5
+    case finalStep = 6
     
     var title: String {
         switch self {
@@ -22,8 +21,6 @@ enum SetupStepType: Int, CaseIterable {
             return "Add your first entry"
         case .addFirstPlace:
             return "Add your first place"
-        case .exploreVisibilityLevels:
-            return "Explore Visibility Levels"
         case .enableNotifications:
             return "Enable Notifications"
         case .feedback:
@@ -43,8 +40,6 @@ enum SetupStepType: Int, CaseIterable {
             return "Garage codes, wifi passwords, and other general information make great entries. These are what your sitter will see."
         case .addFirstPlace:
             return "Places are locations that would be important for sitters to know about. Grandma's house, favorite park, etc."
-        case .exploreVisibilityLevels:
-            return "Decide what information you'd like to keep situational."
         case .enableNotifications:
             return "Stay in the know."
         case .feedback:
@@ -238,11 +233,6 @@ final class SetupService {
             // Check if user has at least one place
             return true
             
-        case .exploreVisibilityLevels:
-            // Check if user has explored visibility levels
-            // This would need to be implemented based on your app's behavior
-            return checkIfUserExploredVisibilityLevels()
-            
         case .enableNotifications:
             // Check if user has enabled notifications
             // This would need to be implemented based on your app's behavior
@@ -263,11 +253,6 @@ final class SetupService {
         // Placeholder - implement based on your data model
         // Example: return EntryService.shared.entriesCount > 0
         return isStepComplete(.addFirstEntry)
-    }
-    
-    private func checkIfUserExploredVisibilityLevels() -> Bool {
-        // Placeholder - implement based on your app behavior
-        return isStepComplete(.exploreVisibilityLevels)
     }
     
     private func checkIfUserExploredFeedback() -> Bool {
