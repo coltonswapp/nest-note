@@ -388,6 +388,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Toast Test", "text.bubble.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
+            ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
@@ -502,6 +503,20 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let vc = CalendarViewController()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
+        case "Test Routine Detail":
+            let mockRoutine = RoutineItem(
+                title: "House Night-time",
+                category: "Household",
+                routineActions: [
+                    "Lock garage door",
+                    "Lock front, side, & back door",
+                    "Put down shades with remote (on fridge)",
+                    "Turn off all lights, leave porch light on"
+                ]
+            )
+            let vc = RoutineDetailViewController(category: "Household", routine: mockRoutine, sourceFrame: nil)
+            vc.routineDelegate = self
+            present(vc, animated: true)
         case "Reset Tooltips":
             resetTooltipsDatastore()
         default:
@@ -817,5 +832,17 @@ extension SettingsViewController: PaywallViewControllerDelegate {
     func paywallViewController(_ controller: PaywallViewController, didFailRestoringWith error: Error) {
         Logger.log(level: .error, category: .purchases, message: "Subscription restore failed: \(error.localizedDescription)")
         showToast(text: "Restore failed. Please try again.")
+    }
+}
+
+extension SettingsViewController: RoutineDetailViewControllerDelegate {
+    func routineDetailViewController(didSaveRoutine routine: RoutineItem?) {
+        if let routine = routine {
+            showToast(text: "Routine saved: \(routine.title)")
+        }
+    }
+    
+    func routineDetailViewController(didDeleteRoutine routine: RoutineItem) {
+        showToast(text: "Routine deleted: \(routine.title)")
     }
 }

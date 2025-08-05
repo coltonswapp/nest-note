@@ -142,7 +142,7 @@ class NNSheetViewController: NNViewController {
             
             infoButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            infoButton.widthAnchor.constraint(equalToConstant: 36),
+            infoButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
             infoButton.heightAnchor.constraint(equalToConstant: 36),
             
             titleField.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
