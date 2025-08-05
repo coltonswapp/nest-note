@@ -26,6 +26,11 @@ class Tracker {
         case entryUpdated = "entryUpdated"
         case entryDeleted = "entryDeleted"
         
+        // MARK: - Routine Related Events
+        case routineCreated = "routineCreated"
+        case routineUpdated = "routineUpdated"
+        case routineDeleted = "routineDeleted"
+        
         // MARK: - Session Related Events
         case sessionCreated = "sessionCreated"
         case sessionUpdated = "sessionUpdated"

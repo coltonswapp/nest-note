@@ -244,11 +244,12 @@ final class SitterViewService: EntryRepository {
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 fetchFolderContents data gathered")
         
-        // Build folder contents using shared utility
+        // Build folder contents using shared utility (SitterViewService doesn't support routines)
         let folderContents = FolderUtility.buildFolderContents(
             for: category,
             allGroupedEntries: allGroupedEntries,
             allPlaces: allPlaces,
+            allRoutines: [], // SitterViewService doesn't support routines
             categories: categories
         )
         

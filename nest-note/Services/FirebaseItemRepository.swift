@@ -207,9 +207,13 @@ final class FirebaseItemRepository: ItemRepository {
                 throw ItemRepositoryError.unsupportedDocumentType
             }
         case .routine:
-            // Future implementation - for now, throw error
-            Logger.log(level: .error, category: .firebaseItemRepo, message: "Routine items not yet implemented")
-            throw ItemRepositoryError.unsupportedItemType(itemType)
+            if let queryDoc = document as? QueryDocumentSnapshot {
+                return try queryDoc.data(as: RoutineItem.self)
+            } else if let doc = document as? DocumentSnapshot {
+                return try doc.data(as: RoutineItem.self)
+            } else {
+                throw ItemRepositoryError.unsupportedDocumentType
+            }
         }
     }
 }

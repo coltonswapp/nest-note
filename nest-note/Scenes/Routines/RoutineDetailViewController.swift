@@ -94,9 +94,6 @@ final class RoutineDetailViewController: NNSheetViewController {
         if routine == nil && !isReadOnly {
             titleField.becomeFirstResponder()
         }
-        
-        // Setup gesture forwarding for scroll-to-dismiss behavior
-        setupScrollGestureForwarding()
     }
     
     // MARK: - Setup Methods
@@ -253,15 +250,24 @@ final class RoutineDetailViewController: NNSheetViewController {
             saveButton.startLoading()
         }
         
-        // For now, just notify the delegate that the routine was deleted
-        // In a real app, this would make an API call to delete the routine
-        routineDelegate?.routineDetailViewController(didDeleteRoutine: routine)
-        
-        // Show success feedback
-        HapticsHelper.thwompHaptic()
-        
-        // Dismiss the sheet
-        dismiss(animated: true)
+        Task {
+            do {
+                try await NestService.shared.deleteRoutine(routine)
+                
+                await MainActor.run {
+                    self.routineDelegate?.routineDetailViewController(didDeleteRoutine: routine)
+                    HapticsHelper.thwompHaptic()
+                    self.dismiss(animated: true)
+                }
+            } catch {
+                await MainActor.run {
+                    if !self.isReadOnly {
+                        self.saveButton.stopLoading(withSuccess: false)
+                    }
+                    self.showErrorAlert(message: error.localizedDescription)
+                }
+            }
+        }
     }
     
     
@@ -302,6 +308,9 @@ final class RoutineDetailViewController: NNSheetViewController {
         // Update the button appearance to reflect the new state
         updateInfoButtonAppearance()
         
+        // Enable/disable drag-to-dismiss based on edit mode
+        updateDragToDismissGesture()
+        
         // Handle showing/hiding the "Add Action" cell
         if !isReadOnly && routineActions.count < 10 {
             let addCellIndexPath = IndexPath(row: routineActions.count, section: 0)
@@ -329,6 +338,13 @@ final class RoutineDetailViewController: NNSheetViewController {
         
     }
     
+    private func updateDragToDismissGesture() {
+        // Find the pan gesture recognizer on the container view (from parent class)
+        if let panGesture = containerView.gestureRecognizers?.first(where: { $0 is UIPanGestureRecognizer }) as? UIPanGestureRecognizer {
+            panGesture.isEnabled = !isTableViewInEditMode
+        }
+    }
+    
     @objc private func saveButtonTapped() {
         guard let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty,
@@ -341,29 +357,57 @@ final class RoutineDetailViewController: NNSheetViewController {
         titleField.isUserInteractionEnabled = false
         routineTableView.isUserInteractionEnabled = false
         
-        // For now, just create/update the routine object and notify delegate
-        let savedRoutine: RoutineItem
-        
-        if let existingRoutine = routine {
-            existingRoutine.title = title
-            existingRoutine.routineActions = routineActions
-            existingRoutine.updatedAt = Date()
-            savedRoutine = existingRoutine
-        } else {
-            savedRoutine = RoutineItem(
-                title: title,
-                category: category,
-                routineActions: routineActions
-            )
+        Task {
+            do {
+                var savedRoutine: RoutineItem
+                
+                if let existingRoutine = routine {
+                    existingRoutine.title = title
+                    existingRoutine.routineActions = routineActions
+                    existingRoutine.updatedAt = Date()
+                    
+                    try await NestService.shared.updateRoutine(existingRoutine)
+                    savedRoutine = existingRoutine
+                } else {
+                    let newRoutine = RoutineItem(
+                        title: title,
+                        category: category,
+                        routineActions: routineActions
+                    )
+                    
+                    try await NestService.shared.createRoutine(newRoutine)
+                    savedRoutine = newRoutine
+                }
+                
+                HapticsHelper.lightHaptic()
+                
+                // Notify delegate
+                await MainActor.run {
+                    self.routineDelegate?.routineDetailViewController(didSaveRoutine: savedRoutine)
+                    self.dismiss(animated: true)
+                }
+            } catch {
+                await MainActor.run {
+                    saveButton.stopLoading(withSuccess: false)
+                    titleField.isUserInteractionEnabled = true
+                    routineTableView.isUserInteractionEnabled = true
+                    self.showErrorAlert(message: error.localizedDescription)
+                }
+            }
         }
+    }
+    
+    // MARK: - Error Handling
+    
+    private func showErrorAlert(message: String) {
+        let alert = UIAlertController(
+            title: "Error",
+            message: message,
+            preferredStyle: .alert
+        )
         
-        HapticsHelper.lightHaptic()
-        
-        // Simulate a brief delay for the loading state
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.routineDelegate?.routineDetailViewController(didSaveRoutine: savedRoutine)
-            self.dismiss(animated: true)
-        }
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
 
@@ -572,51 +616,5 @@ extension RoutineDetailViewController: UITextFieldDelegate {
             return false
         }
         return true
-    }
-}
-
-// MARK: - Scroll-to-Dismiss Implementation  
-extension RoutineDetailViewController {
-    
-    private func setupScrollGestureForwarding() {
-        // Override the table view's pan gesture behavior
-        let customPanGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScrollPan(_:)))
-        customPanGesture.delegate = self
-        routineTableView.addGestureRecognizer(customPanGesture)
-    }
-    
-    @objc private func handleScrollPan(_ recognizer: UIPanGestureRecognizer) {
-        let isAtTop = routineTableView.contentOffset.y <= -routineTableView.contentInset.top
-        let translation = recognizer.translation(in: view)
-        let isDraggingDown = translation.y > 0
-        
-        // If we're at the top and dragging down, directly call the container's dismiss logic
-        if isAtTop && isDraggingDown {
-            // Find the container's pan gesture and invoke its handler
-            if let containerPanGesture = containerView.gestureRecognizers?.compactMap({ $0 as? UIPanGestureRecognizer }).first,
-               let target = containerPanGesture.value(forKey: "_targets") as? NSArray,
-               let targetActionPair = target.firstObject {
-                
-                // Get the target and action from the container's pan gesture
-                let targetObject = targetActionPair.value(forKey: "target")
-                let action = targetActionPair.value(forKey: "action") as? Selector
-                
-                if let target = targetObject, let action = action {
-                    // Call the container's pan gesture handler with our recognizer
-                    _ = (target as AnyObject).perform(action, with: recognizer)
-                    return
-                }
-            }
-        }
-        
-        // If we're not forwarding, let the table view handle it normally
-        // (This won't work perfectly since we can't easily forward to the built-in scroll handler)
-    }
-}
-
-extension RoutineDetailViewController: UIGestureRecognizerDelegate {
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Allow our custom gesture to work with the table view's pan gesture
-        return otherGestureRecognizer == routineTableView.panGestureRecognizer
     }
 }

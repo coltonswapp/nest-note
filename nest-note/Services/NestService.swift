@@ -350,6 +350,74 @@ final class NestService: EntryRepository {
         itemRepository?.clearItemsCache()
     }
     
+    // MARK: - Routine Methods
+    
+    func createRoutine(_ routine: RoutineItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "createRoutine() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        do {
+            // Use ItemRepository for creation
+            try await itemRepository.createItem(routine)
+            
+            Logger.log(level: .info, category: .nestService, message: "Routine created successfully: \(routine.title)")
+            
+            // Log success event
+            Tracker.shared.track(.routineCreated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.routineCreated, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+    
+    func updateRoutine(_ routine: RoutineItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "updateRoutine() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        do {
+            // Use ItemRepository for update
+            try await itemRepository.updateItem(routine)
+            
+            Logger.log(level: .info, category: .nestService, message: "Routine updated successfully: \(routine.title)")
+            
+            // Log success event
+            Tracker.shared.track(.routineUpdated)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.routineUpdated, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+    
+    func deleteRoutine(_ routine: RoutineItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "deleteRoutine() called - using ItemRepository")
+        
+        guard let itemRepository = itemRepository else {
+            throw NestError.noCurrentNest
+        }
+        
+        do {
+            // Use ItemRepository for deletion
+            try await itemRepository.deleteItem(id: routine.id)
+            
+            Logger.log(level: .info, category: .nestService, message: "Routine deleted successfully: \(routine.title)")
+            
+            // Log success event
+            Tracker.shared.track(.routineDeleted)
+        } catch {
+            // Log failure event
+            Tracker.shared.track(.routineDeleted, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+    
     // MARK: - Generic CRUD Methods for All BaseItem Types
     
     /// Generic method to create any BaseItem type
@@ -511,6 +579,7 @@ final class NestService: EntryRepository {
         
         // Get all data in one efficient call - use cached data when possible
         let (allGroupedEntries, allPlaces) = try await fetchEntriesAndPlaces()
+        let allRoutines: [RoutineItem] = try await fetchItems(ofType: .routine)
         let categories = try await fetchCategories()
         
         Logger.log(level: .info, category: .nestService, message: "📁 fetchFolderContents data gathered - using cached data when possible")
@@ -520,10 +589,11 @@ final class NestService: EntryRepository {
             for: category,
             allGroupedEntries: allGroupedEntries,
             allPlaces: allPlaces,
+            allRoutines: allRoutines,
             categories: categories
         )
         
-        Logger.log(level: .info, category: .nestService, message: "Folder contents for '\(category)': \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.subfolders.count) subfolders")
+        Logger.log(level: .info, category: .nestService, message: "Folder contents for '\(category)': \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines, \(folderContents.subfolders.count) subfolders")
         
         return folderContents
     }
