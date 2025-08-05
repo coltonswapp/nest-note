@@ -102,7 +102,18 @@ class AddRoutineActionCell: UITableViewCell {
         delegate?.addRoutineActionCell(self, didAddAction: text)
         textView.text = ""
         placeholderLabel.isHidden = false
-        textView.resignFirstResponder()
+        
+        // Keep the text view focused for rapid-fire adding
+        // The text view will lose focus automatically if this cell gets removed (10th item)
+        
+        // Scroll to keep this cell visible after the table view updates
+        if let tableView = superview as? UITableView,
+           let indexPath = tableView.indexPath(for: self) {
+            DispatchQueue.main.async {
+                // Use a slight delay to ensure the table view update is complete
+                tableView.scrollToRow(at: indexPath, at: .bottom, animated: true)
+            }
+        }
         
         HapticsHelper.lightHaptic()
     }

@@ -7,12 +7,13 @@
 
 import UIKit
 
+
 protocol RoutineDetailViewControllerDelegate: AnyObject {
     func routineDetailViewController(didSaveRoutine routine: RoutineItem?)
     func routineDetailViewController(didDeleteRoutine routine: RoutineItem)
 }
 
-final class RoutineDetailViewController: NNSheetViewController {
+final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismissalProvider {
     
     // MARK: - Properties
     weak var routineDelegate: RoutineDetailViewControllerDelegate?
@@ -24,6 +25,7 @@ final class RoutineDetailViewController: NNSheetViewController {
         tableView.separatorStyle = .none
         tableView.delegate = self
         tableView.dataSource = self
+        tableView.keyboardDismissMode = .onDrag
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.register(RoutineActionCell.self, forCellReuseIdentifier: "RoutineActionCell")
         tableView.register(AddRoutineActionCell.self, forCellReuseIdentifier: "AddRoutineActionCell")
@@ -51,6 +53,15 @@ final class RoutineDetailViewController: NNSheetViewController {
     private var completedActionIndices: Set<Int> = []
     private var isTableViewInEditMode: Bool = false
     private var infoButtonWidthConstraint: NSLayoutConstraint?
+    
+    // MARK: - ScrollViewDismissalProvider Properties
+    var dismissalHandlingScrollView: UIScrollView? {
+        return routineTableView
+    }
+    
+    var shouldDisableScrollDismissalForEditMode: Bool {
+        return isTableViewInEditMode
+    }
     
     // MARK: - Initialization
     init(category: String, routine: RoutineItem? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
@@ -339,10 +350,12 @@ final class RoutineDetailViewController: NNSheetViewController {
     }
     
     private func updateDragToDismissGesture() {
-        // Find the pan gesture recognizer on the container view (from parent class)
+        // Disable container gesture during edit mode
         if let panGesture = containerView.gestureRecognizers?.first(where: { $0 is UIPanGestureRecognizer }) as? UIPanGestureRecognizer {
             panGesture.isEnabled = !isTableViewInEditMode
         }
+        
+        // The scroll view dismissal is automatically handled by shouldDisableScrollDismissalForEditMode
     }
     
     @objc private func saveButtonTapped() {
@@ -554,6 +567,9 @@ extension RoutineDetailViewController: RoutineActionCellDelegate {
         } else {
             completedActionIndices.remove(indexPath.row)
         }
+        
+        // Cell already handled its own appearance update in checkboxTapped
+        // No need to reconfigure here as it would override the cell's internal state
     }
     
     func routineActionCell(_ cell: RoutineActionCell, didRequestDelete action: String) {
@@ -593,18 +609,28 @@ extension RoutineDetailViewController: AddRoutineActionCellDelegate {
     func addRoutineActionCell(_ cell: AddRoutineActionCell, didAddAction action: String) {
         guard routineActions.count < 10 else { return }
         
+        let wasAtLimit = routineActions.count == 9
+        let oldCount = routineActions.count
+        
         routineActions.append(action)
         
-        // Insert the new action row
-        let newActionIndexPath = IndexPath(row: routineActions.count - 1, section: 0)
-        routineTableView.insertRows(at: [newActionIndexPath], with: .fade)
-        
-        // If we've reached the limit, remove the add cell
-        if routineActions.count == 10 {
-            let addCellIndexPath = IndexPath(row: routineActions.count, section: 0)
-            routineTableView.deleteRows(at: [addCellIndexPath], with: .fade)
-        }
-        
+        // Batch the table view updates to avoid inconsistent state
+        routineTableView.performBatchUpdates({
+            if wasAtLimit {
+                // When we have 9 items, the add cell is at index 9
+                // We need to replace the add cell with the new action item
+                let addCellIndexPath = IndexPath(row: oldCount, section: 0)
+                routineTableView.deleteRows(at: [addCellIndexPath], with: .fade)
+                
+                // Insert the new action row at the same position
+                let newActionIndexPath = IndexPath(row: oldCount, section: 0)
+                routineTableView.insertRows(at: [newActionIndexPath], with: .fade)
+            } else {
+                // Normal case: just insert the new action row, add cell will still be there after it
+                let newActionIndexPath = IndexPath(row: oldCount, section: 0)
+                routineTableView.insertRows(at: [newActionIndexPath], with: .fade)
+            }
+        }, completion: nil)
     }
 }
 

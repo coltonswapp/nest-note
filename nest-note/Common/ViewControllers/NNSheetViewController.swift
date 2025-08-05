@@ -4,6 +4,17 @@ protocol NNSheetViewControllerDelegate: AnyObject {
     func sheetViewController(_ controller: NNSheetViewController, didDismissWithResult result: Any?)
 }
 
+// MARK: - Internal Protocol for Scroll-based Dismissal
+internal protocol ScrollViewDismissalProvider {
+    var dismissalHandlingScrollView: UIScrollView? { get }
+    var shouldDisableScrollDismissalForEditMode: Bool { get }
+}
+
+extension ScrollViewDismissalProvider {
+    var dismissalHandlingScrollView: UIScrollView? { nil }
+    var shouldDisableScrollDismissalForEditMode: Bool { false }
+}
+
 class NNSheetViewController: NNViewController {
     
     // MARK: - Properties
@@ -101,6 +112,14 @@ class NNSheetViewController: NNViewController {
         setupInfoButton()
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Re-run scroll view setup in case the view hierarchy changed after viewDidLoad
+        // This ensures we catch scroll views that were added in addContentToContainer
+        setupScrollViewGestureIfNeeded()
+    }
+    
     // MARK: - Setup Methods
     override func setup() {
         super.setup()
@@ -177,6 +196,57 @@ class NNSheetViewController: NNViewController {
     private func setupPanGestureRecognizer() {
         panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
         containerView.addGestureRecognizer(panGestureRecognizer)
+        
+        // Setup scroll-based dismissal if the view controller supports it
+        setupScrollViewGestureIfNeeded()
+    }
+    
+    private func setupScrollViewGestureIfNeeded() {
+        // First check if the subclass explicitly provides a scroll view
+        if let provider = self as? ScrollViewDismissalProvider,
+           let scrollView = provider.dismissalHandlingScrollView {
+            setupGestureForScrollView(scrollView)
+            return
+        }
+        
+        // Auto-discover scroll views in the container view
+        let scrollViews = findScrollViewsInContainer()
+        
+        // Set up gesture for the first scroll view found (most common case)
+        // In the future, we could be smarter about which scroll view to choose
+        if let scrollView = scrollViews.first {
+            setupGestureForScrollView(scrollView)
+        }
+    }
+    
+    private func findScrollViewsInContainer() -> [UIScrollView] {
+        var scrollViews: [UIScrollView] = []
+        
+        func searchForScrollViews(in view: UIView) {
+            for subview in view.subviews {
+                if let scrollView = subview as? UIScrollView {
+                    scrollViews.append(scrollView)
+                }
+                // Recursively search subviews
+                searchForScrollViews(in: subview)
+            }
+        }
+        
+        searchForScrollViews(in: containerView)
+        return scrollViews
+    }
+    
+    private func setupGestureForScrollView(_ scrollView: UIScrollView) {
+        // Check if we already have a OneWayPanGestureRecognizer on this scroll view
+        let existingGesture = scrollView.gestureRecognizers?.first { $0 is OneWayPanGestureRecognizer }
+        if existingGesture != nil { return }
+        
+        let scrollGestureRecognizer = OneWayPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
+        scrollGestureRecognizer.direction = .down
+        scrollGestureRecognizer.delegate = self
+        
+        scrollView.addGestureRecognizer(scrollGestureRecognizer)
+        scrollView.panGestureRecognizer.require(toFail: scrollGestureRecognizer)
     }
     
     private func setupKeyboardObservers() {
@@ -263,5 +333,29 @@ class NNSheetViewController: NNViewController {
         animation.values = [-20.0, 20.0, -20.0, 20.0, -10.0, 10.0, -5.0, 5.0, 0.0]
         containerView.layer.add(animation, forKey: "shake")
         HapticsHelper.mediumHaptic()
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+extension NNSheetViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only apply scroll-based logic to OneWayPanGestureRecognizer
+        guard gestureRecognizer is OneWayPanGestureRecognizer else {
+            return true
+        }
+        
+        // Find the scroll view that this gesture is attached to
+        guard let scrollView = gestureRecognizer.view as? UIScrollView else {
+            return true
+        }
+        
+        // Check if subclass wants to disable scroll dismissal (e.g., during edit mode)
+        if let provider = self as? ScrollViewDismissalProvider,
+           provider.shouldDisableScrollDismissalForEditMode {
+            return false
+        }
+        
+        // Allow dismissal gesture only when scroll view is at the top
+        return scrollView.contentOffset.y <= 0
     }
 }
