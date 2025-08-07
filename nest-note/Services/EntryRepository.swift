@@ -2,6 +2,8 @@ import Foundation
 import UIKit
 
 protocol EntryRepository {
+    func fetchAllItems() async throws -> [BaseItem]
+    
     /// Fetches all entries grouped by category
     func fetchEntries() async throws -> [String: [BaseEntry]]
     

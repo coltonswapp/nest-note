@@ -353,6 +353,7 @@ class NestSessionsViewController: NNViewController {
             do {
                 emptyStateView.isHidden = true
                 loadingSpinner.startAnimating()
+                ctaButton.isEnabled = false
                 guard let nestID = NestService.shared.currentNest?.id else {
                     // Show error state for no current nest
                     await MainActor.run {
@@ -382,6 +383,7 @@ class NestSessionsViewController: NNViewController {
                     self.archivedSessions = archived
                     updateEmptyState()
                     self.loadingSpinner.stopAnimating()
+                    ctaButton.isEnabled = true
                 }
             } catch {
                 // Handle error

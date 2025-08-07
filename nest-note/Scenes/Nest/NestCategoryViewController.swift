@@ -740,7 +740,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedEntries.contains(entry),
-                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
                 )
                 
                 return cell
@@ -752,7 +752,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedEntries.contains(entry),
-                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
                 )
                 
                 return cell

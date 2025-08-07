@@ -10,7 +10,9 @@ import UIKit
 class SelectEntriesCountView: UIView {
     
     // MARK: - Properties
+    private let icon = UIImageView()
     private let countLabel = UILabel()
+    private let iconLabelStack = UIStackView()
     private let continueButton = UIButton(type: .system)
     private let stackView = UIStackView()
     
@@ -37,14 +39,18 @@ class SelectEntriesCountView: UIView {
     // MARK: - Setup
     private func setupView() {
         setupAppearance()
+        setupIcon()
         setupCountLabel()
+        setupIconLabelStack()
         setupContinueButton()
         setupStackView()
         setupConstraints()
     }
     
     private func setupAppearance() {
-        backgroundColor = .systemBackground
+        backgroundColor = .init(dynamicProvider: { traitCollection in
+            return traitCollection.userInterfaceStyle == .dark ? NNColors.NNSystemBackground4 : .systemBackground
+        })
         layer.cornerRadius = 25
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOffset = CGSize(width: 0, height: 2)
@@ -53,10 +59,25 @@ class SelectEntriesCountView: UIView {
         translatesAutoresizingMaskIntoConstraints = false
     }
     
+    private func setupIcon() {
+        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+        icon.image = UIImage(systemName: "dot.circle.and.hand.point.up.left.fill", withConfiguration: config)
+        icon.tintColor = .label
+    }
+    
     private func setupCountLabel() {
         countLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         countLabel.textColor = .label
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
+    }
+    
+    private func setupIconLabelStack() {
+        iconLabelStack.axis = .horizontal
+        iconLabelStack.spacing = 4
+        iconLabelStack.alignment = .center
+        iconLabelStack.distribution = .fill
+        
+        iconLabelStack.addArrangedSubview(icon)
+        iconLabelStack.addArrangedSubview(countLabel)
     }
     
     private func setupContinueButton() {
@@ -83,7 +104,7 @@ class SelectEntriesCountView: UIView {
         stackView.distribution = .fill
         stackView.translatesAutoresizingMaskIntoConstraints = false
         
-        stackView.addArrangedSubview(countLabel)
+        stackView.addArrangedSubview(iconLabelStack)
         stackView.addArrangedSubview(continueButton)
         addSubview(stackView)
     }

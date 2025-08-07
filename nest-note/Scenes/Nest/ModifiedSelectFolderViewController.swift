@@ -7,7 +7,6 @@
 
 import UIKit
 
-// MARK: - ModifiedSelectFolderViewController
 class ModifiedSelectFolderViewController: UIViewController {
     // MARK: - Properties
     private let entryRepository: EntryRepository
@@ -15,12 +14,17 @@ class ModifiedSelectFolderViewController: UIViewController {
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, FolderItem>!
+    private var selectionCounterView: SelectEntriesCountView!
     
     private var categories: [NestCategory] = []
-    private var selectedEntries: Set<BaseEntry> = []
-    private var selectedPlaces: Set<PlaceItem> = []
     private var pendingUpdateNeeded = false
     private var folderItemCounts: [String: Int] = [:]
+    
+    // Callback for continue button - now passes selected IDs
+    var onContinueTapped: (([String]) -> Void)?
+    
+    // Track all selected IDs locally (not committed until continue)
+    private var currentSelectedIds: [String] = []
     
     enum Section: Int, CaseIterable {
         case folders
@@ -59,59 +63,138 @@ class ModifiedSelectFolderViewController: UIViewController {
         
         setupCollectionView()
         configureDataSource()
+        setupSelectionCounterView()
         
         collectionView.delegate = self
         loadCategories()
-    }
-    
-    // Method to update selected entries and refresh the display
-    func updateSelectedEntries(_ entries: Set<BaseEntry>) {
-        selectedEntries = entries
-        // Only apply snapshot if view is loaded and configured
-        if isViewLoaded && dataSource != nil {
-            applySnapshot()
-            pendingUpdateNeeded = false
-        } else {
-            // Mark that we need to update when the view is ready
-            pendingUpdateNeeded = true
+        
+        // Load item-folder mapping for selection counting
+        Task {
+            await updateItemFolderMapping()
         }
     }
     
-    // Method to update selected places and refresh the display
-    func updateSelectedPlaces(_ places: Set<PlaceItem>) {
-        selectedPlaces = places
-        // Only apply snapshot if view is loaded and configured
-        if isViewLoaded && dataSource != nil {
-            applySnapshot()
-            pendingUpdateNeeded = false
-        } else {
-            // Mark that we need to update when the view is ready
-            pendingUpdateNeeded = true
-        }
-    }
+    // Cache for item-to-folder mapping to avoid repeated fetches
+    private var itemFolderMapping: [String: String] = [:]
     
-    // Helper method to count selected entries in a specific folder
-    private func countSelectedEntriesInFolder(_ folderPath: String) -> Int {
-        return selectedEntries.filter { entry in
-            entry.category.hasPrefix(folderPath)
-        }.count
-    }
-    
-    // Helper method to count selected places in a specific folder
-    private func countSelectedPlacesInFolder(_ folderPath: String) -> Int {
-        return selectedPlaces.filter { place in
-            place.category.hasPrefix(folderPath)
-        }.count
-    }
-    
-    // Helper method to count all selected items (entries + places) in a specific folder
+    // Helper method to count selected items in a specific folder using IDs
     private func countSelectedItemsInFolder(_ folderPath: String) -> Int {
-        return countSelectedEntriesInFolder(folderPath) + countSelectedPlacesInFolder(folderPath)
+        return currentSelectedIds.filter { itemId in
+            itemFolderMapping[itemId] == folderPath
+        }.count
+    }
+    
+    // Method to update the item-folder mapping cache
+    private func updateItemFolderMapping() async {
+        do {
+            let allItems = try await entryRepository.fetchAllItems()
+            
+            var mapping: [String: String] = [:]
+            
+            // Map all items (entries, places, routines) to their categories
+            for item in allItems {
+                mapping[item.id] = item.category
+            }
+            
+            await MainActor.run {
+                self.itemFolderMapping = mapping
+                // Refresh snapshot with updated counts
+                self.applySnapshot()
+            }
+        } catch {
+            print("[ERROR] Failed to update item-folder mapping: \(error)")
+        }
     }
     
     // Helper method to get cached total items count for a specific folder
     private func getTotalItemsInFolder(_ folderPath: String) -> Int {
         return folderItemCounts[folderPath] ?? 0
+    }
+    
+    // Method to set initial selected IDs (from EditSessionViewController)
+    func setInitialSelectedItemIds(_ ids: [String]) {
+        print("[DEBUG] setInitialSelectedItemIds called with \(ids.count) items: \(ids)")
+        currentSelectedIds = ids
+        updateSelectionCounter()
+    }
+    
+    // Method to update current selections (called by NestCategoryViewController)
+    func updateCurrentSelectedIds(_ ids: [String]) {
+        print("[DEBUG] updateCurrentSelectedIds called with \(ids.count) items: \(ids)")
+        currentSelectedIds = ids
+        updateSelectionCounter()
+    }
+    
+    // Method to get current selected items organized by type (for restoring in NestCategoryViewController)
+    func getCurrentSelectedItems() async -> (entries: Set<BaseEntry>, places: Set<PlaceItem>, routines: Set<RoutineItem>) {
+        do {
+            let allItems = try await entryRepository.fetchAllItems()
+            
+            var selectedEntries: Set<BaseEntry> = []
+            var selectedPlaces: Set<PlaceItem> = []
+            var selectedRoutines: Set<RoutineItem> = []
+            
+            for item in allItems {
+                if currentSelectedIds.contains(item.id) {
+                    switch item.type {
+                    case .entry:
+                        if let entry = item as? BaseEntry {
+                            selectedEntries.insert(entry)
+                        }
+                    case .place:
+                        if let place = item as? PlaceItem {
+                            selectedPlaces.insert(place)
+                        }
+                    case .routine:
+                        if let routine = item as? RoutineItem {
+                            selectedRoutines.insert(routine)
+                        }
+                    }
+                }
+            }
+            
+            return (entries: selectedEntries, places: selectedPlaces, routines: selectedRoutines)
+        } catch {
+            print("[ERROR] Failed to fetch items for restoration: \(error)")
+            return (entries: [], places: [], routines: [])
+        }
+    }
+    
+    private func setupSelectionCounterView() {
+        selectionCounterView = SelectEntriesCountView()
+        selectionCounterView.onContinueTapped = { [weak self] in
+            guard let self = self else { return }
+            self.onContinueTapped?(self.currentSelectedIds)
+        }
+        
+        // Add as overlay to navigation controller's view if available
+        if let navController = navigationController {
+            navController.view.addSubview(selectionCounterView)
+            navController.view.bringSubviewToFront(selectionCounterView)
+            
+            // Set up constraints
+            NSLayoutConstraint.activate([
+                selectionCounterView.centerXAnchor.constraint(equalTo: navController.view.centerXAnchor),
+                selectionCounterView.bottomAnchor.constraint(equalTo: navController.view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+            ])
+        }
+        
+        updateSelectionCounter()
+    }
+    
+    private func updateSelectionCounter() {
+        guard isViewLoaded else { 
+            print("[DEBUG] updateSelectionCounter: view not loaded yet")
+            return 
+        }
+        
+        print("[DEBUG] updateSelectionCounter: setting count to \(currentSelectedIds.count)")
+        selectionCounterView?.count = currentSelectedIds.count
+        
+        // Ensure counter stays on top
+        if let navController = navigationController {
+            navController.view.bringSubviewToFront(selectionCounterView)
+        }
     }
     
     // Async method to load all folder item counts
@@ -319,4 +402,46 @@ protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>)
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>)
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>)
+}
+
+// MARK: - NestCategoryViewControllerSelectEntriesDelegate
+extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEntriesDelegate {
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>) {
+        let entryIds = entries.map { $0.id }
+        updateSelectedIds(entries: entryIds, places: currentPlaceIds, routines: currentRoutineIds)
+    }
+    
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>) {
+        let placeIds = places.map { $0.id }
+        updateSelectedIds(entries: currentEntryIds, places: placeIds, routines: currentRoutineIds)
+    }
+    
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>) {
+        let routineIds = routines.map { $0.id }
+        updateSelectedIds(entries: currentEntryIds, places: currentPlaceIds, routines: routineIds)
+    }
+    
+    // Helper properties to track current IDs by type
+    private var currentEntryIds: [String] {
+        // Filter currentSelectedIds for entries (could be enhanced with type tracking)
+        return []
+    }
+    
+    private var currentPlaceIds: [String] {
+        // Filter currentSelectedIds for places (could be enhanced with type tracking)
+        return []
+    }
+    
+    private var currentRoutineIds: [String] {
+        // Filter currentSelectedIds for routines (could be enhanced with type tracking)
+        return []
+    }
+    
+    // Helper method to combine all IDs and update the selection counter
+    private func updateSelectedIds(entries: [String], places: [String], routines: [String]) {
+        currentSelectedIds = entries + places + routines
+        updateSelectionCounter()
+        // Update folder counts when selections change
+        applySnapshot()
+    }
 }

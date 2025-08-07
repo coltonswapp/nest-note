@@ -75,6 +75,10 @@ final class SitterViewService: EntryRepository {
     // MARK: - Image Cache (following NestService pattern)
     private var imageAssets: [String: UIImageAsset] = [:]
     
+    func fetchAllItems() async throws -> [BaseItem] {
+        return []
+    }
+    
     /// Unified method to fetch all items with session filtering applied once
     private func fetchAllFilteredItems() async throws -> [BaseItem] {
         Logger.log(level: .info, category: .sitterViewService, message: "fetchAllFilteredItems() called")

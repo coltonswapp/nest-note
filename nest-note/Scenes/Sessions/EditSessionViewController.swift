@@ -11,10 +11,6 @@ protocol DatePresentationDelegate: AnyObject {
     func didChangeEarlyAccess(_ duration: EarlyAccessDuration)
 }
 
-protocol VisibilityCellDelegate: AnyObject {
-    func didRequestVisibilityLevelInfo()
-}
-
 protocol EntryReviewCellDelegate: AnyObject {
     func didTapReview()
 }
@@ -64,9 +60,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         return control
     }()
     
-    private var selectedEntries: [BaseEntry] = []
-    private var selectedPlaces: [PlaceItem] = []
-    private var selectedRoutines: [RoutineItem] = []
+    private var selectedItemIds: [String] = []
+    
+    // Properties for select entries flow
+    private var currentSelectEntriesNavController: UINavigationController?
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -287,7 +284,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
         Logger.log(level: .debug, category: .sessionService, message: "sessionItem.entryIds: \(sessionItem.entryIds?.description ?? "nil")")
         Logger.log(level: .debug, category: .sessionService, message: "originalSession.entryIds: \(originalSession.entryIds?.description ?? "nil")")
-        Logger.log(level: .debug, category: .sessionService, message: "selectedEntries count: \(selectedEntries.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "selectedEntries count: \(selectedItemIds.count)")
         Logger.log(level: .debug, category: .sessionService, message: "=== End Initial Setup Debug ===")
         
         updateSaveButtonState()
@@ -495,27 +492,23 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     await MainActor.run {
                         // Clear the stored entryIds since they're no longer valid
                         self.sessionItem.entryIds = nil
-                        self.selectedEntries = []
-                        self.selectedPlaces = []
-                        self.selectedRoutines = []
+                        self.selectedItemIds = []
                         self.updateSelectEntriesSection()
                         Logger.log(level: .info, category: .general, message: "Cleared invalid entryIds from session")
                     }
                 } else {
                     await MainActor.run {
-                        self.selectedEntries = matchingEntries
-                        self.selectedPlaces = matchingPlaces
-                        self.selectedRoutines = matchingRoutines
-                        Logger.log(level: .info, category: .general, message: "Updated selectedEntries count to: \(self.selectedEntries.count)")
-                        Logger.log(level: .info, category: .general, message: "Updated selectedPlaces count to: \(self.selectedPlaces.count)")
-                        Logger.log(level: .info, category: .general, message: "Updated selectedRoutines count to: \(self.selectedRoutines.count)")
+                        // Store only the IDs that were found
+                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id } + matchingRoutines.map { $0.id }
+                        self.selectedItemIds = restoredIds
+                        
+                        Logger.log(level: .info, category: .general, message: "Updated selectedItemIds count to: \(self.selectedItemIds.count)")
                         Logger.log(level: .info, category: .general, message: "Restored entry IDs: \(matchingEntries.map { $0.id }.sorted())")
                         Logger.log(level: .info, category: .general, message: "Restored place IDs: \(matchingPlaces.map { $0.id }.sorted())")
                         Logger.log(level: .info, category: .general, message: "Restored routine IDs: \(matchingRoutines.map { $0.id }.sorted())")
                         self.updateSelectEntriesSection()
                         
                         // Update originalSession.entryIds to match the restored entries to prevent false change detection
-                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id } + matchingRoutines.map { $0.id }
                         self.originalSession.entryIds = restoredIds.isEmpty ? nil : restoredIds
                         
                         // Now check for changes after restoration - should show no changes since we just synced
@@ -538,7 +531,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Update select entries item
         if let existingSelectEntriesItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
             snapshot.deleteItems([existingSelectEntriesItem])
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
         }
         
         // Update date selection items
@@ -691,10 +684,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 // Note: visibilityLevel is no longer used, replaced by selectedEntries
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
-                // Store combined entry IDs, place IDs, and routine IDs in the session
-                let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id }
-                if !allSelectedIds.isEmpty {
-                    sessionItem.entryIds = allSelectedIds
+                // Store selected item IDs in the session
+                if !selectedItemIds.isEmpty {
+                    sessionItem.entryIds = selectedItemIds
                 } else {
                     sessionItem.entryIds = nil // Clear entryIds if no items selected
                 }
@@ -1056,7 +1048,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -1076,7 +1068,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
@@ -1200,26 +1192,76 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func presentSelectEntriesFlow() {
         guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
         
-        let selectEntriesFlow = SelectEntriesFlowViewController(entryRepository: entryRepository)
-        selectEntriesFlow.delegate = self
-        selectEntriesFlow.modalPresentationStyle = .pageSheet
+        // Create the folder view controller directly
+        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
+        folderVC.title = "Select Items"
+        folderVC.delegate = self
         
-        // Pass current selected entries, places, and routines to restore selection state
-        selectEntriesFlow.setInitialSelectedEntries(selectedEntries)
-        selectEntriesFlow.setInitialSelectedPlaces(selectedPlaces)
-        selectEntriesFlow.setInitialSelectedRoutines(selectedRoutines)
+        // Pass current selected item IDs to restore selection state
+        folderVC.setInitialSelectedItemIds(selectedItemIds)
         
-        present(selectEntriesFlow, animated: true)
+        // Add cancel button
+        folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(selectEntriesDidCancel)
+        )
+        
+        // Create navigation controller and present normally
+        let navController = UINavigationController(rootViewController: folderVC)
+        navController.navigationBar.prefersLargeTitles = false
+        navController.navigationBar.tintColor = NNColors.primary
+        navController.modalPresentationStyle = .pageSheet
+        
+        // Store reference for later use
+        currentSelectEntriesNavController = navController
+        
+        // Set up continue callback to receive selected IDs
+        folderVC.onContinueTapped = { [weak self] selectedIds in
+            self?.selectEntriesDidFinish(with: selectedIds)
+        }
+        
+        present(navController, animated: true)
+    }
+    
+    @objc private func selectEntriesDidCancel() {
+        currentSelectEntriesNavController?.dismiss(animated: true)
+        currentSelectEntriesNavController = nil
+    }
+    
+    private func selectEntriesDidFinish(with selectedIds: [String]) {
+        let totalCount = selectedIds.count
+        let itemText = totalCount == 1 ? "item" : "items"
+        
+        let alert = UIAlertController(
+            title: "Confirm Selection",
+            message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
+            preferredStyle: .alert
+        )
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+        let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
+            // ONLY NOW do we commit the selections
+            self.selectedItemIds = selectedIds
+            self.currentSelectEntriesNavController?.dismiss(animated: true)
+            self.currentSelectEntriesNavController = nil
+            self.updateSelectEntriesSection()
+            self.checkForChanges()
+        }
+        
+        alert.addAction(cancelAction)
+        alert.addAction(confirmAction)
+        
+        currentSelectEntriesNavController?.present(alert, animated: true)
     }
     
     private func updateSelectEntriesSection() {
         var snapshot = dataSource.snapshot()
         
-        // Update select entries item with combined count of entries and places
+        // Update select entries item with count of selected item IDs
         if let existingItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
             snapshot.deleteItems([existingItem])
-            let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-            snapshot.appendItems([.selectEntries(count: totalCount)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
             dataSource.apply(snapshot, animatingDifferences: true)
         }
     }
@@ -1248,16 +1290,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func checkForChanges() {
-        // Compare current selected item IDs (entries + places + routines) with original session's entryIds
-        let currentItemIds = Set(selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id })
+        // Compare current selected item IDs with original session's entryIds
+        let currentItemIds = Set(selectedItemIds)
         let originalItemIds = Set(originalSession.entryIds ?? [])
         let itemsChanged = currentItemIds != originalItemIds
         
         // Enhanced debug logging for item selection changes
         Logger.log(level: .debug, category: .sessionService, message: "=== checkForChanges() Debug ===")
-        Logger.log(level: .debug, category: .sessionService, message: "Current selected entry count: \(selectedEntries.count)")
-        Logger.log(level: .debug, category: .sessionService, message: "Current selected place count: \(selectedPlaces.count)")
-        Logger.log(level: .debug, category: .sessionService, message: "Current item IDs: \(Array(currentItemIds).sorted())")
+        Logger.log(level: .debug, category: .sessionService, message: "Current selected items count: \(selectedItemIds.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "Current item IDs: \(selectedItemIds.sorted())")
         Logger.log(level: .debug, category: .sessionService, message: "Original item IDs: \(Array(originalItemIds).sorted())")
         Logger.log(level: .debug, category: .sessionService, message: "Items changed: \(itemsChanged)")
         Logger.log(level: .debug, category: .sessionService, message: "=== End Debug ===")
@@ -2171,32 +2212,6 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
         
         checkForChanges() // Add this to check for changes after sitter selection
     }
-} 
-
-// Add delegate conformance
-extension EditSessionViewController: SelectEntriesFlowDelegate {
-    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem]) {
-        selectedEntries = entries
-        selectedPlaces = places
-        selectedRoutines = routines
-        controller.dismiss(animated: true)
-        
-        // Combine entry IDs, place IDs, and routine IDs into the entryIds array
-        let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id }
-        if !allSelectedIds.isEmpty {
-            sessionItem.entryIds = allSelectedIds
-        } else {
-            sessionItem.entryIds = nil // Clear entryIds if no items selected
-        }
-        
-        // Update the UI
-        updateSelectEntriesSection()
-        checkForChanges()
-    }
-    
-    func selectEntriesFlowDidCancel(_ controller: SelectEntriesFlowViewController) {
-        controller.dismiss(animated: true)
-    }
 }
 
 extension EditSessionViewController: SelectEntriesCellDelegate {
@@ -2223,7 +2238,7 @@ extension EditSessionViewController: SessionCalendarViewControllerDelegate {
         // Check for unsaved changes
         checkForChanges()
     }
-} 
+}
 
 // Add event delegate
 extension EditSessionViewController: SessionEventViewControllerDelegate {
@@ -2472,6 +2487,37 @@ extension EditSessionViewController: StatusCellDelegate {
         HapticsHelper.lightHaptic()
     }
 }
+
+// MARK: - ModifiedSelectFolderViewControllerDelegate
+extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate {
+    func modifiedSelectFolderViewController(_ controller: ModifiedSelectFolderViewController, didSelectFolder folderPath: String) {
+        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+        
+        // Create and push the category view controller
+        let categoryVC = NestCategoryViewController(
+            entryRepository: entryRepository,
+            initialCategory: folderPath,
+            isEditOnlyMode: true
+        )
+        // Set the folder view controller as the delegate to receive selection updates
+        categoryVC.selectEntriesDelegate = controller
+        categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
+        
+        // Restore previously selected items
+        Task {
+            let selectedItems = await controller.getCurrentSelectedItems()
+            await MainActor.run {
+                categoryVC.restoreSelectedEntries(selectedItems.entries)
+                categoryVC.restoreSelectedPlaces(selectedItems.places)
+                categoryVC.restoreSelectedRoutines(selectedItems.routines)
+            }
+        }
+        
+        currentSelectEntriesNavController?.pushViewController(categoryVC, animated: true)
+        
+    }
+}
+
 
 // MARK: - InviteSitterViewControllerDelegate
 extension EditSessionViewController: InviteSitterViewControllerDelegate {
