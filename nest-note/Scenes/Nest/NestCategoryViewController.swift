@@ -160,6 +160,20 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    // Method to restore selected routines for persistent selection
+    func restoreSelectedRoutines(_ routines: Set<RoutineItem>) {
+        selectedRoutines = routines
+        
+        // If we're already loaded, update the UI immediately
+        if isViewLoaded {
+            DispatchQueue.main.async {
+                self.collectionView.reloadData()
+                self.restoreCollectionViewSelection()
+                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: self.selectedRoutines)
+            }
+        }
+    }
+    
     // Helper method to restore collection view selection state
     private func restoreCollectionViewSelection() {
         guard isEditingMode, let dataSource = self.dataSource else { return }
@@ -305,7 +319,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 folderContents = (contents.entries, contents.places, contents.routines, contents.subfolders, contents.allPlaces)
             } else if let sitterService = entryRepository as? SitterViewService {
                 let contents = try await sitterService.fetchFolderContents(for: category)
-                folderContents = (contents.entries, contents.places, [], contents.subfolders, contents.allPlaces) // SitterViewService doesn't support routines
+                folderContents = (contents.entries, contents.places, contents.routines, contents.subfolders, contents.allPlaces) // SitterViewService now supports routines
             } else {
                 // Fallback for other repository types
                 await loadBasicEntries()
@@ -1031,6 +1045,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             if isEditOnlyMode {
                 selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
                 selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
             }
         }
         
@@ -1794,6 +1809,11 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     selectedRoutines.insert(selectedRoutine)
                 }
                 
+                // Notify delegate in edit-only mode
+                if isEditOnlyMode {
+                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                }
+                
                 // Update the cell appearance
                 updateRoutineCellSelection(for: selectedRoutine)
                 return
@@ -1884,6 +1904,12 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             // Handle routine deselection
             if let selectedRoutine = selectedItem as? RoutineItem {
                 selectedRoutines.remove(selectedRoutine)
+                
+                // Notify delegate in edit-only mode
+                if isEditOnlyMode {
+                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                }
+                
                 updateRoutineCellSelection(for: selectedRoutine)
                 return
             }

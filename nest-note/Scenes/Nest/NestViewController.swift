@@ -261,17 +261,19 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                         }
                     }
                 } else if let sitterService = entryRepository as? SitterViewService {
-                    // For SitterViewService, refresh both entries and places (routines not supported)
+                    // For SitterViewService, refresh entries, places, and routines (now supported)
                     sitterService.clearEntriesCache()
                     sitterService.clearPlacesCache()
+                    sitterService.clearItemsCache() // Clear routines cache too
                     let groupedEntries = try await entryRepository.refreshEntries()
                     let places = try await sitterService.fetchNestPlaces()
-                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups and \(places.count) places")
+                    let routines = try await sitterService.fetchNestRoutines()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
                     
                     await MainActor.run {
                         self.entries = groupedEntries
                         self.places = places
-                        self.routines = []
+                        self.routines = routines
                         self.clearFolderCache()
                         self.applyInitialSnapshots()
                         self.refreshControl.endRefreshing()
@@ -573,13 +575,14 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     self.routines = []
                 }
             } else if let sitterService = entryRepository as? SitterViewService {
-                // For SitterViewService, fetch both entries and places (routines not supported in SitterViewService)
+                // For SitterViewService, fetch entries, places, and routines (now supported)
                 let groupedEntries = try await entryRepository.fetchEntries()
                 let places = try await sitterService.fetchNestPlaces()
-                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups and \(places.count) places")
+                let routines = try await sitterService.fetchNestRoutines()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
                 self.entries = groupedEntries
                 self.places = places
-                self.routines = []
+                self.routines = routines
             } else {
                 // For other repository types, fetch entries only
                 let groupedEntries = try await entryRepository.fetchEntries()

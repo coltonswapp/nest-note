@@ -8,7 +8,7 @@
 import UIKit
 
 protocol SelectEntriesFlowDelegate: AnyObject {
-    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem])
+    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem])
     func selectEntriesFlowDidCancel(_ controller: SelectEntriesFlowViewController)
 }
 
@@ -25,6 +25,7 @@ class SelectEntriesFlowViewController: UIViewController {
     
     private var selectedEntries: Set<BaseEntry> = []
     private var selectedPlaces: Set<PlaceItem> = []
+    private var selectedRoutines: Set<RoutineItem> = []
     
     init(entryRepository: EntryRepository) {
         self.entryRepository = entryRepository
@@ -55,6 +56,17 @@ class SelectEntriesFlowViewController: UIViewController {
         }
     }
     
+    // Method to set initial selected routines
+    func setInitialSelectedRoutines(_ routines: [RoutineItem]) {
+        selectedRoutines = Set(routines)
+        // Update UI if view is already loaded
+        if isViewLoaded {
+            updateSelectionCounter()
+            // Note: Root folder view controller doesn't need routine-specific updates
+            // as it already counts all selected items generically
+        }
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -63,8 +75,8 @@ class SelectEntriesFlowViewController: UIViewController {
         setupSelectionCounterView()
         setupConstraints()
         
-        // Update UI with any pre-selected entries or places
-        if !selectedEntries.isEmpty || !selectedPlaces.isEmpty {
+        // Update UI with any pre-selected entries, places, or routines
+        if !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty {
             updateSelectionCounter()
             rootFolderViewController?.updateSelectedEntries(selectedEntries)
             rootFolderViewController?.updateSelectedPlaces(selectedPlaces)
@@ -177,7 +189,7 @@ class SelectEntriesFlowViewController: UIViewController {
     }
     
     private func updateSelectionCounter() {
-        let totalCount = selectedEntries.count + selectedPlaces.count
+        let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
         let itemText = totalCount == 1 ? "item" : "items"
         countLabel.text = "\(totalCount) \(itemText) selected"
         
@@ -192,7 +204,8 @@ class SelectEntriesFlowViewController: UIViewController {
     @objc private func finishButtonTapped() {
         let entriesArray = Array(selectedEntries)
         let placesArray = Array(selectedPlaces)
-        delegate?.selectEntriesFlow(self, didFinishWithEntries: entriesArray, places: placesArray)
+        let routinesArray = Array(selectedRoutines)
+        delegate?.selectEntriesFlow(self, didFinishWithEntries: entriesArray, places: placesArray, routines: routinesArray)
     }
 }
 
@@ -208,9 +221,10 @@ extension SelectEntriesFlowViewController: ModifiedSelectFolderViewControllerDel
         categoryVC.selectEntriesDelegate = self
         categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
         
-        // Pass the currently selected entries and places to maintain selection state
+        // Pass the currently selected entries, places, and routines to maintain selection state
         categoryVC.restoreSelectedEntries(selectedEntries)
         categoryVC.restoreSelectedPlaces(selectedPlaces)
+        categoryVC.restoreSelectedRoutines(selectedRoutines)
         
         contentNavigationController.pushViewController(categoryVC, animated: true)
     }
@@ -232,6 +246,14 @@ extension SelectEntriesFlowViewController: NestCategoryViewControllerSelectEntri
         
         // Update the root folder view controller to show place selection counts
         rootFolderViewController?.updateSelectedPlaces(places)
+    }
+    
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>) {
+        selectedRoutines = routines
+        updateSelectionCounter()
+        
+        // Note: Root folder view controller doesn't need routine-specific updates
+        // as it already counts all selected items generically
     }
 }
 
@@ -538,4 +560,5 @@ protocol ModifiedSelectFolderViewControllerDelegate: AnyObject {
 protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>)
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>)
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>)
 }

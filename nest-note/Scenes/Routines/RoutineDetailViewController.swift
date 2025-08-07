@@ -50,7 +50,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     let routine: RoutineItem?
     private let category: String
     private var routineActions: [String] = []
-    private var completedActionIndices: Set<Int> = []
+    private let stateManager = RoutineStateManager.shared
     private var isTableViewInEditMode: Bool = false
     private var infoButtonWidthConstraint: NSLayoutConstraint?
     
@@ -86,6 +86,12 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         
         // Load routine actions
         routineActions = routine?.routineActions ?? []
+        
+        // Initialize state manager if we have a routine
+        if let routine = routine {
+            // Load any existing completion state for today
+            // The state manager automatically handles daily resets
+        }
         
         configureFolderLabel()
         
@@ -173,12 +179,13 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     
     private func configureReadOnlyMode() {
         titleField.isEnabled = false
-        routineTableView.isUserInteractionEnabled = false
+        // Allow table view interaction for routine completion checkboxes
+        routineTableView.isUserInteractionEnabled = true
     }
     
     override func setupInfoButton() {
         // Configure the base class info button 
-        infoButton.isHidden = false
+        infoButton.isHidden = isReadOnly
         updateInfoButtonAppearance()
     }
     
@@ -236,6 +243,11 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         toggleEditMode()
     }
     
+    private func presentRoutinesInfo() {
+        let infoVC = RoutinesInfoViewController()
+        present(infoVC, animated: true)
+    }
+    
     private func handleDeleteRoutine() {
         guard let routine = routine else { return }
         
@@ -283,7 +295,18 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     
     
     private func createMenu() -> UIMenu {
-        var actions: [UIAction] = []
+        var topActions: [UIAction] = []
+        var bottomActions: [UIAction] = []
+        var menuChildren: [UIMenuElement] = []
+        
+        // Top section - Info and Edit actions
+        let learnAction = UIAction(
+            title: "Learn about Routines",
+            image: UIImage(systemName: "info.circle")
+        ) { [weak self] _ in
+            self?.presentRoutinesInfo()
+        }
+        topActions.append(learnAction)
         
         // Only show edit option if we have routine actions and not in read-only mode
         if !routineActions.isEmpty && !isReadOnly {
@@ -293,10 +316,16 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             ) { [weak self] _ in
                 self?.toggleEditMode()
             }
-            actions.append(editAction)
+            topActions.append(editAction)
         }
         
-        // Only show delete option if we have an existing routine and not in read-only mode
+        // Create top section menu
+        if !topActions.isEmpty {
+            let topSection = UIMenu(title: "", options: .displayInline, children: topActions)
+            menuChildren.append(topSection)
+        }
+        
+        // Bottom section - Delete action
         if routine != nil && !isReadOnly {
             let deleteAction = UIAction(
                 title: "Delete Routine",
@@ -305,10 +334,13 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             ) { [weak self] _ in
                 self?.handleDeleteRoutine()
             }
-            actions.append(deleteAction)
+            bottomActions.append(deleteAction)
         }
         
-        return UIMenu(children: actions)
+        // Add bottom actions directly (they'll be separated from top section automatically)
+        menuChildren.append(contentsOf: bottomActions)
+        
+        return UIMenu(children: menuChildren)
     }
     
     private func toggleEditMode() {
@@ -341,7 +373,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                let indexPath = routineTableView.indexPath(for: cell),
                indexPath.row < routineActions.count {
                 let action = routineActions[indexPath.row]
-                let isCompleted = completedActionIndices.contains(indexPath.row)
+                let isCompleted = routine.map { stateManager.isActionCompleted(routineId: $0.id, actionIndex: indexPath.row) } ?? false
                 routineCell.configure(with: action, isCompleted: isCompleted, isReadOnly: isReadOnly, at: indexPath)
                 routineCell.setEditMode(isTableViewInEditMode, isCompleted: isCompleted)
             }
@@ -448,7 +480,7 @@ extension RoutineDetailViewController: UITableViewDataSource {
         // Regular action cell
         let cell = tableView.dequeueReusableCell(withIdentifier: "RoutineActionCell", for: indexPath) as! RoutineActionCell
         let action = routineActions[indexPath.row]
-        let isCompleted = completedActionIndices.contains(indexPath.row)
+        let isCompleted = routine.map { stateManager.isActionCompleted(routineId: $0.id, actionIndex: indexPath.row) } ?? false
         
         cell.configure(with: action, isCompleted: isCompleted, isReadOnly: isReadOnly, at: indexPath)
         cell.delegate = self
@@ -478,17 +510,16 @@ extension RoutineDetailViewController: UITableViewDelegate {
             // Remove the action from the array
             routineActions.remove(at: indexPath.row)
             
-            // Update completion indices - remove the deleted index and shift others down
-            var newCompletedIndices: Set<Int> = []
-            for completedIndex in completedActionIndices {
-                if completedIndex < indexPath.row {
-                    newCompletedIndices.insert(completedIndex)
-                } else if completedIndex > indexPath.row {
-                    newCompletedIndices.insert(completedIndex - 1)
+            // Update completion state - shift indices down for actions after the deleted one
+            if let routineId = routine?.id {
+                for actionIndex in (indexPath.row + 1)..<(routineActions.count + 1) {
+                    let wasCompleted = stateManager.isActionCompleted(routineId: routineId, actionIndex: actionIndex)
+                    if wasCompleted {
+                        stateManager.setActionCompleted(false, routineId: routineId, actionIndex: actionIndex)
+                        stateManager.setActionCompleted(true, routineId: routineId, actionIndex: actionIndex - 1)
+                    }
                 }
-                // Skip the deleted index (completedIndex == indexPath.row)
             }
-            completedActionIndices = newCompletedIndices
             
             // Delete the row from the table view
             tableView.deleteRows(at: [indexPath], with: .fade)
@@ -517,35 +548,28 @@ extension RoutineDetailViewController: UITableViewDelegate {
         let movedAction = routineActions.remove(at: sourceIndexPath.row)
         routineActions.insert(movedAction, at: destinationIndexPath.row)
         
-        // Update completion indices to match the new order
-        var newCompletedIndices: Set<Int> = []
-        for completedIndex in completedActionIndices {
-            if completedIndex == sourceIndexPath.row {
-                // The moved item maintains its completion state at the new position
-                newCompletedIndices.insert(destinationIndexPath.row)
-            } else if completedIndex < sourceIndexPath.row && completedIndex < destinationIndexPath.row {
-                // Items before both positions stay the same
-                newCompletedIndices.insert(completedIndex)
-            } else if completedIndex > sourceIndexPath.row && completedIndex > destinationIndexPath.row {
-                // Items after both positions stay the same
-                newCompletedIndices.insert(completedIndex)
-            } else if sourceIndexPath.row < destinationIndexPath.row {
-                // Moving down: items between source and destination shift up
-                if completedIndex > sourceIndexPath.row && completedIndex <= destinationIndexPath.row {
-                    newCompletedIndices.insert(completedIndex - 1)
-                } else {
-                    newCompletedIndices.insert(completedIndex)
-                }
-            } else {
-                // Moving up: items between destination and source shift down
-                if completedIndex >= destinationIndexPath.row && completedIndex < sourceIndexPath.row {
-                    newCompletedIndices.insert(completedIndex + 1)
-                } else {
-                    newCompletedIndices.insert(completedIndex)
-                }
+        // Update completion state to match the new order
+        if let routineId = routine?.id {
+            // Store current completion states
+            var completionStates: [Bool] = []
+            for index in 0..<routineActions.count {
+                completionStates.append(stateManager.isActionCompleted(routineId: routineId, actionIndex: index))
+            }
+            
+            // Clear all states
+            for index in 0..<routineActions.count {
+                stateManager.setActionCompleted(false, routineId: routineId, actionIndex: index)
+            }
+            
+            // Reapply states in new order
+            let movedCompletion = completionStates[sourceIndexPath.row]
+            completionStates.remove(at: sourceIndexPath.row)
+            completionStates.insert(movedCompletion, at: destinationIndexPath.row)
+            
+            for (index, isCompleted) in completionStates.enumerated() {
+                stateManager.setActionCompleted(isCompleted, routineId: routineId, actionIndex: index)
             }
         }
-        completedActionIndices = newCompletedIndices
     }
     
     func tableView(_ tableView: UITableView, targetIndexPathForMoveFromRowAt sourceIndexPath: IndexPath, toProposedIndexPath proposedDestinationIndexPath: IndexPath) -> IndexPath {
@@ -560,13 +584,10 @@ extension RoutineDetailViewController: UITableViewDelegate {
 // MARK: - RoutineActionCellDelegate
 extension RoutineDetailViewController: RoutineActionCellDelegate {
     func routineActionCell(_ cell: RoutineActionCell, didToggleCompletion isCompleted: Bool) {
-        guard let indexPath = routineTableView.indexPath(for: cell) else { return }
+        guard let indexPath = routineTableView.indexPath(for: cell),
+              let routineId = routine?.id else { return }
         
-        if isCompleted {
-            completedActionIndices.insert(indexPath.row)
-        } else {
-            completedActionIndices.remove(indexPath.row)
-        }
+        stateManager.setActionCompleted(isCompleted, routineId: routineId, actionIndex: indexPath.row)
         
         // Cell already handled its own appearance update in checkboxTapped
         // No need to reconfigure here as it would override the cell's internal state
@@ -577,17 +598,16 @@ extension RoutineDetailViewController: RoutineActionCellDelegate {
         
         routineActions.remove(at: index)
         
-        // Update completion indices - remove the deleted index and shift others down
-        var newCompletedIndices: Set<Int> = []
-        for completedIndex in completedActionIndices {
-            if completedIndex < index {
-                newCompletedIndices.insert(completedIndex)
-            } else if completedIndex > index {
-                newCompletedIndices.insert(completedIndex - 1)
+        // Update completion state - shift indices down for actions after the deleted one
+        if let routineId = routine?.id {
+            for actionIndex in (index + 1)..<(routineActions.count + 1) {
+                let wasCompleted = stateManager.isActionCompleted(routineId: routineId, actionIndex: actionIndex)
+                if wasCompleted {
+                    stateManager.setActionCompleted(false, routineId: routineId, actionIndex: actionIndex)
+                    stateManager.setActionCompleted(true, routineId: routineId, actionIndex: actionIndex - 1)
+                }
             }
-            // Skip the deleted index (completedIndex == index)
         }
-        completedActionIndices = newCompletedIndices
         
         routineTableView.deleteRows(at: [IndexPath(row: index, section: 0)], with: .fade)
         

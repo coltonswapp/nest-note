@@ -114,8 +114,8 @@ class RoutineActionCell: UITableViewCell {
         actionLabel.text = action
         updateLabelAppearance(isCompleted: isCompleted)
         
-        // Disable checkbox in read-only mode
-        checkboxButton.isUserInteractionEnabled = !isReadOnly
+        // Allow checkbox interaction even in read-only mode for routine completion
+        checkboxButton.isUserInteractionEnabled = true
         
         // Enable/disable label tap for editing
         actionLabel.isUserInteractionEnabled = !isReadOnly

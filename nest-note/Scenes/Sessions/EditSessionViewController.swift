@@ -66,6 +66,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var selectedEntries: [BaseEntry] = []
     private var selectedPlaces: [PlaceItem] = []
+    private var selectedRoutines: [RoutineItem] = []
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -468,35 +469,27 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         Task {
             do {
-                // Fetch both entries and places to match with the stored IDs
+                // Fetch all items to match with the stored IDs
                 let nestService = NestService.shared
-                let entriesDict = try await nestService.fetchEntries()
-                let allPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
+                let allItems = try await nestService.fetchAllItems()
                 
-                Logger.log(level: .info, category: .general, message: "Fetched entries from \(entriesDict.count) categories and \(allPlaces.count) places")
+                // Separate by type
+                let matchingEntries = allItems.compactMap { $0 as? BaseEntry }.filter { entryIds.contains($0.id) }
+                let matchingPlaces = allItems.compactMap { $0 as? PlaceItem }.filter { entryIds.contains($0.id) }
+                let matchingRoutines = allItems.compactMap { $0 as? RoutineItem }.filter { entryIds.contains($0.id) }
                 
-                // Flatten all entries from all categories
-                let allEntries = entriesDict.values.flatMap { $0 }
-                Logger.log(level: .info, category: .general, message: "Total entries available: \(allEntries.count)")
-                
-                // Log available IDs for debugging
-                let availableEntryIds = allEntries.map { $0.id }
-                let availablePlaceIds = allPlaces.map { $0.id }
-                Logger.log(level: .info, category: .general, message: "Available entry IDs: \(availableEntryIds)")
-                Logger.log(level: .info, category: .general, message: "Available place IDs: \(availablePlaceIds)")
+                Logger.log(level: .info, category: .general, message: "Fetched \(allItems.count) total items")
                 Logger.log(level: .info, category: .general, message: "Looking for item IDs: \(entryIds)")
-                
-                // Filter to entries and places that match the stored IDs
-                let matchingEntries = allEntries.filter { entryIds.contains($0.id) }
-                let matchingPlaces = allPlaces.filter { entryIds.contains($0.id) }
                 
                 Logger.log(level: .info, category: .general, message: "Found \(matchingEntries.count) matching entries")
                 Logger.log(level: .info, category: .general, message: "Found \(matchingPlaces.count) matching places")
+                Logger.log(level: .info, category: .general, message: "Found \(matchingRoutines.count) matching routines")
                 Logger.log(level: .info, category: .general, message: "Matching entry titles: \(matchingEntries.map { $0.title })")
                 Logger.log(level: .info, category: .general, message: "Matching place aliases: \(matchingPlaces.map { $0.alias ?? "Unnamed"})")
+                Logger.log(level: .info, category: .general, message: "Matching routine titles: \(matchingRoutines.map { $0.title })")
                 
                 // If no matching items found, the stored items may have been deleted
-                if matchingEntries.isEmpty && matchingPlaces.isEmpty && !entryIds.isEmpty {
+                if matchingEntries.isEmpty && matchingPlaces.isEmpty && matchingRoutines.isEmpty && !entryIds.isEmpty {
                     Logger.log(level: .info, category: .general, message: "No matching items found for stored IDs - items may have been deleted. Clearing session entryIds.")
                     
                     await MainActor.run {
@@ -504,6 +497,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                         self.sessionItem.entryIds = nil
                         self.selectedEntries = []
                         self.selectedPlaces = []
+                        self.selectedRoutines = []
                         self.updateSelectEntriesSection()
                         Logger.log(level: .info, category: .general, message: "Cleared invalid entryIds from session")
                     }
@@ -511,14 +505,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     await MainActor.run {
                         self.selectedEntries = matchingEntries
                         self.selectedPlaces = matchingPlaces
+                        self.selectedRoutines = matchingRoutines
                         Logger.log(level: .info, category: .general, message: "Updated selectedEntries count to: \(self.selectedEntries.count)")
                         Logger.log(level: .info, category: .general, message: "Updated selectedPlaces count to: \(self.selectedPlaces.count)")
+                        Logger.log(level: .info, category: .general, message: "Updated selectedRoutines count to: \(self.selectedRoutines.count)")
                         Logger.log(level: .info, category: .general, message: "Restored entry IDs: \(matchingEntries.map { $0.id }.sorted())")
                         Logger.log(level: .info, category: .general, message: "Restored place IDs: \(matchingPlaces.map { $0.id }.sorted())")
+                        Logger.log(level: .info, category: .general, message: "Restored routine IDs: \(matchingRoutines.map { $0.id }.sorted())")
                         self.updateSelectEntriesSection()
                         
                         // Update originalSession.entryIds to match the restored entries to prevent false change detection
-                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id }
+                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id } + matchingRoutines.map { $0.id }
                         self.originalSession.entryIds = restoredIds.isEmpty ? nil : restoredIds
                         
                         // Now check for changes after restoration - should show no changes since we just synced
@@ -541,7 +538,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Update select entries item
         if let existingSelectEntriesItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
             snapshot.deleteItems([existingSelectEntriesItem])
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
         }
         
         // Update date selection items
@@ -694,8 +691,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 // Note: visibilityLevel is no longer used, replaced by selectedEntries
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
-                // Store combined entry IDs and place IDs in the session
-                let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id }
+                // Store combined entry IDs, place IDs, and routine IDs in the session
+                let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id }
                 if !allSelectedIds.isEmpty {
                     sessionItem.entryIds = allSelectedIds
                 } else {
@@ -1059,7 +1056,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -1079,7 +1076,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedEntries.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedEntries.count + selectedPlaces.count + selectedRoutines.count)], toSection: .selectEntries)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
@@ -1207,9 +1204,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         selectEntriesFlow.delegate = self
         selectEntriesFlow.modalPresentationStyle = .pageSheet
         
-        // Pass current selected entries and places to restore selection state
+        // Pass current selected entries, places, and routines to restore selection state
         selectEntriesFlow.setInitialSelectedEntries(selectedEntries)
         selectEntriesFlow.setInitialSelectedPlaces(selectedPlaces)
+        selectEntriesFlow.setInitialSelectedRoutines(selectedRoutines)
         
         present(selectEntriesFlow, animated: true)
     }
@@ -1220,7 +1218,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Update select entries item with combined count of entries and places
         if let existingItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
             snapshot.deleteItems([existingItem])
-            let totalCount = selectedEntries.count + selectedPlaces.count
+            let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
             snapshot.appendItems([.selectEntries(count: totalCount)], toSection: .selectEntries)
             dataSource.apply(snapshot, animatingDifferences: true)
         }
@@ -1250,8 +1248,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func checkForChanges() {
-        // Compare current selected item IDs (entries + places) with original session's entryIds
-        let currentItemIds = Set(selectedEntries.map { $0.id } + selectedPlaces.map { $0.id })
+        // Compare current selected item IDs (entries + places + routines) with original session's entryIds
+        let currentItemIds = Set(selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id })
         let originalItemIds = Set(originalSession.entryIds ?? [])
         let itemsChanged = currentItemIds != originalItemIds
         
@@ -2177,13 +2175,14 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
 
 // Add delegate conformance
 extension EditSessionViewController: SelectEntriesFlowDelegate {
-    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem]) {
+    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem]) {
         selectedEntries = entries
         selectedPlaces = places
+        selectedRoutines = routines
         controller.dismiss(animated: true)
         
-        // Combine both entry IDs and place IDs into the entryIds array
-        let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id }
+        // Combine entry IDs, place IDs, and routine IDs into the entryIds array
+        let allSelectedIds = selectedEntries.map { $0.id } + selectedPlaces.map { $0.id } + selectedRoutines.map { $0.id }
         if !allSelectedIds.isEmpty {
             sessionItem.entryIds = allSelectedIds
         } else {

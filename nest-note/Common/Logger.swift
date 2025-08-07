@@ -114,6 +114,8 @@ public extension Logger {
         case placesService = "🏙️ PlaceService"
 
         case cachedImageController = "🗾 CachedImageController"
+        
+        case routineStateManager = "🕒 RoutineStateManager"
 
         case purchases = "💰 Purchases"
         case subscription = "💵 Subscriptions"
