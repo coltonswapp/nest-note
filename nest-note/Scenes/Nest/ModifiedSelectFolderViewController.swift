@@ -7,218 +7,6 @@
 
 import UIKit
 
-protocol SelectEntriesFlowDelegate: AnyObject {
-    func selectEntriesFlow(_ controller: SelectEntriesFlowViewController, didFinishWithEntries entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem])
-    func selectEntriesFlowDidCancel(_ controller: SelectEntriesFlowViewController)
-}
-
-class SelectEntriesFlowViewController: UIViewController {
-    // MARK: - Properties
-    private let entryRepository: EntryRepository
-    weak var delegate: SelectEntriesFlowDelegate?
-    
-    private var contentNavigationController: UINavigationController!
-    private var selectionCounterView: SelectEntriesCountView!
-    
-    private var selectedEntries: Set<BaseEntry> = []
-    private var selectedPlaces: Set<PlaceItem> = []
-    private var selectedRoutines: Set<RoutineItem> = []
-    
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
-        super.init(nibName: nil, bundle: nil)
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    // Method to set initial selected entries
-    func setInitialSelectedEntries(_ entries: [BaseEntry]) {
-        selectedEntries = Set(entries)
-        // Update UI if view is already loaded
-        if isViewLoaded {
-            updateSelectionCounter()
-            rootFolderViewController?.updateSelectedEntries(selectedEntries)
-        }
-    }
-    
-    // Method to set initial selected places
-    func setInitialSelectedPlaces(_ places: [PlaceItem]) {
-        selectedPlaces = Set(places)
-        // Update UI if view is already loaded
-        if isViewLoaded {
-            updateSelectionCounter()
-            rootFolderViewController?.updateSelectedPlaces(selectedPlaces)
-        }
-    }
-    
-    // Method to set initial selected routines
-    func setInitialSelectedRoutines(_ routines: [RoutineItem]) {
-        selectedRoutines = Set(routines)
-        // Update UI if view is already loaded
-        if isViewLoaded {
-            updateSelectionCounter()
-            // Note: Root folder view controller doesn't need routine-specific updates
-            // as it already counts all selected items generically
-        }
-    }
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        
-        setupContentNavigationController()
-        setupSelectionCounterView()
-        setupConstraints()
-        
-        // Update UI with any pre-selected entries, places, or routines
-        if !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty {
-            updateSelectionCounter()
-            rootFolderViewController?.updateSelectedEntries(selectedEntries)
-            rootFolderViewController?.updateSelectedPlaces(selectedPlaces)
-        }
-    }
-    
-    private func setupContentNavigationController() {
-        // Create the initial folder selection view controller
-        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
-        folderVC.delegate = self
-        folderVC.title = "Select Items"
-        
-        // Add cancel button to the root view controller
-        folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel,
-            target: self,
-            action: #selector(cancelButtonTapped)
-        )
-        
-        // Create navigation controller with folder selection as root
-        contentNavigationController = UINavigationController(rootViewController: folderVC)
-        contentNavigationController.navigationBar.prefersLargeTitles = false
-        contentNavigationController.navigationBar.tintColor = NNColors.primary
-        
-        // Add as child view controller
-        addChild(contentNavigationController)
-        view.addSubview(contentNavigationController.view)
-        contentNavigationController.didMove(toParent: self)
-        
-        contentNavigationController.view.translatesAutoresizingMaskIntoConstraints = false
-    }
-    
-    // Helper method to get the root folder view controller
-    private var rootFolderViewController: ModifiedSelectFolderViewController? {
-        return contentNavigationController.viewControllers.first as? ModifiedSelectFolderViewController
-    }
-    
-    private func setupSelectionCounterView() {
-        selectionCounterView = SelectEntriesCountView()
-        selectionCounterView.onContinueTapped = { [weak self] in
-            self?.finishButtonTapped()
-        }
-        
-        view.addSubview(selectionCounterView)
-        updateSelectionCounter()
-        
-        view.backgroundColor = .clear
-    }
-    
-    private func setupConstraints() {
-        NSLayoutConstraint.activate([
-            // Content navigation controller takes up space above the counter with padding for floating effect
-            contentNavigationController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            contentNavigationController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            contentNavigationController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contentNavigationController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            
-            // Selection counter view centered and floating
-            selectionCounterView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            selectionCounterView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
-        ])
-    }
-    
-    private func updateSelectionCounter() {
-        let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-        selectionCounterView.count = totalCount
-    }
-    
-    @objc private func cancelButtonTapped() {
-        delegate?.selectEntriesFlowDidCancel(self)
-    }
-    
-    private func finishButtonTapped() {
-        let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-        let itemText = totalCount == 1 ? "item" : "items"
-        
-        let alert = UIAlertController(
-            title: "Confirm Selection",
-            message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
-            preferredStyle: .alert
-        )
-        
-        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
-        let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
-            let entriesArray = Array(self.selectedEntries)
-            let placesArray = Array(self.selectedPlaces)
-            let routinesArray = Array(self.selectedRoutines)
-            self.delegate?.selectEntriesFlow(self, didFinishWithEntries: entriesArray, places: placesArray, routines: routinesArray)
-        }
-        
-        alert.addAction(cancelAction)
-        alert.addAction(confirmAction)
-        
-        present(alert, animated: true)
-    }
-}
-
-// MARK: - ModifiedSelectFolderViewControllerDelegate
-extension SelectEntriesFlowViewController: ModifiedSelectFolderViewControllerDelegate {
-    func modifiedSelectFolderViewController(_ controller: ModifiedSelectFolderViewController, didSelectFolder folderPath: String) {
-        // Create and push the category view controller to the content navigation controller
-        let categoryVC = NestCategoryViewController(
-            entryRepository: entryRepository,
-            initialCategory: folderPath,
-            isEditOnlyMode: true
-        )
-        categoryVC.selectEntriesDelegate = self
-        categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
-        
-        // Pass the currently selected entries, places, and routines to maintain selection state
-        categoryVC.restoreSelectedEntries(selectedEntries)
-        categoryVC.restoreSelectedPlaces(selectedPlaces)
-        categoryVC.restoreSelectedRoutines(selectedRoutines)
-        
-        contentNavigationController.pushViewController(categoryVC, animated: true)
-    }
-}
-
-// MARK: - NestCategoryViewControllerSelectEntriesDelegate
-extension SelectEntriesFlowViewController: NestCategoryViewControllerSelectEntriesDelegate {
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>) {
-        selectedEntries = entries
-        updateSelectionCounter()
-        
-        // Update the root folder view controller to show selection counts
-        rootFolderViewController?.updateSelectedEntries(entries)
-    }
-    
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>) {
-        selectedPlaces = places
-        updateSelectionCounter()
-        
-        // Update the root folder view controller to show place selection counts
-        rootFolderViewController?.updateSelectedPlaces(places)
-    }
-    
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>) {
-        selectedRoutines = routines
-        updateSelectionCounter()
-        
-        // Note: Root folder view controller doesn't need routine-specific updates
-        // as it already counts all selected items generically
-    }
-}
-
 // MARK: - ModifiedSelectFolderViewController
 class ModifiedSelectFolderViewController: UIViewController {
     // MARK: - Properties
@@ -367,22 +155,18 @@ class ModifiedSelectFolderViewController: UIViewController {
     }
     
     private func setupCollectionView() {
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: createLayout())
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
+        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemBackground
         
         view.addSubview(collectionView)
         
-        // Set up Auto Layout constraints
-        NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        
         // Use automatic content inset adjustment for proper navigation bar handling
-        collectionView.contentInsetAdjustmentBehavior = .automatic
+        let buttonHeight: CGFloat = 50
+        let buttonPadding: CGFloat = 24
+        let totalInset = buttonHeight + buttonPadding * 2
+        collectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 90, right: 0)
+        collectionView.verticalScrollIndicatorInsets = collectionView.contentInset
         
         // Register the FolderCollectionViewCell
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
