@@ -740,7 +740,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedEntries.contains(entry),
-                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
                 )
                 
                 return cell
@@ -752,7 +752,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     isNestOwner: self.entryRepository is NestService,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedEntries.contains(entry),
-                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
                 )
                 
                 return cell
@@ -2121,6 +2121,14 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
                 }
             }
         }
+    }
+    
+    // Method to get all selected item IDs across all types
+    func getAllSelectedItemIds() -> [String] {
+        let entryIds = selectedEntries.map { $0.id }
+        let placeIds = selectedPlaces.map { $0.id }
+        let routineIds = selectedRoutines.map { $0.id }
+        return entryIds + placeIds + routineIds
     }
 }
 

@@ -29,7 +29,7 @@ final class SelectEntriesCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Select Entries"
+        label.text = "Select Items"
         label.font = .preferredFont(forTextStyle: .body)
         label.adjustsFontForContentSizeCategory = true
         return label
@@ -37,7 +37,7 @@ final class SelectEntriesCell: UICollectionViewListCell {
     
     private lazy var selectButton: NNSmallPrimaryButton = {
         let button = NNSmallPrimaryButton(
-            title: "0 entries",
+            title: "0 items",
             image: nil,
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
             foregroundColor: NNColors.primary
@@ -80,8 +80,8 @@ final class SelectEntriesCell: UICollectionViewListCell {
     func configure(with selectedCount: Int) {
         self.selectedCount = selectedCount
         
-        let entryText = selectedCount == 1 ? "entry" : "entries"
-        let buttonTitle = "\(selectedCount) \(entryText)"
+        let itemText = selectedCount == 1 ? "item" : "items"
+        let buttonTitle = "\(selectedCount) \(itemText)"
         
         var container = AttributeContainer()
         container.font = .h4
