@@ -77,9 +77,13 @@ class SelectPlaceViewController: NNViewController {
     
     private let geocoder = CLGeocoder()
     private var currentPlacemark: CLPlacemark?
+    private let addressGeocoder = CLGeocoder() // Separate geocoder for address updates
     
     // Add new property for the found place label
     private var foundPlaceLabel: BlurBackgroundLabel!
+    
+    // Add property for current address label
+    private var currentAddressLabel: BlurBackgroundLabel!
     
     // Remove timer and movement tracking properties
     private var hasSelectedPlace = false
@@ -89,6 +93,7 @@ class SelectPlaceViewController: NNViewController {
     
     // Add property to track if instructions have been shown
     private var hasShownInstructions = true
+    private var shouldShowAddressLabel = false
     
     // Add property for clear button
     private lazy var clearButton: UIButton = {
@@ -260,6 +265,7 @@ class SelectPlaceViewController: NNViewController {
         setupAddPlaceButton()
         setupInstructionLabel()
         setupFoundPlaceLabel()
+        setupCurrentAddressLabel()
         
         // Add the center pin view
         view.addSubview(centerPinView)
@@ -649,8 +655,59 @@ class SelectPlaceViewController: NNViewController {
         ])
     }
     
+    private func setupCurrentAddressLabel() {
+        currentAddressLabel = BlurBackgroundLabel()
+        currentAddressLabel.translatesAutoresizingMaskIntoConstraints = false
+        currentAddressLabel.text = "Loading address..."
+        currentAddressLabel.font = .bodyL
+        currentAddressLabel.textColor = .label
+        currentAddressLabel.alpha = 0
+        
+        view.addSubview(currentAddressLabel)
+        
+        // Use the same constraints as instruction label
+        NSLayoutConstraint.activate([
+            currentAddressLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            currentAddressLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            currentAddressLabel.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, multiplier: 0.8)
+        ])
+    }
+    
+    private func updateCurrentAddress() {
+        let centerCoordinate = mapView.centerCoordinate
+        let location = CLLocation(latitude: centerCoordinate.latitude, longitude: centerCoordinate.longitude)
+        
+        addressGeocoder.cancelGeocode() // Cancel any previous requests
+        addressGeocoder.reverseGeocodeLocation(location) { [weak self] (placemarks, error) in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Address geocoding error: \(error.localizedDescription)")
+                    self.currentAddressLabel.text = "Unable to load address"
+                    return
+                }
+                
+                guard let placemark = placemarks?.first else {
+                    self.currentAddressLabel.text = "No address found"
+                    return
+                }
+                
+                let address = self.formatAddress(from: placemark)
+                self.currentAddressLabel.text = address
+                
+                // Only show the label if we should show address label
+                if self.shouldShowAddressLabel && self.currentAddressLabel.alpha == 0 {
+                    UIView.animate(withDuration: 0.3) {
+                        self.currentAddressLabel.alpha = 1
+                    }
+                }
+            }
+        }
+    }
+    
     deinit {
-        // No need to invalidate any timers in the new implementation
+        addressGeocoder.cancelGeocode()
     }
     
     private func setupExistingLocation(for place: PlaceItem) {
@@ -750,12 +807,23 @@ extension SelectPlaceViewController: MKMapViewDelegate {
         if hasShownInstructions {
             hasShownInstructions = false
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 UIView.animate(withDuration: 0.3) {
                     self.instructionLabel.alpha = 0
+                } completion: { _ in
+                    // Enable address label showing and show it
+                    self.shouldShowAddressLabel = true
+                    UIView.animate(withDuration: 0.3) {
+                        self.currentAddressLabel.alpha = 1
+                    }
                 }
             }
         }
+    }
+    
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        // Update the current address when the map region changes
+        updateCurrentAddress()
     }
     
     // Customize annotation appearance
