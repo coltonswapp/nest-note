@@ -18,10 +18,7 @@ class SelectEntriesFlowViewController: UIViewController {
     weak var delegate: SelectEntriesFlowDelegate?
     
     private var contentNavigationController: UINavigationController!
-    private var selectionCounterView: UIView!
-    private var countLabel: UILabel!
-    private var finishButton: NNPrimaryLabeledButton!
-    private var stackView: UIStackView!
+    private var selectionCounterView: SelectEntriesCountView!
     
     private var selectedEntries: Set<BaseEntry> = []
     private var selectedPlaces: Set<PlaceItem> = []
@@ -115,97 +112,62 @@ class SelectEntriesFlowViewController: UIViewController {
     }
     
     private func setupSelectionCounterView() {
-        selectionCounterView = UIView()
-        selectionCounterView.backgroundColor = .systemBackground
-        selectionCounterView.translatesAutoresizingMaskIntoConstraints = false
+        selectionCounterView = SelectEntriesCountView()
+        selectionCounterView.onContinueTapped = { [weak self] in
+            self?.finishButtonTapped()
+        }
         
-        // Add shadow and border
-        selectionCounterView.layer.shadowColor = UIColor.black.cgColor
-        selectionCounterView.layer.shadowOffset = CGSize(width: 0, height: -2)
-        selectionCounterView.layer.shadowOpacity = 0.1
-        selectionCounterView.layer.shadowRadius = 4
-        
-        // Add top border
-        let topBorder = UIView()
-        topBorder.backgroundColor = .separator
-        topBorder.translatesAutoresizingMaskIntoConstraints = false
-        selectionCounterView.addSubview(topBorder)
-        
-        // Create stack view for vertical layout
-        stackView = UIStackView()
-        stackView.axis = .vertical
-        stackView.spacing = 12
-        stackView.alignment = .fill
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Create count label
-        countLabel = UILabel()
-        countLabel.font = .h4
-        countLabel.textColor = .secondaryLabel
-        countLabel.textAlignment = .center
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Create finish button - using "Done" to match the image
-        finishButton = NNPrimaryLabeledButton(title: "Done")
-        finishButton.addTarget(self, action: #selector(finishButtonTapped), for: .touchUpInside)
-        finishButton.translatesAutoresizingMaskIntoConstraints = false
-        
-        stackView.addArrangedSubview(countLabel)
-        stackView.addArrangedSubview(finishButton)
-        
-        selectionCounterView.addSubview(stackView)
         view.addSubview(selectionCounterView)
-        
-        NSLayoutConstraint.activate([
-            topBorder.topAnchor.constraint(equalTo: selectionCounterView.topAnchor),
-            topBorder.leadingAnchor.constraint(equalTo: selectionCounterView.leadingAnchor),
-            topBorder.trailingAnchor.constraint(equalTo: selectionCounterView.trailingAnchor),
-            topBorder.heightAnchor.constraint(equalToConstant: 0.5),
-            
-            stackView.topAnchor.constraint(equalTo: selectionCounterView.topAnchor, constant: 16),
-            stackView.leadingAnchor.constraint(equalTo: selectionCounterView.leadingAnchor, constant: 20),
-            stackView.trailingAnchor.constraint(equalTo: selectionCounterView.trailingAnchor, constant: -20),
-            stackView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            
-            finishButton.heightAnchor.constraint(equalToConstant: 50)
-        ])
-        
         updateSelectionCounter()
+        
+        view.backgroundColor = .clear
     }
     
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Content navigation controller takes up space above the counter
+            // Content navigation controller takes up space above the counter with padding for floating effect
             contentNavigationController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             contentNavigationController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             contentNavigationController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contentNavigationController.view.bottomAnchor.constraint(equalTo: selectionCounterView.topAnchor),
+            contentNavigationController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             
-            // Selection counter view is fixed at the bottom
-            selectionCounterView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            selectionCounterView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            selectionCounterView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            // Selection counter view centered and floating
+            selectionCounterView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            selectionCounterView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
         ])
     }
     
     private func updateSelectionCounter() {
         let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-        let itemText = totalCount == 1 ? "item" : "items"
-        countLabel.text = "\(totalCount) \(itemText) selected"
-        
-        finishButton.isEnabled = totalCount > 0
-        finishButton.alpha = totalCount > 0 ? 1.0 : 0.6
+        selectionCounterView.count = totalCount
     }
     
     @objc private func cancelButtonTapped() {
         delegate?.selectEntriesFlowDidCancel(self)
     }
     
-    @objc private func finishButtonTapped() {
-        let entriesArray = Array(selectedEntries)
-        let placesArray = Array(selectedPlaces)
-        let routinesArray = Array(selectedRoutines)
-        delegate?.selectEntriesFlow(self, didFinishWithEntries: entriesArray, places: placesArray, routines: routinesArray)
+    private func finishButtonTapped() {
+        let totalCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+        let itemText = totalCount == 1 ? "item" : "items"
+        
+        let alert = UIAlertController(
+            title: "Confirm Selection",
+            message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
+            preferredStyle: .alert
+        )
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+        let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
+            let entriesArray = Array(self.selectedEntries)
+            let placesArray = Array(self.selectedPlaces)
+            let routinesArray = Array(self.selectedRoutines)
+            self.delegate?.selectEntriesFlow(self, didFinishWithEntries: entriesArray, places: placesArray, routines: routinesArray)
+        }
+        
+        alert.addAction(cancelAction)
+        alert.addAction(confirmAction)
+        
+        present(alert, animated: true)
     }
 }
 
@@ -405,10 +367,22 @@ class ModifiedSelectFolderViewController: UIViewController {
     }
     
     private func setupCollectionView() {
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
-        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: createLayout())
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .systemBackground
+        
         view.addSubview(collectionView)
+        
+        // Set up Auto Layout constraints
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // Use automatic content inset adjustment for proper navigation bar handling
+        collectionView.contentInsetAdjustmentBehavior = .automatic
         
         // Register the FolderCollectionViewCell
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
