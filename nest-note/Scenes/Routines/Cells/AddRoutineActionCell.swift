@@ -20,7 +20,7 @@ class AddRoutineActionCell: UITableViewCell {
         let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         let image = UIImage(systemName: "plus", withConfiguration: config)
         imageView.image = image
-        imageView.tintColor = .systemBlue
+        imageView.tintColor = .tertiaryLabel
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
     }()
@@ -42,7 +42,7 @@ class AddRoutineActionCell: UITableViewCell {
         let label = UILabel()
         label.text = "Add routine item"
         label.font = .bodyXL
-        label.textColor = .systemBlue
+        label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()

@@ -50,6 +50,15 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    private var filterView: NNCategoryFilterView?
+    private var enabledSections: Set<Section> = Set(Section.allCases) {
+        didSet {
+            if shouldApplySnapshotAutomatically {
+                applySnapshot()
+            }
+        }
+    }
+    
     var places: [PlaceItem] = [] {
         didSet {
             if shouldApplySnapshotAutomatically {
@@ -255,6 +264,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         setupLoadingIndicator()
         setupRefreshControl()
         setupNavigationBar()
+        setupFilterView()
         setupAddEntryButton()
         configureDataSource()
         setupEmptyStateView()
@@ -320,6 +330,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 // Update UI state
                 self.refreshEmptyState()
                 
+                // Update filter view after a brief delay to ensure data is fully loaded
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.updateFilterView()
+                }
+                
                 // Restore selection state if in edit-only mode
                 if self.isEditOnlyMode && self.isEditingMode {
                     self.restoreCollectionViewSelection()
@@ -358,6 +373,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 
                 // Update UI state
                 self.refreshEmptyState()
+                
+                // Update filter view after a brief delay to ensure data is fully loaded
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.updateFilterView()
+                }
                 
                 // Restore selection state if in edit-only mode
                 if self.isEditOnlyMode && self.isEditingMode {
@@ -448,7 +468,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             // Use the stored section order to get the correct section
             guard sectionIndex < self.sectionOrder.count else { 
                 Logger.log(level: .error, category: logCategory, message: "❌ LAYOUT ERROR: sectionIndex \(sectionIndex) >= sectionOrder.count \(self.sectionOrder.count). SectionOrder: \(self.sectionOrder.map { $0.rawValue })")
-                return self.createInsetGroupedSection() // Fallback section
+                return self.createFullWidthSection() // Fallback section
             }
             let section = self.sectionOrder[sectionIndex]
             
@@ -456,9 +476,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             case .folders:
                 return self.createFoldersSection()
             case .codes:
-                return self.createHalfWidthSection()
+                // Always show header for .codes section (first entries section)
+                return self.createHalfWidthSectionWithHeader()
             case .other:
-                return self.createInsetGroupedSection()
+                // Show header only if .codes section is not present (FullWidth-only scenario)
+                let hasCodesSection = self.sectionOrder.contains(.codes)
+                return hasCodesSection ? self.createFullWidthSection() : self.createFullWidthSectionWithHeader()
             case .places:
                 return self.createPlacesSection()
             case .routines:
@@ -473,11 +496,42 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 4, bottom: 30, trailing: 4)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
+        section.interGroupSpacing = 8
+        return section
+    }
+    
+    private func createFullWidthSectionWithHeader() -> NSCollectionLayoutSection {
+        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
+        let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
+        section.interGroupSpacing = 8
+        
+        let header = NSCollectionLayoutBoundarySupplementaryItem(
+            layoutSize: NestCategoryViewController.headerSize,
+            elementKind: UICollectionView.elementKindSectionHeader,
+            alignment: .top
+        )
+        section.boundarySupplementaryItems = [header]
+        
         return section
     }
     
     private func createHalfWidthSection() -> NSCollectionLayoutSection {
+        
+        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(90))
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+        let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(90))
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
+        let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4)
+        return section
+    }
+    
+    private func createHalfWidthSectionWithHeader() -> NSCollectionLayoutSection {
         
         let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(90))
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
@@ -717,8 +771,21 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             // Configure header based on section
             let section = self.sectionOrder[indexPath.section]
             
-            // Don't return a header for .other section to avoid duplicate "ENTRIES" headers
-            if section == .other {
+            // Apply the same logic as in the layout creation
+            let shouldShowHeader: Bool
+            switch section {
+            case .codes:
+                // Always show header for .codes section (first entries section)
+                shouldShowHeader = true
+            case .other:
+                // Show header only if .codes section is not present (FullWidth-only scenario)
+                shouldShowHeader = !self.sectionOrder.contains(.codes)
+            default:
+                // All other sections always show headers
+                shouldShowHeader = true
+            }
+            
+            if !shouldShowHeader {
                 return nil
             }
             
@@ -735,7 +802,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             case .codes:
                 title = "ENTRIES"
             case .other:
-                title = "" // This case shouldn't be reached due to early return above
+                title = "ENTRIES"
             case .places:
                 title = "PLACES"
             case .routines:
@@ -767,15 +834,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // Debug logging
         Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Creating snapshot for category '\(category)'. Folders: \(folders.count), Entries: \(entries.count), Places: \(places.count)")
         
-        // Determine which sections we need based on content
-        var sectionsToAdd: [Section] = []
-        
-        // Add folders section if we have folders
-        if !folders.isEmpty {
-            sectionsToAdd.append(.folders)
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .folders section with \(folders.count) folders")
-        }
-        
         // Filter entries based on cell type (title + content < 15 characters)
         let codesEntries = entries.filter { $0.shouldUseHalfWidthCell }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -784,59 +842,60 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Category '\(category)' - Codes: \(codesEntries.count), Other: \(otherEntries.count)")
         
-        // Only add sections that have content
-        if !codesEntries.isEmpty {
-            sectionsToAdd.append(.codes)
+        // Build sections map similar to the Medium article approach
+        var sectionsData: [Section: [AnyHashable]] = [:]
+        
+        // Add folders section if we have folders and it's enabled
+        if !folders.isEmpty && enabledSections.contains(.folders) {
+            let sortedFolders = folders.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sectionsData[.folders] = sortedFolders
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .folders section with \(folders.count) folders")
+        }
+        
+        // Add codes entries section if we have them and it's enabled
+        if !codesEntries.isEmpty && enabledSections.contains(.codes) {
+            sectionsData[.codes] = codesEntries
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .codes section")
         }
-        if !otherEntries.isEmpty {
-            sectionsToAdd.append(.other)
+        
+        // Add other entries section if we have them and it's enabled
+        if !otherEntries.isEmpty && enabledSections.contains(.codes) {
+            sectionsData[.other] = otherEntries
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .other section")
         }
         
-        // Add places section if we have places
-        if !places.isEmpty {
-            sectionsToAdd.append(.places)
+        // Add places section if we have places and it's enabled
+        if !places.isEmpty && enabledSections.contains(.places) {
+            let sortedPlaces = places.sorted { $0.alias?.localizedCaseInsensitiveCompare($1.alias ?? "") == .orderedAscending }
+            sectionsData[.places] = sortedPlaces
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .places section with \(places.count) places")
         }
         
-        // Add routines section LAST if we have routines
-        if !routines.isEmpty {
-            sectionsToAdd.append(.routines)
+        // Add routines section LAST if we have routines and it's enabled
+        if !routines.isEmpty && enabledSections.contains(.routines) {
+            let sortedRoutines = routines.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sectionsData[.routines] = sortedRoutines
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .routines section with \(routines.count) routines")
         }
         
-        // Add the sections to snapshot
-        snapshot.appendSections(sectionsToAdd)
-        Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Final sections in snapshot: \(sectionsToAdd.map { $0.rawValue })")
+        // Sort sections by their defined order
+        let sectionKeys = sectionsData.keys.sorted { section0, section1 in
+            return section0.rawValue < section1.rawValue
+        }
         
-        // Add content to sections
-        if !folders.isEmpty {
-            let sortedFolders = folders.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(sortedFolders.count) folders to .folders section: \(sortedFolders.map { $0.title })")
-            snapshot.appendItems(sortedFolders, toSection: .folders)
-        }
-        if !places.isEmpty {
-            let sortedPlaces = places.sorted { $0.alias?.localizedCaseInsensitiveCompare($1.alias ?? "") == .orderedAscending }
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(sortedPlaces.count) places to .places section: \(sortedPlaces.map { $0.alias ?? "Unnamed" })")
-            snapshot.appendItems(sortedPlaces, toSection: .places)
-        }
-        if !routines.isEmpty {
-            let sortedRoutines = routines.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(sortedRoutines.count) routines to .routines section: \(sortedRoutines.map { $0.title })")
-            snapshot.appendItems(sortedRoutines, toSection: .routines)
-        }
-        if !codesEntries.isEmpty {
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(codesEntries.count) entries to .codes section: \(codesEntries.map { $0.title })")
-            snapshot.appendItems(codesEntries, toSection: .codes)
-        }
-        if !otherEntries.isEmpty {
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding \(otherEntries.count) entries to .other section: \(otherEntries.map { $0.title })")
-            snapshot.appendItems(otherEntries, toSection: .other)
+        // Apply sections and items following the Medium article pattern
+        for sectionKey in sectionKeys {
+            if let items = sectionsData[sectionKey], !items.isEmpty {
+                snapshot.appendSections([sectionKey])
+                snapshot.appendItems(items, toSection: sectionKey)
+                Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Added section \(sectionKey) with \(items.count) items")
+            }
         }
         
         // Store the section order for layout creation
-        self.sectionOrder = sectionsToAdd
+        self.sectionOrder = sectionKeys
+        
+        Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Final sections in snapshot: \(sectionKeys.map { $0.rawValue })")
         
         return snapshot
     }
@@ -856,50 +915,54 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Starting snapshot application...")
         isApplyingSnapshot = true
         
-        do {
-            let snapshot = createSnapshot()
-            
-            // Log section information for debugging
-            Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Created snapshot with sections: \(sectionOrder.map { $0.rawValue })")
-            Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Snapshot has \(snapshot.numberOfSections) sections, \(snapshot.numberOfItems) total items")
-            
-            // Validate snapshot before applying
-            if snapshot.numberOfSections == 0 && (entries.isEmpty && folders.isEmpty && places.isEmpty) {
-                Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Empty snapshot - showing empty state")
-                isApplyingSnapshot = false
-                refreshEmptyState()
-                return
-            }
-            
-            // Determine if we should animate based on section changes and parameter
-            let shouldAnimate = animated && (sectionOrder != previousSectionOrder)
-            
-            // Apply snapshot 
-            dataSource.apply(snapshot, animatingDifferences: shouldAnimate) { [weak self] in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    // Only update layout after snapshot is successfully applied and if composition changed
-                    let layoutNeedsUpdate = sectionOrder != previousSectionOrder
-                    if layoutNeedsUpdate {
-                        Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Section composition changed after apply. Previous: \(previousSectionOrder.map { $0.rawValue } ?? []), New: \(sectionOrder.map { $0.rawValue } ?? [])")
-                        collectionView.setCollectionViewLayout(createLayout() ?? UICollectionViewFlowLayout(), animated: false)
-                        previousSectionOrder = sectionOrder ?? []
-                    } else {
-                        Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Section composition unchanged, skipping layout update")
-                    }
-                    
+        Task { @MainActor in
+            do {
+                let snapshot = createSnapshot()
+                
+                // Log section information for debugging
+                Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Created snapshot with sections: \(sectionOrder.map { $0.rawValue })")
+                Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Snapshot has \(snapshot.numberOfSections) sections, \(snapshot.numberOfItems) total items")
+                
+                // Validate snapshot before applying
+                if snapshot.numberOfSections == 0 && (entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty) {
+                    Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Empty snapshot - showing empty state")
                     isApplyingSnapshot = false
-                    collectionView.layoutIfNeeded()
-                    Logger.log(level: .info, category: logCategory, message: "✅ CRASH DEBUG: Snapshot applied successfully")
+                    refreshEmptyState()
+                    return
                 }
-            }
-        } catch {
-            Logger.log(level: .error, category: logCategory, message: "❌ CRASH DEBUG: Snapshot application failed: \(error)")
-            isApplyingSnapshot = false
-            
-            // Force reload as fallback
-            DispatchQueue.main.async {
-                self.collectionView.reloadData()
+                
+                // Always animate when requested for filtering operations
+                let shouldAnimate = animated
+                
+                // Apply snapshot following the Medium article pattern
+                Logger.log(level: .info, category: logCategory, message: "🎬 Applying snapshot with animation: \(shouldAnimate)")
+                dataSource.apply(snapshot, animatingDifferences: shouldAnimate) { [weak self] in
+                    print("Apply snapshot completed!")
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        
+                        self.isApplyingSnapshot = false
+                        Logger.log(level: .info, category: logCategory, message: "✅ CRASH DEBUG: Snapshot applied successfully")
+                    }
+                }
+            } catch {
+                Logger.log(level: .error, category: logCategory, message: "❌ CRASH DEBUG: Snapshot application failed: \(error)")
+                isApplyingSnapshot = false
+                
+                // For filtering operations, try to apply without animation as fallback
+                if animated {
+                    Logger.log(level: .info, category: logCategory, message: "Retrying snapshot without animation")
+                    let snapshot = createSnapshot()
+                    dataSource.apply(snapshot, animatingDifferences: false)
+                } else {
+                    // Only use reloadData as last resort
+                    collectionView.reloadData()
+                }
+                
+                // Restore alpha if we were animating
+                if animated {
+                    collectionView.alpha = 1.0
+                }
             }
         }
     }
@@ -1144,6 +1207,62 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         showUpgradePrompt(for: proFeature)
     }
     
+    private func setupFilterView() {
+        // Don't show filter view in edit-only mode
+        guard !isEditOnlyMode else { return }
+        
+        // Always create the filterView in viewDidLoad to avoid late addition issues
+        filterView = NNCategoryFilterView()
+        filterView?.delegate = self
+        filterView?.frame.size.height = 55
+        filterView?.isHidden = true // Start hidden, will be shown when data loads if needed
+        
+        if let filterView = filterView {
+            addNavigationBarPalette(filterView)
+        }
+    }
+    
+    private func updateFilterView() {
+        guard let filterView = filterView, !isEditOnlyMode else { return }
+        
+        let availableSections = getAvailableSections()
+        
+        // Hide filter view only if there are no items at all
+        if availableSections.isEmpty {
+            filterView.isHidden = true
+            return
+        }
+        
+        print("🔄 Updating filter view with sections: \(availableSections.map { $0.displayTitle })")
+        filterView.isHidden = false
+        filterView.configure(with: availableSections)
+    }
+    
+    private func getAvailableSections() -> [Section] {
+        var sections: [Section] = []
+        
+        if !folders.isEmpty {
+            sections.append(.folders)
+        }
+        
+        let codesEntries = entries.filter { $0.shouldUseHalfWidthCell }
+        let otherEntries = entries.filter { !$0.shouldUseHalfWidthCell }
+        
+        if !codesEntries.isEmpty || !otherEntries.isEmpty {
+            sections.append(.codes)
+        }
+        
+        if !places.isEmpty {
+            sections.append(.places)
+        }
+        
+        if !routines.isEmpty {
+            sections.append(.routines)
+        }
+        
+        return sections
+    }
+
     private func setupAddEntryButton() {
         // Only show add entry button for nest owners and not in edit-only mode
         guard entryRepository is NestService && !isEditOnlyMode else { return }
@@ -2226,6 +2345,27 @@ extension NestCategoryViewController {
             } else {
                 Logger.log(level: .info, category: logCategory, message: "Place not found in local array for deletion: \(place.id)")
             }
+        }
+    }
+}
+
+extension NestCategoryViewController: NNCategoryFilterViewDelegate {
+    func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateEnabledSections sections: Set<Section>) {
+        // Temporarily disable automatic snapshots to prevent double application
+        shouldApplySnapshotAutomatically = false
+        
+        // Set the enabled sections without triggering automatic snapshot
+        self.enabledSections = sections
+        
+        // Re-enable automatic snapshots
+        self.shouldApplySnapshotAutomatically = true
+        
+        // Apply with animation when filtering - this is the ONLY snapshot application
+        self.applySnapshot(animated: true)
+        
+        // Update filter view display after main collection view is done
+        DispatchQueue.main.async {
+            filterView.updateDisplayedState()
         }
     }
 }
