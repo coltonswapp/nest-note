@@ -89,6 +89,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             for: categoryNames,
             allGroupedEntries: entries,
             allPlaces: places,
+            allRoutines: routines,
             categories: categories
         )
         
@@ -121,6 +122,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             for: currentFolderPath,
             allEntries: entries,
             allPlaces: places,
+            allRoutines: routines,
             categories: categories
         )
         
@@ -142,6 +144,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private var entries: [String: [BaseEntry]]?
     private var places: [PlaceItem] = []
+    private var routines: [RoutineItem] = []
     
     private let sectionHeaders = ["", "Folders"]
     
@@ -232,11 +235,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 if let nestService = entryRepository as? NestService {
                     do {
                         let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
-                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                        let routines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
+                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places, \(routines.count) routines")
                         
                         await MainActor.run {
                             self.entries = groupedEntries
                             self.places = places
+                            self.routines = routines
                             self.clearFolderCache() // Clear cache when data refreshes
                             self.applyInitialSnapshots()
                             self.refreshControl.endRefreshing()
@@ -249,22 +254,26 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                         await MainActor.run {
                             self.entries = groupedEntries
                             self.places = []
+                            self.routines = []
                             self.clearFolderCache()
                             self.applyInitialSnapshots()
                             self.refreshControl.endRefreshing()
                         }
                     }
                 } else if let sitterService = entryRepository as? SitterViewService {
-                    // For SitterViewService, refresh both entries and places
+                    // For SitterViewService, refresh entries, places, and routines (now supported)
                     sitterService.clearEntriesCache()
                     sitterService.clearPlacesCache()
+                    sitterService.clearItemsCache() // Clear routines cache too
                     let groupedEntries = try await entryRepository.refreshEntries()
                     let places = try await sitterService.fetchNestPlaces()
-                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups and \(places.count) places")
+                    let routines = try await sitterService.fetchNestRoutines()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
                     
                     await MainActor.run {
                         self.entries = groupedEntries
                         self.places = places
+                        self.routines = routines
                         self.clearFolderCache()
                         self.applyInitialSnapshots()
                         self.refreshControl.endRefreshing()
@@ -277,6 +286,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     await MainActor.run {
                         self.entries = groupedEntries
                         self.places = []
+                        self.routines = []
                         self.clearFolderCache()
                         self.applyInitialSnapshots()
                         self.refreshControl.endRefreshing()
@@ -551,29 +561,35 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             if let nestService = entryRepository as? NestService {
                 do {
                     let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
-                    Logger.log(level: .info, category: logCategory, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places")
+                    let routines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
+                    Logger.log(level: .info, category: logCategory, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places, \(routines.count) routines")
                     self.entries = groupedEntries
                     self.places = places
+                    self.routines = routines
                 } catch {
                     Logger.log(level: .error, category: logCategory, message: "Failed to fetch entries and places: \(error)")
                     // Fallback to separate fetches
                     let groupedEntries = try await entryRepository.fetchEntries()
                     self.entries = groupedEntries
                     self.places = []
+                    self.routines = []
                 }
             } else if let sitterService = entryRepository as? SitterViewService {
-                // For SitterViewService, fetch both entries and places
+                // For SitterViewService, fetch entries, places, and routines (now supported)
                 let groupedEntries = try await entryRepository.fetchEntries()
                 let places = try await sitterService.fetchNestPlaces()
-                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups and \(places.count) places")
+                let routines = try await sitterService.fetchNestRoutines()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
                 self.entries = groupedEntries
                 self.places = places
+                self.routines = routines
             } else {
                 // For other repository types, fetch entries only
                 let groupedEntries = try await entryRepository.fetchEntries()
                 Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups")
                 self.entries = groupedEntries
                 self.places = []
+                self.routines = []
             }
             
             await MainActor.run {
@@ -644,13 +660,15 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                 
                 let (newCategories, groupedEntries) = try await (categoriesTask, entriesTask)
                 
-                // Refresh places too
+                // Refresh places and routines too
                 let refreshedPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
+                let refreshedRoutines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
                 
                 await MainActor.run {
                     self.categories = newCategories
                     self.entries = groupedEntries
                     self.places = refreshedPlaces
+                    self.routines = refreshedRoutines
                     self.applyInitialSnapshots()
                     self.showToast(text: "Category Created")
                 }

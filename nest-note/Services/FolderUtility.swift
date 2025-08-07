@@ -8,6 +8,7 @@ final class FolderUtility {
     struct FolderContents {
         let entries: [BaseEntry]
         let places: [PlaceItem]
+        let routines: [RoutineItem]
         let subfolders: [FolderData]
         let allPlaces: [PlaceItem] // For passing to child folders
     }
@@ -17,6 +18,7 @@ final class FolderUtility {
         for category: String,
         allEntries: [String: [BaseEntry]],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         categories: [NestCategory]
     ) -> [FolderData] {
         var folderItems: [FolderData] = []
@@ -58,11 +60,28 @@ final class FolderUtility {
             }
         }
         
+        // Count routines in subfolders
+        for routine in allRoutines {
+            let folderPath = routine.category
+            
+            if folderPath.hasPrefix(category + "/") {
+                let remainingPath = String(folderPath.dropFirst(category.count + 1))
+                
+                if !remainingPath.isEmpty {
+                    let nextFolderComponent = remainingPath.components(separatedBy: "/").first!
+                    let nextFolderPath = "\(category)/\(nextFolderComponent)"
+                    currentLevelFolders.insert(nextFolderPath)
+                    folderCounts[nextFolderPath, default: 0] += 1
+                }
+            }
+        }
+        
         // Count subfolders as items (recursive counting)
         let subFolderCounts = countSubfoldersRecursively(
             for: currentLevelFolders,
             allEntries: allEntries,
             allPlaces: allPlaces,
+            allRoutines: allRoutines,
             categories: categories
         )
         
@@ -112,6 +131,7 @@ final class FolderUtility {
         for folderPaths: Set<String>,
         allEntries: [String: [BaseEntry]],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         categories: [NestCategory]
     ) -> [String: Int] {
         var subfolderCounts: [String: Int] = [:]
@@ -121,6 +141,7 @@ final class FolderUtility {
                 for: folderPath,
                 allEntries: allEntries,
                 allPlaces: allPlaces,
+                allRoutines: allRoutines,
                 categories: categories
             )
             
@@ -138,6 +159,7 @@ final class FolderUtility {
         for targetCategories: [String],
         allGroupedEntries: [String: [BaseEntry]],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         categories: [NestCategory]
     ) -> [String: Int] {
         var folderCounts: [String: Int] = [:]
@@ -175,12 +197,26 @@ final class FolderUtility {
             }
         }
         
+        // Count routines efficiently in one pass
+        for routine in allRoutines {
+            let routineCategory = routine.category
+            
+            // Check if routine belongs to any target category
+            for targetCategory in targetCategories {
+                if routineCategory == targetCategory || routineCategory.hasPrefix(targetCategory + "/") {
+                    folderCounts[targetCategory, default: 0] += 1
+                    break // Routine can only belong to one target category
+                }
+            }
+        }
+        
         // Count subfolders for each target category
         for targetCategory in targetCategories {
             let subfolders = buildSubfolders(
                 for: targetCategory,
                 allEntries: allGroupedEntries,
                 allPlaces: allPlaces,
+                allRoutines: allRoutines,
                 categories: categories
             )
             folderCounts[targetCategory, default: 0] += subfolders.count
@@ -194,6 +230,7 @@ final class FolderUtility {
         for category: String,
         allGroupedEntries: [String: [BaseEntry]],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         categories: [NestCategory]
     ) -> FolderContents {
         // Filter entries for this exact category
@@ -217,17 +254,22 @@ final class FolderUtility {
         // Filter places for this category
         let places = allPlaces.filter { $0.category == category }
         
+        // Filter routines for this category
+        let routines = allRoutines.filter { $0.category == category }
+        
         // Build subfolders
         let subfolders = buildSubfolders(
             for: category,
             allEntries: allGroupedEntries,
             allPlaces: allPlaces,
+            allRoutines: allRoutines,
             categories: categories
         )
         
         return FolderContents(
             entries: entries,
             places: places,
+            routines: routines,
             subfolders: subfolders,
             allPlaces: allPlaces
         )

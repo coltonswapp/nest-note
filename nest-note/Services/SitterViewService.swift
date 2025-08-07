@@ -63,6 +63,12 @@ final class SitterViewService: EntryRepository {
         return sessionFilteredItems.compactMap { $0 as? BaseEntry }
     }
     
+    // Computed property that filters routines from session-filtered items
+    private var cachedRoutines: [RoutineItem]? {
+        guard !sessionFilteredItems.isEmpty else { return nil }
+        return sessionFilteredItems.compactMap { $0 as? RoutineItem }
+    }
+    
     // MARK: - Folder Contents Cache (optimizes expensive folder traversals)
     private var cachedFolderContents: [String: FolderContents] = [:]
     
@@ -132,7 +138,7 @@ final class SitterViewService: EntryRepository {
             return cachedEntries
         }
         
-        // Get session-filtered items using unified method
+        // Get session-filtered items using unified method (this is cached after first call)
         let filteredItems = try await fetchAllFilteredItems()
         
         // Filter to only entry items (already BaseEntry from repository)
@@ -209,7 +215,7 @@ final class SitterViewService: EntryRepository {
             return cachedPlaces
         }
         
-        // Get session-filtered items using unified method
+        // Get session-filtered items using unified method (this is cached after first call)
         let filteredItems = try await fetchAllFilteredItems()
         
         // Filter to only place items from session-filtered items
@@ -222,6 +228,63 @@ final class SitterViewService: EntryRepository {
         return places
     }
     
+    // MARK: - Routines
+    
+    /// Fetches routines for the current nest, using cache if available
+    func fetchNestRoutines() async throws -> [RoutineItem] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestRoutines() called - using unified approach")
+        
+        // Return cached routines if available
+        if let cachedRoutines = cachedRoutines {
+            Logger.log(level: .info, category: .sitterViewService, message: "Using cached routines (count: \(cachedRoutines.count))")
+            return cachedRoutines
+        }
+        
+        // Get session-filtered items using unified method (this is cached after first call)
+        let filteredItems = try await fetchAllFilteredItems()
+        
+        // Filter to only routine items from session-filtered items
+        let routines = filteredItems.compactMap { item -> RoutineItem? in
+            guard item.type == .routine, let routineItem = item as? RoutineItem else { return nil }
+            return routineItem
+        }
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(routines.count) routines using unified approach ✅")
+        return routines
+    }
+    
+    /// Forces a refresh of the routines
+    func refreshRoutines() async throws -> [RoutineItem] {
+        clearItemsCache() // This will clear the session-filtered items which includes routines
+        return try await fetchNestRoutines()
+    }
+    
+    /// Fetch both entries and places in a single efficient call (matching NestService pattern)
+    func fetchEntriesAndPlaces() async throws -> (entries: [String: [BaseEntry]], places: [PlaceItem]) {
+        Logger.log(level: .info, category: .sitterViewService, message: "📦 fetchEntriesAndPlaces() called - efficient single fetch")
+        
+        let filteredItems = try await fetchAllFilteredItems() // Single fetch with session filtering
+        
+        // Filter entries (already BaseEntry from repository)
+        let entryItems = filteredItems.compactMap { item -> BaseEntry? in
+            guard item.type == .entry else { return nil }
+            return item as? BaseEntry
+        }
+        let groupedEntries = Dictionary(grouping: entryItems) { $0.category }
+        
+        // Filter places
+        let placeItems = filteredItems.compactMap { $0 as? PlaceItem }
+        
+        Logger.log(level: .info, category: .sitterViewService, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(placeItems.count) places")
+        return (entries: groupedEntries, places: placeItems)
+    }
+    
+    /// Fetch routines (matching NestService pattern)
+    func fetchRoutines() async throws -> [RoutineItem] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchRoutines() called")
+        return try await fetchNestRoutines()
+    }
+    
     // MARK: - Folder Contents Structure (using shared FolderUtility)
     typealias FolderContents = FolderUtility.FolderContents
     
@@ -231,28 +294,33 @@ final class SitterViewService: EntryRepository {
         
         // Check cache first to avoid expensive folder traversals
         if let cachedContents = cachedFolderContents[category] {
-            Logger.log(level: .info, category: .sitterViewService, message: "📁 Using cached folder contents for '\(category)' - \(cachedContents.entries.count) entries, \(cachedContents.places.count) places, \(cachedContents.subfolders.count) subfolders")
+            Logger.log(level: .info, category: .sitterViewService, message: "📁 Using cached folder contents for '\(category)' - \(cachedContents.entries.count) entries, \(cachedContents.places.count) places, \(cachedContents.routines.count) routines, \(cachedContents.subfolders.count) subfolders")
             return cachedContents
         }
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 Cache miss - performing folder traversal for '\(category)'")
         
-        // Get all data in one efficient call
-        let allGroupedEntries = try await fetchNestEntries()
-        let allPlaces = try await fetchNestPlaces()
+        // Get all data in one efficient call - matching NestService pattern
+        let (allGroupedEntries, allPlaces) = try await fetchEntriesAndPlaces()
+        let allRoutines = try await fetchRoutines()
         let categories = try await fetchCategories()
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 fetchFolderContents data gathered")
         
-        // Build folder contents using shared utility
+        // Build folder contents using shared utility (SitterViewService now supports routines)
         let folderContents = FolderUtility.buildFolderContents(
             for: category,
             allGroupedEntries: allGroupedEntries,
             allPlaces: allPlaces,
+            allRoutines: allRoutines,
             categories: categories
         )
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Folder contents for '\(category)': \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.subfolders.count) subfolders")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 DEBUGGING FOLDER COUNTS for '\(category)':")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Direct items: \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Subfolders: \(folderContents.subfolders.count)")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Subfolder details: \(folderContents.subfolders.map { "\($0.title)(\($0.itemCount))" }.joined(separator: ", "))")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Total visible items should be: \(folderContents.entries.count + folderContents.places.count + folderContents.routines.count + folderContents.subfolders.count)")
         
         // Cache the result to speed up future requests
         cachedFolderContents[category] = folderContents
