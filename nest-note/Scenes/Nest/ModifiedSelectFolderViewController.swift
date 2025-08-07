@@ -407,39 +407,23 @@ protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
 // MARK: - NestCategoryViewControllerSelectEntriesDelegate
 extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEntriesDelegate {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>) {
-        let entryIds = entries.map { $0.id }
-        updateSelectedIds(entries: entryIds, places: currentPlaceIds, routines: currentRoutineIds)
+        updateAllSelectedIds(from: controller)
     }
     
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>) {
-        let placeIds = places.map { $0.id }
-        updateSelectedIds(entries: currentEntryIds, places: placeIds, routines: currentRoutineIds)
+        updateAllSelectedIds(from: controller)
     }
     
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>) {
-        let routineIds = routines.map { $0.id }
-        updateSelectedIds(entries: currentEntryIds, places: currentPlaceIds, routines: routineIds)
+        updateAllSelectedIds(from: controller)
     }
     
-    // Helper properties to track current IDs by type
-    private var currentEntryIds: [String] {
-        // Filter currentSelectedIds for entries (could be enhanced with type tracking)
-        return []
-    }
-    
-    private var currentPlaceIds: [String] {
-        // Filter currentSelectedIds for places (could be enhanced with type tracking)
-        return []
-    }
-    
-    private var currentRoutineIds: [String] {
-        // Filter currentSelectedIds for routines (could be enhanced with type tracking)
-        return []
-    }
-    
-    // Helper method to combine all IDs and update the selection counter
-    private func updateSelectedIds(entries: [String], places: [String], routines: [String]) {
-        currentSelectedIds = entries + places + routines
+    // Helper method to get ALL selected IDs from the controller
+    private func updateAllSelectedIds(from controller: NestCategoryViewController) {
+        let allSelectedIds = controller.getAllSelectedItemIds()
+        currentSelectedIds = allSelectedIds
+        print("[DEBUG] Total selected items: \(currentSelectedIds.count)")
+        
         updateSelectionCounter()
         // Update folder counts when selections change
         applySnapshot()

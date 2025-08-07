@@ -2122,6 +2122,14 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
             }
         }
     }
+    
+    // Method to get all selected item IDs across all types
+    func getAllSelectedItemIds() -> [String] {
+        let entryIds = selectedEntries.map { $0.id }
+        let placeIds = selectedPlaces.map { $0.id }
+        let routineIds = selectedRoutines.map { $0.id }
+        return entryIds + placeIds + routineIds
+    }
 }
 
 // Add delegate conformance for empty state view
