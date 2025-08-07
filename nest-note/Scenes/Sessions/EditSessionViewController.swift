@@ -2629,6 +2629,8 @@ extension EditSessionViewController: EventsCellDelegate {
 class SessionInviteSitterCell: UICollectionViewListCell {
     static let reuseIdentifier = "SessionInviteSitterCell"
     
+    private var currentInviteCode: String?
+    
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -2656,7 +2658,8 @@ class SessionInviteSitterCell: UICollectionViewListCell {
             foregroundColor: NNColors.primary
         )
         button.titleLabel?.font = .h4
-        button.isUserInteractionEnabled = false
+        button.isUserInteractionEnabled = true
+        button.addTarget(self, action: #selector(codeButtonTapped), for: .touchUpInside)
         
         return button
     }()
@@ -2698,13 +2701,41 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         nameLabel.textColor = name.isEmpty ? .secondaryLabel : .label
         iconImageView.tintColor = NNColors.primary
         
+        // Store the current invite code for copying
+        currentInviteCode = inviteCode
+        
         if let code = inviteCode, !code.isEmpty && code != "000-000" {
             let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
             codeLabel.setTitle(formattedCode, for: .normal)
+            codeLabel.isUserInteractionEnabled = true
         } else {
             codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
             codeLabel.foregroundColor = .secondaryLabel
             codeLabel.setTitle("000-000", for: .normal)
+            codeLabel.isUserInteractionEnabled = false
+        }
+    }
+    
+    @objc private func codeButtonTapped() {
+        guard let code = currentInviteCode, !code.isEmpty && code != "000-000" else { return }
+        
+        // Copy the unformatted code to pasteboard
+        UIPasteboard.general.string = code
+        
+        // Haptic feedback
+        HapticsHelper.lightHaptic()
+        
+        // Store the original title and temporarily disable button interaction
+        let originalTitle = codeLabel.titleLabel?.text ?? ""
+        codeLabel.isUserInteractionEnabled = false
+        
+        // Change button title to "Copied!"
+        codeLabel.setTitle("Copied!", for: .normal)
+        
+        // Restore original title after 1.5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.codeLabel.setTitle(originalTitle, for: .normal)
+            self?.codeLabel.isUserInteractionEnabled = true
         }
     }
     
@@ -2713,9 +2744,11 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         nameLabel.textColor = .secondaryLabel
         iconImageView.tintColor = .secondaryLabel
         
+        currentInviteCode = nil
         codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
         codeLabel.foregroundColor = .secondaryLabel
         codeLabel.setTitle("000-000", for: .normal)
+        codeLabel.isUserInteractionEnabled = false
     }
 }
 
