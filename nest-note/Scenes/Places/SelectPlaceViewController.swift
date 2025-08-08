@@ -183,6 +183,14 @@ class SelectPlaceViewController: NNViewController {
         mapView.delegate = self
         setupNavigationBarButtons()
         
+        // Listen for place save notifications to dismiss this view controller
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(placeDidSave),
+            name: .placeDidSave,
+            object: nil
+        )
+        
         if let existingPlace {
             setupExistingLocation(for: existingPlace)
         }
@@ -245,6 +253,17 @@ class SelectPlaceViewController: NNViewController {
     
     @objc private func dismissTapped() {
         closeButtonTapped()
+    }
+    
+    @objc private func placeDidSave() {
+        // Only dismiss if we're creating a new place (not editing an existing one)
+        // Editing existing places already have their own dismissal logic
+        guard existingPlace == nil else { return }
+        
+        // Dismiss this view controller when a new place is successfully saved
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.dismiss(animated: true)
+        }
     }
     
     @objc private func showPlacesList() {
@@ -802,6 +821,7 @@ class SelectPlaceViewController: NNViewController {
     deinit {
         addressGeocoder.cancelGeocode()
         searchTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func setupExistingLocation(for place: PlaceItem) {
@@ -1038,5 +1058,13 @@ extension SelectPlaceViewController: UITableViewDataSource, UITableViewDelegate 
         )
         mapView.setRegion(region, animated: true)
         selectPlace(at: selectedMapItem.placemark.coordinate)
+        
+        // Update state and button since user has selected a place from search
+        currentState = .pinDropped
+        if isTemporarySelection {
+            addPlaceButton.setTitle("Use This Location")
+        } else {
+            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
+        }
     }
 }
