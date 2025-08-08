@@ -20,7 +20,7 @@ protocol SelectPlaceLocationDelegate: AnyObject {
     )
 }
 
-class SelectPlaceViewController: NNViewController {
+class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, SearchResultsDelegate {
     
     weak var locationDelegate: SelectPlaceLocationDelegate?
     weak var temporaryPlaceDelegate: TemporaryPlaceSelectionDelegate?
@@ -28,11 +28,9 @@ class SelectPlaceViewController: NNViewController {
     // Property to store initial location if available
     var initialLocation: CLLocation?
     
-    private let searchBarView: NNSearchBarView = {
-        let view = NNSearchBarView(placeholder: "1 Infinite Loop, Cupertino, CA",
-                                   keyboardType: .default)
-        return view
-    }()
+    // Replace NNSearchBarView with UISearchController
+    private var searchController: UISearchController!
+    private var searchResultsController: SearchResultsViewController!
     
     private var mapView: MKMapView!
     private var addPlaceButton: NNPrimaryLabeledButton!
@@ -85,9 +83,7 @@ class SelectPlaceViewController: NNViewController {
     // Add property for current address label
     private var currentAddressLabel: BlurBackgroundLabel!
     
-    // Add properties for search results
-    private var searchResultsTableView: UITableView!
-    private var searchResults: [MKMapItem] = []
+    // Add properties for search
     private var searchTask: Task<Void, Never>?
     
     // Remove timer and movement tracking properties
@@ -179,7 +175,7 @@ class SelectPlaceViewController: NNViewController {
             title = existingPlace == nil ? "Add a Place" : "Update Location"
         }
         
-        searchBarView.searchBar.delegate = self
+        setupSearchController()
         mapView.delegate = self
         setupNavigationBarButtons()
         
@@ -284,7 +280,6 @@ class SelectPlaceViewController: NNViewController {
     }
     
     override func addSubviews() {
-        setupPaletteSearch()
         setupMap()
         setupAddPlaceButton()
         setupInstructionLabel()
@@ -298,13 +293,50 @@ class SelectPlaceViewController: NNViewController {
             centerPinView.centerYAnchor.constraint(equalTo: mapView.centerYAnchor)
         ])
         
-        // Add search results table view AFTER center pin to ensure proper z-order
-        setupSearchResultsTableView()
     }
     
-    func setupPaletteSearch() {
-        searchBarView.frame.size.height = 50
-        addNavigationBarPalette(searchBarView)
+    private func setupSearchController() {
+        // Create search results controller
+        searchResultsController = SearchResultsViewController()
+        searchResultsController.searchDelegate = self
+        
+        // Create search controller with results controller
+        searchController = UISearchController(searchResultsController: searchResultsController)
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search for places"
+        
+        // Configure search bar appearance
+        searchController.searchBar.searchBarStyle = .minimal
+        
+        // Set the search controller to the navigation item
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        
+        // Define which content is searched
+        definesPresentationContext = true
+    }
+    
+    // MARK: - UISearchResultsUpdating
+    
+    func updateSearchResults(for searchController: UISearchController) {
+        // Cancel any existing search task
+        searchTask?.cancel()
+        
+        guard let searchText = searchController.searchBar.text, !searchText.isEmpty else {
+            // Clear results if search text is empty
+            searchResultsController.updateSearchResults([])
+            return
+        }
+        
+        // Start new search task with debouncing
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            
+            guard !Task.isCancelled else { return }
+            
+            await performSearchForController(searchText: searchText)
+        }
     }
     
     private func setupMap() {
@@ -622,7 +654,7 @@ class SelectPlaceViewController: NNViewController {
         dismiss(animated: true)
     }
     
-    private func formatAddress(from placemark: CLPlacemark) -> String {
+    func formatAddress(from placemark: CLPlacemark) -> String {
         var addressComponents: [String] = []
         
         // Add street address
@@ -652,7 +684,7 @@ class SelectPlaceViewController: NNViewController {
         return addressComponents.joined(separator: ", ")
     }
     
-    private func formatDistance(_ distanceInMeters: Double) -> String {
+    func formatDistance(_ distanceInMeters: Double) -> String {
         let distanceInMiles = distanceInMeters * 0.000621371 // Convert meters to miles
         
         if distanceInMiles < 0.1 {
@@ -712,29 +744,6 @@ class SelectPlaceViewController: NNViewController {
         ])
     }
     
-    private func setupSearchResultsTableView() {
-        searchResultsTableView = UITableView()
-        searchResultsTableView.translatesAutoresizingMaskIntoConstraints = false
-        searchResultsTableView.delegate = self
-        searchResultsTableView.dataSource = self
-        searchResultsTableView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
-        searchResultsTableView.layer.cornerRadius = 12
-        searchResultsTableView.separatorStyle = .singleLine
-        searchResultsTableView.isHidden = true
-        searchResultsTableView.rowHeight = 60
-        
-        // Register a subtitle style cell for detailed info
-        searchResultsTableView.register(UITableViewCell.self, forCellReuseIdentifier: "SearchResultCell")
-        
-        view.addSubview(searchResultsTableView)
-        
-        NSLayoutConstraint.activate([
-            searchResultsTableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            searchResultsTableView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            searchResultsTableView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            searchResultsTableView.heightAnchor.constraint(equalToConstant: 300)
-        ])
-    }
     
     private func updateCurrentAddress() {
         let centerCoordinate = mapView.centerCoordinate
@@ -770,7 +779,7 @@ class SelectPlaceViewController: NNViewController {
     }
     
     @MainActor
-    private func performSearch(for searchText: String) async {
+    private func performSearchForController(searchText: String) async {
         let searchRequest = MKLocalSearch.Request()
         searchRequest.naturalLanguageQuery = searchText
         searchRequest.region = mapView.region
@@ -804,18 +813,47 @@ class SelectPlaceViewController: NNViewController {
                 return distance1 < distance2
             }
             
-            searchResults = Array(sortedResults.prefix(10)) // Limit to 10 results
-            searchResultsTableView.reloadData()
-            
-            if !searchResults.isEmpty {
-                searchResultsTableView.isHidden = false
-            }
+            let limitedResults = Array(sortedResults.prefix(10)) // Limit to 10 results
+            searchResultsController.updateSearchResults(limitedResults)
         } catch {
             print("Search error: \(error.localizedDescription)")
-            searchResults.removeAll()
-            searchResultsTableView.reloadData()
-            searchResultsTableView.isHidden = true
+            searchResultsController.updateSearchResults([])
         }
+    }
+    
+    
+    // MARK: - SearchResultsDelegate
+    
+    func searchResults(_ controller: SearchResultsViewController, didSelectMapItem mapItem: MKMapItem) {
+        // Dismiss search controller (but keep search text)
+        searchController.isActive = false
+        
+        // Clear any existing selection
+        clearSelection()
+        
+        // Animate to the selected location
+        let region = MKCoordinateRegion(
+            center: mapItem.placemark.coordinate,
+            latitudinalMeters: 750,
+            longitudinalMeters: 750
+        )
+        mapView.setRegion(region, animated: true)
+        selectPlace(at: mapItem.placemark.coordinate)
+        
+        // Update state and button since user has selected a place from search
+        currentState = .pinDropped
+        if isTemporarySelection {
+            addPlaceButton.setTitle("Use This Location")
+        } else {
+            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
+        }
+    }
+    
+    func getCurrentLocation() -> CLLocation {
+        return CLLocation(
+            latitude: mapView.centerCoordinate.latitude,
+            longitude: mapView.centerCoordinate.longitude
+        )
     }
     
     deinit {
@@ -861,89 +899,6 @@ class SelectPlaceViewController: NNViewController {
     }
 }
 
-// Add UISearchBarDelegate
-extension SelectPlaceViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        // Cancel any existing search task
-        searchTask?.cancel()
-        
-        // Hide results if search text is empty
-        guard !searchText.isEmpty else {
-            searchResults.removeAll()
-            searchResultsTableView.reloadData()
-            searchResultsTableView.isHidden = true
-            return
-        }
-        
-        // Start new search task with debouncing
-        searchTask = Task {
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
-            
-            guard !Task.isCancelled else { return }
-            
-            await performSearch(for: searchText)
-        }
-    }
-    
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        guard let searchText = searchBar.text, !searchText.isEmpty else { return }
-        searchBar.resignFirstResponder()
-        
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = searchText
-        searchRequest.region = mapView.region
-        
-        let search = MKLocalSearch(request: searchRequest)
-        search.start { [weak self] (response, error) in
-            guard let self = self else { return }
-            
-            if let error = error {
-                print("Search error: \(error.localizedDescription)")
-                return
-            }
-            
-            guard let firstMatch = response?.mapItems.first else {
-                print("No matches found")
-                return
-            }
-            
-            // Clear any existing selection
-            self.clearSelection()
-            
-            // Animate to the found location
-            let region = MKCoordinateRegion(
-                center: firstMatch.placemark.coordinate,
-                latitudinalMeters: 750,
-                longitudinalMeters: 750
-            )
-            self.mapView.setRegion(region, animated: true)
-            self.selectPlace(at: firstMatch.placemark.coordinate)
-        }
-    }
-    
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.text = ""
-        searchBar.resignFirstResponder()
-        searchBar.showsCancelButton = false
-        
-        // Hide search results
-        searchResults.removeAll()
-        searchResultsTableView.reloadData()
-        searchResultsTableView.isHidden = true
-        searchTask?.cancel()
-    }
-    
-    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-        searchBar.showsCancelButton = true
-    }
-    
-    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-        // Hide search results when search bar loses focus
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.searchResultsTableView.isHidden = true
-        }
-    }
-}
 
 // Update the MapKit delegate
 extension SelectPlaceViewController: MKMapViewDelegate {
@@ -999,72 +954,3 @@ extension SelectPlaceViewController: MKMapViewDelegate {
     }
 }
 
-// MARK: - Search Results Table View
-extension SelectPlaceViewController: UITableViewDataSource, UITableViewDelegate {
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return min(searchResults.count, 10) // Limit to 10 results
-    }
-    
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "SearchResultCell")
-        let mapItem = searchResults[indexPath.row]
-        
-        // Configure cell
-        cell.textLabel?.text = mapItem.name ?? "Unknown Location"
-        cell.textLabel?.font = .h4
-        
-        // Create subtitle with address and distance
-        let address = formatAddress(from: mapItem.placemark)
-        
-        // Calculate distance from current map center
-        let currentLocation = CLLocation(
-            latitude: mapView.centerCoordinate.latitude,
-            longitude: mapView.centerCoordinate.longitude
-        )
-        let itemLocation = CLLocation(
-            latitude: mapItem.placemark.coordinate.latitude,
-            longitude: mapItem.placemark.coordinate.longitude
-        )
-        let distance = currentLocation.distance(from: itemLocation)
-        let distanceString = formatDistance(distance)
-        
-        cell.detailTextLabel?.text = "\(address) • \(distanceString)"
-        cell.detailTextLabel?.font = .bodyS
-        cell.detailTextLabel?.textColor = .secondaryLabel
-        
-        cell.backgroundColor = .clear
-        cell.selectionStyle = .default
-        
-        return cell
-    }
-    
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        
-        let selectedMapItem = searchResults[indexPath.row]
-        
-        // Hide search results
-        searchResultsTableView.isHidden = true
-        searchBarView.searchBar.resignFirstResponder()
-        
-        // Clear any existing selection
-        clearSelection()
-        
-        // Animate to the selected location
-        let region = MKCoordinateRegion(
-            center: selectedMapItem.placemark.coordinate,
-            latitudinalMeters: 750,
-            longitudinalMeters: 750
-        )
-        mapView.setRegion(region, animated: true)
-        selectPlace(at: selectedMapItem.placemark.coordinate)
-        
-        // Update state and button since user has selected a place from search
-        currentState = .pinDropped
-        if isTemporarySelection {
-            addPlaceButton.setTitle("Use This Location")
-        } else {
-            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
-        }
-    }
-}
