@@ -20,7 +20,7 @@ protocol SelectPlaceLocationDelegate: AnyObject {
     )
 }
 
-class SelectPlaceViewController: NNViewController {
+class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, SearchResultsDelegate {
     
     weak var locationDelegate: SelectPlaceLocationDelegate?
     weak var temporaryPlaceDelegate: TemporaryPlaceSelectionDelegate?
@@ -28,11 +28,9 @@ class SelectPlaceViewController: NNViewController {
     // Property to store initial location if available
     var initialLocation: CLLocation?
     
-    private let searchBarView: NNSearchBarView = {
-        let view = NNSearchBarView(placeholder: "1 Infinite Loop, Cupertino, CA",
-                                   keyboardType: .default)
-        return view
-    }()
+    // Replace NNSearchBarView with UISearchController
+    private var searchController: UISearchController!
+    private var searchResultsController: SearchResultsViewController!
     
     private var mapView: MKMapView!
     private var addPlaceButton: NNPrimaryLabeledButton!
@@ -77,9 +75,16 @@ class SelectPlaceViewController: NNViewController {
     
     private let geocoder = CLGeocoder()
     private var currentPlacemark: CLPlacemark?
+    private let addressGeocoder = CLGeocoder() // Separate geocoder for address updates
     
     // Add new property for the found place label
     private var foundPlaceLabel: BlurBackgroundLabel!
+    
+    // Add property for current address label
+    private var currentAddressLabel: BlurBackgroundLabel!
+    
+    // Add properties for search
+    private var searchTask: Task<Void, Never>?
     
     // Remove timer and movement tracking properties
     private var hasSelectedPlace = false
@@ -89,6 +94,7 @@ class SelectPlaceViewController: NNViewController {
     
     // Add property to track if instructions have been shown
     private var hasShownInstructions = true
+    private var shouldShowAddressLabel = false
     
     // Add property for clear button
     private lazy var clearButton: UIButton = {
@@ -169,9 +175,17 @@ class SelectPlaceViewController: NNViewController {
             title = existingPlace == nil ? "Add a Place" : "Update Location"
         }
         
-        searchBarView.searchBar.delegate = self
+        setupSearchController()
         mapView.delegate = self
         setupNavigationBarButtons()
+        
+        // Listen for place save notifications to dismiss this view controller
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(placeDidSave),
+            name: .placeDidSave,
+            object: nil
+        )
         
         if let existingPlace {
             setupExistingLocation(for: existingPlace)
@@ -237,6 +251,17 @@ class SelectPlaceViewController: NNViewController {
         closeButtonTapped()
     }
     
+    @objc private func placeDidSave() {
+        // Only dismiss if we're creating a new place (not editing an existing one)
+        // Editing existing places already have their own dismissal logic
+        guard existingPlace == nil else { return }
+        
+        // Dismiss this view controller when a new place is successfully saved
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.dismiss(animated: true)
+        }
+    }
+    
     @objc private func showPlacesList() {
         let placesVC = PlaceListViewController()
         
@@ -255,11 +280,11 @@ class SelectPlaceViewController: NNViewController {
     }
     
     override func addSubviews() {
-        setupPaletteSearch()
         setupMap()
         setupAddPlaceButton()
         setupInstructionLabel()
         setupFoundPlaceLabel()
+        setupCurrentAddressLabel()
         
         // Add the center pin view
         view.addSubview(centerPinView)
@@ -267,11 +292,51 @@ class SelectPlaceViewController: NNViewController {
             centerPinView.centerXAnchor.constraint(equalTo: mapView.centerXAnchor),
             centerPinView.centerYAnchor.constraint(equalTo: mapView.centerYAnchor)
         ])
+        
     }
     
-    func setupPaletteSearch() {
-        searchBarView.frame.size.height = 50
-        addNavigationBarPalette(searchBarView)
+    private func setupSearchController() {
+        // Create search results controller
+        searchResultsController = SearchResultsViewController()
+        searchResultsController.searchDelegate = self
+        
+        // Create search controller with results controller
+        searchController = UISearchController(searchResultsController: searchResultsController)
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search for places"
+        
+        // Configure search bar appearance
+        searchController.searchBar.searchBarStyle = .minimal
+        
+        // Set the search controller to the navigation item
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        
+        // Define which content is searched
+        definesPresentationContext = true
+    }
+    
+    // MARK: - UISearchResultsUpdating
+    
+    func updateSearchResults(for searchController: UISearchController) {
+        // Cancel any existing search task
+        searchTask?.cancel()
+        
+        guard let searchText = searchController.searchBar.text, !searchText.isEmpty else {
+            // Clear results if search text is empty
+            searchResultsController.updateSearchResults([])
+            return
+        }
+        
+        // Start new search task with debouncing
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            
+            guard !Task.isCancelled else { return }
+            
+            await performSearchForController(searchText: searchText)
+        }
     }
     
     private func setupMap() {
@@ -589,7 +654,7 @@ class SelectPlaceViewController: NNViewController {
         dismiss(animated: true)
     }
     
-    private func formatAddress(from placemark: CLPlacemark) -> String {
+    func formatAddress(from placemark: CLPlacemark) -> String {
         var addressComponents: [String] = []
         
         // Add street address
@@ -617,6 +682,18 @@ class SelectPlaceViewController: NNViewController {
         }
         
         return addressComponents.joined(separator: ", ")
+    }
+    
+    func formatDistance(_ distanceInMeters: Double) -> String {
+        let distanceInMiles = distanceInMeters * 0.000621371 // Convert meters to miles
+        
+        if distanceInMiles < 0.1 {
+            return "< 0.1 mi"
+        } else if distanceInMiles < 1.0 {
+            return String(format: "%.1f mi", distanceInMiles)
+        } else {
+            return String(format: "%.1f mi", distanceInMiles)
+        }
     }
     
     private func showFoundPlace(_ address: String) {
@@ -649,8 +726,140 @@ class SelectPlaceViewController: NNViewController {
         ])
     }
     
+    private func setupCurrentAddressLabel() {
+        currentAddressLabel = BlurBackgroundLabel()
+        currentAddressLabel.translatesAutoresizingMaskIntoConstraints = false
+        currentAddressLabel.text = "Loading address..."
+        currentAddressLabel.font = .bodyL
+        currentAddressLabel.textColor = .label
+        currentAddressLabel.alpha = 0
+        
+        view.addSubview(currentAddressLabel)
+        
+        // Use the same constraints as instruction label
+        NSLayoutConstraint.activate([
+            currentAddressLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            currentAddressLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            currentAddressLabel.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, multiplier: 0.8)
+        ])
+    }
+    
+    
+    private func updateCurrentAddress() {
+        let centerCoordinate = mapView.centerCoordinate
+        let location = CLLocation(latitude: centerCoordinate.latitude, longitude: centerCoordinate.longitude)
+        
+        addressGeocoder.cancelGeocode() // Cancel any previous requests
+        addressGeocoder.reverseGeocodeLocation(location) { [weak self] (placemarks, error) in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Address geocoding error: \(error.localizedDescription)")
+                    self.currentAddressLabel.text = "Unable to load address"
+                    return
+                }
+                
+                guard let placemark = placemarks?.first else {
+                    self.currentAddressLabel.text = "No address found"
+                    return
+                }
+                
+                let address = self.formatAddress(from: placemark)
+                self.currentAddressLabel.text = address
+                
+                // Only show the label if we should show address label
+                if self.shouldShowAddressLabel && self.currentAddressLabel.alpha == 0 {
+                    UIView.animate(withDuration: 0.3) {
+                        self.currentAddressLabel.alpha = 1
+                    }
+                }
+            }
+        }
+    }
+    
+    @MainActor
+    private func performSearchForController(searchText: String) async {
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.naturalLanguageQuery = searchText
+        searchRequest.region = mapView.region
+        
+        let search = MKLocalSearch(request: searchRequest)
+        
+        do {
+            let response = try await search.start()
+            
+            guard !Task.isCancelled else { return }
+            
+            // Sort results by distance from current map center
+            let currentLocation = CLLocation(
+                latitude: mapView.centerCoordinate.latitude,
+                longitude: mapView.centerCoordinate.longitude
+            )
+            
+            let sortedResults = response.mapItems.sorted { item1, item2 in
+                let location1 = CLLocation(
+                    latitude: item1.placemark.coordinate.latitude,
+                    longitude: item1.placemark.coordinate.longitude
+                )
+                let location2 = CLLocation(
+                    latitude: item2.placemark.coordinate.latitude,
+                    longitude: item2.placemark.coordinate.longitude
+                )
+                
+                let distance1 = currentLocation.distance(from: location1)
+                let distance2 = currentLocation.distance(from: location2)
+                
+                return distance1 < distance2
+            }
+            
+            let limitedResults = Array(sortedResults.prefix(10)) // Limit to 10 results
+            searchResultsController.updateSearchResults(limitedResults)
+        } catch {
+            print("Search error: \(error.localizedDescription)")
+            searchResultsController.updateSearchResults([])
+        }
+    }
+    
+    
+    // MARK: - SearchResultsDelegate
+    
+    func searchResults(_ controller: SearchResultsViewController, didSelectMapItem mapItem: MKMapItem) {
+        // Dismiss search controller (but keep search text)
+        searchController.isActive = false
+        
+        // Clear any existing selection
+        clearSelection()
+        
+        // Animate to the selected location
+        let region = MKCoordinateRegion(
+            center: mapItem.placemark.coordinate,
+            latitudinalMeters: 750,
+            longitudinalMeters: 750
+        )
+        mapView.setRegion(region, animated: true)
+        selectPlace(at: mapItem.placemark.coordinate)
+        
+        // Update state and button since user has selected a place from search
+        currentState = .pinDropped
+        if isTemporarySelection {
+            addPlaceButton.setTitle("Use This Location")
+        } else {
+            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
+        }
+    }
+    
+    func getCurrentLocation() -> CLLocation {
+        return CLLocation(
+            latitude: mapView.centerCoordinate.latitude,
+            longitude: mapView.centerCoordinate.longitude
+        )
+    }
+    
     deinit {
-        // No need to invalidate any timers in the new implementation
+        addressGeocoder.cancelGeocode()
+        searchTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func setupExistingLocation(for place: PlaceItem) {
@@ -690,58 +899,6 @@ class SelectPlaceViewController: NNViewController {
     }
 }
 
-// Add UISearchBarDelegate
-extension SelectPlaceViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        // Optional: Implement real-time search suggestions
-    }
-    
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        guard let searchText = searchBar.text, !searchText.isEmpty else { return }
-        searchBar.resignFirstResponder()
-        
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = searchText
-        searchRequest.region = mapView.region
-        
-        let search = MKLocalSearch(request: searchRequest)
-        search.start { [weak self] (response, error) in
-            guard let self = self else { return }
-            
-            if let error = error {
-                print("Search error: \(error.localizedDescription)")
-                return
-            }
-            
-            guard let firstMatch = response?.mapItems.first else {
-                print("No matches found")
-                return
-            }
-            
-            // Clear any existing selection
-            self.clearSelection()
-            
-            // Animate to the found location
-            let region = MKCoordinateRegion(
-                center: firstMatch.placemark.coordinate,
-                latitudinalMeters: 750,
-                longitudinalMeters: 750
-            )
-            self.mapView.setRegion(region, animated: true)
-            self.selectPlace(at: firstMatch.placemark.coordinate)
-        }
-    }
-    
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchBar.text = ""
-        searchBar.resignFirstResponder()
-        searchBar.showsCancelButton = false
-    }
-    
-    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-        searchBar.showsCancelButton = true
-    }
-}
 
 // Update the MapKit delegate
 extension SelectPlaceViewController: MKMapViewDelegate {
@@ -750,12 +907,23 @@ extension SelectPlaceViewController: MKMapViewDelegate {
         if hasShownInstructions {
             hasShownInstructions = false
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 UIView.animate(withDuration: 0.3) {
                     self.instructionLabel.alpha = 0
+                } completion: { _ in
+                    // Enable address label showing and show it
+                    self.shouldShowAddressLabel = true
+                    UIView.animate(withDuration: 0.3) {
+                        self.currentAddressLabel.alpha = 1
+                    }
                 }
             }
         }
+    }
+    
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        // Update the current address when the map region changes
+        updateCurrentAddress()
     }
     
     // Customize annotation appearance

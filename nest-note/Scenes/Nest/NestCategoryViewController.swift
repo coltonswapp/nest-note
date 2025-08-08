@@ -267,8 +267,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     @objc private func placeDidSave(_ notification: Notification) {
-        // This will be called when any place is saved
-        // Places are now managed by parent NestViewController
+        // Refresh folder contents when a place is saved to show the new place
+        Task {
+            await loadFolderContents()
+        }
     }
     
     override func viewDidLoad() {

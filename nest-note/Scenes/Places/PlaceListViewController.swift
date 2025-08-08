@@ -84,6 +84,14 @@ final class PlaceListViewController: NNViewController, NNTippable {
         setupNavigationBarButtons()
         setupEmptyState()
         
+        // Listen for place save notifications to refresh the list
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(placeDidSave),
+            name: .placeDidSave,
+            object: nil
+        )
+        
         // Only show the "Choose on Map" button when in selection mode
         if isSelecting {
             setupChooseOnMapButton()
@@ -327,6 +335,11 @@ final class PlaceListViewController: NNViewController, NNTippable {
                 self.navigationController?.pushViewController(selectPlaceVC, animated: true)
             }
         }
+    }
+    
+    @objc private func placeDidSave() {
+        // Refresh places list when a new place is saved
+        fetchPlaces()
     }
     
     private func placeSuggestionsTapped() {
