@@ -40,7 +40,7 @@ final class Launcher {
             }
         }
         
-        // requestNotificationPermissions()
+        registerForNotificationsIfAuthorized()
         
         Logger.log(level: .info, category: .launcher, message: "Service configuration complete ✅")
     }
@@ -72,23 +72,19 @@ final class Launcher {
         Logger.log(level: .info, category: .launcher, message: "Service configuration reset complete ✅")
     }
     
-    private func requestNotificationPermissions() {
+    /// Registers for remote notifications if already authorized, without requesting permission
+    /// This ensures we register for push notifications on app launch for existing users
+    /// without bombarding fresh install users with permission prompts
+    private func registerForNotificationsIfAuthorized() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
-            // Only request if not determined yet
-            if settings.authorizationStatus == .notDetermined {
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-                    if granted {
-                        DispatchQueue.main.async {
-                            UIApplication.shared.registerForRemoteNotifications()
-                        }
-                    } else if let error = error {
-                        Logger.log(level: .error, category: .general, message: "Failed to request notification authorization: \(error.localizedDescription)")
-                    }
-                }
-            } else if settings.authorizationStatus == .authorized {
+            // Only register if already authorized - don't request permission
+            if settings.authorizationStatus == .authorized {
                 DispatchQueue.main.async {
                     UIApplication.shared.registerForRemoteNotifications()
+                    Logger.log(level: .info, category: .launcher, message: "Registered for remote notifications (already authorized)")
                 }
+            } else {
+                Logger.log(level: .info, category: .launcher, message: "Notification permissions not authorized, skipping registration. Status: \(settings.authorizationStatus.rawValue)")
             }
         }
     }

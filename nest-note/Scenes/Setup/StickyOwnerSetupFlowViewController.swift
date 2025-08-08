@@ -324,6 +324,9 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
                 self.delegate?.setupFlowDidUpdateStepStatus()
                 
                 if granted {
+                    // Register for remote notifications
+                    UIApplication.shared.registerForRemoteNotifications()
+                    
                     // Update notification preferences to true for both types
                     Task {
                         do {
