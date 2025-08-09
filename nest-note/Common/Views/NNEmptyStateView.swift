@@ -53,10 +53,14 @@ class NNEmptyStateView: UIView {
         return button
     }()
     
-    init(icon: UIImage?, title: String, subtitle: String, actionButtonTitle: String? = nil) {
+    init(icon: UIImage?, title: String, subtitle: String, actionButtonTitle: String? = nil, actionButtonMenu: UIMenu? = nil) {
         super.init(frame: .zero)
         setupView()
         configure(icon: icon, title: title, subtitle: subtitle, actionButtonTitle: actionButtonTitle)
+        
+        if let menu = actionButtonMenu {
+            addMenuToActionButton(menu: menu)
+        }
     }
     
     required init?(coder: NSCoder) {

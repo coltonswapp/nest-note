@@ -120,11 +120,13 @@ final class NestService: EntryRepository {
         Logger.log(level: .info, category: .nestService, message: "Creating new nest for user: \(ownerId)")
         
         do {
-            let nest = NestItem(
+            var nest = NestItem(
                 ownerId: ownerId,
                 name: name,
                 address: address
             )
+            
+            nest.pinnedCategories = ["Household"]
             
             let docRef = db.collection("nests").document(nest.id)
             try await docRef.setData(try Firestore.Encoder().encode(nest))
