@@ -89,6 +89,10 @@ final class NestService: EntryRepository {
         isOwner = false
         clearEntriesCache()
         clearSavedSittersCache()
+        clearCategoriesCache()
+        invalidateItemsCache()
+        clearImageCache()
+        Logger.log(level: .info, category: .nestService, message: "All NestService caches cleared ✅")
     }
     
     // MARK: - Current Nest Methods
@@ -112,23 +116,25 @@ final class NestService: EntryRepository {
     }
     
     // MARK: - Firestore Methods
-    func createNest(ownerId: String, name: String, address: String) async throws -> NestItem {
+    func createNest(ownerId: String, name: String, address: String, careResponsibilities: [String]? = nil) async throws -> NestItem {
         Logger.log(level: .info, category: .nestService, message: "Creating new nest for user: \(ownerId)")
         
         do {
-            let nest = NestItem(
+            var nest = NestItem(
                 ownerId: ownerId,
                 name: name,
                 address: address
             )
             
+            nest.pinnedCategories = ["Household"]
+            
             let docRef = db.collection("nests").document(nest.id)
             try await docRef.setData(try Firestore.Encoder().encode(nest))
             
-            // Create default categories
-            try await createDefaultCategories(for: nest.id)
+            // Create categories based on survey responses
+            try await createCategoriesBasedOnSurvey(for: nest.id, careResponsibilities: careResponsibilities)
             
-            Logger.log(level: .info, category: .nestService, message: "Nest created successfully with default categories ✅")
+            Logger.log(level: .info, category: .nestService, message: "Nest created successfully with personalized categories ✅")
             
             // Set as current nest after creation
             setCurrentNest(nest)
@@ -922,6 +928,46 @@ extension NestService {
         }
         
         Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultCategories.count) default categories")
+    }
+    
+    func createCategoriesBasedOnSurvey(for nestId: String, careResponsibilities: [String]? = nil) async throws {
+        let categoriesRef = db.collection("nests").document(nestId).collection("nestCategories")
+        var categoriesToCreate: [NestCategory] = []
+        
+        // Always create "Household" folder as default
+        let householdCategory = NestCategory(name: "Household", symbolName: "house.fill", isDefault: true, isPinned: true)
+        categoriesToCreate.append(householdCategory)
+        
+        // Create categories based on care responsibilities from survey
+        if let careResponsibilities = careResponsibilities {
+            for responsibility in careResponsibilities {
+                let category = createCategoryForCareResponsibility(responsibility)
+                if !categoriesToCreate.contains(where: { $0.name == category.name }) {
+                    categoriesToCreate.append(category)
+                }
+            }
+        }
+        
+        // Create all categories in Firestore
+        for category in categoriesToCreate {
+            try await categoriesRef.document(category.id).setData(try Firestore.Encoder().encode(category))
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Created \(categoriesToCreate.count) personalized categories based on survey responses")
+    }
+    
+    private func createCategoryForCareResponsibility(_ responsibility: String) -> NestCategory {
+        switch responsibility {
+        case "Children":
+            return NestCategory(name: "Children", symbolName: "figure.child", isDefault: false, isPinned: false)
+        case "Pets":
+            return NestCategory(name: "Pets", symbolName: "pawprint.fill", isDefault: false, isPinned: false)
+        case "Plants":
+            return NestCategory(name: "Plants", symbolName: "leaf.fill", isDefault: false, isPinned: false)
+        default:
+            // For any unknown responsibility, create a generic folder
+            return NestCategory(name: responsibility, symbolName: "folder.fill", isDefault: false, isPinned: false)
+        }
     }
     
     // MARK: - Folder Validation

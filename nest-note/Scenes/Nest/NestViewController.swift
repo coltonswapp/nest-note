@@ -49,9 +49,37 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private func calculateDataHash() -> Int {
         var hasher = Hasher()
         hasher.combine(currentFolderPath)
-        hasher.combine(entries?.keys.count ?? 0)
-        hasher.combine(places.count)
+        
+        // Hash per-category entry counts to detect distribution changes
+        if let entries = entries {
+            // Sort category keys to ensure consistent hashing
+            let sortedCategories = entries.keys.sorted()
+            for category in sortedCategories {
+                hasher.combine(category)
+                hasher.combine(entries[category]?.count ?? 0)
+            }
+        }
+        
+        // Hash category names and count to detect category structure changes
+        let sortedCategoryNames = categories.map { $0.name }.sorted()
+        for categoryName in sortedCategoryNames {
+            hasher.combine(categoryName)
+        }
         hasher.combine(categories.count)
+        
+        // Hash places and routines with their IDs to detect item changes
+        let sortedPlaceIds = places.map { $0.id }.sorted()
+        for placeId in sortedPlaceIds {
+            hasher.combine(placeId)
+        }
+        hasher.combine(places.count)
+        
+        let sortedRoutineIds = routines.map { $0.id }.sorted()
+        for routineId in sortedRoutineIds {
+            hasher.combine(routineId)
+        }
+        hasher.combine(routines.count)
+        
         return hasher.finalize()
     }
     

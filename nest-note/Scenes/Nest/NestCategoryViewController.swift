@@ -493,7 +493,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 return self.createFoldersSection()
             case .codes:
                 // Always show header for .codes section (first entries section)
-                return self.createHalfWidthSectionWithHeader()
+                // Check if .other section is present - if not, codes section needs bottom padding
+                let hasOtherSection = self.sectionOrder.contains(.other)
+                return self.createHalfWidthSectionWithHeader(needsBottomPadding: !hasOtherSection)
             case .other:
                 // Show header only if .codes section is not present (FullWidth-only scenario)
                 let hasCodesSection = self.sectionOrder.contains(.codes)
@@ -547,7 +549,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         return section
     }
     
-    private func createHalfWidthSectionWithHeader() -> NSCollectionLayoutSection {
+    private func createHalfWidthSectionWithHeader(needsBottomPadding: Bool = false) -> NSCollectionLayoutSection {
         
         let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(90))
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
@@ -555,7 +557,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(90))
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4)
+        
+        // Use 30 points bottom padding when there's no .other section (to match .other section padding)
+        let bottomPadding: CGFloat = needsBottomPadding ? 30 : 4
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: bottomPadding, trailing: 4)
         
         let header = NSCollectionLayoutBoundarySupplementaryItem(
             layoutSize: NestCategoryViewController.headerSize,
@@ -1461,6 +1466,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func addLocalPlace(_ place: PlaceItem) {
+        places.append(place)
+        
         DispatchQueue.main.async {
             guard let dataSource = self.dataSource else { return }
             var snapshot = dataSource.snapshot()
@@ -1505,6 +1512,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func addLocalRoutine(_ routine: RoutineItem) {
+        routines.append(routine)
+        
         DispatchQueue.main.async {
             guard let dataSource = self.dataSource else { return }
             var snapshot = dataSource.snapshot()
@@ -1576,12 +1585,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 title: "It's a little quiet in here",
                 subtitle: entryRepository is NestService ? "Items for this folder will appear here. Suggestions can be found in the upper-right corner." :
                     "This folder either has no items in it or none of the items were shared with you.",
-                actionButtonTitle: entryRepository is NestService ? "Add an Entry" : nil
+                actionButtonTitle: entryRepository is NestService ? "Add Item" : nil,
+                actionButtonMenu: entryRepository is NestService ? createAddItemMenu() : nil
             )
-            
-            if entryRepository is NestService {
-                emptyStateView.addMenuToActionButton(menu: addEntryButton.menu!)
-            }
         }
         
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
@@ -2058,11 +2064,17 @@ extension NestCategoryViewController: EntryDetailViewControllerDelegate {
             // Handle save/update
             Logger.log(level: .info, category: logCategory, message: "Delegate received saved entry: \(entry.title)")
             
+            // Invalidate cache so parent views will refresh
+            if let nestService = entryRepository as? NestService {
+                nestService.invalidateItemsCache()
+            }
+            
             if entries.contains(where: { $0.id == entry.id }) {
                 updateLocalEntry(entry)
             } else {
                 addLocalEntry(entry)
                 refreshEmptyState()
+                updateFilterView()
             }
         }
     }
@@ -2268,18 +2280,20 @@ extension NestCategoryViewController: SelectPlaceLocationDelegate {
 extension NestCategoryViewController: RoutineDetailViewControllerDelegate {
     func routineDetailViewController(didSaveRoutine routine: RoutineItem?) {
         if let routine = routine {
-            // Handle save/update
+            // Handle save/update - exact same pattern as entries
             Logger.log(level: .info, category: logCategory, message: "Delegate received saved routine: \(routine.title)")
             
-            if let index = routines.firstIndex(where: { $0.id == routine.id }) {
-                // Update existing routine
-                routines[index] = routine
+            // Invalidate cache so parent views will refresh
+            if let nestService = entryRepository as? NestService {
+                nestService.invalidateItemsCache()
+            }
+            
+            if routines.contains(where: { $0.id == routine.id }) {
                 updateLocalRoutine(routine)
             } else {
-                // Add new routine
-                routines.append(routine)
                 addLocalRoutine(routine)
                 refreshEmptyState()
+                updateFilterView()
             }
         }
     }
@@ -2303,50 +2317,20 @@ extension NestCategoryViewController: RoutineDetailViewControllerDelegate {
 // MARK: - PlaceListViewControllerDelegate
 extension NestCategoryViewController {
     func placeListViewController(didUpdatePlace place: PlaceItem) {
-        // Handle place creation or update
+        // Handle save/update - exact same pattern as entries
         Logger.log(level: .info, category: logCategory, message: "Delegate received saved place: \(place.alias ?? "Unnamed")")
         
-        // For new places created from this view, ensure they have the correct category
-        var updatedPlace = place
-        if place.category.isEmpty || (place.category != self.category && !places.contains(where: { $0.id == place.id })) {
-            // This is a new place, assign it to the current category
-            updatedPlace = PlaceItem(
-                id: place.id,
-                nestId: place.nestId,
-                category: self.category, // Set to current category
-                alias: place.alias,
-                address: place.address,
-                coordinate: place.locationCoordinate,
-                thumbnailURLs: place.thumbnailURLs,
-                isTemporary: place.isTemporary,
-                createdAt: place.createdAt,
-                updatedAt: place.updatedAt
-            )
-            
-            // Update the place in the backend with the correct category
-            Task {
-                if let nestService = entryRepository as? NestService {
-                    do {
-                        try await nestService.updatePlace(updatedPlace)
-                    } catch {
-                        Logger.log(level: .error, category: logCategory, message: "Failed to update place category: \(error.localizedDescription)")
-                    }
-                }
-            }
+        // Invalidate cache so parent views will refresh
+        if let nestService = entryRepository as? NestService {
+            nestService.invalidateItemsCache()
         }
         
-        // Check if place belongs to current category
-        if updatedPlace.category == self.category {
-            if let index = places.firstIndex(where: { $0.id == updatedPlace.id }) {
-                // Update existing place
-                places[index] = updatedPlace
-                updateLocalPlace(updatedPlace)
-            } else {
-                // Add new place
-                places.append(updatedPlace)
-                addLocalPlace(updatedPlace)
-            }
+        if places.contains(where: { $0.id == place.id }) {
+            updateLocalPlace(place)
+        } else {
+            addLocalPlace(place)
             refreshEmptyState()
+            updateFilterView()
         }
     }
     

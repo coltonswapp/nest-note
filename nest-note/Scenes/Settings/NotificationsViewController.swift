@@ -255,31 +255,107 @@ extension NotificationsViewController: NotificationCellDelegate {
     func notificationCell(_ cell: NotificationCell, didToggleSwitch isOn: Bool) {
         guard let user = UserService.shared.currentUser else { return }
 
-        // Update user preferences in Firestore
+        // If user is trying to enable notifications, check permissions first
+        if isOn {
+            UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+                DispatchQueue.main.async {
+                    switch settings.authorizationStatus {
+                    case .notDetermined:
+                        // Request permission
+                        self?.requestNotificationPermission(for: cell)
+                    case .denied:
+                        // Show alert to go to settings
+                        self?.showPermissionDeniedAlert(for: cell)
+                    case .authorized:
+                        // Update preferences normally
+                        self?.updateNotificationPreferences(for: cell, isEnabled: true)
+                    default:
+                        // Handle other cases (provisional, ephemeral)
+                        self?.updateNotificationPreferences(for: cell, isEnabled: true)
+                    }
+                }
+            }
+        } else {
+            // Disabling notifications - update preferences directly
+            updateNotificationPreferences(for: cell, isEnabled: false)
+        }
+    }
+    
+    private func requestNotificationPermission(for cell: NotificationCell) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
+            DispatchQueue.main.async {
+                if granted {
+                    // Register for remote notifications
+                    UIApplication.shared.registerForRemoteNotifications()
+                    
+                    // Update preferences
+                    self?.updateNotificationPreferences(for: cell, isEnabled: true)
+                    
+                    // Refresh the entire view to update footer visibility
+                    self?.applyInitialSnapshots()
+                    
+                    // Show success message
+                    self?.showToast(text: "Notifications Enabled!", subtitle: "You'll receive important updates about your Nest", sentiment: .positive)
+                } else {
+                    // Permission denied, reset toggle
+                    cell.resetToggle()
+                    
+                    // Show settings alert
+                    self?.showPermissionDeniedAlert(for: cell)
+                }
+            }
+        }
+    }
+    
+    private func showPermissionDeniedAlert(for cell: NotificationCell) {
+        cell.resetToggle() // Reset the toggle since permission is denied
+        
+        let alert = UIAlertController(
+            title: "Notifications Disabled",
+            message: "To enable notifications, please go to Settings > Notifications > NestNote and turn on Allow Notifications.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settingsURL)
+            }
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func updateNotificationPreferences(for cell: NotificationCell, isEnabled: Bool) {
+        guard let user = UserService.shared.currentUser else { return }
+        
         Task {
             do {
-                var preferences = user.personalInfo.notificationPreferences
+                var preferences = user.personalInfo.notificationPreferences ?? .default
                 
                 // Determine which preference to update based on the cell's title
                 if cell.titleLabel.text == "Session Notifications" {
-                    preferences?.sessionNotifications = isOn
-                    
-                    // If enabling notifications, ensure we have permissions and FCM token
-                    if isOn {
-                        await handleNotificationEnable()
-                    }
+                    preferences.sessionNotifications = isEnabled
                 } else if cell.titleLabel.text == "Other Notifications" {
-                    preferences?.otherNotifications = isOn
-                    
-                    // If enabling notifications, ensure we have permissions and FCM token
-                    if isOn {
-                        await handleNotificationEnable()
-                    }
+                    preferences.otherNotifications = isEnabled
                 }
                 
-                try await UserService.shared.updateNotificationPreferences(preferences ?? .default)
+                try await UserService.shared.updateNotificationPreferences(preferences)
+                
+                // If enabling, ensure FCM token is updated
+                if isEnabled {
+                    await handleNotificationEnable()
+                }
+                
+                Logger.log(level: .info, category: .general, message: "Updated notification preference: \(cell.titleLabel.text ?? "Unknown") = \(isEnabled)")
+                
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to update notification preferences: \(error.localizedDescription)")
+                
+                // Reset toggle on error
+                await MainActor.run {
+                    cell.resetToggle()
+                }
             }
         }
     }
@@ -368,13 +444,12 @@ class NotificationCell: UICollectionViewListCell {
         descriptionLabel.text = description
         toggleSwitch.isOn = isEnabled
         
-        
-       // Disable the switch if notifications are not authorized
-       UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
-           DispatchQueue.main.async {
-               self?.toggleSwitch.isEnabled = settings.authorizationStatus == .authorized
-           }
-       }
+        // Always enable the switch - we'll handle permission requests when toggled
+        toggleSwitch.isEnabled = true
+    }
+    
+    func resetToggle() {
+        toggleSwitch.setOn(false, animated: true)
     }
     
     @objc private func switchValueChanged() {
@@ -430,9 +505,9 @@ class NotificationFooterView: UICollectionReusableView {
     }
     
     private func updateMessageLabel() {
-        let text = "Notifications for NestNote are disabled.\n Go to Settings"
+        let text = "Notifications are disabled. Toggle a notification above to enable, or manually enable in Settings."
         let attributedString = NSMutableAttributedString(string: text)
-        let range = (text as NSString).range(of: "Go to Settings")
+        let range = (text as NSString).range(of: "Settings")
         
         // Add URL attribute to make it look like a link
         attributedString.addAttributes([

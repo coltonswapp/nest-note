@@ -18,8 +18,8 @@
         },
         {
             "id": "communication_methods",
-            "title": "When communicating sitting information, what methods do you use?",
-            "subtitle": "This can include instructions, routines, medications, events, etc.",
+            "title": "When communicating sitting instructions, what methods do you use?",
+            "subtitle": "This can include important information, routines, medications, events, etc.",
             "options": [
                 "Sticky note / piece of paper",
                 "Text Message",
@@ -31,8 +31,21 @@
             "order": 2
         },
         {
+            "id": "care_responsibilities",
+            "title": "What do you typically need sitters to help care for?",
+            "subtitle": "Select all that apply - this helps us create the most relevant categories for your nest",
+            "options": [
+                "Children",
+                "Pets",
+                "Plants"
+            ],
+            "multi_select": true,
+            "category": "setup",
+            "order": 3
+        },
+        {
             "id": "info_provided",
-            "title": "Select all the relevant information that you provide sitters during their stay.",
+            "title": "Select all the information that you would typically provide sitters for their stays.",
             "subtitle": "This will help us continue to develop useful features for NestNote.",
             "options": [
                 "Schedules (ex. school start & end)",
@@ -55,12 +68,12 @@
             ],
             "multi_select": true,
             "category": "information",
-            "order": 3
+            "order": 4
         },
         {
             "id": "discovery_method",
             "title": "How did you hear about NestNote?",
-            "subtitle": "Are our TikToks working? Lol",
+            "subtitle": "This will help guide our marketing efforts.",
             "options": [
                 "Instagram",
                 "TikTok",
@@ -72,7 +85,7 @@
             ],
             "multi_select": false,
             "category": "discovery",
-            "order": 4
+            "order": 5
         }
     ]
 } 
