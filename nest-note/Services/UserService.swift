@@ -301,7 +301,7 @@ final class UserService {
             if let nestName = info.nestInfo?.name,
                let nestAddress = info.nestInfo?.address {
                 // Create default nest for user
-                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress, surveyResponses: info.surveyResponses)
             }
             
             // Create NestUser with access to their nest
@@ -485,7 +485,7 @@ final class UserService {
             if let nestName = info.nestInfo?.name,
                let nestAddress = info.nestInfo?.address {
                 // Create default nest for user
-                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress, surveyResponses: info.surveyResponses)
             }
             
             let user = NestUser(
@@ -553,7 +553,7 @@ final class UserService {
             if let nestName = info.nestInfo?.name,
                let nestAddress = info.nestInfo?.address {
                 // Create default nest for user
-                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress)
+                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress, surveyResponses: info.surveyResponses)
             }
             
             let user = NestUser(
@@ -597,18 +597,22 @@ final class UserService {
     ///   - nestAddress: The address for the new nest
     ///   - updateCurrentUser: If true and the user is the current user, updates their roles
     /// - Returns: The created NestItem
-    func setupNestForUser(userId: String, nestName: String, nestAddress: String, updateCurrentUser: Bool = false) async throws -> NestItem {
+    func setupNestForUser(userId: String, nestName: String, nestAddress: String, surveyResponses: [String: [String]]? = nil, updateCurrentUser: Bool = false) async throws -> NestItem {
         
         Logger.log(level: .info, category: .userService, message: "Setting up nest for user: \(userId)")
         
-        // Create nest for user
+        // Extract care responsibilities from survey responses
+        let careResponsibilities = surveyResponses?["care_responsibilities"]
+        
+        // Create nest for user with personalized categories
         let nest = try await NestService.shared.createNest(
             ownerId: userId,
             name: nestName,
-            address: nestAddress
+            address: nestAddress,
+            careResponsibilities: careResponsibilities
         )
         
-        Logger.log(level: .info, category: .userService, message: "Successfully created nest: \(nest.name)")
+        Logger.log(level: .info, category: .userService, message: "Successfully created nest: \(nest.name) with care responsibilities: \(careResponsibilities ?? [])")
         
         return nest
     }
