@@ -135,26 +135,6 @@ final class PlaceListViewController: NNViewController, NNTippable {
             action: #selector(toggleLayout)
         )
         
-        if !isReadOnly {
-            let menuButton = UIBarButtonItem(
-                image: UIImage(systemName: "ellipsis"),
-                style: .plain,
-                target: self,
-                action: nil
-            )
-            
-            if !isSelecting {
-                let placeSuggestionsAction = UIAction(
-                    title: "Place Suggestions",
-                    image: UIImage(systemName: "sparkles")
-                ) { _ in
-                    self.placeSuggestionsTapped()
-                }
-                
-                menuButton.menu = UIMenu(children: [placeSuggestionsAction])
-                navigationItem.rightBarButtonItem = menuButton
-            }
-        }
         navigationItem.leftBarButtonItem = layoutButton
         navigationController?.navigationBar.tintColor = .label
     }
@@ -340,13 +320,6 @@ final class PlaceListViewController: NNViewController, NNTippable {
     @objc private func placeDidSave() {
         // Refresh places list when a new place is saved
         fetchPlaces()
-    }
-    
-    private func placeSuggestionsTapped() {
-        let commonPlacesVC = CommonPlacesViewController()
-        commonPlacesVC.delegate = self
-        let navController = UINavigationController(rootViewController: commonPlacesVC)
-        present(navController, animated: true)
     }
     
     @objc private func toggleLayout() {
@@ -569,7 +542,7 @@ extension PlaceListViewController: NNEmptyStateViewDelegate {
 }
 
 extension PlaceListViewController: CommonPlacesViewControllerDelegate {
-    func commonPlacesViewController(_ controller: CommonPlacesViewController, didSelectPlace commonPlace: CommonPlace) {
+    func commonPlacesViewController(didSelectPlace commonPlace: CommonPlace) {
         // Create and push the SelectPlaceViewController with the suggested place name
         let selectPlaceVC = SelectPlaceViewController()
         selectPlaceVC.suggestedPlaceName = commonPlace.name

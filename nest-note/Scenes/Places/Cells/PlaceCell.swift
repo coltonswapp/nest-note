@@ -154,7 +154,7 @@ final class PlaceCell: UICollectionViewCell {
         ]
     }
     
-    func configure(with place: PlaceItem, isGridLayout: Bool, isEditMode: Bool = false, isSelected: Bool = false) {
+    func configure(with place: PlaceItem, isGridLayout: Bool, isEditMode: Bool = false, isSelected: Bool = false, shouldLoadThumbnail: Bool = true) {
         // Update labels immediately
         aliasLabel.text = place.alias
         addressLabel.text = place.address
@@ -163,19 +163,21 @@ final class PlaceCell: UICollectionViewCell {
         self.isInEditMode = isEditMode
         self.isPlaceSelected = isSelected
         
-        // Load thumbnail
-        Task {
-            do {
-                let image = try await NestService.shared.loadImages(for: place)
-                await MainActor.run {
-                    thumbnailImageView.image = image
-                }
-            } catch {
-                Logger.log(level: .error, category: .placesService, 
-                    message: "Failed to load image for place: \(error.localizedDescription)")
-                // Set placeholder image on error
-                await MainActor.run {
-                    thumbnailImageView.image = UIImage(systemName: "mappin.circle")
+        // Load thumbnail only if requested
+        if shouldLoadThumbnail {
+            Task {
+                do {
+                    let image = try await NestService.shared.loadImages(for: place)
+                    await MainActor.run {
+                        thumbnailImageView.image = image
+                    }
+                } catch {
+                    Logger.log(level: .error, category: .placesService, 
+                        message: "Failed to load image for place: \(error.localizedDescription)")
+                    // Set placeholder image on error
+                    await MainActor.run {
+                        thumbnailImageView.image = UIImage(systemName: "mappin.circle")
+                    }
                 }
             }
         }
