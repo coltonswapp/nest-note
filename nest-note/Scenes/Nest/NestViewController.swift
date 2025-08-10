@@ -661,6 +661,79 @@ extension NestViewController: UICollectionViewDelegate {
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
         }
     }
+
+    // MARK: - Context Menu (Folder actions)
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        // Only allow for nest owners and only for folder cells
+        guard entryRepository is NestService,
+              indexPath.section == Section.main.rawValue,
+              let item = dataSource.itemIdentifier(for: indexPath),
+              let folderData = item as? FolderData else {
+            return nil
+        }
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            let deleteAction = UIAction(
+                title: "Delete Folder",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { _ in
+                self?.deleteFolderWithConfirmation(folderData)
+            }
+            return UIMenu(title: folderData.title, children: [deleteAction])
+        }
+    }
+}
+
+// MARK: - Folder Deletion
+extension NestViewController {
+    private func deleteFolderWithConfirmation(_ folderData: FolderData) {
+        let alert = UIAlertController(
+            title: "Delete Folder",
+            message: "Are you sure you want to delete the folder '\(folderData.title)'? This will also delete all entries within this folder. This action cannot be undone.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.deleteFolder(folderData)
+        })
+        present(alert, animated: true)
+    }
+
+    private func deleteFolder(_ folderData: FolderData) {
+        guard let nestService = entryRepository as? NestService else {
+            Logger.log(level: .error, category: logCategory, message: "Only nest owners can delete folders")
+            return
+        }
+
+        Task {
+            do {
+                try await nestService.deleteCategory(folderData.fullPath)
+
+                // Refresh categories, entries, places, and routines
+                async let categoriesTask = nestService.fetchCategories()
+                async let entriesPlacesTask = nestService.fetchEntriesAndPlaces()
+                async let routinesTask: [RoutineItem] = nestService.fetchItems(ofType: .routine)
+
+                let (newCategories, (groupedEntries, places), routines) = try await (categoriesTask, entriesPlacesTask, routinesTask)
+
+                await MainActor.run {
+                    self.categories = newCategories
+                    self.entries = groupedEntries
+                    self.places = places
+                    self.routines = routines
+                    self.clearFolderCache()
+                    self.applyInitialSnapshots()
+                    self.showToast(text: "Folder Deleted")
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.log(level: .error, category: logCategory, message: "Failed to delete folder: \(error)")
+                    self.showToast(text: "Failed to delete folder")
+                }
+            }
+        }
+    }
 }
 
 extension NestViewController: CategoryDetailViewControllerDelegate {
@@ -698,7 +771,7 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                     self.places = refreshedPlaces
                     self.routines = refreshedRoutines
                     self.applyInitialSnapshots()
-                    self.showToast(text: "Category Created")
+                    self.showToast(text: "Folder Created")
                 }
             } catch {
                 Logger.log(level: .error, category: logCategory, message: "Failed to create category: \(error)")

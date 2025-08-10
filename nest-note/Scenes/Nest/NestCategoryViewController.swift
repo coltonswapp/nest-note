@@ -1699,6 +1699,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     func createAddItemMenu() -> UIMenu {
         
+        let addFolderAction = UIAction(
+            title: "Add Folder",
+            image: UIImage(systemName: "folder.badge.plus")
+        ) { _ in
+            self.presentAddFolder()
+        }
+
         let addEntryAction = UIAction(
             title: "Add Entry",
             image: UIImage(systemName: "doc.text")
@@ -1720,7 +1727,15 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             self.addRoutineTapped()
         }
         
-        return UIMenu(title: "Add Item", children: [addEntryAction, addPlaceAction, addRoutineAction])
+        // Mirror the depth restriction used in the top-right nav menu
+        let currentDepth = category.components(separatedBy: "/").count
+        var children: [UIMenuElement] = [addEntryAction, addPlaceAction, addRoutineAction]
+        if currentDepth < 3 {
+            // Prefer showing Add Folder first
+            children.insert(addFolderAction, at: 0)
+        }
+        
+        return UIMenu(title: "Add Item", children: children)
     }
 }
 
