@@ -16,7 +16,13 @@ class PDFExportService {
     // Default section order - easily customizable
     private static let defaultSectionOrder: [PDFSection] = [.events, .entries]
     
-    static func generateSessionPDF(session: SessionItem, nestItem: NestItem, events: [SessionEvent] = [], sectionOrder: [PDFSection]? = nil) async -> Data? {
+    static func generateSessionPDF(
+        session: SessionItem,
+        nestItem: NestItem,
+        events: [SessionEvent] = [],
+        selectedItemIds: [String]? = nil,
+        sectionOrder: [PDFSection]? = nil
+    ) async -> Data? {
         // Fetch all places from NestService and pre-load their images
         var allPlaces: [PlaceItem] = []
         var eventPlaces: [String: PlaceItem] = [:]
@@ -59,6 +65,31 @@ class PDFExportService {
             // Fallback to nestItem.entries if available
             allEntries = nestItem.entries ?? []
         }
+
+        // Fetch routines
+        var allRoutines: [RoutineItem] = []
+        do {
+            allRoutines = try await NestService.shared.fetchItems(ofType: .routine)
+            print("PDFExport: Fetched \(allRoutines.count) routines from NestService")
+        } catch {
+            print("PDFExport: Failed to fetch routines: \(error)")
+        }
+
+        // Determine selection set: prefer explicit selectedItemIds, else session.entryIds, else empty
+        let selectionSet: Set<String> = {
+            if let explicit = selectedItemIds, !explicit.isEmpty {
+                return Set(explicit)
+            }
+            if let sessionIds = session.entryIds, !sessionIds.isEmpty {
+                return Set(sessionIds)
+            }
+            return []
+        }()
+
+        // Filter entries and places for the Entries section to ONLY selected items
+        let filteredEntriesForEntriesSection: [BaseEntry] = allEntries.filter { selectionSet.contains($0.id) }
+        let filteredPlacesForEntriesSection: [PlaceItem] = allPlaces.filter { selectionSet.contains($0.id) }
+        let filteredRoutinesForSection: [RoutineItem] = allRoutines.filter { selectionSet.contains($0.id) }
         
         let pageSize = CGRect(x: 0, y: 0, width: 612, height: 792) // 8.5 x 11 inches at 72 DPI
         let renderer = UIGraphicsPDFRenderer(bounds: pageSize)
@@ -99,10 +130,11 @@ class PDFExportService {
                     cgContext: cgContext,
                     session: session,
                     nestItem: nestItem,
-                    allEntries: allEntries,
+                    allEntries: filteredEntriesForEntriesSection,
                     events: events,
                     eventPlaces: eventPlaces,
-                    allPlaces: allPlaces,
+                    allPlaces: filteredPlacesForEntriesSection,
+                    allRoutines: filteredRoutinesForSection,
                     placeImages: placeImages,
                     currentY: currentY,
                     leftMargin: leftMargin,
@@ -831,6 +863,7 @@ class PDFExportService {
         events: [SessionEvent],
         eventPlaces: [String: PlaceItem],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
@@ -846,6 +879,7 @@ class PDFExportService {
                 cgContext: cgContext,
                 allEntries: allEntries,
                 allPlaces: allPlaces,
+                allRoutines: allRoutines,
                 placeImages: placeImages,
                 currentY: currentY,
                 leftMargin: leftMargin,
@@ -892,7 +926,7 @@ class PDFExportService {
             return drawRoutinesSection(
                 context: context,
                 cgContext: cgContext,
-                session: session,
+                routines: allRoutines,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -907,6 +941,7 @@ class PDFExportService {
         cgContext: CGContext,
         allEntries: [BaseEntry],
         allPlaces: [PlaceItem],
+        allRoutines: [RoutineItem],
         placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
@@ -923,14 +958,13 @@ class PDFExportService {
             print("PDFExport: Entry '\(entry.title)' - category: '\(entry.category)'")
         }
         
-        // Group entries by category
+        // Group by category for unified folder rendering
         let entriesByCategory = Dictionary(grouping: allEntries) { $0.category }
-        
-        // Group places by category  
         let placesByCategory = Dictionary(grouping: allPlaces) { $0.category }
-        
-        // Get all unique categories from both entries and places
-        let allCategories = Set(entriesByCategory.keys).union(Set(placesByCategory.keys))
+        let routinesByCategory = Dictionary(grouping: allRoutines) { $0.category }
+        let allCategories = Set(entriesByCategory.keys)
+            .union(placesByCategory.keys)
+            .union(routinesByCategory.keys)
         
         // Draw categories
         if allCategories.isEmpty {
@@ -944,26 +978,95 @@ class PDFExportService {
             noEntriesText.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: noEntriesAttributes)
             y += noEntriesFont.lineHeight
         } else {
-            for categoryName in allCategories.sorted() {
+            let categories = allCategories.sorted()
+            for (catIndex, categoryName) in categories.enumerated() {
                 let entries = entriesByCategory[categoryName] ?? []
                 let places = placesByCategory[categoryName] ?? []
-                
-                if !entries.isEmpty || !places.isEmpty {
-                    print("PDFExport: Drawing category '\(categoryName)' with \(entries.count) entries and \(places.count) places")
-                    
-                    y = drawCategorySectionWithPageBreaks(
-                        context: context,
-                        cgContext: cgContext,
-                        categoryName: categoryName,
-                        entries: entries,
-                        places: places,
-                        placeImages: placeImages,
-                        currentY: y,
-                        leftMargin: leftMargin,
-                        contentWidth: contentWidth,
-                        pageSize: pageSize
-                    )
-                    y += 16 // Space between categories
+                let routines = routinesByCategory[categoryName] ?? []
+
+                if !entries.isEmpty || !places.isEmpty || !routines.isEmpty {
+                    // Category header
+                    let categoryFont = UIFont.systemFont(ofSize: 22, weight: .bold)
+                    let categoryAttributes: [NSAttributedString.Key: Any] = [
+                        .font: categoryFont,
+                        .foregroundColor: UIColor.black
+                    ]
+                    let headerHeight = categoryName.size(withAttributes: categoryAttributes).height + 20
+                    if y + headerHeight > pageSize.height - 60 {
+                        context.beginPage(); y = 60
+                    }
+                    categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
+                    y += headerHeight
+
+                    // 1) Entries (grid then full-width)
+                    let gridEntries = entries.filter { isGridItem($0) }
+                    if !gridEntries.isEmpty {
+                        y = drawGridItemsWithPageBreaks(
+                            context: context,
+                            cgContext: cgContext,
+                            items: gridEntries,
+                            currentY: y,
+                            leftMargin: leftMargin,
+                            contentWidth: contentWidth,
+                            pageSize: pageSize,
+                            bottomMargin: 60
+                        )
+                        y += 16
+                    }
+                    for entry in entries.filter({ !isGridItem($0) }) {
+                        y = drawFullWidthItemWithPageBreaks(
+                            context: context,
+                            cgContext: cgContext,
+                            entry: entry,
+                            currentY: y,
+                            leftMargin: leftMargin,
+                            contentWidth: contentWidth,
+                            pageSize: pageSize,
+                            bottomMargin: 60
+                        )
+                        y += 16
+                    }
+
+                    // 2) Places (2 per row) with extra padding from entries
+                    if !places.isEmpty {
+                        // Extra top padding before places to reduce cramping with entries above
+                        y += 12
+                        y = drawPlacesGridWithPageBreaks(
+                            context: context,
+                            cgContext: cgContext,
+                            places: places,
+                            placeImages: placeImages,
+                            currentY: y,
+                            leftMargin: leftMargin,
+                            contentWidth: contentWidth,
+                            pageSize: pageSize,
+                            bottomMargin: 60
+                        )
+                        // Extra bottom padding after places before routines
+                        y += 24
+                    }
+
+                    // 3) Routines (checklist)
+                    if !routines.isEmpty {
+                        y = drawRoutineCategory(
+                            context: context,
+                            cgContext: cgContext,
+                            categoryName: "", // no nested header inside category
+                            routines: routines,
+                            currentY: y,
+                            leftMargin: leftMargin,
+                            contentWidth: contentWidth,
+                            pageSize: pageSize,
+                            bottomMargin: 60
+                        )
+                        y += 8
+                    }
+                    // Divider between folders (categories)
+                    if catIndex < categories.count - 1 {
+                        y += 12
+                        drawHalfWidthDivider(context: cgContext, y: y, leftMargin: leftMargin, contentWidth: contentWidth)
+                        y += 24
+                    }
                 }
             }
         }
@@ -1096,7 +1199,7 @@ class PDFExportService {
         let lineSpacing: CGFloat = 4 // Consistent spacing between elements
         
         // Event title
-        let titleFont = UIFont.systemFont(ofSize: 12, weight: .medium)
+        let titleFont = UIFont.systemFont(ofSize: 14, weight: .medium)
         let titleAttributes: [NSAttributedString.Key: Any] = [
             .font: titleFont,
             .foregroundColor: UIColor.gray
@@ -1112,7 +1215,7 @@ class PDFExportService {
         let endTime = timeFormatter.string(from: event.endDate)
         let timeString = "\(startTime) - \(endTime)"
         
-        let contentFont = UIFont.systemFont(ofSize: 14, weight: .regular)
+        let contentFont = UIFont.systemFont(ofSize: 12, weight: .regular)
         let contentAttributes: [NSAttributedString.Key: Any] = [
             .font: contentFont,
             .foregroundColor: UIColor.black
@@ -1350,14 +1453,122 @@ class PDFExportService {
     private static func drawRoutinesSection(
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
-        session: SessionItem,
+        routines: [RoutineItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
         pageSize: CGRect
     ) -> CGFloat {
-        // TODO: Implement routines section
-        // Could show session-specific routines or schedules
-        return currentY
+        var y = currentY
+        let bottomMargin: CGFloat = 60
+        guard !routines.isEmpty else { return y }
+
+        // Section title
+        let titleFont = UIFont.systemFont(ofSize: 22, weight: .bold)
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.black
+        ]
+        let titleHeight = "Routines".size(withAttributes: titleAttributes).height + 20
+        if y + titleHeight > pageSize.height - bottomMargin {
+            context.beginPage(); y = 60
+        }
+        "Routines".draw(at: CGPoint(x: leftMargin, y: y), withAttributes: titleAttributes)
+        y += titleHeight
+
+        // Group routines by category for consistency with entries
+        let routinesByCategory = Dictionary(grouping: routines) { $0.category }
+        for category in routinesByCategory.keys.sorted() {
+            let categoryRoutines = routinesByCategory[category] ?? []
+            y = drawRoutineCategory(
+                context: context,
+                cgContext: cgContext,
+                categoryName: category,
+                routines: categoryRoutines,
+                currentY: y,
+                leftMargin: leftMargin,
+                contentWidth: contentWidth,
+                pageSize: pageSize,
+                bottomMargin: bottomMargin
+            )
+            y += 16
+        }
+
+        return y
+    }
+
+    private static func drawRoutineCategory(
+        context: UIGraphicsPDFRendererContext,
+        cgContext: CGContext,
+        categoryName: String,
+        routines: [RoutineItem],
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
+        var y = currentY
+
+        // Category title
+        let categoryFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        let categoryAttributes: [NSAttributedString.Key: Any] = [
+            .font: categoryFont,
+            .foregroundColor: UIColor.black
+        ]
+        let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 12
+        if y + categoryHeight > pageSize.height - bottomMargin {
+            context.beginPage(); y = 60
+        }
+        categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
+        y += categoryHeight
+
+        // Each routine
+        for routine in routines {
+            // Routine title
+            let routineTitleFont = UIFont.systemFont(ofSize: 14, weight: .medium)
+            let routineTitleAttrs: [NSAttributedString.Key: Any] = [
+                .font: routineTitleFont,
+                .foregroundColor: UIColor.gray
+            ]
+            let routineTitleHeight = routine.title.uppercased().size(withAttributes: routineTitleAttrs).height
+            if y + routineTitleHeight > pageSize.height - bottomMargin {
+                context.beginPage(); y = 60
+            }
+            routine.title.uppercased().draw(at: CGPoint(x: leftMargin, y: y), withAttributes: routineTitleAttrs)
+            y += routineTitleHeight + 6
+
+            // Actions list with bullet (circle)
+            let actionFont = UIFont.systemFont(ofSize: 14, weight: .regular)
+            let actionAttrs: [NSAttributedString.Key: Any] = [
+                .font: actionFont,
+                .foregroundColor: UIColor.black
+            ]
+            let bulletSize: CGFloat = 8
+            let bulletSpacing: CGFloat = 8
+            let actionLineSpacing: CGFloat = 6
+            let actionIndentX = leftMargin + bulletSize + bulletSpacing + 4
+            for action in routine.routineActions {
+                let lineHeight = max(bulletSize, actionFont.lineHeight)
+                if y + lineHeight > pageSize.height - bottomMargin {
+                    context.beginPage(); y = 60
+                }
+
+                // Draw circular bullet
+                let bulletRect = CGRect(x: leftMargin, y: y + (lineHeight - bulletSize) / 2, width: bulletSize, height: bulletSize)
+                cgContext.setFillColor(UIColor.black.cgColor)
+                cgContext.fillEllipse(in: bulletRect)
+
+                // Draw action text
+                let actionPoint = CGPoint(x: actionIndentX, y: y)
+                (action as NSString).draw(at: actionPoint, withAttributes: actionAttrs)
+
+                y += lineHeight + actionLineSpacing
+            }
+
+            y += 8 // spacing between routines
+        }
+
+        return y
     }
 }

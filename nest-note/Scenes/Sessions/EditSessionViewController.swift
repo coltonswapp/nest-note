@@ -611,7 +611,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 guard let pdfData = await PDFExportService.generateSessionPDF(
                     session: sessionItem,
                     nestItem: nest,
-                    events: sessionEvents
+                    events: sessionEvents,
+                    selectedItemIds: (self.selectedItemIds.isEmpty ? (self.sessionItem.entryIds ?? []) : self.selectedItemIds)
                 ) else {
                     await showError(message: "Failed to generate PDF")
                     return
@@ -1400,6 +1401,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     // Store events in sessionItem for change tracking
                     self.sessionItem.events = events
                     
+                    // Sync originalSession events with fetched events so that
+                    // opening a session with existing events does not appear
+                    // as an unsaved change.
+                    self.originalSession.events = events
+                    
                     // Update the events section in the collection view
                     if events.isEmpty {
                         // If no events, just show the add button
@@ -1420,6 +1426,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     } else {
                         updateEventsSection(with: events)
                     }
+                    
+                    // Re-evaluate save state after syncing events
+                    self.checkForChanges()
                 }
             } catch {
                 Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session events: \(error.localizedDescription)")
