@@ -514,7 +514,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 40, trailing: 12)
         section.interGroupSpacing = 8
         return section
     }
@@ -524,7 +524,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 40, trailing: 12)
         section.interGroupSpacing = 8
         
         let header = NSCollectionLayoutBoundarySupplementaryItem(
@@ -559,7 +559,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let section = NSCollectionLayoutSection(group: group)
         
         // Use 30 points bottom padding when there's no .other section (to match .other section padding)
-        let bottomPadding: CGFloat = needsBottomPadding ? 30 : 4
+        let bottomPadding: CGFloat = needsBottomPadding ? 40 : 4
         section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: bottomPadding, trailing: 4)
         
         let header = NSCollectionLayoutBoundarySupplementaryItem(
@@ -1007,8 +1007,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             } else {
                 // Create top section actions (suggestions and add folder)
                 var topActions: [UIAction] = [
-                    UIAction(title: "Entry Suggestions", image: UIImage(systemName: "sparkles")) { _ in
-                        self.showEntrySuggestions()
+                    UIAction(title: "Item Suggestions", image: UIImage(systemName: "sparkles")) { _ in
+                        self.showItemSuggestions()
                     }
                 ]
                 
@@ -1125,24 +1125,22 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         updateMoveButtonState()
     }
     
-    private func showEntrySuggestions() {
+    private func showItemSuggestions() {
         // Dismiss the suggestion tip when user opens suggestions
         NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
-        
-        // Present CommonEntriesViewController as a sheet with medium and large detents
-        let commonEntriesVC = CommonEntriesViewController(category: category, entryRepository: entryRepository)
-        let navController = UINavigationController(rootViewController: commonEntriesVC)
-        
-        // Set this view controller as the delegate
-        commonEntriesVC.delegate = self
-        
+
+        // Present CommonItemsViewController as a sheet with medium and large detents
+        let commonItemsVC = CommonItemsViewController(category: category, entryRepository: entryRepository)
+        commonItemsVC.delegate = self
+        let navController = UINavigationController(rootViewController: commonItemsVC)
+
         if let sheet = navController.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
             sheet.prefersScrollingExpandsWhenScrolledToEdge = true
             sheet.prefersEdgeAttachedInCompactHeight = true
         }
-        
+
         present(navController, animated: true)
     }
     
@@ -1257,7 +1255,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         print("🔄 Updating filter view with sections: \(availableSections.map { $0.displayTitle })")
         filterView.isHidden = false
-        filterView.configure(with: availableSections)
+        filterView.configure(
+            with: availableSections,
+            allowsMultipleSelection: true,
+            showsAllOption: true
+        )
     }
     
     private func getAvailableSections() -> [Section] {
@@ -2163,7 +2165,7 @@ extension NestCategoryViewController: NNEmptyStateViewDelegate {
 
 // Add extension to implement the CommonEntriesViewControllerDelegate
 extension NestCategoryViewController: CommonEntriesViewControllerDelegate {
-    func commonEntriesViewController(_ controller: CommonEntriesViewController, didSelectEntry entry: BaseEntry) {
+    func commonEntriesViewController(didSelectEntry entry: BaseEntry) {
         // Show the entry detail with this controller as the delegate
         let cellFrame = view.frame  // We don't have a cell frame since we're coming from a different view
         let isReadOnly = !(entryRepository is NestService)
@@ -2180,6 +2182,75 @@ extension NestCategoryViewController: CommonEntriesViewControllerDelegate {
     
     func showUpgradePrompt() {
         showEntryLimitUpgradePrompt()
+    }
+}
+
+// MARK: - CommonItemsViewControllerDelegate
+extension NestCategoryViewController: CommonItemsViewControllerDelegate {
+    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectEntry entry: CommonEntry) {
+        // Only allow creating entries for nest owners
+        guard entryRepository is NestService else { return }
+        Logger.log(level: .info, category: logCategory, message: "Selected common entry: \(entry.title)")
+
+        // Check entry limit for free tier users, then present EntryDetailViewController
+        Task {
+            let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+            if !hasUnlimitedEntries {
+                do {
+                    let currentCount = try await (entryRepository as! NestService).getCurrentEntryCount()
+                    if currentCount >= 10 {
+                        await MainActor.run {
+                            self.dismiss(animated: true) {
+                                self.showEntryLimitUpgradePrompt()
+                            }
+                        }
+                        return
+                    }
+                } catch {
+                    Logger.log(level: .error, category: logCategory, message: "Failed to check entry count: \(error.localizedDescription)")
+                }
+            }
+
+            await MainActor.run {
+                let editEntryVC = EntryDetailViewController(
+                    category: self.category,
+                    title: entry.title,
+                    content: entry.content
+                )
+                editEntryVC.entryDelegate = self
+                self.dismiss(animated: true) {
+                    self.present(editEntryVC, animated: true)
+                }
+            }
+        }
+    }
+
+    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectPlace place: CommonPlace) {
+        // Only allow creating places for nest owners
+        guard entryRepository is NestService else { return }
+
+        // Present SelectPlaceViewController to choose location, prefilled with suggested name
+        let selectPlaceVC = SelectPlaceViewController()
+        selectPlaceVC.suggestedPlaceName = place.name
+        selectPlaceVC.category = self.category
+        let navController = UINavigationController(rootViewController: selectPlaceVC)
+        self.dismiss(animated: true) {
+            self.present(navController, animated: true)
+        }
+    }
+
+    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectRoutine routine: CommonRoutine) {
+        // Only allow creating routines for nest owners
+        guard entryRepository is NestService else { return }
+
+        let routineDetailVC = RoutineDetailViewController(
+            category: self.category,
+            routineName: routine.name
+        )
+        routineDetailVC.routineDelegate = self
+        self.dismiss(animated: true) {
+            self.present(routineDetailVC, animated: true)
+        }
     }
 }
 
@@ -2370,20 +2441,28 @@ extension NestCategoryViewController {
 }
 
 extension NestCategoryViewController: NNCategoryFilterViewDelegate {
-    func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateEnabledSections sections: Set<Section>) {
+    func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateSelection selection: NNCategoryFilterView.Selection) {
+        // Map selection to our concrete enabledSections
+        let allAvailable = getAvailableSections()
+
+        let newEnabled: Set<Section>
+        switch selection {
+        case .all:
+            newEnabled = Set(allAvailable)
+        case .specific(let ids):
+            // ids are AnyHashable of Section (conforming to NNCategoryFilterOption)
+            let selected = allAvailable.filter { ids.contains($0) }
+            // If user cleared all (should not happen due to All auto-select), fallback to all
+            newEnabled = selected.isEmpty ? Set(allAvailable) : Set(selected)
+        }
+
         // Temporarily disable automatic snapshots to prevent double application
         shouldApplySnapshotAutomatically = false
-        
-        // Set the enabled sections without triggering automatic snapshot
-        self.enabledSections = sections
-        
-        // Re-enable automatic snapshots
+        self.enabledSections = newEnabled
         self.shouldApplySnapshotAutomatically = true
-        
-        // Apply with animation when filtering - this is the ONLY snapshot application
+
         self.applySnapshot(animated: true)
-        
-        // Update filter view display after main collection view is done
+
         DispatchQueue.main.async {
             filterView.updateDisplayedState()
         }

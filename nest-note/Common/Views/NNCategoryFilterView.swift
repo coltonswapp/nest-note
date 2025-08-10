@@ -1,39 +1,113 @@
 import UIKit
 
-protocol NNCategoryFilterViewDelegate: AnyObject {
-    func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateEnabledSections sections: Set<NestCategoryViewController.Section>)
+// MARK: - Protocols & Types
+
+protocol NNCategoryFilterOption: Hashable {
+    var displayTitle: String { get }
 }
 
-class NNCategoryFilterView: UIView {
+protocol NNCategoryFilterViewDelegate: AnyObject {
+    func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateSelection selection: NNCategoryFilterView.Selection)
+}
+
+final class NNCategoryFilterView: UIView {
+    // MARK: - Selection
+    enum Selection {
+        case all
+        case specific(Set<AnyHashable>)
+    }
+
+    // MARK: - Public
     weak var delegate: NNCategoryFilterViewDelegate?
-    
+
+    // MARK: - UI
     private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDataSource?
-    
-    private var availableSections: [NestCategoryViewController.Section] = []
-    private var enabledSections: Set<NestCategoryViewController.Section> = [] {
+
+    // MARK: - Data
+    private struct OptionItem {
+        let id: AnyHashable
+        let title: String
+    }
+
+    private var options: [OptionItem] = []
+    private var allowsMultipleSelection: Bool = true
+    private var showsAllOption: Bool = true
+    private var isConfiguring: Bool = false
+    private var activeOptionIds: Set<AnyHashable> = [] {
         didSet {
-            delegate?.categoryFilterView(self, didUpdateEnabledSections: enabledSections)
+            // Avoid partial reloads while reconfiguring the option set (item count may change)
+            if isConfiguring {
+                return
+            }
+            // Reload visible items to animate state change smoothly
+            let visible = collectionView?.indexPathsForVisibleItems ?? []
+            if !visible.isEmpty {
+                collectionView?.reloadItems(at: visible)
+            } else {
+                collectionView?.reloadData()
+            }
+            notifyDelegate()
         }
     }
-    
-    private var isAllSelected: Bool = true {
-        didSet {
-            collectionView.reloadData()
-        }
-    }
-    
-    private var isInteractionDisabled: Bool = false
-    
+
+    // Tracks whether the All chip is explicitly active
+    private var isAllChipActive: Bool = false
+
+    // MARK: - Init
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupCollectionView()
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
+    // MARK: - Configuration
+    func configure<T: NNCategoryFilterOption>(
+        with options: [T],
+        allowsMultipleSelection: Bool = true,
+        showsAllOption: Bool? = nil,
+        defaultSelection: T? = nil
+    ) {
+        isConfiguring = true
+        self.options = options.map { OptionItem(id: AnyHashable($0), title: $0.displayTitle) }
+        self.allowsMultipleSelection = allowsMultipleSelection
+        self.showsAllOption = showsAllOption ?? allowsMultipleSelection
+
+        if allowsMultipleSelection {
+            // Default to All selected when multi-select and All is shown
+            if self.showsAllOption {
+                isAllChipActive = true
+                activeOptionIds = Set(self.options.map { $0.id })
+            } else {
+                // No "All" chip shown; start with empty set and wait for user input
+                isAllChipActive = false
+                activeOptionIds = []
+            }
+        } else {
+            // Single-select must always have one selected
+            let initial = defaultSelection ?? options.first
+            if let initial = initial {
+                isAllChipActive = false
+                activeOptionIds = [AnyHashable(initial)]
+            } else {
+                isAllChipActive = false
+                activeOptionIds = []
+            }
+        }
+
+        collectionView.reloadData()
+        isConfiguring = false
+        // After configuration is complete, notify delegate of the initial selection state
+        notifyDelegate()
+    }
+
+    func updateDisplayedState() {
+        collectionView.reloadData()
+    }
+
+    // MARK: - Private
     private func setupCollectionView() {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
@@ -41,18 +115,18 @@ class NNCategoryFilterView: UIView {
         layout.minimumLineSpacing = 8
         layout.sectionInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
         layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
-        
+
         collectionView = UICollectionView(frame: bounds, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.showsHorizontalScrollIndicator = false
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        
+
         collectionView.register(CategoryFilterCell.self, forCellWithReuseIdentifier: CategoryFilterCell.reuseIdentifier)
-        
+
         addSubview(collectionView)
-        
+
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -60,116 +134,112 @@ class NNCategoryFilterView: UIView {
             collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
-    
-    func configure(with sections: [NestCategoryViewController.Section]) {
-        availableSections = sections
-        enabledSections = Set(sections)
-        
-        // If there's only one section, disable interaction and don't show "ALL"
-        isInteractionDisabled = sections.count == 1
-        isAllSelected = sections.count > 1  // Only show "ALL" when there are multiple sections
-        
-        collectionView.reloadData()
+
+    private func notifyDelegate() {
+        if allowsMultipleSelection && showsAllOption && isAllChipActive {
+            delegate?.categoryFilterView(self, didUpdateSelection: .all)
+        } else {
+            delegate?.categoryFilterView(self, didUpdateSelection: .specific(activeOptionIds))
+        }
     }
-    
-    func updateDisplayedState() {
-        // Just reload the collection view - no state changes
-        collectionView.reloadData()
+
+    private func handleTapOnAll() {
+        guard allowsMultipleSelection && showsAllOption else { return }
+        // Select All → activate all options and mark All chip active
+        isAllChipActive = true
+        activeOptionIds = Set(options.map { $0.id })
+        HapticsHelper.lightHaptic()
     }
-    
+
+    private func handleTapOnOption(at index: Int) {
+        guard index >= 0 && index < options.count else { return }
+        let optionId = options[index].id
+
+        if allowsMultipleSelection {
+            if isAllChipActive {
+                // Transition from All → single specific
+                isAllChipActive = false
+                activeOptionIds = [optionId]
+            } else {
+                var next = activeOptionIds
+                if next.contains(optionId) {
+                    next.remove(optionId)
+                } else {
+                    next.insert(optionId)
+                }
+                if next.isEmpty {
+                    // Auto-select All when cleared
+                    isAllChipActive = true
+                    activeOptionIds = Set(options.map { $0.id })
+                } else {
+                    // If user manually selects all items, keep All chip OFF per requirement
+                    isAllChipActive = false
+                    activeOptionIds = next
+                }
+            }
+        } else {
+            // Enforce exactly one selected
+            if !activeOptionIds.contains(optionId) {
+                activeOptionIds = [optionId]
+            }
+        }
+
+        HapticsHelper.lightHaptic()
+    }
+
+    // MARK: - Trait changes
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
-        
-        // Update colors when switching between light and dark mode
         if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
             collectionView.reloadData()
         }
     }
-    
-    private func selectAll() {
-        isAllSelected = true
-        enabledSections = Set(availableSections)
-        HapticsHelper.lightHaptic()
-    }
-    
-    private func toggleSection(_ section: NestCategoryViewController.Section) {
-        if isAllSelected {
-            // If ALL is currently selected, switch to individual selection mode with just this section
-            isAllSelected = false
-            enabledSections = [section]
-        } else {
-            // Normal toggle behavior when already in individual selection mode
-            if enabledSections.contains(section) {
-                enabledSections.remove(section)
-            } else {
-                enabledSections.insert(section)
-            }
-        }
-        
-        HapticsHelper.lightHaptic()
-    }
 }
 
+// MARK: - UICollectionViewDataSource
 extension NNCategoryFilterView: UICollectionViewDataSource {
-    func numberOfSections(in collectionView: UICollectionView) -> Int {
-        return 1
-    }
-    
+    func numberOfSections(in collectionView: UICollectionView) -> Int { 1 }
+
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        if isInteractionDisabled {
-            // Single section: show only that section's button (no "ALL" button)
-            return availableSections.count
-        } else {
-            // Multiple sections: show "ALL" button + section buttons
-            return availableSections.count + 1
-        }
+        return options.count + (showsAllOption ? 1 : 0)
     }
-    
+
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(
             withReuseIdentifier: CategoryFilterCell.reuseIdentifier,
             for: indexPath
         ) as! CategoryFilterCell
-        
-        if isInteractionDisabled {
-            // Single section: show only that section's button, always enabled
-            let section = availableSections[indexPath.item]
-            cell.configure(title: section.displayTitle, isEnabled: true, isInteractionDisabled: true)
-        } else {
-            // Multiple sections: show "ALL" + section buttons with normal logic
-            if indexPath.item == 0 {
-                // "ALL" button - only highlighted when ALL is selected
-                cell.configure(title: "All", isEnabled: isAllSelected, isInteractionDisabled: false)
-            } else {
-                // Regular section buttons - only highlighted when ALL is NOT selected and they're in enabledSections
-                let section = availableSections[indexPath.item - 1]
-                let isEnabled = !isAllSelected && enabledSections.contains(section)
-                
-                cell.configure(title: section.displayTitle, isEnabled: isEnabled, isInteractionDisabled: false)
-            }
+
+        if showsAllOption && indexPath.item == 0 {
+            cell.configure(title: "All", isEnabled: isAllChipActive, isInteractionDisabled: false)
+            return cell
         }
-        
+
+        let baseIndex = indexPath.item - (showsAllOption ? 1 : 0)
+        let option = options[baseIndex]
+
+        let isEnabled: Bool
+        if allowsMultipleSelection {
+            isEnabled = !isAllChipActive && activeOptionIds.contains(option.id)
+        } else {
+            isEnabled = activeOptionIds.contains(option.id)
+        }
+
+        cell.configure(title: option.title, isEnabled: isEnabled, isInteractionDisabled: false)
         return cell
     }
 }
 
+// MARK: - UICollectionViewDelegate
 extension NNCategoryFilterView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        
-        // Don't handle taps when interaction is disabled (single section mode)
-        guard !isInteractionDisabled else { return }
-        
-        if indexPath.item == 0 {
-            selectAll()
+
+        if showsAllOption && indexPath.item == 0 {
+            handleTapOnAll()
         } else {
-            // Tapped regular section button
-            guard indexPath.item - 1 < availableSections.count else {
-                return 
-            }
-            
-            let section = availableSections[indexPath.item - 1]
-            toggleSection(section)
+            let baseIndex = indexPath.item - (showsAllOption ? 1 : 0)
+            handleTapOnOption(at: baseIndex)
         }
     }
 }
@@ -215,7 +285,7 @@ private class CategoryFilterCell: UICollectionViewCell {
         // Disable user interaction if specified (for single section mode)
         self.isUserInteractionEnabled = !isInteractionDisabled
         
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+        UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
             if isEnabled {
                 self.contentView.backgroundColor = NNColors.primaryOpaque
                 self.contentView.layer.borderColor = NNColors.primary.cgColor
@@ -254,7 +324,7 @@ private class CategoryFilterCell: UICollectionViewCell {
     }
 }
 
-extension NestCategoryViewController.Section {
+extension NestCategoryViewController.Section: NNCategoryFilterOption {
     var displayTitle: String {
         switch self {
         case .folders: return "Folders"

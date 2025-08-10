@@ -69,6 +69,16 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         self.routine = routine
         self.isReadOnly = isReadOnly
         super.init(sourceFrame: sourceFrame)
+        titleField.text = routine?.title
+    }
+    
+    init(category: String, routineName: String, sourceFrame: CGRect? = nil) {
+        self.category = category
+        self.routine = nil
+        self.isReadOnly = false
+        super.init(sourceFrame: sourceFrame)
+        
+        titleField.text = routineName
     }
     
     required init?(coder: NSCoder) {
@@ -80,7 +90,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         super.viewDidLoad()
         
         titleLabel.text = routine == nil ? "New Routine" : isReadOnly ? "View Routine" : "Edit Routine"
-        titleField.text = routine?.title
+        
         titleField.placeholder = "Routine Name"
         titleField.delegate = self
         
@@ -108,8 +118,10 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         routineTableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
         routineTableView.scrollIndicatorInsets = routineTableView.contentInset
         
-        if routine == nil && !isReadOnly {
+        if routine == nil && !isReadOnly && titleField.text == nil  {
             titleField.becomeFirstResponder()
+        } else if routine == nil && !isReadOnly {
+            routineTableView.becomeFirstResponder()
         }
     }
     

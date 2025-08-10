@@ -23,6 +23,10 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     
     var mapHeightConstraint: NSLayoutConstraint?
     
+    // Define fixed heights to avoid cumulative growth when toggling keyboard
+    private let collapsedMapHeight: CGFloat = 140
+    private let expandedMapHeight: CGFloat = 260
+    
     let addressLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -170,7 +174,8 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         containerView.addSubview(folderLabel)
         containerView.addSubview(buttonStackView)
         
-        mapHeightConstraint = mapView.heightAnchor.constraint(equalToConstant: 200)
+        // Start slightly larger when keyboard is hidden
+        mapHeightConstraint = mapView.heightAnchor.constraint(equalToConstant: expandedMapHeight)
         
         NSLayoutConstraint.activate([
             
@@ -407,11 +412,17 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     override func onKeyboardShow() {
-        mapHeightConstraint?.constant = mapView.frame.height - 60.0
+        mapHeightConstraint?.constant = collapsedMapHeight
+        UIView.animate(withDuration: 0.25) {
+            self.view.layoutIfNeeded()
+        }
     }
     
     override func onKeyboardHide() {
-        mapHeightConstraint?.constant = mapView.frame.height + 60.0
+        mapHeightConstraint?.constant = expandedMapHeight
+        UIView.animate(withDuration: 0.25) {
+            self.view.layoutIfNeeded()
+        }
     }
     
     // MARK: - Helper Methods
