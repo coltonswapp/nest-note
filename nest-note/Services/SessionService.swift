@@ -191,6 +191,11 @@ class SessionService {
         
         try await sessionRef.delete()
         Logger.log(level: .info, category: .sessionService, message: "Session deleted successfully ✅")
+        
+        // Remove from in-memory cache to prevent stale sessions from reappearing
+        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions.remove(at: index)
+        }
     }
     
     // MARK: - Fetch Organized Sessions

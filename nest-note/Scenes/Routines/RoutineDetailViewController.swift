@@ -93,6 +93,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         
         titleField.placeholder = "Routine Name"
         titleField.delegate = self
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
         
         // Load routine actions
         routineActions = routine?.routineActions ?? []
@@ -123,6 +124,9 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         } else if routine == nil && !isReadOnly {
             routineTableView.becomeFirstResponder()
         }
+
+        // Ensure save button state reflects current title and action list
+        updateSaveButtonEnabledState()
     }
     
     // MARK: - Setup Methods
@@ -177,6 +181,19 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         containerView.clipsToBounds = true
     }
     
+    private func updateSaveButtonEnabledState() {
+        guard !isReadOnly else { return }
+        let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasTitle = !titleString.isEmpty
+        let hasAtLeastOneAction = !routineActions.isEmpty
+        let shouldEnable = hasTitle && hasAtLeastOneAction
+        saveButton.isEnabled = shouldEnable
+    }
+
+    @objc private func titleFieldChanged() {
+        updateSaveButtonEnabledState()
+    }
+
     // MARK: - Private Methods
     private func configureFolderLabel() {
         let components = category.components(separatedBy: "/")
@@ -541,6 +558,9 @@ extension RoutineDetailViewController: UITableViewDelegate {
             
             
             HapticsHelper.lightHaptic()
+
+            // Reflect new validity in save button state
+            updateSaveButtonEnabledState()
         }
     }
     
@@ -662,7 +682,9 @@ extension RoutineDetailViewController: AddRoutineActionCellDelegate {
                 let newActionIndexPath = IndexPath(row: oldCount, section: 0)
                 routineTableView.insertRows(at: [newActionIndexPath], with: .fade)
             }
-        }, completion: nil)
+        }, completion: { [weak self] _ in
+            self?.updateSaveButtonEnabledState()
+        })
     }
 }
 
