@@ -14,6 +14,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     // MARK: - Properties
     internal let entryRepository: EntryRepository
     private let category: String
+    // Expose current category path to selection flow controller for scoping
+    func getCurrentCategoryPath() -> String { category }
+    private var selectAllBarButtonItem: UIBarButtonItem?
+    private var allItemIdsInScope: Set<String> = []
+    private var inScopeEntries: [BaseEntry] = []
+    private var inScopePlaces: [PlaceItem] = []
+    private var inScopeRoutines: [RoutineItem] = []
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -141,7 +148,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             DispatchQueue.main.async {
                 self.collectionView.reloadData()
                 self.restoreCollectionViewSelection()
-                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: self.selectedEntries)
             }
         }
     }
@@ -155,7 +161,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             DispatchQueue.main.async {
                 self.collectionView.reloadData()
                 self.restoreCollectionViewSelection()
-                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
             }
         }
     }
@@ -169,7 +174,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             DispatchQueue.main.async {
                 self.collectionView.reloadData()
                 self.restoreCollectionViewSelection()
-                self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: self.selectedRoutines)
             }
         }
     }
@@ -292,6 +296,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // If in edit-only mode, automatically enter edit mode
         if isEditOnlyMode {
             isEditingMode = true
+        }
+        
+        // Prepare Select All button and data for edit-only selection flow
+        if isEditOnlyMode {
+            setupSelectAllButton()
+            Task { await prepareSelectableItemsInScope() }
         }
     }
     
@@ -998,7 +1008,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             if isEditingMode {
                 // In edit-only mode, don't show any navigation buttons as the flow controller handles navigation
                 if isEditOnlyMode {
-                    navigationItem.rightBarButtonItems = []
+                    // Show Select All when selecting items in edit-only mode
+                    if selectAllBarButtonItem == nil {
+                        setupSelectAllButton()
+                    }
+                    navigationItem.rightBarButtonItems = selectAllBarButtonItem != nil ? [selectAllBarButtonItem! ] : []
                 } else {
                     // When in edit mode, show a simple "Done" button
                     let doneButton = UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(doneButtonTapped))
@@ -1037,6 +1051,120 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             }
             navigationController?.navigationBar.tintColor = .label
         }
+    }
+
+    // MARK: - Select All Support (Edit-only mode)
+    private func setupSelectAllButton() {
+        let button = UIBarButtonItem(title: "Select All", style: .plain, target: self, action: #selector(didTapSelectAll))
+        selectAllBarButtonItem = button
+        navigationItem.rightBarButtonItem = button
+        updateSelectAllButtonTitle()
+    }
+    
+    // Compute all items in current category INCLUDING descendants
+    private func isInScope(_ itemCategory: String) -> Bool {
+        return itemCategory == category || itemCategory.hasPrefix(category + "/")
+    }
+    
+    private func updateSelectAllButtonTitle() {
+        guard isEditOnlyMode else { return }
+        let total = allItemIdsInScope.count
+        let selectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+        let isAllSelected = total > 0 && selectedCount >= total
+        selectAllBarButtonItem?.title = isAllSelected ? "Clear All" : "Select All"
+        selectAllBarButtonItem?.isEnabled = total > 0
+    }
+    
+    private func updateSelectAllButtonAfterSelectionChange() {
+        if isEditOnlyMode { updateSelectAllButtonTitle() }
+    }
+    
+    private func prepareSelectableItemsInScope() async {
+        do {
+            var entries: [BaseEntry] = []
+            var places: [PlaceItem] = []
+            var routines: [RoutineItem] = []
+            if let nestService = entryRepository as? NestService {
+                do {
+                    let (groupedEntries, allPlaces) = try await nestService.fetchEntriesAndPlaces()
+                    let allRoutines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
+                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
+                    places = allPlaces.filter { isInScope($0.category) }
+                    routines = allRoutines.filter { isInScope($0.category) }
+                } catch {
+                    let groupedEntries = try await entryRepository.fetchEntries()
+                    let allPlaces = try await entryRepository.fetchPlaces()
+                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
+                    places = allPlaces.filter { isInScope($0.category) }
+                    routines = []
+                }
+            } else if let sitterService = entryRepository as? SitterViewService {
+                do {
+                    let (groupedEntries, allPlaces) = try await sitterService.fetchEntriesAndPlaces()
+                    let allRoutines = try await sitterService.fetchRoutines()
+                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
+                    places = allPlaces.filter { isInScope($0.category) }
+                    routines = allRoutines.filter { isInScope($0.category) }
+                } catch {
+                    let groupedEntries = try await entryRepository.fetchEntries()
+                    let allPlaces = try await entryRepository.fetchPlaces()
+                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
+                    places = allPlaces.filter { isInScope($0.category) }
+                    routines = []
+                }
+            } else {
+                let groupedEntries = try await entryRepository.fetchEntries()
+                let allPlaces = try await entryRepository.fetchPlaces()
+                entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
+                places = allPlaces.filter { isInScope($0.category) }
+                routines = []
+            }
+            let ids = Set(entries.map { $0.id } + places.map { $0.id } + routines.map { $0.id })
+            await MainActor.run {
+                self.inScopeEntries = entries
+                self.inScopePlaces = places
+                self.inScopeRoutines = routines
+                self.allItemIdsInScope = ids
+                self.updateSelectAllButtonTitle()
+            }
+        } catch {
+            await MainActor.run {
+                self.inScopeEntries = []
+                self.inScopePlaces = []
+                self.inScopeRoutines = []
+                self.allItemIdsInScope = []
+                self.updateSelectAllButtonTitle()
+            }
+        }
+    }
+    
+    @objc private func didTapSelectAll() {
+        guard isEditOnlyMode else { return }
+        let total = allItemIdsInScope.count
+        let currentSelectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+        let isAllSelected = total > 0 && currentSelectedCount >= total
+        if isAllSelected {
+            selectedEntries.removeAll()
+            selectedPlaces.removeAll()
+            selectedRoutines.removeAll()
+        } else {
+            // Ensure we have prepared items; if not, compute synchronously minimal by using current lists
+            if inScopeEntries.isEmpty && inScopePlaces.isEmpty && inScopeRoutines.isEmpty && !allItemIdsInScope.isEmpty {
+                // No-op; ids are filled but details aren't needed to set selection state
+            }
+            selectedEntries = Set(inScopeEntries)
+            selectedPlaces = Set(inScopePlaces)
+            selectedRoutines = Set(inScopeRoutines)
+        }
+        // Notify delegate in edit-only mode
+        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+        
+        // Update UI
+        collectionView.reloadData()
+        refreshFolderSelectionCounts()
+        updateSelectAllButtonTitle()
     }
     
     private func updateEditModeUI() {
@@ -1759,7 +1887,20 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     places: allPlaces
                 )
                 subfolderVC.selectEntriesDelegate = selectEntriesDelegate
-                subfolderVC.restoreSelectedEntries(selectedEntries)
+                
+                // Restore selection from flow controller to ensure persistence across navigation
+                Task { @MainActor in
+                    if let items = await self.selectEntriesDelegate?.getCurrentSelectedItems() {
+                        subfolderVC.restoreSelectedEntries(items.entries)
+                        subfolderVC.restoreSelectedPlaces(items.places)
+                        subfolderVC.restoreSelectedRoutines(items.routines)
+                    } else {
+                        // Fallback to current controller's known selections
+                        subfolderVC.restoreSelectedEntries(self.selectedEntries)
+                        subfolderVC.restoreSelectedPlaces(self.selectedPlaces)
+                        subfolderVC.restoreSelectedRoutines(self.selectedRoutines)
+                    }
+                }
                 
                 navigationController?.pushViewController(subfolderVC, animated: true)
             } else if !isEditingMode {
@@ -1797,6 +1938,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
                     selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                    updateSelectAllButtonAfterSelectionChange()
                 }
                 return
             }
@@ -1837,6 +1979,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
                     selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                    updateSelectAllButtonAfterSelectionChange()
                 }
                 
                 // Update the cell appearance
@@ -1883,6 +2026,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             if isEditOnlyMode {
                 selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
                 refreshFolderSelectionCounts()
+                updateSelectAllButtonAfterSelectionChange()
             }
             
             // Update the cell appearance using diffable data source
@@ -1922,6 +2066,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
                     selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                    updateSelectAllButtonAfterSelectionChange()
                 }
                 return
             }
@@ -1936,6 +2081,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 }
                 
                 updateRoutineCellSelection(for: selectedRoutine)
+                updateSelectAllButtonAfterSelectionChange()
                 return
             }
             
@@ -1947,6 +2093,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 if isEditOnlyMode {
                     selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
                     refreshFolderSelectionCounts()
+                    updateSelectAllButtonAfterSelectionChange()
                 }
                 
                 // Update the cell appearance using diffable data source

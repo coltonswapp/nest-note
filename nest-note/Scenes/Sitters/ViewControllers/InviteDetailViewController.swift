@@ -44,9 +44,9 @@ class InviteDetailViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
     private var createUpdateButton: NNLoadingButton!
     private var actionButtonsStackView: UIStackView!
-    private var skipButton: UIButton!
-    private var skipLabel: UILabel!
-    private var skipStack: UIStackView!
+    private var skipButton: UIButton?
+    private var skipLabel: UILabel?
+    private var skipStack: UIStackView?
     
     private lazy var copyButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "doc.on.doc"),
@@ -241,83 +241,38 @@ class InviteDetailViewController: NNViewController {
         // Set initial button state
         updateButtonState()
         
-        // Setup skip button
-        setupSkipButton()
-        
-        // Constrain action buttons above the skip button
+        // Constrain action buttons above the bottom button
         NSLayoutConstraint.activate([
             actionButtonsStackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             actionButtonsStackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             actionButtonsStackView.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -24)
         ])
     }
-    
-    private func setupSkipButton() {
-        skipButton = UIButton(type: .system)
-        skipButton.setTitle("Skip for now", for: .normal)
-        skipButton.setTitleColor(NNColors.primary, for: .normal)
-        skipButton.titleLabel?.font = .bodyL
-        skipButton.translatesAutoresizingMaskIntoConstraints = false
-        skipButton.addTarget(self, action: #selector(skipButtonTapped), for: .touchUpInside)
-        
-        skipLabel = UILabel()
-        skipLabel.font = .preferredFont(forTextStyle: .footnote)
-        skipLabel.textColor = .tertiaryLabel
-        skipLabel.textAlignment = .center
-        skipLabel.numberOfLines = 0
-        skipLabel.text = "You can always invite a sitter later"
-        
-        skipStack = UIStackView()
-        skipStack.translatesAutoresizingMaskIntoConstraints = false
-        skipStack.axis = .vertical
-        skipStack.spacing = 4
-        skipStack.alignment = .center
-        skipStack.addArrangedSubview(skipButton)
-        skipStack.addArrangedSubview(skipLabel)
-        
-        view.addSubview(skipStack)
-        
-        NSLayoutConstraint.activate([
-            skipStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            skipStack.bottomAnchor.constraint(equalTo: createUpdateButton.topAnchor, constant: -16),
-            skipButton.heightAnchor.constraint(equalToConstant: 30)
-        ])
-        
-        // Initially hide skip button, only show for new invites
-        updateSkipButtonVisibility()
-    }
-    
-    @objc private func skipButtonTapped() {
-        let alert = UIAlertController(
-            title: "Skip Invite Creation?",
-            message: "You can create an invite for this session later from the session details.",
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
-        alert.addAction(UIAlertAction(title: "Skip", style: .default) { [weak self] _ in
-            // Call the closure to notify that invite creation is complete (skipped)
-            self?.onInviteCreation?()
-            self?.dismiss(animated: true)
-        })
-        
-        present(alert, animated: true)
-    }
-    
-    private func updateSkipButtonVisibility() {
-        guard skipButton != nil else { return }
-        
-        // Only show skip button if onInviteCreation closure is set and no invite exists yet
-        let shouldShow = !inviteExists && onInviteCreation != nil
-        skipStack.isHidden = !shouldShow
-    }
+    // Skip button removed for open-invite flow
     
     @objc private func createUpdateButtonTapped() {
         if inviteExists {
             updateInvite()
         } else {
-            createInvite()
+            // Open invite fallback: auto-create code if missing
+            Task { [weak self] in
+                guard let self = self, let sessionID = self.sessionID else { return }
+                do {
+                    let invite = try await SessionService.shared.createOpenInvite(sessionID: sessionID)
+                    await MainActor.run {
+                        self.inviteCode = invite.code
+                        self.inviteID = invite.id
+                        self.inviteExists = true
+                        self.updateActionButtonsVisibility()
+                        self.applySnapshot()
+                        self.createUpdateButton.isEnabled = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.showToast(text: "Failed to create invite")
+                    }
+                }
+            }
         }
     }
     
@@ -344,7 +299,7 @@ class InviteDetailViewController: NNViewController {
                     self.inviteID = invite.id
                     self.inviteExists = true
                     self.updateActionButtonsVisibility()
-                    self.updateSkipButtonVisibility()
+                    
                     self.applySnapshot()
                     self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter, inviteId: invite.id)
                     
@@ -419,7 +374,7 @@ class InviteDetailViewController: NNViewController {
         updateButtonTitle()
         updateButtonState()
         updateActionButtonsVisibility()
-        updateSkipButtonVisibility()
+        
         
         // Only apply snapshot if view has loaded
         if isViewLoaded {
@@ -436,7 +391,7 @@ class InviteDetailViewController: NNViewController {
         updateButtonTitle()
         updateButtonState()
         updateActionButtonsVisibility()
-        updateSkipButtonVisibility()
+        
         
         // Only apply snapshot if view has loaded
         if isViewLoaded {
@@ -491,11 +446,7 @@ class InviteDetailViewController: NNViewController {
             guard let self else { return }
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
             if section == .code {
-                if !inviteExists {
-                    footerView.configure(text: "Your invite code will appear here once it is created.")
-                } else {
-                    footerView.configure(text: "Instruct your sitter to enter this code in their NestNote app to join your session.")
-                }
+                footerView.configure(text: "Share this code. Anyone with it can join this session.")
             }
         }
         

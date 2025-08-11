@@ -15,16 +15,21 @@ class ModifiedSelectFolderViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, FolderItem>!
     private var selectionCounterView: SelectEntriesCountView!
+    private var selectAllBarButtonItem: UIBarButtonItem?
     
     private var categories: [NestCategory] = []
     private var pendingUpdateNeeded = false
     private var folderItemCounts: [String: Int] = [:]
+    // Optional preloaded items to avoid redundant service calls
+    private var preloadedAllItems: [BaseItem]? = nil
     
     // Callback for continue button - now passes selected IDs
     var onContinueTapped: (([String]) -> Void)?
     
     // Track all selected IDs locally (not committed until continue)
     private var currentSelectedIds: [String] = []
+    // Cache of all selectable item IDs (entries + places + routines)
+    private var allSelectableItemIds: [String] = []
     
     enum Section: Int, CaseIterable {
         case folders
@@ -64,41 +69,80 @@ class ModifiedSelectFolderViewController: UIViewController {
         setupCollectionView()
         configureDataSource()
         setupSelectionCounterView()
+        setupNavigationItems()
         
         collectionView.delegate = self
-        loadCategories()
         
-        // Load item-folder mapping for selection counting
-        Task {
-            await updateItemFolderMapping()
-        }
+        // Single consolidated initial load to avoid duplicate fetches
+        Task { await initialLoad() }
     }
     
     // Cache for item-to-folder mapping to avoid repeated fetches
     private var itemFolderMapping: [String: String] = [:]
     
-    // Helper method to count selected items in a specific folder using IDs
+    // Helper method to determine if a category is the folder or a descendant
+    private func isInFolderOrDescendant(itemCategory: String, folderPath: String) -> Bool {
+        return itemCategory == folderPath || itemCategory.hasPrefix(folderPath + "/")
+    }
+
+    // Consolidated initial load to fetch categories and all items once
+    private func initialLoad() async {
+        do {
+            async let categoriesTask = entryRepository.fetchCategories()
+            // Use preloaded snapshot if available
+            let allItems = try await { () -> [BaseItem] in
+                if let items = self.preloadedAllItems { return items }
+                return try await self.entryRepository.fetchAllItems()
+            }()
+            let fetchedCategories = try await categoriesTask
+
+            // Build mapping and counts from single items snapshot
+            var mapping: [String: String] = [:]
+            for item in allItems { mapping[item.id] = item.category }
+
+            var counts: [String: Int] = [:]
+            for category in fetchedCategories where !category.name.contains("/") {
+                let path = category.name
+                let total = allItems.filter { $0.category == path || $0.category.hasPrefix(path + "/") }.count
+                counts[path] = total
+            }
+
+            let ids = allItems.map { $0.id }
+
+            await MainActor.run {
+                self.categories = fetchedCategories
+                self.itemFolderMapping = mapping
+                self.folderItemCounts = counts
+                self.allSelectableItemIds = ids
+                self.applySnapshot()
+                self.updateSelectAllButtonTitle()
+            }
+        } catch {
+            await MainActor.run {
+                self.showError(error.localizedDescription)
+            }
+        }
+    }
+    
+    // Helper method to count selected items in a specific folder using IDs (including children)
     private func countSelectedItemsInFolder(_ folderPath: String) -> Int {
-        return currentSelectedIds.filter { itemId in
-            itemFolderMapping[itemId] == folderPath
-        }.count
+        return currentSelectedIds.reduce(0) { count, itemId in
+            guard let cat = itemFolderMapping[itemId] else { return count }
+            return count + (isInFolderOrDescendant(itemCategory: cat, folderPath: folderPath) ? 1 : 0)
+        }
     }
     
     // Method to update the item-folder mapping cache
     private func updateItemFolderMapping() async {
         do {
-            let allItems = try await entryRepository.fetchAllItems()
-            
+            let allItems = try await { () -> [BaseItem] in
+                if let items = self.preloadedAllItems { return items }
+                return try await self.entryRepository.fetchAllItems()
+            }()
             var mapping: [String: String] = [:]
-            
-            // Map all items (entries, places, routines) to their categories
-            for item in allItems {
-                mapping[item.id] = item.category
-            }
-            
+            for item in allItems { mapping[item.id] = item.category }
             await MainActor.run {
                 self.itemFolderMapping = mapping
-                // Refresh snapshot with updated counts
                 self.applySnapshot()
             }
         } catch {
@@ -182,6 +226,13 @@ class ModifiedSelectFolderViewController: UIViewController {
         updateSelectionCounter()
     }
     
+    private func setupNavigationItems() {
+        let button = UIBarButtonItem(title: "Select All", style: .plain, target: self, action: #selector(didTapSelectAll))
+        selectAllBarButtonItem = button
+        navigationItem.rightBarButtonItem = button
+        updateSelectAllButtonTitle()
+    }
+    
     private func updateSelectionCounter() {
         guard isViewLoaded else { 
             print("[DEBUG] updateSelectionCounter: view not loaded yet")
@@ -195,46 +246,89 @@ class ModifiedSelectFolderViewController: UIViewController {
         if let navController = navigationController {
             navController.view.bringSubviewToFront(selectionCounterView)
         }
+        updateSelectAllButtonTitle()
     }
     
-    // Async method to load all folder item counts
-    private func loadFolderItemCounts() async {
+    // Toggle Select All / Clear All button title based on selection state
+    private func updateSelectAllButtonTitle() {
+        let total = allSelectableItemIds.count
+        let isAllSelected = total > 0 && currentSelectedIds.count >= total
+        selectAllBarButtonItem?.title = isAllSelected ? "Clear All" : "Select All"
+        selectAllBarButtonItem?.isEnabled = total > 0
+    }
+    
+    // Precompute all selectable item IDs (entries + places + routines)
+    private func prepareSelectableItems() async {
+        // If we already have the mapping, derive IDs without fetching again
+        if !itemFolderMapping.isEmpty {
+            await MainActor.run {
+                self.allSelectableItemIds = Array(self.itemFolderMapping.keys)
+                self.updateSelectAllButtonTitle()
+            }
+            return
+        }
+        // Fallback: fetch once (or reuse preloaded) and populate both mapping and IDs
         do {
-            // Fetch all entries and places for counting
-            let allEntries = try await entryRepository.fetchEntries()
-            let allPlaces = try await entryRepository.fetchPlaces()
-            
-            var counts: [String: Int] = [:]
-            
-            // Count items for each top-level category
-            for category in categories {
-                // Only count top-level folders (no "/" in the name)
-                guard !category.name.contains("/") else { continue }
-                
-                let folderPath = category.name
-                
-                // Count entries in this exact folder path
-                let entriesCount = allEntries.values.flatMap { $0 }.filter { $0.category == folderPath }.count
-                
-                // Count places in this exact folder path
-                let placesCount = allPlaces.filter { $0.category == folderPath }.count
-                
-                counts[folderPath] = entriesCount + placesCount
-            }
-            
+            let allItems = try await { () -> [BaseItem] in
+                if let items = self.preloadedAllItems { return items }
+                return try await self.entryRepository.fetchAllItems()
+            }()
+            var mapping: [String: String] = [:]
+            for item in allItems { mapping[item.id] = item.category }
+            let ids = allItems.map { $0.id }
             await MainActor.run {
-                self.folderItemCounts = counts
-                // Refresh the snapshot now that we have counts
+                self.itemFolderMapping = mapping
+                self.allSelectableItemIds = ids
+                self.updateSelectAllButtonTitle()
                 self.applySnapshot()
             }
-            
         } catch {
-            // If there's an error, use empty counts
             await MainActor.run {
-                self.folderItemCounts = [:]
-                self.applySnapshot()
+                self.allSelectableItemIds = []
+                self.updateSelectAllButtonTitle()
             }
         }
+    }
+    
+    @objc private func didTapSelectAll() {
+        let total = allSelectableItemIds.count
+        let isAllSelected = total > 0 && currentSelectedIds.count >= total
+        if isAllSelected {
+            currentSelectedIds = []
+        } else {
+            currentSelectedIds = allSelectableItemIds
+        }
+        updateSelectionCounter()
+        applySnapshot()
+    }
+    
+    // Async method to load all folder item counts (including child folders)
+    private func loadFolderItemCounts() async {
+        // Prefer using the existing mapping to avoid extra fetches
+        if itemFolderMapping.isEmpty {
+            await updateItemFolderMapping()
+        }
+
+        var counts: [String: Int] = [:]
+        for category in categories {
+            // Only top-level folders
+            guard !category.name.contains("/") else { continue }
+            let folderPath = category.name
+            let totalCount = itemFolderMapping.values.filter { cat in
+                cat == folderPath || cat.hasPrefix(folderPath + "/")
+            }.count
+            counts[folderPath] = totalCount
+        }
+
+        await MainActor.run {
+            self.folderItemCounts = counts
+            self.applySnapshot()
+        }
+    }
+
+    // Allow parent to provide a preloaded items snapshot to eliminate extra fetches
+    func setPreloadedItems(_ items: [BaseItem]) {
+        preloadedAllItems = items
     }
     
     private func setupCollectionView() {
@@ -402,6 +496,8 @@ protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>)
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>)
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>)
+    // Provide current selected items so child folders can restore selection state
+    func getCurrentSelectedItems() async -> (entries: Set<BaseEntry>, places: Set<PlaceItem>, routines: Set<RoutineItem>)
 }
 
 // MARK: - NestCategoryViewControllerSelectEntriesDelegate
@@ -420,12 +516,24 @@ extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEn
     
     // Helper method to get ALL selected IDs from the controller
     private func updateAllSelectedIds(from controller: NestCategoryViewController) {
-        let allSelectedIds = controller.getAllSelectedItemIds()
-        currentSelectedIds = allSelectedIds
-        print("[DEBUG] Total selected items: \(currentSelectedIds.count)")
+        let incomingAllIds = Set(controller.getAllSelectedItemIds())
+        // Merge: keep selections from other folders, replace selections within the current folder scope
+        let scopePath = controller.getCurrentCategoryPath()
+        let isInScope: (String) -> Bool = { id in
+            guard let cat = self.itemFolderMapping[id] else { return false }
+            return cat == scopePath || cat.hasPrefix(scopePath + "/")
+        }
+        // Use set operations to avoid duplicates
+        let existingSet = Set(currentSelectedIds)
+        let preserved = existingSet.filter { !isInScope($0) }
+        let incomingInScope = incomingAllIds.filter { isInScope($0) }
+        let merged = preserved.union(incomingInScope)
+        currentSelectedIds = Array(merged)
+        print("[DEBUG] Total selected items (merged): \(currentSelectedIds.count)")
         
         updateSelectionCounter()
         // Update folder counts when selections change
         applySnapshot()
     }
+    
 }
