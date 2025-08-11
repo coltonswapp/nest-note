@@ -693,6 +693,75 @@ class SessionService {
         let inviteID = "invite-\(code)"
         return (id: inviteID, code: code)
     }
+
+    /// Creates an open invite (no sitter assigned) for a session
+    func createOpenInvite(sessionID: String) async throws -> (id: String, code: String) {
+        guard let nestID = NestService.shared.currentNest?.id else {
+            throw SessionError.noCurrentNest
+        }
+
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+
+        // Get current nest name
+        guard let nestName = NestService.shared.currentNest?.name else {
+            throw SessionError.noCurrentNest
+        }
+
+        // Generate unique code
+        let code = try await generateUniqueInviteCode()
+        let inviteID = "invite-\(code)"
+
+        Logger.log(level: .info, category: .sessionService, message: "Creating OPEN invite... \(inviteID)")
+
+        // Create invite object without a sitter email
+        let invite = Invite(
+            id: inviteID,
+            nestID: nestID,
+            nestName: nestName,
+            sessionID: sessionID,
+            sitterEmail: nil,
+            status: .pending,
+            createdBy: currentUserID
+        )
+
+        // Minimal assigned sitter stub to carry the invite ID
+        let assignedSitter = AssignedSitter(
+            id: UUID().uuidString,
+            name: "",
+            email: "",
+            userID: nil,
+            inviteStatus: .invited,
+            inviteID: inviteID
+        )
+
+        let inviteRef = db.collection("invites").document(inviteID)
+        let sessionRef = db.collection("nests").document(nestID)
+            .collection("sessions").document(sessionID)
+
+        let encodedInvite = try Firestore.Encoder().encode(invite)
+        let encodedSitter = try Firestore.Encoder().encode(assignedSitter)
+
+        // Create invite and update session atomically
+        try await db.runTransaction { transaction, _ in
+            transaction.setData(encodedInvite, forDocument: inviteRef)
+            transaction.updateData(["assignedSitter": encodedSitter], forDocument: sessionRef)
+            return nil
+        }
+
+        // Update local cache if available
+        if var session = sessions.first(where: { $0.id == sessionID }) {
+            session.assignedSitter = assignedSitter
+            if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+                sessions[index] = session
+            }
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Open invite created and assignedSitter linked ✅")
+        Tracker.shared.track(.sessionInviteCreated)
+        return (id: inviteID, code: code)
+    }
     
     /// Updates an existing invite with new sitter information
     func updateInvite(
@@ -876,7 +945,7 @@ class SessionService {
         let updatedSitter = AssignedSitter(
             id: session.assignedSitter?.id ?? UUID().uuidString,
             name: session.assignedSitter?.name ?? "Sitter",
-            email: invite.sitterEmail,
+            email: invite.sitterEmail ?? (session.assignedSitter?.email ?? ""),
             userID: existingUserID,  // Preserve the existing userID
             inviteStatus: sessionStatus,
             inviteID: inviteID
@@ -922,36 +991,37 @@ class SessionService {
     
     /// Fetches the full invite information for a session if it exists
     func fetchSessionInvite(for session: SessionItem) async throws -> Invite? {
-        // If session has no invite ID, return nil
-        guard let sitter = session.assignedSitter,
-              let inviteID = sitter.inviteID else {
-            return nil
-        }
-        
-        let inviteRef = db.collection("invites").document(inviteID)
-        let snapshot = try await inviteRef.getDocument()
-        
-        guard snapshot.exists else {
-            // If invite doesn't exist but session thinks it does, clean up the session
-            if let sitter = session.assignedSitter {
-                // Create SavedSitter from AssignedSitter
-                let savedSitter = NestService.SavedSitter(
-                    id: sitter.id,
-                    name: sitter.name,
-                    email: sitter.email
-                )
-                
-                try await updateSessionSitterStatus(
-                    sessionID: session.id,
-                    sitter: savedSitter,
-                    status: .none,
-                    inviteID: nil
-                )
+        // Prefer legacy lookup via assigned sitter's inviteID if present
+        if let sitter = session.assignedSitter, let inviteID = sitter.inviteID {
+            let inviteRef = db.collection("invites").document(inviteID)
+            let snapshot = try await inviteRef.getDocument()
+            if snapshot.exists {
+                return try snapshot.data(as: Invite.self)
             }
-            return nil
+            // Clean up stale invite reference
+            let savedSitter = NestService.SavedSitter(
+                id: sitter.id,
+                name: sitter.name,
+                email: sitter.email
+            )
+            try await updateSessionSitterStatus(
+                sessionID: session.id,
+                sitter: savedSitter,
+                status: .none,
+                inviteID: nil
+            )
         }
-        
-        return try snapshot.data(as: Invite.self)
+
+        // Fallback: query by sessionID/nestID for active invites
+        guard let nestID = NestService.shared.currentNest?.id else { return nil }
+        let invitesRef = db.collection("invites")
+            .whereField("sessionID", isEqualTo: session.id)
+            .whereField("nestID", isEqualTo: nestID)
+            .whereField("status", in: [InviteStatus.pending.rawValue, InviteStatus.accepted.rawValue])
+
+        let snapshot = try await invitesRef.getDocuments()
+        guard let doc = snapshot.documents.first else { return nil }
+        return try doc.data(as: Invite.self)
     }
     
     /// Fetches all active invites for a session (pending or accepted)
@@ -959,23 +1029,12 @@ class SessionService {
         guard let nestID = NestService.shared.currentNest?.id else {
             throw SessionError.noCurrentNest
         }
-        
-        // Get the session first to check if it has an active sitter
-        guard let session = try await getSession(nestID: nestID, sessionID: sessionID) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // If there's no assigned sitter or no invite ID, return empty array
-        guard let sitter = session.assignedSitter,
-              let inviteID = sitter.inviteID else {
-            return []
-        }
-        
+
         let invitesRef = db.collection("invites")
             .whereField("sessionID", isEqualTo: sessionID)
             .whereField("nestID", isEqualTo: nestID)
-            .whereField("status", in: ["pending", "accepted"])
-        
+            .whereField("status", in: [InviteStatus.pending.rawValue, InviteStatus.accepted.rawValue])
+
         let snapshot = try await invitesRef.getDocuments()
         return try snapshot.documents.map { try $0.data(as: Invite.self) }
     }
@@ -1086,29 +1145,43 @@ class SessionService {
                 inviteAcceptedAt: Date()
             )
             
-            // Update the assigned sitter with the actual joiner's information
-            var updatedAssignedSitter = session.assignedSitter
-            updatedAssignedSitter?.userID = currentUserID
-            updatedAssignedSitter?.inviteStatus = .accepted
-            
-            // Update email to reflect who actually joined, but preserve the original invited name
-            // unless the current user has a proper name set
-            if let currentUser = Auth.auth().currentUser {
-                // Only update the name if the current user has a proper name in their profile
-                // Otherwise, keep the original invited sitter's name
-                if let userName = UserService.shared.currentUser?.personalInfo.name, !userName.isEmpty {
-                    updatedAssignedSitter?.name = userName
+            // Build or update the assigned sitter with the actual joiner's information
+            var updatedAssignedSitter: AssignedSitter
+            if var existing = session.assignedSitter {
+                existing.userID = currentUserID
+                existing.inviteStatus = .accepted
+                if let currentUser = Auth.auth().currentUser {
+                    if let userName = UserService.shared.currentUser?.personalInfo.name, !userName.isEmpty {
+                        existing.name = userName
+                    }
+                    existing.email = currentUser.email ?? existing.email
                 }
-                // Always update email to reflect who actually accepted
-                updatedAssignedSitter?.email = currentUser.email ?? ""
+                existing.inviteID = invite.id
+                updatedAssignedSitter = existing
+            } else {
+                let currentUser = Auth.auth().currentUser
+                let joinerEmail = currentUser?.email ?? ""
+                let joinerName = (UserService.shared.currentUser?.personalInfo.name.isEmpty == false)
+                    ? (UserService.shared.currentUser?.personalInfo.name ?? "Sitter")
+                    : (currentUser?.email ?? "Sitter")
+                updatedAssignedSitter = AssignedSitter(
+                    id: UUID().uuidString,
+                    name: joinerName,
+                    email: joinerEmail,
+                    userID: currentUserID,
+                    inviteStatus: .accepted,
+                    inviteID: invite.id
+                )
             }
             
-            // Update the saved sitter with the user's ID
-            try await updateSavedSitterWithUserID(
-                nestID: invite.nestID,
-                sitterEmail: invite.sitterEmail,
-                userID: currentUserID
-            )
+            // Update the saved sitter with the user's ID when we have a target email
+            if let targetEmail = invite.sitterEmail, !targetEmail.isEmpty {
+                try await updateSavedSitterWithUserID(
+                    nestID: invite.nestID,
+                    sitterEmail: targetEmail,
+                    userID: currentUserID
+                )
+            }
             
             // Encode the updated sitter data before transaction
             let encodedSitter = try Firestore.Encoder().encode(updatedAssignedSitter)
@@ -1455,7 +1528,7 @@ struct Invite: Codable, Identifiable {
     let nestID: String
     let nestName: String  // Add nestName field
     let sessionID: String
-    let sitterEmail: String
+    let sitterEmail: String?
     let status: InviteStatus
     let createdAt: Date
     let expiresAt: Date
@@ -1472,7 +1545,7 @@ struct Invite: Codable, Identifiable {
         nestID: String,
         nestName: String,  // Add nestName parameter
         sessionID: String,
-        sitterEmail: String,
+        sitterEmail: String?,
         status: InviteStatus,
         createdAt: Date = Date(),
         expiresAt: Date? = nil,

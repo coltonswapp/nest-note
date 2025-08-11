@@ -704,15 +704,25 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     try await Task.sleep(for: .seconds(0.75))
                     saveButton.stopLoading(withSuccess: true)
                     
-                    let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
-                    inviteDetailVC.delegate = self
-                    
-                    // Set the closure to call the delegate when invite creation is complete
-                    inviteDetailVC.onInviteCreation = { [weak self] in
-                        self?.delegate?.editSessionViewController(self!, didCreateSession: newSession)
+                    // Notify sessions list to reload now that a new session exists
+                    delegate?.editSessionViewController(self, didCreateSession: newSession)
+
+                    // Auto-create an open invite and pass it to the InviteDetailViewController
+                    Task { [weak self] in
+                        guard let self = self else { return }
+                        do {
+                            let invite = try await SessionService.shared.createOpenInvite(sessionID: newSession.id)
+                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
+                            inviteDetailVC.delegate = self
+                            inviteDetailVC.configure(with: invite.code, sessionID: newSession.id, sitter: nil)
+                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
+                        } catch {
+                            // If open invite creation fails, still navigate and allow manual creation
+                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
+                            inviteDetailVC.delegate = self
+                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
+                        }
                     }
-                    
-                    navigationController?.pushViewController(inviteDetailVC, animated: true)
                     return
                 }
                 
@@ -781,27 +791,24 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 if isEditingSession {
                     
                     let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
-                    
-                    if let sitter = displaySitter {
-                        // Extract invite code from assigned sitter if available
-                        let inviteCode: String?
-                        if let assignedSitter = self.sessionItem.assignedSitter,
-                           let inviteID = assignedSitter.inviteID,
-                           let code = inviteID.split(separator: "-").last {
-                            inviteCode = String(code)
-                        } else {
-                            inviteCode = nil
-                        }
-                        
-                        // Use email as fallback if name is empty
-                        let displayName = sitter.name.isEmpty ? sitter.email : sitter.name
-                        
-                        cell.configure(name: displayName, inviteCode: inviteCode)
-                    } else {
-                        // Show default state
-                        let placeholderName = isArchivedSession ? "No sitter" : ""
-                        cell.configure(name: placeholderName, inviteCode: nil)
+                    let assignedSitter = self.sessionItem.assignedSitter
+
+                    // Prefer code from assigned sitter if present
+                    var derivedCode: String? = nil
+                    if let inviteID = assignedSitter?.inviteID,
+                       let code = inviteID.split(separator: "-").last {
+                        derivedCode = String(code)
                     }
+
+                    let displayName: String = {
+                        if let sitter = displaySitter {
+                            return sitter.name.isEmpty ? sitter.email : sitter.name
+                        } else {
+                            return "Open Invite"
+                        }
+                    }()
+
+                    cell.configure(name: displayName, inviteCode: derivedCode)
                 } else {
                     cell.configureDisabled()
                 }
@@ -1090,21 +1097,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let displaySitter = sessionItem.assignedSitter?.asSitterItem()
         let inviteDetailVC: InviteDetailViewController
         
-        if let sitter = displaySitter {
-            // Check if there's an existing invite
-            if let assignedSitter = sessionItem.assignedSitter,
-               let inviteID = assignedSitter.inviteID,
-               let code = inviteID.split(separator: "-").last {
-                // Configure with existing invite
-                inviteDetailVC = InviteDetailViewController()
-                inviteDetailVC.configure(with: String(code), sessionID: sessionItem.id, sitter: sitter)
-            } else {
-                // Configure with sitter but no existing invite
-                inviteDetailVC = InviteDetailViewController(sitter: sitter, sessionID: sessionItem.id)
-            }
+        if let sitter = displaySitter,
+           let assignedSitter = sessionItem.assignedSitter,
+           let inviteID = assignedSitter.inviteID,
+           let code = inviteID.split(separator: "-").last {
+            inviteDetailVC = InviteDetailViewController()
+            inviteDetailVC.configure(with: String(code), sessionID: sessionItem.id, sitter: sitter)
+        } else if let assignedSitter = sessionItem.assignedSitter,
+                  let inviteID = assignedSitter.inviteID,
+                  let code = inviteID.split(separator: "-").last {
+            inviteDetailVC = InviteDetailViewController()
+            inviteDetailVC.configure(with: String(code), sessionID: sessionItem.id, sitter: nil)
         } else {
-            // Configure without sitter - user can select one in InviteDetailViewController
-            inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: sessionItem.id)
+            inviteDetailVC = InviteDetailViewController(sitter: displaySitter, sessionID: sessionItem.id)
         }
         
         inviteDetailVC.delegate = self

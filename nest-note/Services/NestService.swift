@@ -1002,7 +1002,7 @@ extension NestService {
             // Clear the cached categories to force fresh fetch next time
             cachedCategories = nil
             
-            Logger.log(level: .info, category: .nestService, message: "Category created successfully: \(category.name)")
+            Logger.log(level: .info, category: .nestService, message: "Folder created successfully: \(category.name)")
             
             // Log success event
             Tracker.shared.track(.nestCategoryAdded)

@@ -19,7 +19,7 @@ class JoinSessionViewController: NNViewController {
     private let topImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(imageView, for: .rectanglePatternSmall)
+        NNAssetHelper.configureImageView(imageView, for: .rectanglePatternSmall, with: NNColors.primary)
         return imageView
     }()
     
