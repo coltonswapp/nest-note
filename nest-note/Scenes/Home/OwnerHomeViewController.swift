@@ -526,8 +526,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
+            return // Always return after attempting to show this highest priority tip
         }
         
         // Priority 2: Your Nest tip (second priority)
@@ -550,8 +550,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
+            return // Always return after attempting to show this tip
         }
         
         // Priority 3: Current session tip (lower priority)
@@ -574,7 +574,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
         }
     }
