@@ -329,7 +329,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                         // Add the setup progress section only if we should show setup
                         var updatedSnapshot = snapshot
                         updatedSnapshot.appendSections([.setupProgress])
-                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 7)], toSection: .setupProgress)
+                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 6)], toSection: .setupProgress)
                         snapshot = updatedSnapshot
                     }
                     

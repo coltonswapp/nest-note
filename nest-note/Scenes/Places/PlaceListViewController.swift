@@ -534,6 +534,10 @@ extension PlaceListViewController: TemporaryPlaceSelectionDelegate {
 }
 
 extension PlaceListViewController: NNEmptyStateViewDelegate {
+    func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int) {
+        //
+    }
+    
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
         
         // Use the same action as the add button

@@ -176,10 +176,6 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             // Navigate to create an entry
             presentAddFirstEntry()
             
-        case .addFirstPlace:
-            // Navigate to add a place
-            presentAddFirstPlace()
-            
         case .enableNotifications:
             // Request notification permissions
             requestNotifications()
@@ -223,9 +219,9 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             self?.delegate?.setupFlowDidUpdateStepStatus()
             
             // Dismiss the presented NestCategoryViewController
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                 self?.presentedViewController?.dismiss(animated: true) {
-                    self?.showToast(delay: 0.0, text: "First Entry Added!", subtitle: "Here's to many more! 🥂", sentiment: .positive)                    
+                    self?.showToast(delay: 0.0, text: "First Item Added!", subtitle: "Here's to many more! 🥂", sentiment: .positive)
                 }
             }
             
@@ -233,40 +229,6 @@ final class StickyOwnerSetupFlowViewController: NNViewController, PaywallPresent
             if let entryObserver = self?.entryObserver {
                 NotificationCenter.default.removeObserver(entryObserver)
                 self?.entryObserver = nil
-            }
-        }
-    }
-    
-    private func presentAddFirstPlace() {
-        // Create a PlaceListViewController for adding a place
-        let placeListVC = PlaceListViewController()
-        
-        // Wrap in a navigation controller for proper presentation
-        let navController = UINavigationController(rootViewController: placeListVC)
-        
-        // Present the view controller
-        present(navController, animated: true)
-        
-        // Add observer to mark step as complete when a place is saved
-        placeObserver = NotificationCenter.default.addObserver(
-            forName: .placeDidSave,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.setupService.markStepComplete(.addFirstPlace)
-            self?.delegate?.setupFlowDidUpdateStepStatus()
-            
-            // Dismiss the presented PlaceListViewController
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                self?.presentedViewController?.dismiss(animated: true) {
-                    self?.showToast(delay: 0.0, text: "First Place Added!", subtitle: "You can never have too many!", sentiment: .positive)
-                }
-            }
-            
-            // Remove the observer after the step is completed
-            if let placeObserver = self?.placeObserver {
-                NotificationCenter.default.removeObserver(placeObserver)
-                self?.placeObserver = nil
             }
         }
     }

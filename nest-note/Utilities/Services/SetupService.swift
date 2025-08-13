@@ -6,7 +6,6 @@ enum SetupStepType: Int, CaseIterable {
     case createAccount = 0
     case setupNest = 1
     case addFirstEntry = 2
-    case addFirstPlace = 3
     case enableNotifications = 4
     case feedback = 5
     case finalStep = 6
@@ -18,9 +17,7 @@ enum SetupStepType: Int, CaseIterable {
         case .setupNest:
             return "Setup your Nest"
         case .addFirstEntry:
-            return "Add your first entry"
-        case .addFirstPlace:
-            return "Add your first place"
+            return "Explore Folders"
         case .enableNotifications:
             return "Enable Notifications"
         case .feedback:
@@ -37,9 +34,7 @@ enum SetupStepType: Int, CaseIterable {
         case .setupNest:
             return "Add a nest name and address."
         case .addFirstEntry:
-            return "Garage codes, wifi passwords, and other general information make great entries. These are what your sitter will see."
-        case .addFirstPlace:
-            return "Places are locations that would be important for sitters to know about. Grandma's house, favorite park, etc."
+            return "Folders contain information, important places, & routines"
         case .enableNotifications:
             return "Stay in the know."
         case .feedback:
@@ -228,10 +223,6 @@ final class SetupService {
             // Check if user has at least one entry
             // This would need to be implemented based on your data model
             return checkIfUserHasEntries()
-            
-        case .addFirstPlace:
-            // Check if user has at least one place
-            return true
             
         case .enableNotifications:
             // Check if user has enabled notifications

@@ -759,6 +759,10 @@ extension SitterHomeViewController: UICollectionViewDelegate {
 }
 
 extension SitterHomeViewController: NNEmptyStateViewDelegate {
+    func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int) {
+        //
+    }
+    
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
         let joinVC = JoinSessionViewController()
         joinVC.delegate = self
