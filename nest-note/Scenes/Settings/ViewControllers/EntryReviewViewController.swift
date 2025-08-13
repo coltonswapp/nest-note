@@ -91,8 +91,23 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     // Add property for entry repository
     private let entryRepository: EntryRepository
     
-    // Add property to store outdated entries
-    private var outdatedEntries: [BaseEntry] = []
+    // Review item wrapper to support multiple types
+    private enum ReviewItem {
+        case entry(BaseEntry)
+        case place(PlaceItem)
+        case routine(RoutineItem)
+        
+        var updatedAt: Date {
+            switch self {
+            case .entry(let e): return e.updatedAt
+            case .place(let p): return p.updatedAt
+            case .routine(let r): return r.updatedAt
+            }
+        }
+    }
+    
+    // Backing data
+    private var reviewItems: [ReviewItem] = []
     
     // Update initializer to accept repository
     init(entryRepository: EntryRepository) {
@@ -109,13 +124,13 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         setupCardStack()
         cardStackView.delegate = self
         
-        // Load outdated entries
-        loadOutdatedEntries()
+        // Load outdated items across all types
+        loadOutdatedItems()
     }
     
     override func setup() {
         setupLoadingIndicator()
-        navigationItem.title = "Review Entries"
+        navigationItem.title = "Review Items"
         navigationController?.navigationBar.prefersLargeTitles = false
     }
     
@@ -182,20 +197,51 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         ])
     }
     
-    private func loadOutdatedEntries() {
+    private func loadOutdatedItems() {
         Task {
             do {
                 isLoading = true
-                // Fetch entries older than 90 days using the protocol method
-                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
+                // Threshold (reduced for testing to include recent items)
+                let days = 1
+                let calendar = Calendar.current
+                let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+
+                // Gather items: entries via protocol, places and routines via repository services
+                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: days)
+                var places: [PlaceItem] = []
+                var routines: [RoutineItem] = []
+                
+                if let nestService = entryRepository as? NestService {
+                    places = try await nestService.fetchPlaces()
+                    routines = try await nestService.fetchItems(ofType: .routine)
+                } else if let sitterService = entryRepository as? SitterViewService {
+                    places = try await sitterService.fetchNestPlaces()
+                    routines = try await sitterService.fetchNestRoutines()
+                } else {
+                    // Fallback: try fetchAllItems if implemented
+                    let all = try await entryRepository.fetchAllItems()
+                    places = all.compactMap { $0 as? PlaceItem }
+                    routines = all.compactMap { $0 as? RoutineItem }
+                }
+                
+                // Filter outdated by updatedAt threshold
+                let outdatedPlaces = places.filter { $0.updatedAt < threshold }
+                let outdatedRoutines = routines.filter { $0.updatedAt < threshold }
+                
+                // Build review items and sort oldest first
+                var items: [ReviewItem] = []
+                items.append(contentsOf: entries.map { .entry($0) })
+                items.append(contentsOf: outdatedPlaces.map { .place($0) })
+                items.append(contentsOf: outdatedRoutines.map { .routine($0) })
+                items.sort { $0.updatedAt < $1.updatedAt }
                 
                 await MainActor.run {
-                    outdatedEntries = entries
+                    reviewItems = items
                     
                     isLoading = false
-                    if entries.isEmpty {
+                    if items.isEmpty {
                         // Show success state with better message - format with title and subtitle separated by double newline
-                        cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if entries need updating the next time you create a session.")
+                        cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if items need updating the next time you create a session.")
                         
                         // Hide the button stack since there are no entries to review
                         buttonStack.isHidden = true
@@ -211,13 +257,29 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
                         // Show button stack since there are entries to review
                         buttonStack.isHidden = false
                         
-                        // Convert entries to card data format
-                        let cardData = entries.map { entry in
-                            return (entry.title, entry.content, entry.updatedAt)
+                        // Build custom card views matching item type styles
+                        let views: [UIView] = items.map { item in
+                            switch item {
+                            case .entry(let e):
+                                let v = MiniEntryDetailView()
+                                v.translatesAutoresizingMaskIntoConstraints = false
+                                v.configure(key: e.title, value: e.content, lastModified: e.updatedAt)
+                                return v
+                            case .place(let p):
+                                let v = MiniPlaceReviewView()
+                                v.translatesAutoresizingMaskIntoConstraints = false
+                                v.configure(with: p)
+                                return v
+                            case .routine(let r):
+                                let v = MiniRoutineReviewView()
+                                v.translatesAutoresizingMaskIntoConstraints = false
+                                v.configure(with: r)
+                                return v
+                            }
                         }
                         
-                        // Update card stack with real data
-                        cardStackView.setCardData(cardData)
+                        // Update card stack with custom views
+                        cardStackView.setCardViews(views)
                         updateButtonStates()
                         
                         // Ensure progress label is visible using the public method
@@ -231,8 +293,8 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
                 await MainActor.run {
                     isLoading = false
                     // Handle error
-                    Logger.log(level: .error, category: .nestService, message: "Error loading outdated entries: \(error.localizedDescription)")
-                    cardStackView.showError(message: "Failed to load entries")
+                    Logger.log(level: .error, category: .nestService, message: "Error loading outdated items: \(error.localizedDescription)")
+                    cardStackView.showError(message: "Failed to load items")
                     
                     // Hide button stack on error too
                     buttonStack.isHidden = true
@@ -261,41 +323,44 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     }
     
     @objc private func approveTapped() {
-        // Get the top card index to find the corresponding entry
+        // Get the top card index to find the corresponding item
         guard let topCardIndex = cardStackView.topCardIndex,
-              topCardIndex < outdatedEntries.count else {
-            // If there's no valid card, just call the regular approve (visual effect only)
+              topCardIndex < reviewItems.count else {
             cardStackView.approveCard()
             return
         }
         
-        // Get the entry to update
-        var updatedEntry = outdatedEntries[topCardIndex]
-        updatedEntry.updatedAt = Date()
+        var item = reviewItems[topCardIndex]
         
-        // Update in the repository
         Task {
             do {
-                try await entryRepository.updateEntry(updatedEntry)
-                
+                switch item {
+                case .entry(var e):
+                    e.updatedAt = Date()
+                    try await entryRepository.updateEntry(e)
+                    await MainActor.run { self.reviewItems[topCardIndex] = .entry(e) }
+                case .place(var p):
+                    p.updatedAt = Date()
+                    if let nest = self.entryRepository as? NestService {
+                        try await nest.updatePlace(p)
+                        await MainActor.run { self.reviewItems[topCardIndex] = .place(p) }
+                    }
+                case .routine(var r):
+                    r.updatedAt = Date()
+                    if let nest = self.entryRepository as? NestService {
+                        try await nest.updateRoutine(r)
+                        await MainActor.run { self.reviewItems[topCardIndex] = .routine(r) }
+                    }
+                }
                 await MainActor.run {
-                    // Update the entry in our local array instead of removing it
-                    outdatedEntries[topCardIndex] = updatedEntry
-                    
-                    // Show visual feedback
                     HapticsHelper.mediumHaptic()
-                    
-                    // Trigger the card stack animation
                     cardStackView.approveCard()
                 }
             } catch {
                 await MainActor.run {
-                    // Show error feedback but still move the card
-                    showToast(text: "Error updating entry", sentiment: .negative)
-                    Logger.log(level: .error, category: .nestService, message: "Error updating entry: \(error.localizedDescription)")
-                    
-                    // Still approve the card visually
-                    cardStackView.approveCard()
+                    self.showToast(text: "Error updating item", sentiment: .negative)
+                    Logger.log(level: .error, category: .nestService, message: "Error updating item: \(error.localizedDescription)")
+                    self.cardStackView.approveCard()
                 }
             }
         }
@@ -342,18 +407,25 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     
     // Card stack delegate methods
     func cardStackView(_ stackView: CardStackView, didTapCard card: UIView) {
-        // Find the corresponding entry
         guard let index = stackView.topCardIndex,
-              index < outdatedEntries.count else {
-            return
+              index < reviewItems.count else { return }
+        
+        switch reviewItems[index] {
+        case .entry(let entry):
+            let vc = EntryDetailViewController(category: entry.category, entry: entry, sourceFrame: card.frame)
+            vc.entryDelegate = self
+            present(vc, animated: true)
+        case .place(let place):
+            let isReadOnly = !(entryRepository is NestService)
+            let vc = PlaceDetailViewController(place: place, isReadOnly: isReadOnly)
+            vc.placeListDelegate = self
+            present(vc, animated: true)
+        case .routine(let routine):
+            let isReadOnly = !(entryRepository is NestService)
+            let vc = RoutineDetailViewController(category: routine.category, routine: routine, sourceFrame: card.frame, isReadOnly: isReadOnly)
+            vc.routineDelegate = self
+            present(vc, animated: true)
         }
-        
-        let entry = outdatedEntries[index]
-        
-        // Open the entry for editing
-        let vc = EntryDetailViewController(category: entry.category, entry: entry, sourceFrame: card.frame)
-        vc.entryDelegate = self
-        present(vc, animated: true)
     }
     
     func cardStackView(_ stackView: CardStackView, didRemoveCard card: UIView) {
@@ -375,27 +447,33 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     func cardStackView(_ stackView: CardStackView, didFinishSwipe translation: CGFloat, velocity: CGFloat, dismissed: Bool) {
         // This is called when a card is swiped by the user
         if dismissed && translation > 0 {
-            // Right swipe - update the entry's timestamp
             guard let topCardIndex = stackView.topCardIndex,
-                  topCardIndex < outdatedEntries.count else {
-                return
-            }
+                  topCardIndex < reviewItems.count else { return }
             
-            // Get and update the entry
-            var updatedEntry = outdatedEntries[topCardIndex]
-            updatedEntry.updatedAt = Date()
-            
-            // Update in the local array instead of removing it
-            outdatedEntries[topCardIndex] = updatedEntry
-            
-            // Update in the repository
             Task {
                 do {
-                    try await entryRepository.updateEntry(updatedEntry)
+                    switch reviewItems[topCardIndex] {
+                    case .entry(var e):
+                        e.updatedAt = Date()
+                        try await entryRepository.updateEntry(e)
+                        await MainActor.run { self.reviewItems[topCardIndex] = .entry(e) }
+                    case .place(var p):
+                        p.updatedAt = Date()
+                        if let nest = self.entryRepository as? NestService {
+                            try await nest.updatePlace(p)
+                            await MainActor.run { self.reviewItems[topCardIndex] = .place(p) }
+                        }
+                    case .routine(var r):
+                        r.updatedAt = Date()
+                        if let nest = self.entryRepository as? NestService {
+                            try await nest.updateRoutine(r)
+                            await MainActor.run { self.reviewItems[topCardIndex] = .routine(r) }
+                        }
+                    }
                 } catch {
                     await MainActor.run {
-                        showToast(text: "Error updating entry", sentiment: .negative)
-                        Logger.log(level: .error, category: .nestService, message: "Error updating entry on swipe: \(error.localizedDescription)")
+                        self.showToast(text: "Error updating item", sentiment: .negative)
+                        Logger.log(level: .error, category: .nestService, message: "Error updating item on swipe: \(error.localizedDescription)")
                     }
                 }
             }
@@ -414,9 +492,8 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
         }
         
         // Update the entry in our local array
-        if let index = outdatedEntries.firstIndex(where: { $0.id == entry.id }) {
-            // Update the entry in the local array instead of removing it
-            outdatedEntries[index] = entry
+        if let index = reviewItems.firstIndex(where: { if case .entry(let e) = $0 { return e.id == entry.id } else { return false } }) {
+            reviewItems[index] = .entry(entry)
             
             // Update in the repository
             Task {
@@ -457,9 +534,9 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
         showToast(text: "Entry deleted")
         Logger.log(level: .info, category: .nestService, message: "Entry deleted: \(entry.id)")
         
-        // Remove the entry from our local array
-        if let index = outdatedEntries.firstIndex(where: { $0.id == entry.id }) {
-            outdatedEntries.remove(at: index)
+        // Remove from our items
+        if let index = reviewItems.firstIndex(where: { if case .entry(let e) = $0 { return e.id == entry.id } else { return false } }) {
+            reviewItems.remove(at: index)
             
             // Automatically advance to the next card after deletion
             if cardStackView.canGoNext {
@@ -476,8 +553,85 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
                 doneButton.isEnabled = true
                 
                 // If we deleted all entries, show success state
-                if outdatedEntries.isEmpty {
-                    cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if entries need updating the next time you create a session.")
+                if reviewItems.isEmpty {
+                    cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if items need updating the next time you create a session.")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - PlaceListViewControllerDelegate (used by PlaceDetailViewController)
+extension EntryReviewViewController: PlaceListViewControllerDelegate {
+    func placeListViewController(didUpdatePlace place: PlaceItem) {
+        if let index = reviewItems.firstIndex(where: { if case .place(let p) = $0 { return p.id == place.id } else { return false } }) {
+            reviewItems[index] = .place(place)
+            showToast(text: "Place updated")
+            if cardStackView.canGoNext {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.cardStackView.approveCard()
+                    self.updateButtonStates()
+                    HapticsHelper.lightHaptic()
+                }
+            } else {
+                doneButton.isEnabled = true
+            }
+        }
+    }
+    
+    func placeListViewController(didDeletePlace place: PlaceItem) {
+        if let index = reviewItems.firstIndex(where: { if case .place(let p) = $0 { return p.id == place.id } else { return false } }) {
+            reviewItems.remove(at: index)
+            showToast(text: "Place deleted")
+            if cardStackView.canGoNext {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.cardStackView.approveCard()
+                    self.updateButtonStates()
+                    HapticsHelper.lightHaptic()
+                }
+            } else {
+                doneButton.isEnabled = true
+                if reviewItems.isEmpty {
+                    cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if items need updating the next time you create a session.")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - RoutineDetailViewControllerDelegate
+extension EntryReviewViewController: RoutineDetailViewControllerDelegate {
+    func routineDetailViewController(didSaveRoutine routine: RoutineItem?) {
+        guard let routine else { return }
+        if let index = reviewItems.firstIndex(where: { if case .routine(let r) = $0 { return r.id == routine.id } else { return false } }) {
+            reviewItems[index] = .routine(routine)
+            showToast(text: "Routine updated")
+            if cardStackView.canGoNext {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.cardStackView.approveCard()
+                    self.updateButtonStates()
+                    HapticsHelper.lightHaptic()
+                }
+            } else {
+                doneButton.isEnabled = true
+            }
+        }
+    }
+    
+    func routineDetailViewController(didDeleteRoutine routine: RoutineItem) {
+        if let index = reviewItems.firstIndex(where: { if case .routine(let r) = $0 { return r.id == routine.id } else { return false } }) {
+            reviewItems.remove(at: index)
+            showToast(text: "Routine deleted")
+            if cardStackView.canGoNext {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.cardStackView.approveCard()
+                    self.updateButtonStates()
+                    HapticsHelper.lightHaptic()
+                }
+            } else {
+                doneButton.isEnabled = true
+                if reviewItems.isEmpty {
+                    cardStackView.showSuccess(message: "Everything looks up-to-date!\n\nWe'll let you know if items need updating the next time you create a session.")
                 }
             }
         }
