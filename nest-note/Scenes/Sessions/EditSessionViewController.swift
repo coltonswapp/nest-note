@@ -44,13 +44,21 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // 4 day, multi-day session by default
     private var initialDate: (startDate: Date, endDate: Date, isMultiDay: Bool) = (startDate: Date().roundedToNextHour(), endDate: Date().addingTimeInterval(60 * 60 * 96).roundedToNextHour(), isMultiDay: true)
     
-    private let titleTextField: UITextField = {
-        let field = UITextField()
-        field.placeholder = "Session Title"
+    private let titleTextField: FlashingPlaceholderTextField = {
+        let placeholders = [
+            "Date Night",
+            "Weekend Getaway", 
+            "Anniversary Trip",
+            "Birthday Trip",
+            "Family Vacation",
+            "Business Trip",
+            "Sleepover",
+            "Evening Out"
+        ]
+        let field = FlashingPlaceholderTextField(placeholders: placeholders)
         field.font = .h2
         field.borderStyle = .none
         field.returnKeyType = .done
-        field.placeholder = "Session Title"
         return field
     }()
     
@@ -660,10 +668,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         Task {
             do {
                 // Validate required fields
-                guard let title = titleTextField.text, !title.isEmpty else {
+                guard let titleText = titleTextField.text, !titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     showToast(text: "Please enter a session title", sentiment: .negative)
                     return
                 }
+                
+                // Trim whitespace from title
+                let title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
                 
                 guard let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
                       case let .dateSelection(startDate, endDate, isMultiDay) = dateItem else {
