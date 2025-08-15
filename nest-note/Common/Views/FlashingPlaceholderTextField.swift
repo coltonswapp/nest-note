@@ -24,6 +24,8 @@ class FlashingPlaceholderTextField: UITextField {
         super.init(frame: .zero)
         self.placeholders = placeholders
         self.placeholder = placeholders.first
+        
+        addTarget(self, action: #selector(textChanged), for: .editingChanged)
     }
     
     required init?(coder: NSCoder) {
@@ -41,6 +43,14 @@ class FlashingPlaceholderTextField: UITextField {
         timer = Timer.scheduledTimer(withTimeInterval: holdDuration, repeats: true) { [weak self] _ in
             self?.animateNextPlaceholder()
         }
+    }
+    
+    @objc func textChanged() {
+      if let text = text, !text.isEmpty {
+        stopAnimating()
+      } else {
+        startAnimating()
+      }
     }
     
     private func stopAnimating() {
@@ -87,4 +97,4 @@ class FlashingPlaceholderTextField: UITextField {
     deinit {
         stopAnimating()
     }
-} 
+}
