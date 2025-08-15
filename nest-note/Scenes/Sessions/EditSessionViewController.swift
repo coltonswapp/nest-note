@@ -1675,7 +1675,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Wait briefly to show success state before dismissing
         try await Task.sleep(for: .seconds(0.5))
         
+        // Call delegate BEFORE dismissing to ensure the update is received
         delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
+        
         dismiss(animated: true)
     }
     

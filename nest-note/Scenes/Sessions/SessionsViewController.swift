@@ -74,6 +74,7 @@ class NestSessionsViewController: NNViewController {
         }
     }
     private var currentBucket: SessionService.SessionBucket = .inProgress
+    private var lastLocalUpdateTime: Date?
     
     private var filteredSessions: [any SessionDisplayable] {
         switch currentBucket {
@@ -92,7 +93,7 @@ class NestSessionsViewController: NNViewController {
             
         case .inProgress:
             return allSessions
-                .filter { $0.status == .inProgress || $0.status == .extended }
+                .filter { $0.status == .inProgress || $0.status == .extended || $0.status == .earlyAccess }
                 .sorted { $0.endDate < $1.endDate }
                 .map { $0 as (any SessionDisplayable) }
                 
@@ -126,6 +127,7 @@ class NestSessionsViewController: NNViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupNotificationObservers()
         loadSessions()
         
         // Set initial filter to inProgress
@@ -135,6 +137,60 @@ class NestSessionsViewController: NNViewController {
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+    }
+    
+    private func setupNotificationObservers() {
+        // Listen for session changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionChange),
+            name: .sessionDidChange,
+            object: nil
+        )
+        
+        // Listen for session status changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionStatusChange),
+            name: .sessionStatusDidChange,
+            object: nil
+        )
+    }
+    
+    @objc private func handleSessionChange() {
+        // Check if we've made local updates recently (within last 2 seconds)
+        if let lastUpdate = lastLocalUpdateTime, Date().timeIntervalSince(lastUpdate) < 2.0 {
+            return
+        }
+        
+        loadSessions()
+    }
+    
+    @objc private func handleSessionStatusChange(_ notification: Notification) {
+        // Handle specific session status changes
+        if let userInfo = notification.userInfo,
+           let sessionId = userInfo["sessionId"] as? String,
+           let newStatusString = userInfo["newStatus"] as? String,
+           let newStatus = SessionStatus(rawValue: newStatusString) {
+            
+            // Update the specific session in our local data
+            updateSessionStatus(sessionId: sessionId, newStatus: newStatus)
+        } else {
+            // Fallback to full refresh if no specific session info
+            loadSessions()
+        }
+    }
+    
+    private func updateSessionStatus(sessionId: String, newStatus: SessionStatus) {
+        // Find and update the session in our local array
+        if let index = allSessions.firstIndex(where: { $0.id == sessionId }) {
+            allSessions[index].status = newStatus
+            // This will trigger updateDisplayedSessions() via the didSet observer
+        }
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     override func setup() {
@@ -284,7 +340,6 @@ class NestSessionsViewController: NNViewController {
                 if let sessionItem = session as? SessionItem {
                     cell.configure(with: sessionItem)
                 } else if let archivedSession = session as? ArchivedSession {
-                    // Configure cell for archived session
                     cell.configure(with: archivedSession)
                 }
                 
@@ -340,6 +395,18 @@ class NestSessionsViewController: NNViewController {
         }
         
         dataSource.apply(snapshot, animatingDifferences: true)
+        
+        // Force reconfiguration of all session items to ensure updated data is displayed
+        let sessionItems = snapshot.itemIdentifiers.filter { 
+            if case .session = $0 { return true }
+            return false
+        }
+        if !sessionItems.isEmpty {
+            var currentSnapshot = dataSource.snapshot()
+            currentSnapshot.reconfigureItems(sessionItems)
+            dataSource.apply(currentSnapshot, animatingDifferences: false)
+        }
+        
         updateEmptyState()
     }
     
@@ -542,8 +609,15 @@ extension Calendar {
 // MARK: - EditSessionViewControllerDelegate
 extension NestSessionsViewController: EditSessionViewControllerDelegate {
     func editSessionViewController(_ controller: EditSessionViewController, didCreateSession session: SessionItem) {
-        // Refresh sessions to include the new one
-        loadSessions()
+        // Mark that we're making a local update
+        lastLocalUpdateTime = Date()
+        
+        // Add the new session to local data immediately
+        allSessions.append(session)
+        // This will trigger updateDisplayedSessions() via the didSet observer
+        
+        // Post notification for other view controllers
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
         
         // Optionally, ensure we're showing the appropriate bucket
         let sessionStatus = session.status
@@ -558,8 +632,20 @@ extension NestSessionsViewController: EditSessionViewControllerDelegate {
     }
     
     func editSessionViewController(_ controller: EditSessionViewController, didUpdateSession session: SessionItem) {
-        // Refresh sessions to get the updated data
-        loadSessions()
+        // Mark that we're making a local update
+        lastLocalUpdateTime = Date()
+        
+        // Update the session in local data immediately with a complete replacement
+        if let index = allSessions.firstIndex(where: { $0.id == session.id }) {
+            allSessions[index] = session.copy()
+            // This will trigger updateDisplayedSessions() via the didSet observer
+        } else {
+            // If session not found in current array, add it (edge case)
+            allSessions.append(session.copy())
+        }
+        
+        // Post notification for other view controllers
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
         
         // Determine which bucket the updated session belongs in
         let now = Date()
