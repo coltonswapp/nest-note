@@ -73,7 +73,6 @@ class FlashingPlaceholderTextField: UITextField {
     
     // Stop animation when text field becomes first responder
     override func becomeFirstResponder() -> Bool {
-        isAnimating = false
         return super.becomeFirstResponder()
     }
     
