@@ -329,7 +329,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                         // Add the setup progress section only if we should show setup
                         var updatedSnapshot = snapshot
                         updatedSnapshot.appendSections([.setupProgress])
-                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 7)], toSection: .setupProgress)
+                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 6)], toSection: .setupProgress)
                         snapshot = updatedSnapshot
                     }
                     
@@ -526,8 +526,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
+            return // Always return after attempting to show this highest priority tip
         }
         
         // Priority 2: Your Nest tip (second priority)
@@ -550,8 +550,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
+            return // Always return after attempting to show this tip
         }
         
         // Priority 3: Current session tip (lower priority)
@@ -574,7 +574,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
-                return
             }
         }
     }

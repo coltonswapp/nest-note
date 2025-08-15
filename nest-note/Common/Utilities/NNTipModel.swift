@@ -63,15 +63,8 @@ enum NestCategoryTips {
     static let entrySuggestionTip = NNTipModel(
         id: "EntrySuggestionTip",
         title: "Need Inspiration?",
-        message: "Browse our collection of entry suggestions.",
+        message: "Browse our collection of item suggestions.",
         systemImageName: "sparkles"
-    )
-    
-    static let entriesLiveHereTip = NNTipModel(
-        id: "EntriesLiveHereTip",
-        title: "Entries Live Here",
-        message: "Add information babysitters need - codes, rules, contacts, and more.",
-        systemImageName: "note.text"
     )
 }
 

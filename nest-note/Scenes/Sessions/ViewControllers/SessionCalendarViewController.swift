@@ -294,9 +294,17 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             case .events(let date):
                 headerView.configure(title: dateFormatter.string(from: date))
             case .emptyDays(let dateRange):
-                let startStr = dateFormatter.string(from: dateRange.start)
-                let endStr = dateFormatter.string(from: dateRange.end)
-                headerView.configure(title: "\(startStr) - \(endStr)")
+                let calendar = Calendar.current
+                if calendar.isDate(dateRange.start, inSameDayAs: dateRange.end) {
+                    // Single day
+                    let dayStr = dateFormatter.string(from: dateRange.start)
+                    headerView.configure(title: dayStr)
+                } else {
+                    // Date range
+                    let startStr = dateFormatter.string(from: dateRange.start)
+                    let endStr = dateFormatter.string(from: dateRange.end)
+                    headerView.configure(title: "\(startStr) - \(endStr)")
+                }
             }
         }
         
@@ -332,7 +340,8 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             if let events = eventsByDate[currentDate], !events.isEmpty {
                 // If we had empty days, add them as a section
                 if let start = emptyDaysStart {
-                    let emptyRange = DateInterval(start: start, end: currentDate)
+                    let previousDay = calendar.date(byAdding: .day, value: -1, to: currentDate)!
+                    let emptyRange = DateInterval(start: start, end: previousDay)
                     snapshot.appendSections([.emptyDays(dateRange: emptyRange)])
                     snapshot.appendItems([EmptyDaysItem(dateRange: emptyRange)])
                     emptyDaysStart = nil
@@ -354,7 +363,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         
         // Add any remaining empty days
         if let start = emptyDaysStart {
-            let emptyRange = DateInterval(start: start, end: calendar.date(byAdding: .day, value: 1, to: endDate)!)
+            let emptyRange = DateInterval(start: start, end: endDate)
             snapshot.appendSections([.emptyDays(dateRange: emptyRange)])
             snapshot.appendItems([EmptyDaysItem(dateRange: emptyRange)])
         }

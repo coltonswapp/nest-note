@@ -94,7 +94,7 @@ class JoinSessionViewController: NNViewController {
         view.alpha = 0 // Start hidden
         return view
     }()
-    
+
     private var inviteCardBottomConstraint: NSLayoutConstraint?
     
     private var currentInviteCode: String?
@@ -154,7 +154,7 @@ class JoinSessionViewController: NNViewController {
         NSLayoutConstraint.activate([
             inviteCardView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             inviteCardView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            inviteCardView.heightAnchor.constraint(equalToConstant: view.frame.height * 0.4),
+            inviteCardView.heightAnchor.constraint(equalToConstant: view.frame.height * 0.5),
             inviteCardBottomConstraint!
         ])
     }

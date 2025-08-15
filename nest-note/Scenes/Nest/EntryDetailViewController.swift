@@ -110,8 +110,6 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         }
     }
     
-    
-    
     // MARK: - Setup Methods
     override func addContentToContainer() {
         super.addContentToContainer()
@@ -336,7 +334,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     
     func showTips() {
         // Show tips in priority order - only show one at a time
-        guard entry == nil && !isReadOnly else {
+        guard entry == nil && !isReadOnly && titleField.text == nil else {
             return
         }
         

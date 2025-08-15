@@ -1479,42 +1479,23 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         trackScreenVisit()
         
-        // Show "Entries Live Here" tip first, pointing to the title
-        if NNTipManager.shared.shouldShowTip(NestCategoryTips.entriesLiveHereTip) {
-            // Use the navigation bar title as the source view
-            if let titleView = navigationController?.navigationBar {
-                NNTipManager.shared.showTip(
-                    NestCategoryTips.entriesLiveHereTip,
-                    sourceView: titleView,
-                    in: self,
-                    pinToEdge: .bottom,
-                    offset: CGPoint(x: 0, y: 8)
-                )
-                return
-            }
-        }
-        
         // Show suggestion tip for nest owners and if the menu button exists
-        if let menuButton = navigationItem.rightBarButtonItems?.first,
-           NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip),
-           !NNTipManager.shared.shouldShowTip(NestCategoryTips.entriesLiveHereTip) {
+        if let suggestionsButton = emptyStateView.actionButtons.first(where: { $0.tag == 1 }),
+           NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip) {
             
             // Show the tooltip anchored to the navigation bar menu button
             // Using .bottom edge to show tooltip below the navigation bar
             guard !(navigationController?.navigationBar.prefersLargeTitles ?? false) else { return }
             
-            if let buttonView = menuButton.value(forKey: "view") as? UIView {
-                NNTipManager.shared.showTip(
-                    NestCategoryTips.entrySuggestionTip,
-                    sourceView: buttonView,
-                    in: self,
-                    pinToEdge: .bottom,
-                    offset: CGPoint(x: -8, y: 0)
-                )
-            }
+            NNTipManager.shared.showTip(
+                NestCategoryTips.entrySuggestionTip,
+                sourceView: suggestionsButton,
+                in: self,
+                pinToEdge: .bottom,
+                offset: CGPoint(x: 0, y: 8)
+            )
         }
     }
-    
     
     private func flashCell(for entry: BaseEntry) {
         guard let indexPath = dataSource?.indexPath(for: entry),
@@ -1713,11 +1694,15 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             emptyStateView = NNEmptyStateView(
                 icon: UIImage(systemName: "moon.zzz.fill"),
                 title: "It's a little quiet in here",
-                subtitle: entryRepository is NestService ? "Items for this folder will appear here. Suggestions can be found in the upper-right corner." :
+                subtitle: entryRepository is NestService ? "Items for this folder will appear here. Add an item by tapping below or explore suggestions." :
                     "This folder either has no items in it or none of the items were shared with you.",
                 actionButtonTitle: entryRepository is NestService ? "Add Item" : nil,
                 actionButtonMenu: entryRepository is NestService ? createAddItemMenu() : nil
             )
+            
+            if entryRepository is NestService {
+                emptyStateView.addAction(title: "Item Suggestions", backgroundColor: .systemBlue.withAlphaComponent(0.15), foregroundColor: .systemBlue, tag: 1)
+            }
         }
         
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
@@ -2312,6 +2297,10 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
 
 // Add delegate conformance for empty state view
 extension NestCategoryViewController: NNEmptyStateViewDelegate {
+    func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int) {
+        showItemSuggestions()
+    }
+    
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
         // Don't handle action button tap in edit-only mode
         guard !isEditOnlyMode else { return }

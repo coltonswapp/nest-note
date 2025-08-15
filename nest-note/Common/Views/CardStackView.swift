@@ -32,6 +32,9 @@ class CardStackView: UIView {
     
     // Add these properties
     private var cardData: [(key: String, value: String, date: Date)] = []
+    // Support pre-built custom card views (e.g., Place/Routine cards)
+    private var customCardViews: [UIView] = []
+    private var usesCustomCards: Bool = false
     private var currentIndex: Int = 0 {
         didSet {
             updateProgressLabel()
@@ -167,6 +170,8 @@ class CardStackView: UIView {
     // MARK: - Public Methods
     func setCardData(_ data: [(key: String, value: String, date: Date)]) {
         self.cardData = data
+        self.customCardViews = []
+        self.usesCustomCards = false
         currentIndex = 0  // This will trigger updateProgressLabel
         initializeVisibleCards()
         
@@ -176,12 +181,42 @@ class CardStackView: UIView {
         // Log the current progress for debugging
         Logger.log(level: .debug, category: .general, message: "CardStackView: Set card data, progress: \(progressLabel.text ?? "nil"), count: \(data.count)")
     }
+
+    // New: Accept fully configured custom card views (e.g., Place/Routine review cards)
+    func setCardViews(_ views: [UIView]) {
+        // Reset any existing data mode
+        self.cardData = []
+        self.customCardViews = views
+        self.usesCustomCards = true
+        currentIndex = 0
+        initializeVisibleCards()
+        
+        // Ensure progress label is visible
+        showProgressLabel()
+        
+        Logger.log(level: .debug, category: .general, message: "CardStackView: Set custom card views, count: \(views.count)")
+    }
     
     private func initializeVisibleCards() {
-        // Only create the first 3 cards
-        let visibleCount = min(3, cardData.count)
-        cards = (0..<visibleCount).map { index in
-            createCard(from: cardData[index])
+        // Remove any existing cards
+        cards.forEach { $0.removeFromSuperview() }
+        reviewedCards.removeAll()
+        cards.removeAll()
+        
+        if usesCustomCards {
+            // Only attach the first 3 provided views
+            let visibleCount = min(3, customCardViews.count)
+            for i in 0..<visibleCount {
+                let card = customCardViews[i]
+                card.translatesAutoresizingMaskIntoConstraints = false
+                cards.append(card)
+            }
+        } else {
+            // Only create the first 3 cards from data
+            let visibleCount = min(3, cardData.count)
+            cards = (0..<visibleCount).map { index in
+                createCard(from: cardData[index])
+            }
         }
         
         // Add cards in reverse for proper z-index
@@ -252,8 +287,11 @@ class CardStackView: UIView {
     private func cycleToNextCard(withDirection direction: SwipeDirection? = nil) {
         guard !cards.isEmpty else { return }
         
+        // Total number of cards depending on mode
+        let totalCount = usesCustomCards ? customCardViews.count : cardData.count
+        
         // Check if this is the last card
-        let isLastCard = currentIndex == cardData.count
+        let isLastCard = currentIndex == totalCount
         let cardToRemove = cards.removeFirst()
         
         if !isLastCard {   
@@ -261,8 +299,15 @@ class CardStackView: UIView {
         }
         
         // Create and add new card if there's more data
-        if currentIndex + 2 < cardData.count {
-            let newCard = createCard(from: cardData[currentIndex + 2])
+        if currentIndex + 2 < totalCount {
+            let newCard: UIView
+            if usesCustomCards {
+                let provided = customCardViews[currentIndex + 2]
+                provided.translatesAutoresizingMaskIntoConstraints = false
+                newCard = provided
+            } else {
+                newCard = createCard(from: cardData[currentIndex + 2])
+            }
             newCard.alpha = 0
             
             if let lastCard = cards.last {
@@ -493,7 +538,12 @@ class CardStackView: UIView {
     }
     
     private func updateProgressLabel() {
-        progressLabel.text = "\(currentIndex + 1)/\(cardData.count)"
+        let totalCount = usesCustomCards ? customCardViews.count : cardData.count
+        guard totalCount > 0 else {
+            progressLabel.text = "0/0"
+            return
+        }
+        progressLabel.text = "\(currentIndex + 1)/\(totalCount)"
         
         // Always make sure the label is visible when updating it
         progressLabel.alpha = 1.0
@@ -513,8 +563,11 @@ class CardStackView: UIView {
     func approveCard() {
         guard let topCard = cards.first else { return }
         
+        // Total number of cards depending on mode
+        let totalCount = usesCustomCards ? customCardViews.count : cardData.count
+        
         // Check if this is the last card
-        let isLastCard = currentIndex == cardData.count - 1
+        let isLastCard = currentIndex == totalCount - 1
         
         // Store swipe direction for potential restoration
         swipeDirections[topCard] = .right
@@ -530,8 +583,15 @@ class CardStackView: UIView {
         showProgressLabel()
         
         // Create and add new card if needed
-        if currentIndex + 2 < cardData.count {
-            let newCard = createCard(from: cardData[currentIndex + 2])
+        if currentIndex + 2 < totalCount {
+            let newCard: UIView
+            if usesCustomCards {
+                let provided = customCardViews[currentIndex + 2]
+                provided.translatesAutoresizingMaskIntoConstraints = false
+                newCard = provided
+            } else {
+                newCard = createCard(from: cardData[currentIndex + 2])
+            }
             newCard.alpha = 0
             if let lastCard = cards.last {
                 insertSubview(newCard, belowSubview: lastCard)

@@ -18,17 +18,10 @@ class MiniEntryDetailView: UIView {
     
     private let valueLabel: UILabel = {
         let label = UILabel()
-        label.font = .h3
+        label.font = .h4
+        label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.numberOfLines = 0
-        return label
-    }()
-    
-    private let visibilityLabel: UILabel = {
-        let label = UILabel()
-        label.font = .h4
-        label.text = "Comprehensive"  // Default text
-        label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
@@ -60,7 +53,7 @@ class MiniEntryDetailView: UIView {
         layer.shadowRadius = 8
         
         // Disable user interaction on all subviews
-        [keyLabel, divider, valueLabel, visibilityLabel, timestampLabel].forEach { view in
+        [keyLabel, divider, valueLabel, timestampLabel].forEach { view in
             view.isUserInteractionEnabled = false
             addSubview(view)
         }
@@ -78,10 +71,7 @@ class MiniEntryDetailView: UIView {
             valueLabel.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 20),
             valueLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            valueLabel.bottomAnchor.constraint(lessThanOrEqualTo: visibilityLabel.topAnchor, constant: -20),
-            
-            visibilityLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            visibilityLabel.bottomAnchor.constraint(equalTo: timestampLabel.topAnchor, constant: -4),
+            valueLabel.bottomAnchor.constraint(lessThanOrEqualTo: timestampLabel.topAnchor, constant: -20),
             
             timestampLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             timestampLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),

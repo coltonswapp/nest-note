@@ -2,6 +2,7 @@ import UIKit
 
 protocol NNEmptyStateViewDelegate: AnyObject {
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView)
+    func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int)
 }
 
 class NNEmptyStateView: UIView {
@@ -44,12 +45,23 @@ class NNEmptyStateView: UIView {
         return label
     }()
     
+    private lazy var buttonStackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.distribution = .fillProportionally
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+    
+    private(set) var actionButtons: [NNSmallPrimaryButton] = []
+    
     private lazy var actionButton: NNSmallPrimaryButton = {
         let button = NNSmallPrimaryButton(title: "Test", backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
         button.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
-        //button.isHidden = true
-        button.translatesAutoresizingMaskIntoConstraints = false
         button.isUserInteractionEnabled = true
+        button.tag = 0
         return button
     }()
     
@@ -75,7 +87,8 @@ class NNEmptyStateView: UIView {
 
         stackView.addArrangedSubview(titleLabel)
         stackView.addArrangedSubview(subtitleLabel)
-        stackView.addArrangedSubview(actionButton)
+        stackView.addArrangedSubview(buttonStackView)
+        buttonStackView.addArrangedSubview(actionButton)
         
         stackView.setCustomSpacing(16, after: subtitleLabel)
         
@@ -93,7 +106,8 @@ class NNEmptyStateView: UIView {
             iconImageView.heightAnchor.constraint(equalToConstant: 48),
             iconImageView.widthAnchor.constraint(equalToConstant: 48),
             
-            actionButton.heightAnchor.constraint(equalToConstant: 46)
+            actionButton.heightAnchor.constraint(equalToConstant: 46),
+            buttonStackView.heightAnchor.constraint(equalToConstant: 46)
         ])
     }
     
@@ -125,5 +139,22 @@ class NNEmptyStateView: UIView {
     func addMenuToActionButton(menu: UIMenu) {
         actionButton.showsMenuAsPrimaryAction = true
         actionButton.menu = menu
+    }
+    
+    func addAction(title: String, backgroundColor: UIColor = NNColors.primary.withAlphaComponent(0.15), foregroundColor: UIColor = NNColors.primary, tag: Int) {
+        let button = NNSmallPrimaryButton(title: title, backgroundColor: backgroundColor, foregroundColor: foregroundColor)
+        button.addTarget(self, action: #selector(actionButtonWithTagTapped(_:)), for: .touchUpInside)
+        button.tag = tag
+        
+        actionButtons.append(button)
+        buttonStackView.addArrangedSubview(button)
+        
+        NSLayoutConstraint.activate([
+            button.heightAnchor.constraint(equalToConstant: 46)
+        ])
+    }
+    
+    @objc private func actionButtonWithTagTapped(_ sender: UIButton) {
+        delegate?.emptyStateView(self, didTapActionWithTag: sender.tag)
     }
 }
