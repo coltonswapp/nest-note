@@ -17,6 +17,8 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     // Add delegate property
     weak var reviewDelegate: EntryReviewViewControllerDelegate?
     
+    private let outOfDateThreshold: Int = 90
+    
     private let cardStackView: CardStackView = {
         let stack = CardStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -201,13 +203,12 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         Task {
             do {
                 isLoading = true
-                // Threshold (reduced for testing to include recent items)
-                let days = 1
+                
                 let calendar = Calendar.current
-                let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+                let threshold = calendar.date(byAdding: .day, value: -outOfDateThreshold, to: Date()) ?? Date()
 
                 // Gather items: entries via protocol, places and routines via repository services
-                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: days)
+                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: outOfDateThreshold)
                 var places: [PlaceItem] = []
                 var routines: [RoutineItem] = []
                 

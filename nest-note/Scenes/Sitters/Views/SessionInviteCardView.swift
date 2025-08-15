@@ -8,166 +8,155 @@ import UIKit
 
 class SessionInviteCardView: UIView {
     
-    // Transform properties
-    private var currentYaw: CGFloat = 0
-    private var currentPitch: CGFloat = 0
-    private var maxRotation: CGFloat = 0.66  // Maximum rotation in radians
-    private var transformSensitivity: CGFloat = 0.001  // Adjust this to control rotation sensitivity
-    
-    // Configurable animation properties
-    private var yawFrequency: CGFloat = 0.5
-    private var pitchFrequency: CGFloat = 0.7
-    private var yawAmplitude: CGFloat = 0.15
-    private var pitchAmplitude: CGFloat = 0.1
-    
     // Add content view to manage hierarchy
     private let contentView: UIView = {
         let view = UIView()
-        view.backgroundColor = .clear
+        view.backgroundColor = .secondarySystemGroupedBackground
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.clipsToBounds = true
+        view.layer.cornerRadius = 12
+        return view
+    }()
+
+    // Top pattern image (uses NNAssetType.rectanglePattern)
+    private let topPatternView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.clipsToBounds = true
+        return imageView
+    }()
+
+    // Perforation dashed separator
+    private let perforationView: UIView = {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
+    }()
+    private let perforationLayer: CAShapeLayer = {
+        let layer = CAShapeLayer()
+        layer.lineWidth = 2
+        layer.lineDashPattern = [6, 6]
+        layer.fillColor = UIColor.clear.cgColor
+        layer.strokeColor = UIColor.systemGray5.cgColor
+        return layer
     }()
     
     private let nestNameLabel: UILabel = {
         let label = UILabel()
-        label.font = .h3
+        label.font = .h1
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.textAlignment = .left
+        label.textAlignment = .center
         label.text = "Debug Text"
         return label
     }()
     
-    private let divider: UIView = {
+    // Badge styled like NNCategoryFilterView's enabled chip
+    private let inviteBadgeView: UIView = {
         let view = UIView()
-        view.backgroundColor = .quaternaryLabel
+        view.layer.borderWidth = 2
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
     
-    private let sessionDateLabel: UILabel = {
+    private let inviteBadgeLabel: UILabel = {
         let label = UILabel()
         label.font = .h3
+        label.text = "SESSION INVITE"
+        label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.textAlignment = .left
+        return label
+    }()
+    
+    private let sessionDateLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyXL
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .center
         label.numberOfLines = 0
+        label.textColor = .secondaryLabel
         return label
     }()
     
-    private let backgroundTileView: UIImageView = {
+    // App icon with shadow: use a container for shadow, inner image for rounded mask
+    private let appIconContainer: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        // Shadow on container (not clipped)
+        view.layer.shadowColor = UIColor.black.cgColor
+        view.layer.shadowOpacity = 0.2
+        view.layer.shadowOffset = CGSize(width: 0, height: 4)
+        view.layer.shadowRadius = 8
+        view.layer.masksToBounds = false
+        return view
+    }()
+    
+    private let appIconView: UIImageView = {
         let imageView = UIImageView()
-        imageView.image = UIImage(named: "bird_tile")
-        imageView.contentMode = .scaleAspectFill
-        imageView.clipsToBounds = true
-        imageView.alpha = 0.6
+        imageView.image = UIImage(named: "icon_pattern-preview")
+        imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 16
         return imageView
-    }()
-    
-    private let footnoteLabel: UILabel = {
-        let label = UILabel()
-        label.font = .bodyL
-        label.textColor = .secondaryLabel
-        label.text = "Session Invite"  // Default text
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-    
-    private let dateInvitedLabel: UILabel = {
-        let label = UILabel()
-        label.font = .bodyL
-        label.textColor = .secondaryLabel
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.textAlignment = .right
-        return label
     }()
     
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupView()
-        setupGestureRecognizers()
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupView()
-        setupGestureRecognizers()
     }
     
-    private func setupGestureRecognizers() {
-        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        addGestureRecognizer(panGesture)
-    }
-    
-    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        let translation = gesture.translation(in: self)
-        
-        switch gesture.state {
-        case .changed:
-            // Convert pan translation to rotation
-            let newYaw = (translation.x * transformSensitivity).clamped(to: -maxRotation...maxRotation)
-            let newPitch = (translation.y * transformSensitivity).clamped(to: -maxRotation...maxRotation)
-            
-            updateTransform(yaw: newYaw, pitch: newPitch)
-            
-        case .ended, .cancelled:
-            // Reset transform with animation
-            UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut) {
-                self.updateTransform(yaw: 0, pitch: 0)
-            }
-            
-        case .began:
-            HapticsHelper.superLightHaptic()
-        default:
-            break
-        }
-    }
-    
-    private func updateTransform(yaw: CGFloat, pitch: CGFloat) {
-        currentYaw = yaw
-        currentPitch = pitch
-        
-        var transform = CATransform3DIdentity
-        transform.m34 = -1.0 / 500.0  // Add perspective
-        
-        // Apply rotations
-        transform = CATransform3DRotate(transform, yaw, 0, 1, 0)   // Yaw (Y-axis rotation)
-        transform = CATransform3DRotate(transform, pitch, 1, 0, 0) // Pitch (X-axis rotation)
-        
-        self.layer.transform = transform
-    }
-    
-    // Add method to update animation properties
-    func updateAnimationProperties(yawFreq: CGFloat, pitchFreq: CGFloat, yawAmp: CGFloat, pitchAmp: CGFloat) {
-        yawFrequency = yawFreq
-        pitchFrequency = pitchFreq
-        yawAmplitude = yawAmp
-        pitchAmplitude = pitchAmp
-    }
+    // Pan/tilt gestures removed – card is static and presented using flip animation
     
     func updatePattern(size: CGFloat, spacing: CGFloat, alpha: CGFloat) {
-        // Update just the alpha since we're using a static image
-        backgroundTileView.alpha = alpha
+        // Update alpha for the pattern view
+        topPatternView.alpha = alpha
     }
     
     private func setupView() {
-        backgroundColor = .secondarySystemGroupedBackground
+        backgroundColor = .clear
         layer.cornerRadius = 12
+        layer.masksToBounds = false
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.3
         layer.shadowOffset = CGSize(width: 4, height: 8)
         layer.shadowRadius = 8
         
-        // First add background tile at the bottom
-        addSubview(backgroundTileView)
+        // Shadow is applied on container; the image view clips to its rounded corners
         
-        // Add content view above blur
+        // Configure top pattern image using NNAssetType.rectanglePattern
+        if let image = UIImage(named: NNAssetType.rectanglePattern.rawValue) {
+            topPatternView.image = image
+            topPatternView.contentMode = .scaleAspectFill
+            topPatternView.alpha = NNAssetType.rectanglePattern.defaultAlpha
+        }
+
+        // Add content view (clipping container)
         addSubview(contentView)
         
-        // Add all content elements to the content view instead of directly to self
-        [nestNameLabel, divider, sessionDateLabel, footnoteLabel, dateInvitedLabel].forEach { view in
+        // Background pattern and perforation inside contentView so they clip
+        contentView.addSubview(topPatternView)
+        contentView.addSubview(perforationView)
+        perforationView.layer.addSublayer(perforationLayer)
+        
+        // Badge setup
+        inviteBadgeView.addSubview(inviteBadgeLabel)
+        inviteBadgeView.backgroundColor = NNColors.primaryOpaque
+        inviteBadgeView.layer.borderColor = NNColors.primary.cgColor
+        inviteBadgeLabel.textColor = NNColors.primary
+        
+        // Add content elements
+        [inviteBadgeView, appIconContainer, nestNameLabel, sessionDateLabel].forEach { view in
             view.isUserInteractionEnabled = false
             contentView.addSubview(view)
         }
+        // Place the icon image inside the shadow container
+        appIconContainer.addSubview(appIconView)
         
         NSLayoutConstraint.activate([
             // Content view constraints
@@ -175,32 +164,49 @@ class SessionInviteCardView: UIView {
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            
-            // Background tile constraints
-            backgroundTileView.topAnchor.constraint(equalTo: topAnchor),
-            backgroundTileView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            backgroundTileView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            backgroundTileView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            
-            // Existing constraints, but relative to contentView instead of self
-            nestNameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
+
+            // Top pattern view (only top section)
+            topPatternView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: -12),
+            topPatternView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            topPatternView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            topPatternView.heightAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.4),
+
+            // Perforation directly under the pattern
+            perforationView.topAnchor.constraint(equalTo: topPatternView.bottomAnchor),
+            perforationView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 0),
+            perforationView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: 0),
+            perforationView.heightAnchor.constraint(equalToConstant: 1),
+
+            // Badge over the perforation (centered)
+            inviteBadgeView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            inviteBadgeView.centerYAnchor.constraint(equalTo: perforationView.centerYAnchor),
+
+            // Badge label padding
+            inviteBadgeLabel.topAnchor.constraint(equalTo: inviteBadgeView.topAnchor, constant: 6),
+            inviteBadgeLabel.leadingAnchor.constraint(equalTo: inviteBadgeView.leadingAnchor, constant: 14),
+            inviteBadgeLabel.trailingAnchor.constraint(equalTo: inviteBadgeView.trailingAnchor, constant: -14),
+            inviteBadgeLabel.bottomAnchor.constraint(equalTo: inviteBadgeView.bottomAnchor, constant: -6),
+
+            // App icon container below perforation
+            appIconContainer.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            appIconContainer.topAnchor.constraint(equalTo: perforationView.bottomAnchor, constant: 48),
+            appIconContainer.widthAnchor.constraint(equalToConstant: 100),
+            appIconContainer.heightAnchor.constraint(equalTo: appIconContainer.widthAnchor),
+
+            // Icon fills its container
+            appIconView.topAnchor.constraint(equalTo: appIconContainer.topAnchor),
+            appIconView.leadingAnchor.constraint(equalTo: appIconContainer.leadingAnchor),
+            appIconView.trailingAnchor.constraint(equalTo: appIconContainer.trailingAnchor),
+            appIconView.bottomAnchor.constraint(equalTo: appIconContainer.bottomAnchor),
+
+            // Title and dates centered under icon
+            nestNameLabel.topAnchor.constraint(equalTo: appIconContainer.bottomAnchor, constant: 24),
             nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            
-            divider.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: 20),
-            divider.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            divider.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            divider.heightAnchor.constraint(equalToConstant: 1),
-            
-            sessionDateLabel.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 20),
+
+            sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: 8),
             sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            
-            footnoteLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            footnoteLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
-            
-            dateInvitedLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            dateInvitedLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
+            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20)
         ])
     }
     
@@ -237,11 +243,21 @@ class SessionInviteCardView: UIView {
                 \(startTimeStr) - \(endTimeStr)
                 """
         }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Update dashed line path
+        perforationLayer.frame = perforationView.bounds
+        let path = UIBezierPath()
+        let midY: CGFloat = perforationView.bounds.height / 2
+        path.move(to: CGPoint(x: 0, y: midY))
+        path.addLine(to: CGPoint(x: perforationView.bounds.width, y: midY))
+        perforationLayer.path = path.cgPath
+        // Update colors on trait changes dynamically
+        perforationLayer.strokeColor = UIColor.systemGray3.withAlphaComponent(0.3).cgColor
         
-        // Configure invite date with same format
-        let inviteDateStr = dateFormatter.string(from: invite.createdAt)
-        let inviteYearStr = yearFormatter.string(from: invite.createdAt)
-        dateInvitedLabel.text = "\(inviteDateStr)\(inviteYearStr)"
+        inviteBadgeView.layer.cornerRadius = inviteBadgeView.frame.size.height / 2
     }
 }
 
