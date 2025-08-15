@@ -51,8 +51,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             "Anniversary Trip",
             "Birthday Trip",
             "Family Vacation",
-            "Business Trip",
-            "Sleepover",
+            "Sleepover w/ Grandma",
             "Evening Out"
         ]
         let field = FlashingPlaceholderTextField(placeholders: placeholders)
