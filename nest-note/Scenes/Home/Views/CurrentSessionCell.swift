@@ -92,4 +92,9 @@ final class CurrentSessionCell: UICollectionViewListCell {
         titleLabel.text = title
         durationLabel.text = duration
     }
+    
+    func configureForEarlyAccess(title: String, sessionStartTime: String) {
+        titleLabel.text = title
+        durationLabel.text = "Session starts \(sessionStartTime)"
+    }
 } 

@@ -1454,6 +1454,7 @@ class SessionService {
                     
                     Logger.log(level: .debug, category: .sessionService, message: "Session \(session.id) has status: \(session.status)")
                     
+                    // Check for active sessions (inProgress, extended, earlyAccess)
                     if session.status == .inProgress || session.status == .extended || session.status == .earlyAccess {
                         // Check if early access is still valid
                         if session.status == .earlyAccess && !session.isInEarlyAccess {
@@ -1463,6 +1464,24 @@ class SessionService {
                         
                         Logger.log(level: .info, category: .sessionService, message: "Found accessible session: \(session.id) with status: \(session.status) ✅")
                         return session
+                    }
+                    
+                    // Check if upcoming session should show early access
+                    if session.status == .upcoming && session.earlyAccessDuration != .none {
+                        let now = Date()
+                        // Show if we're within early access period before the session starts
+                        let earlyAccessStartTime = session.startDate.addingTimeInterval(-session.earlyAccessDuration.timeInterval)
+                        
+                        if now >= earlyAccessStartTime && now < session.startDate {
+                            Logger.log(level: .info, category: .sessionService, message: "Found upcoming session in early access period: \(session.id) ✅")
+                            
+                            // Temporarily set status to earlyAccess for display purposes (don't save to DB)
+                            var displaySession = session
+                            displaySession.status = .earlyAccess
+                            displaySession.earlyAccessEndDate = session.startDate // Early access ends when session starts
+                            
+                            return displaySession
+                        }
                     }
                 } catch {
                     Logger.log(level: .error, category: .sessionService, message: "Failed to fetch session \(sitterSession.id) from nest \(sitterSession.nestID): \(error.localizedDescription)")

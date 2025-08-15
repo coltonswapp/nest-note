@@ -177,7 +177,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 // Get sitter name or email
                 let sitterInfo: String? = session.assignedSitter?.name ?? session.assignedSitter?.email
                 
-                let durationText: String = sitterInfo == nil ? "No sitter assigned • \(duration)" : "\(sitterInfo!) • \(duration)"
+                let durationText: String = sitterInfo == nil ? duration : "\(sitterInfo!) • \(duration)"
                 
                 cell.configure(title: session.title, duration: durationText)
                 
