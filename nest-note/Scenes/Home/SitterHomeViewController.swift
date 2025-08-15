@@ -222,13 +222,19 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         
         let currentSessionCellRegistration = UICollectionView.CellRegistration<CurrentSessionCell, HomeItem> { cell, indexPath, item in
             if case let .currentSession(session) = item {
-                // Format duration manually since we can't access formattedDuration
-                let formatter = DateIntervalFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                let duration = formatter.string(from: session.startDate, to: session.endDate)
-                
-                cell.configure(title: session.title, duration: duration)
+                if session.status == .earlyAccess {
+                    // Format session start time
+                    let sessionStartTime = self.formatSessionStartTime(session.startDate)
+                    cell.configureForEarlyAccess(title: session.title, sessionStartTime: sessionStartTime)
+                } else {
+                    // Format duration manually since we can't access formattedDuration
+                    let formatter = DateIntervalFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .none
+                    let duration = formatter.string(from: session.startDate, to: session.endDate)
+                    
+                    cell.configure(title: session.title, duration: duration)
+                }
                 
                 // Configure the cell's background
                 var backgroundConfig = UIBackgroundConfiguration.listCell()
@@ -337,7 +343,14 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             let title: String
             switch section {
             case .currentSession:
-                title = "In-progress session"
+                // Check if we have a current session to determine the title
+                if let currentSessionItems = self?.dataSource.snapshot().itemIdentifiers(inSection: .currentSession),
+                   let firstItem = currentSessionItems.first,
+                   case let .currentSession(session) = firstItem {
+                    title = session.status == .earlyAccess ? "Early Access" : "In-progress session"
+                } else {
+                    title = "In-progress session"
+                }
                 headerView.configure(title: title)
             case .nest:
                 title = "Session Nest"
@@ -644,6 +657,26 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         return "folder.fill"
     }
     
+    // MARK: - Helper Methods
+    
+    private func formatSessionStartTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            // Today: show "today at 2:30 PM"
+            formatter.dateFormat = "'today at' h:mm a"
+        } else if calendar.isDateInTomorrow(date) {
+            // Tomorrow: show "tomorrow at 2:30 PM"  
+            formatter.dateFormat = "'tomorrow at' h:mm a"
+        } else {
+            // Other days: show "Mon, Aug 15 at 2:30 PM"
+            formatter.dateFormat = "E, MMM d 'at' h:mm a"
+        }
+        
+        return formatter.string(from: date)
+    }
+    
     // MARK: - Layout
     // Remove custom layout implementation to use the default one from HomeViewControllerType
     
@@ -779,8 +812,8 @@ extension SitterHomeViewController: JoinSessionViewControllerDelegate {
             do {
                 // Fetch the session to check its status
                 if let sessionItem = try await SessionService.shared.getSession(nestID: session.nestID, sessionID: session.id) {
-                    if sessionItem.status == .inProgress || sessionItem.status == .extended {
-                        // If it's in progress, refresh the data to show it
+                    if sessionItem.status == .inProgress || sessionItem.status == .extended || sessionItem.status == .earlyAccess {
+                        // If it's in progress or in early access, refresh the data to show it
                         await MainActor.run {
                             self.refreshData()
                         }

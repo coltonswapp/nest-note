@@ -379,7 +379,7 @@ final class SitterViewService: EntryRepository {
                     return
                 }
                 session = fetchedSession
-                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched session: \(session.id)")
+                Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched session: \(session.id) with status: \(session.status)")
             } catch {
                 Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch in-progress session: \(error.localizedDescription)")
                 await MainActor.run {
