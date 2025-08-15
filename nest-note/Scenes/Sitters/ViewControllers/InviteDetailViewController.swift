@@ -48,22 +48,25 @@ class InviteDetailViewController: NNViewController {
     private var skipLabel: UILabel?
     private var skipStack: UIStackView?
     
-    private lazy var copyButton = NNCircularIconButtonWithLabel(
-        icon: UIImage(systemName: "doc.on.doc"),
-        title: "Copy",
-        foregroundColor: .label
+    private lazy var newCodeButton = NNCircularIconButtonWithLabel(
+        icon: UIImage(systemName: "arrow.trianglehead.2.clockwise"),
+        title: "New Code",
+        backgroundColor: .systemBlue.withAlphaComponent(0.15),
+        foregroundColor: .systemBlue
     )
     
     private lazy var messageButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "message"),
         title: "Message",
-        foregroundColor: .label
+        backgroundColor: .systemBlue.withAlphaComponent(0.15),
+        foregroundColor: .systemBlue
     )
     
     private lazy var shareButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "square.and.arrow.up"),
         title: "Share",
-        foregroundColor: .label
+        backgroundColor: .systemBlue.withAlphaComponent(0.15),
+        foregroundColor: .systemBlue
     )
     
     private lazy var deleteButton = NNCircularIconButtonWithLabel(
@@ -212,14 +215,14 @@ class InviteDetailViewController: NNViewController {
         actionButtonsStackView.spacing = 24
         actionButtonsStackView.translatesAutoresizingMaskIntoConstraints = false
         
-        actionButtonsStackView.addArrangedSubview(copyButton)
         actionButtonsStackView.addArrangedSubview(messageButton)
         actionButtonsStackView.addArrangedSubview(shareButton)
+        actionButtonsStackView.addArrangedSubview(newCodeButton)
         actionButtonsStackView.addArrangedSubview(deleteButton)
         
         view.addSubview(actionButtonsStackView)
         
-        copyButton.addTarget(self, action: #selector(copyButtonTapped), for: .touchUpInside)
+        newCodeButton.addTarget(self, action: #selector(newCodeButtonTapped), for: .touchUpInside)
         messageButton.addTarget(self, action: #selector(messageButtonTapped), for: .touchUpInside)
         shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
         deleteButton.addTarget(self, action: #selector(deleteButtonTapped), for: .touchUpInside)
@@ -420,12 +423,12 @@ class InviteDetailViewController: NNViewController {
         actionButtonsStackView.isHidden = !shouldShow
         
         // Enable/disable individual buttons
-        copyButton.alpha = shouldShow ? 1.0 : 0.5
+        newCodeButton.alpha = shouldShow ? 1.0 : 0.5
         messageButton.alpha = shouldShow ? 1.0 : 0.5
         shareButton.alpha = shouldShow ? 1.0 : 0.5
         deleteButton.alpha = shouldShow ? 1.0 : 0.5
         
-        copyButton.isUserInteractionEnabled = shouldShow
+        newCodeButton.isUserInteractionEnabled = shouldShow
         messageButton.isUserInteractionEnabled = shouldShow
         shareButton.isUserInteractionEnabled = shouldShow
         deleteButton.isUserInteractionEnabled = shouldShow
@@ -603,16 +606,15 @@ extension InviteDetailViewController: UICollectionViewDelegate {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         if item is CodeCellItem {
-            // Show alert when user taps on code cell
-            let alert = UIAlertController(
-                title: "Create Invite",
-                message: "Select a Sitter, then tap the \"Create Invite\" button below.",
-                preferredStyle: .alert
-            )
+            // Copy invite code and show feedback
+            guard let code = inviteCode else { return }
+            let url = "nestnote://invite?code=\(code)"
+            UIPasteboard.general.string = url
             
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            
-            present(alert, animated: true)
+            // Show copy feedback on the cell
+            if let cell = collectionView.cellForItem(at: indexPath) as? CodeCell {
+                cell.showCopyFeedback()
+            }
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
@@ -672,13 +674,68 @@ extension InviteDetailViewController: SitterListViewControllerDelegate {
 
 // MARK: - Action Button Methods
 extension InviteDetailViewController {
-    @objc private func copyButtonTapped() {
-        guard let code = inviteCode else { return }
-        let url = "nestnote://invite?code=\(code)"
-        UIPasteboard.general.string = url
+    @objc private func newCodeButtonTapped() {
+        let alert = UIAlertController(
+            title: "Generate New Code?",
+            message: "This will invalidate the current invite code and create a new one. Anyone with the old code will no longer be able to join.",
+            preferredStyle: .alert
+        )
         
-        HapticsHelper.lightHaptic()
-        showToast(delay: 0.0, text: "Invite link copied!")
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        alert.addAction(UIAlertAction(title: "Generate", style: .default) { [weak self] _ in
+            self?.generateNewInviteCode()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func generateNewInviteCode() {
+        guard let inviteID = inviteID,
+              let sessionID = sessionID else { return }
+        
+        // Show loading state on the new code button
+        newCodeButton.isUserInteractionEnabled = false
+        newCodeButton.alpha = 0.5
+        
+        Task {
+            do {
+                // Delete the existing invite
+                try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
+                
+                // Create a new invite
+                let newInvite = try await SessionService.shared.createOpenInvite(sessionID: sessionID)
+                
+                await MainActor.run {
+                    // Update the invite properties
+                    self.inviteCode = newInvite.code
+                    self.inviteID = newInvite.id
+                    
+                    // Update the UI
+                    self.applySnapshot()
+                    self.showToast(text: "New invite code generated!")
+                    
+                    // Reset button state
+                    self.newCodeButton.isUserInteractionEnabled = true
+                    self.newCodeButton.alpha = 1.0
+                }
+            } catch {
+                await MainActor.run {
+                    // Reset button state
+                    self.newCodeButton.isUserInteractionEnabled = true
+                    self.newCodeButton.alpha = 1.0
+                    
+                    // Show error
+                    let alert = UIAlertController(
+                        title: "Error",
+                        message: "Failed to generate new code: \(error.localizedDescription)",
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(alert, animated: true)
+                }
+            }
+        }
     }
     
     @objc private func messageButtonTapped() {
