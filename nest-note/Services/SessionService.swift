@@ -709,13 +709,18 @@ class SessionService {
             throw SessionError.noCurrentNest
         }
 
+        // Get session to determine expiration time
+        guard let session = try await getSession(nestID: nestID, sessionID: sessionID) else {
+            throw SessionError.sessionNotFound
+        }
+
         // Generate unique code
         let code = try await generateUniqueInviteCode()
         let inviteID = "invite-\(code)"
 
         Logger.log(level: .info, category: .sessionService, message: "Creating OPEN invite... \(inviteID)")
 
-        // Create invite object without a sitter email
+        // Create invite object without a sitter email, expires at session end time
         let invite = Invite(
             id: inviteID,
             nestID: nestID,
@@ -723,6 +728,7 @@ class SessionService {
             sessionID: sessionID,
             sitterEmail: nil,
             status: .pending,
+            expiresAt: session.endDate,
             createdBy: currentUserID
         )
 
@@ -825,6 +831,11 @@ class SessionService {
             throw SessionError.noCurrentNest
         }
         
+        // Get session to determine expiration time
+        guard let session = try await getSession(nestID: nestID, sessionID: sessionID) else {
+            throw SessionError.sessionNotFound
+        }
+        
         do {
             // Check if the sitter already has a userID in the SavedSitter record
             var sitterUserID: String? = nil
@@ -838,7 +849,7 @@ class SessionService {
             
             Logger.log(level: .info, category: .sessionService, message: "Creating invite... \(inviteID)")
             
-            // Create invite object
+            // Create invite object, expires at session end time
             let invite = Invite(
                 id: inviteID,
                 nestID: nestID,
@@ -846,6 +857,7 @@ class SessionService {
                 sessionID: sessionID,
                 sitterEmail: sitter.email,
                 status: .pending,
+                expiresAt: session.endDate,
                 createdBy: currentUserID
             )
             
@@ -1558,7 +1570,7 @@ struct Invite: Codable, Identifiable {
         self.sitterEmail = sitterEmail
         self.status = status
         self.createdAt = createdAt
-        self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(48 * 60 * 60) // 48 hours validity
+        self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(48 * 60 * 60) // Fallback: 48 hours validity (invites should use session end time)
         self.createdBy = createdBy
     }
 }
