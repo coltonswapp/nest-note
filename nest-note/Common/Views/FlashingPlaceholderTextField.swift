@@ -8,7 +8,7 @@ class FlashingPlaceholderTextField: UITextField {
     
     private let fadeOutDuration: TimeInterval = 0.2
     private let fadeInDuration: TimeInterval = 0.3
-    private let holdDuration: TimeInterval = 1.2
+    private let holdDuration: TimeInterval = 2.0
     
     var isAnimating: Bool = false {
         didSet {

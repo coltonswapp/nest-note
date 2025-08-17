@@ -285,7 +285,7 @@ private class CompactCalendarDateCell: UICollectionViewCell {
     private let dayLabel: UILabel = {
         let label = UILabel()
         label.textAlignment = .center
-        label.font = .captionBold
+        label.font = .captionBoldS
         label.textColor = .secondaryLabel
         return label
     }()

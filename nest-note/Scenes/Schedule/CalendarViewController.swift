@@ -336,7 +336,7 @@ class CalendarContentView: UIView {
 class EventView: UIControl {
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .captionBold
+        label.font = .captionBoldS
         label.textColor = .white
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false

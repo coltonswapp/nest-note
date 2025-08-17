@@ -32,6 +32,19 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         return tableView
     }()
     
+    private lazy var frequencyButton: NNSmallPrimaryButton = {
+        let chevronImage = UIImage(systemName: "chevron.up.chevron.down")
+        let button = NNSmallPrimaryButton(
+            title: routine?.frequency ?? "Daily",
+            image: chevronImage,
+            imagePlacement: .right,
+            backgroundColor: NNColors.offBlack,
+            foregroundColor: .white
+        )
+        button.addTarget(self, action: #selector(frequencyButtonTapped), for: .touchUpInside)
+        return button
+    }()
+    
     private lazy var saveButton: NNLoadingButton = {
         let button = NNLoadingButton(
             title: routine == nil ? "Save" : "Update",
@@ -40,6 +53,16 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         )
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
+    }()
+    
+    private lazy var ctaStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [frequencyButton, saveButton])
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.distribution = .fill
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
     }()
     
     private lazy var folderLabel: NNSmallLabel = {
@@ -112,7 +135,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             setupInfoButton()
         }
         
-        itemsHiddenDuringTransition = [saveButton]
+        itemsHiddenDuringTransition = isReadOnly ? [] : [ctaStack]
         
         // Add content insets so content can scroll above the folder label and save button
         let bottomInset: CGFloat = isReadOnly ? 56 : 104
@@ -136,7 +159,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         containerView.addSubview(routineTableView)
         containerView.addSubview(folderLabel)
         if !isReadOnly {
-            containerView.addSubview(saveButton)
+            containerView.addSubview(ctaStack)
         }
         
         var constraints: [NSLayoutConstraint] = [
@@ -145,7 +168,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             routineTableView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             routineTableView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
-            // Folder label - positioned above save button
+            // Folder label - positioned above CTA stack
             folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
             folderLabel.heightAnchor.constraint(equalToConstant: 30),
@@ -156,13 +179,17 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                 // Table view extends all the way to bottom
                 routineTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
                 
-                // Folder label and save button float over the table view
-                folderLabel.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -16),
+                // Folder label and CTA stack float over the table view
+                folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -16),
                 
-                saveButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-                saveButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                saveButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
-                saveButton.heightAnchor.constraint(equalToConstant: 46),
+                ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+                ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+                ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                ctaStack.heightAnchor.constraint(equalToConstant: 46),
+                
+                frequencyButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6),
+                
+                saveButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: 0.4)
             ])
         } else {
             constraints.append(contentsOf: [
@@ -186,7 +213,29 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasTitle = !titleString.isEmpty
         let hasAtLeastOneAction = !routineActions.isEmpty
-        let shouldEnable = hasTitle && hasAtLeastOneAction
+        
+        // For new routines, just check basic requirements
+        if routine == nil {
+            let shouldEnable = hasTitle && hasAtLeastOneAction
+            saveButton.isEnabled = shouldEnable
+            return
+        }
+        
+        // For existing routines, also check if anything has changed
+        let currentTitle = routine?.title ?? ""
+        let currentActions = routine?.routineActions ?? []
+        
+        // Handle frequency comparison
+        let currentFrequency = routine?.frequency ?? "Daily"
+        let selectedFrequency = frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal) ?? "Daily"
+        let frequencyChanged = selectedFrequency != currentFrequency
+        
+        let titleChanged = titleString != currentTitle
+        let actionsChanged = routineActions != currentActions
+        
+        
+        let hasChanges = titleChanged || actionsChanged || frequencyChanged
+        let shouldEnable = hasTitle && hasAtLeastOneAction && hasChanges
         saveButton.isEnabled = shouldEnable
     }
 
@@ -419,6 +468,13 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         // The scroll view dismissal is automatically handled by shouldDisableScrollDismissalForEditMode
     }
     
+    @objc private func frequencyButtonTapped() {
+        let currentFrequency = routine?.frequency ?? "Daily"
+        let frequencyVC = RoutineFrequencyViewController(currentFrequency: currentFrequency)
+        frequencyVC.delegate = self
+        present(frequencyVC, animated: true)
+    }
+    
     @objc private func saveButtonTapped() {
         guard let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty,
@@ -438,6 +494,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                 if let existingRoutine = routine {
                     existingRoutine.title = title
                     existingRoutine.routineActions = routineActions
+                    existingRoutine.frequency = frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal)
                     existingRoutine.updatedAt = Date()
                     
                     try await NestService.shared.updateRoutine(existingRoutine)
@@ -446,7 +503,8 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                     let newRoutine = RoutineItem(
                         title: title,
                         category: category,
-                        routineActions: routineActions
+                        routineActions: routineActions,
+                        frequency: frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal)
                     )
                     
                     try await NestService.shared.createRoutine(newRoutine)
@@ -685,6 +743,16 @@ extension RoutineDetailViewController: AddRoutineActionCellDelegate {
         }, completion: { [weak self] _ in
             self?.updateSaveButtonEnabledState()
         })
+    }
+}
+
+// MARK: - RoutineFrequencyViewControllerDelegate
+extension RoutineDetailViewController: RoutineFrequencyViewControllerDelegate {
+    func routineFrequencyViewController(_ controller: RoutineFrequencyViewController, didSelectFrequency frequency: String) {
+        // Update the frequency button title
+        frequencyButton.setTitle(frequency, for: .normal)
+        // Update save button state to reflect the change
+        updateSaveButtonEnabledState()
     }
 }
 

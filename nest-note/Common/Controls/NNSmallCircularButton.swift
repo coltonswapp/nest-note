@@ -12,7 +12,7 @@ class NNSmallCircularButton: NNBaseControl {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .captionBold
+        label.font = .captionBoldS
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
