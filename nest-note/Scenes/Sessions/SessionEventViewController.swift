@@ -201,6 +201,11 @@ final class SessionEventViewController: NNSheetViewController {
         if !isReadOnly && selectedColorIndex < colorButtons.count {
             colorButtonTapped(colorButtons[selectedColorIndex])
         }
+        
+        // Focus the title field when creating a new event
+        if event == nil && !isReadOnly {
+            titleField.becomeFirstResponder()
+        }
     }
     
     // MARK: - Setup Methods
@@ -421,8 +426,13 @@ final class SessionEventViewController: NNSheetViewController {
             let eventStart = startControl.date
             let eventEnd = endControl.date
             
-            // Check if event falls within session start & end
-            if  eventStart < sessionDateRange.start || eventEnd > sessionDateRange.end {
+            // Check if event falls within session start & end (using calendar comparison to handle same-day events properly)
+            let calendar = Calendar.current
+            let sessionStart = sessionDateRange.start
+            let sessionEnd = sessionDateRange.end
+            
+            if calendar.compare(eventStart, to: sessionStart, toGranularity: .day) == .orderedAscending ||
+               calendar.compare(eventEnd, to: sessionEnd, toGranularity: .day) == .orderedDescending {
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateStyle = .medium
                 let alert = UIAlertController(
@@ -609,6 +619,9 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
             startControl.dateText = formatter.string(from: date)
             startControl.date = date
             endControl.date = date.addingTimeInterval(3600)
+            // Update the end time display after changing the date
+            formatter.dateFormat = "h:mm a"
+            endControl.timeText = formatter.string(from: endControl.date)
             
         case .startTime:
             formatter.dateFormat = "h:mm a"
@@ -616,6 +629,8 @@ extension SessionEventViewController: NNDateTimePickerSheetDelegate {
             startControl.date = date
             if startControl.date >= endControl.date {
                 endControl.date = startControl.date.addingTimeInterval(3600)
+                // Update the end time display after changing the date
+                endControl.timeText = formatter.string(from: endControl.date)
             }
             
         case .endDate:
