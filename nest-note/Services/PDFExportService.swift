@@ -1560,7 +1560,7 @@ class PDFExportService {
                 .font: actionFont,
                 .foregroundColor: UIColor.black
             ]
-            let bulletSize: CGFloat = 8
+            let bulletSize: CGFloat = 4
             let bulletSpacing: CGFloat = 8
             let actionLineSpacing: CGFloat = 6
             let actionIndentX = leftMargin + bulletSize + bulletSpacing + 4
