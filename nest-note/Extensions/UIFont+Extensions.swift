@@ -73,8 +73,13 @@ extension UIFont {
     }
     
     // MARK: Caption
+    /// 14pt, semibold
+    static var captionBoldM: UIFont {
+        return .systemFont(ofSize: 14, weight: .semibold)
+    }
+    
     /// 12pt, semibold
-    static var captionBold: UIFont {
+    static var captionBoldS: UIFont {
         return .systemFont(ofSize: 12, weight: .semibold)
     }
 } 

@@ -163,10 +163,8 @@ extension SubscriptionService {
 // MARK: - Pro Features Enum
 enum ProFeature {
     case unlimitedEntries
-    case customCategories
     case multiDaySessions
     case sessionEvents
-    case unlimitedPlaces
     
     func isAvailable(for tier: SubscriptionService.SubscriptionTier) -> Bool {
         switch tier {
@@ -181,14 +179,10 @@ enum ProFeature {
         switch self {
         case .unlimitedEntries:
             return "Unlimited Entries"
-        case .customCategories:
-            return "Custom Categories"
         case .multiDaySessions:
             return "Multi-day Sessions"
         case .sessionEvents:
             return "Session Events"
-        case .unlimitedPlaces:
-            return "Unlimited Places"
         }
     }
     
@@ -196,14 +190,10 @@ enum ProFeature {
         switch self {
         case .unlimitedEntries:
             return "Create unlimited entries across all categories"
-        case .customCategories:
-            return "Create your own specialized categories"
         case .multiDaySessions:
             return "Schedule overnight stays and extended care sessions"
         case .sessionEvents:
             return "Add detailed scheduling within sessions"
-        case .unlimitedPlaces:
-            return "Add unlimited locations for all your family's needs"
         }
     }
     
@@ -213,14 +203,10 @@ enum ProFeature {
         switch self {
         case .unlimitedEntries:
             return "Entry Limit Reached"
-        case .customCategories:
-            return "Pro Feature"
         case .multiDaySessions:
             return "Pro Feature"
         case .sessionEvents:
             return "Pro Feature"
-        case .unlimitedPlaces:
-            return "Place Limit Reached"
         }
     }
     
@@ -228,14 +214,10 @@ enum ProFeature {
         switch self {
         case .unlimitedEntries:
             return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries and more features."
-        case .customCategories:
-            return "Creating custom categories is a Pro feature. Upgrade to Pro for unlimited categories and more features."
         case .multiDaySessions:
             return "Multi-day sessions are a Pro feature. Upgrade to Pro for multi-day sessions and more features."
         case .sessionEvents:
             return "Session events are a Pro feature. Upgrade to Pro for session events and more features."
-        case .unlimitedPlaces:
-            return "You've reached the 3 place limit on the free plan. Upgrade to Pro for unlimited places and more features."
         }
     }
     
@@ -243,14 +225,10 @@ enum ProFeature {
         switch self {
         case .unlimitedEntries:
             return "Subscription activated! You can now create unlimited entries & do so much more!"
-        case .customCategories:
-            return "Subscription activated! You can now create unlimited categories & do so much more!"
         case .multiDaySessions:
             return "Subscription activated! You can now create multi-day sessions & do so much more!"
         case .sessionEvents:
             return "Subscription activated! You can now create session events & do so much more!"
-        case .unlimitedPlaces:
-            return "Subscription activated! You can now create unlimited places & do so much more!"
         }
     }
 }

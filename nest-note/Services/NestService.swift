@@ -250,15 +250,6 @@ final class NestService: EntryRepository {
             throw NestError.noCurrentNest
         }
         
-        // Check entry limit for free tier users
-        let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
-        if !hasUnlimitedEntries {
-            let currentCount = try await getCurrentEntryCount()
-            if currentCount >= 10 {
-                throw NestError.entryLimitReached
-            }
-        }
-        
         do {
             // Use ItemRepository for creation (BaseEntry directly)
             try await itemRepository.createItem(entry)

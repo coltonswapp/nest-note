@@ -18,11 +18,26 @@ final class FeatureFlagService {
     enum FeatureFlag: String, CaseIterable {
         case bypassPaywallForTesting = "bypass_paywall_for_testing"
         case testFlightBypassEnabled = "testflight_bypass_enabled"
+        case debugAsProUser = "debug_as_pro_user"
         
         var defaultValue: Bool {
             switch self {
             case .bypassPaywallForTesting, .testFlightBypassEnabled:
                 return false // Default to requiring subscriptions
+            case .debugAsProUser:
+                return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
+            }
+        }
+    }
+    
+    // MARK: - Remote Config Keys
+    enum RemoteConfigKey: String, CaseIterable {
+        case freeUserSelectionLimit = "free_user_selection_limit"
+        
+        var defaultValue: Any {
+            switch self {
+            case .freeUserSelectionLimit:
+                return 6 // Default limit for free users
             }
         }
     }
@@ -50,6 +65,9 @@ final class FeatureFlagService {
         var defaults: [String: NSObject] = [:]
         for flag in FeatureFlag.allCases {
             defaults[flag.rawValue] = flag.defaultValue as NSObject
+        }
+        for configKey in RemoteConfigKey.allCases {
+            defaults[configKey.rawValue] = configKey.defaultValue as? NSObject
         }
         remoteConfig.setDefaults(defaults)
         
@@ -83,6 +101,25 @@ final class FeatureFlagService {
         #endif
         
         return value
+    }
+    
+    /// Gets the integer value for a remote config key
+    /// - Parameter key: The remote config key to fetch
+    /// - Returns: The current value of the remote config key
+    func getIntValue(for key: RemoteConfigKey) -> Int {
+        let value = Int(remoteConfig.configValue(forKey: key.rawValue).numberValue)
+        
+        #if DEBUG
+        Logger.log(level: .debug, category: .general, message: "Remote config '\(key.rawValue)': \(value)")
+        #endif
+        
+        return value
+    }
+    
+    /// Gets the free user selection limit from remote config
+    /// - Returns: The maximum number of items free users can select
+    func getFreeUserSelectionLimit() -> Int {
+        return getIntValue(for: .freeUserSelectionLimit)
     }
     
     /// Checks if paywall bypass is enabled for testing
@@ -123,14 +160,18 @@ final class FeatureFlagService {
     /// Logs current feature flag values for debugging
     private func logCurrentFlags() {
         #if DEBUG
-        Logger.log(level: .info, category: .general, message: "=== Current Feature Flags ===")
+        Logger.log(level: .info, category: .general, message: "=== Current Feature Flags & Config ===")
         for flag in FeatureFlag.allCases {
             let value = isEnabled(flag)
             Logger.log(level: .info, category: .general, message: "\(flag.rawValue): \(value)")
         }
+        for configKey in RemoteConfigKey.allCases {
+            let value = getIntValue(for: configKey)
+            Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+        }
         Logger.log(level: .info, category: .general, message: "TestFlight detected: \(isRunningInTestFlight())")
         Logger.log(level: .info, category: .general, message: "Should bypass paywall: \(shouldBypassPaywall())")
-        Logger.log(level: .info, category: .general, message: "============================")
+        Logger.log(level: .info, category: .general, message: "=====================================")
         #endif
     }
 }

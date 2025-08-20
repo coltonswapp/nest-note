@@ -21,7 +21,13 @@ class SelectEntriesCountView: UIView {
     var count: Int = 0 {
         didSet {
             updateCountLabel()
-            isHidden = count == 0
+            updateVisibility()
+        }
+    }
+    
+    var selectionLimit: Int? = nil {
+        didSet {
+            updateCountLabel()
         }
     }
     
@@ -57,6 +63,9 @@ class SelectEntriesCountView: UIView {
         layer.shadowOpacity = 0.15
         layer.shadowRadius = 8
         translatesAutoresizingMaskIntoConstraints = false
+        
+        // Start offscreen (translated down by 100 points)
+        transform = CGAffineTransform(translationX: 0, y: 100)
     }
     
     private func setupIcon() {
@@ -122,7 +131,23 @@ class SelectEntriesCountView: UIView {
     
     private func updateCountLabel() {
         let itemText = count == 1 ? "item" : "items"
-        countLabel.text = "\(count) \(itemText) selected"
+        
+        if let limit = selectionLimit {
+            countLabel.text = "\(count)/\(limit) \(itemText) selected"
+        } else {
+            countLabel.text = "\(count) \(itemText) selected"
+        }
+    }
+    
+    private func updateVisibility() {
+        let shouldShow = count > 0
+        let targetTransform = shouldShow ? .identity : CGAffineTransform(translationX: 0, y: 100)
+        
+        let animator = UIViewPropertyAnimator(duration: 0.4, controlPoint1: CGPoint(x: 0.34, y: 1.56), controlPoint2: CGPoint(x: 0.28, y: 0.94), animations: {
+            self.transform = targetTransform
+        })
+        
+        animator.startAnimation()
     }
     
     @objc private func continueButtonTapped() {

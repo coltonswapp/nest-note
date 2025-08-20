@@ -1675,7 +1675,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Wait briefly to show success state before dismissing
         try await Task.sleep(for: .seconds(0.5))
         
+        // Call delegate BEFORE dismissing to ensure the update is received
         delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
+        
         dismiss(animated: true)
     }
     
@@ -2526,6 +2528,9 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
         // Set the folder view controller as the delegate to receive selection updates
         categoryVC.selectEntriesDelegate = controller
         categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
+        
+        // Pass selection limit information for enforcement
+        categoryVC.setSelectionLimit(controller.getCurrentSelectionLimit())
         
         // Restore previously selected items
         Task {

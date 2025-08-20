@@ -396,7 +396,7 @@ private class ModeSwitchCell: UICollectionViewListCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .captionBold
+        label.font = .captionBoldS
         label.textColor = .secondaryLabel
         label.text = "CURRENT MODE"
         return label

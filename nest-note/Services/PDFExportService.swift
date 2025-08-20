@@ -113,7 +113,23 @@ class PDFExportService {
             currentY += 30
             
             // Use the provided section order or default
-            let sectionsToRender = sectionOrder ?? defaultSectionOrder
+            let requestedSections = sectionOrder ?? defaultSectionOrder
+            
+            // Filter out sections that have no content
+            let sectionsToRender = requestedSections.filter { section in
+                switch section {
+                case .events:
+                    return !events.isEmpty
+                case .entries:
+                    return !filteredEntriesForEntriesSection.isEmpty || !filteredPlacesForEntriesSection.isEmpty || !filteredRoutinesForSection.isEmpty
+                case .contacts:
+                    return true // Always show contacts section for now
+                case .places:
+                    return !filteredPlacesForEntriesSection.isEmpty
+                case .routines:
+                    return !filteredRoutinesForSection.isEmpty
+                }
+            }
             
             // Draw sections in the specified order
             for (index, section) in sectionsToRender.enumerated() {
@@ -1544,7 +1560,7 @@ class PDFExportService {
                 .font: actionFont,
                 .foregroundColor: UIColor.black
             ]
-            let bulletSize: CGFloat = 8
+            let bulletSize: CGFloat = 4
             let bulletSpacing: CGFloat = 8
             let actionLineSpacing: CGFloat = 6
             let actionIndentX = leftMargin + bulletSize + bulletSpacing + 4

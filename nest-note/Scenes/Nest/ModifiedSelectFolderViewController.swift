@@ -6,8 +6,10 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
-class ModifiedSelectFolderViewController: UIViewController {
+class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
     private let entryRepository: EntryRepository
     weak var delegate: ModifiedSelectFolderViewControllerDelegate?
@@ -30,6 +32,15 @@ class ModifiedSelectFolderViewController: UIViewController {
     private var currentSelectedIds: [String] = []
     // Cache of all selectable item IDs (entries + places + routines)
     private var allSelectableItemIds: [String] = []
+    
+    // Selection limit properties
+    private var selectionLimit: Int? = nil
+    private var isProUser: Bool = false
+    
+    // MARK: - PaywallPresentable
+    var proFeature: ProFeature {
+        return .unlimitedEntries
+    }
     
     enum Section: Int, CaseIterable {
         case folders
@@ -74,7 +85,10 @@ class ModifiedSelectFolderViewController: UIViewController {
         collectionView.delegate = self
         
         // Single consolidated initial load to avoid duplicate fetches
-        Task { await initialLoad() }
+        Task { 
+            await checkProStatusAndSetLimit()
+            await initialLoad() 
+        }
     }
     
     // Cache for item-to-folder mapping to avoid repeated fetches
@@ -83,6 +97,52 @@ class ModifiedSelectFolderViewController: UIViewController {
     // Helper method to determine if a category is the folder or a descendant
     private func isInFolderOrDescendant(itemCategory: String, folderPath: String) -> Bool {
         return itemCategory == folderPath || itemCategory.hasPrefix(folderPath + "/")
+    }
+    
+    // Check user's pro status and set selection limit
+    private func checkProStatusAndSetLimit() async {
+        // Check actual subscription status first
+        let hasProSubscription = await SubscriptionService.shared.hasProSubscription()
+        
+        // Allow override for testing purposes - this overrides even paywall bypass
+        #if DEBUG
+        let debugAsProFlag = FeatureFlagService.shared.isEnabled(.debugAsProUser)
+        let shouldBypassPaywall = FeatureFlagService.shared.shouldBypassPaywall()
+        
+        // The debug flag takes priority over everything else for testing selection limits
+        isProUser = debugAsProFlag
+        #else
+        isProUser = hasProSubscription
+        #endif
+        
+        selectionLimit = isProUser ? nil : FeatureFlagService.shared.getFreeUserSelectionLimit()
+        
+        await MainActor.run {
+            selectionCounterView?.selectionLimit = selectionLimit
+        }
+    }
+    
+    // Helper method to check if adding more selections would exceed the limit
+    private func canAddMoreSelections(_ count: Int = 1) -> Bool {
+        guard let limit = selectionLimit else { return true }
+        return currentSelectedIds.count + count <= limit
+    }
+    
+    // Show an alert when selection limit is reached
+    private func showSelectionLimitAlert() {
+        let limit = FeatureFlagService.shared.getFreeUserSelectionLimit()
+        let alert = UIAlertController(
+            title: "Selection Limit Reached",
+            message: "Free users can select up to \(limit) items to share. Upgrade to Pro for unlimited selections.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { [weak self] _ in
+            self?.showUpgradeFlow()
+        })
+        
+        present(alert, animated: true)
     }
 
     // Consolidated initial load to fetch categories and all items once
@@ -157,15 +217,27 @@ class ModifiedSelectFolderViewController: UIViewController {
     
     // Method to set initial selected IDs (from EditSessionViewController)
     func setInitialSelectedItemIds(_ ids: [String]) {
-        print("[DEBUG] setInitialSelectedItemIds called with \(ids.count) items: \(ids)")
         currentSelectedIds = ids
         updateSelectionCounter()
     }
     
     // Method to update current selections (called by NestCategoryViewController)
     func updateCurrentSelectedIds(_ ids: [String]) {
-        print("[DEBUG] updateCurrentSelectedIds called with \(ids.count) items: \(ids)")
-        currentSelectedIds = ids
+        
+        // Check selection limit
+        if let limit = selectionLimit {
+            if ids.count > limit {
+                // Limit exceeded, show alert and take only the allowed number
+                showSelectionLimitAlert()
+                currentSelectedIds = Array(ids.prefix(limit))
+            } else {
+                currentSelectedIds = ids
+            }
+        } else {
+            // No limit (pro user)
+            currentSelectedIds = ids
+        }
+        
         updateSelectionCounter()
     }
     
@@ -206,6 +278,7 @@ class ModifiedSelectFolderViewController: UIViewController {
     
     private func setupSelectionCounterView() {
         selectionCounterView = SelectEntriesCountView()
+        selectionCounterView.selectionLimit = selectionLimit
         selectionCounterView.onContinueTapped = { [weak self] in
             guard let self = self else { return }
             self.onContinueTapped?(self.currentSelectedIds)
@@ -235,11 +308,9 @@ class ModifiedSelectFolderViewController: UIViewController {
     
     private func updateSelectionCounter() {
         guard isViewLoaded else { 
-            print("[DEBUG] updateSelectionCounter: view not loaded yet")
             return 
         }
         
-        print("[DEBUG] updateSelectionCounter: setting count to \(currentSelectedIds.count)")
         selectionCounterView?.count = currentSelectedIds.count
         
         // Ensure counter stays on top
@@ -293,10 +364,24 @@ class ModifiedSelectFolderViewController: UIViewController {
     @objc private func didTapSelectAll() {
         let total = allSelectableItemIds.count
         let isAllSelected = total > 0 && currentSelectedIds.count >= total
+        
         if isAllSelected {
+            // Clear all selections
             currentSelectedIds = []
         } else {
-            currentSelectedIds = allSelectableItemIds
+            // Select all items, respecting the limit
+            if let limit = selectionLimit {
+                let itemsToSelect = min(limit, total)
+                currentSelectedIds = Array(allSelectableItemIds.prefix(itemsToSelect))
+                
+                // Show alert if we couldn't select all items due to limit
+                if total > limit {
+                    showSelectionLimitAlert()
+                }
+            } else {
+                // No limit (pro user)
+                currentSelectedIds = allSelectableItemIds
+            }
         }
         updateSelectionCounter()
         applySnapshot()
@@ -329,6 +414,11 @@ class ModifiedSelectFolderViewController: UIViewController {
     // Allow parent to provide a preloaded items snapshot to eliminate extra fetches
     func setPreloadedItems(_ items: [BaseItem]) {
         preloadedAllItems = items
+    }
+    
+    // Expose selection limit for child view controllers
+    func getCurrentSelectionLimit() -> Int? {
+        return selectionLimit
     }
     
     private func setupCollectionView() {
@@ -527,13 +617,51 @@ extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEn
         let existingSet = Set(currentSelectedIds)
         let preserved = existingSet.filter { !isInScope($0) }
         let incomingInScope = incomingAllIds.filter { isInScope($0) }
-        let merged = preserved.union(incomingInScope)
-        currentSelectedIds = Array(merged)
-        print("[DEBUG] Total selected items (merged): \(currentSelectedIds.count)")
+        let potentialMerged = preserved.union(incomingInScope)
+        
+        // Check selection limit
+        if let limit = selectionLimit {
+            if potentialMerged.count > limit {
+                // Calculate how many new items we're trying to add
+                let previousInScope = existingSet.filter { isInScope($0) }
+                let newItemsCount = incomingInScope.count - previousInScope.count
+                
+                if newItemsCount > 0 && !canAddMoreSelections(newItemsCount) {
+                    // Show alert and keep previous selections
+                    showSelectionLimitAlert()
+                    return
+                }
+                
+                // Respect limit by taking only allowed items
+                let availableSlots = limit - preserved.count
+                let limitedIncomingInScope = Array(incomingInScope.prefix(availableSlots))
+                currentSelectedIds = Array(preserved.union(Set(limitedIncomingInScope)))
+            } else {
+                currentSelectedIds = Array(potentialMerged)
+            }
+        } else {
+            // No limit (pro user)
+            currentSelectedIds = Array(potentialMerged)
+        }
+        
         
         updateSelectionCounter()
         // Update folder counts when selections change
         applySnapshot()
     }
+}
+
+// MARK: - PaywallViewControllerDelegate
+extension ModifiedSelectFolderViewController {
+    func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        // Purchase successful - refresh pro status and update UI
+        Task {
+            await checkProStatusAndSetLimit()
+        }
+        controller.dismiss(animated: true)
+    }
     
+    func paywallViewControllerWasDismissed(_ controller: PaywallViewController) {
+        // Paywall was dismissed without purchase - no action needed
+    }
 }
