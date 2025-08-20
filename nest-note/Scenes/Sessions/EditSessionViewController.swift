@@ -2529,6 +2529,9 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
         categoryVC.selectEntriesDelegate = controller
         categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
         
+        // Pass selection limit information for enforcement
+        categoryVC.setSelectionLimit(controller.getCurrentSelectionLimit())
+        
         // Restore previously selected items
         Task {
             let selectedItems = await controller.getCurrentSelectedItems()

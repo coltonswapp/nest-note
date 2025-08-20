@@ -298,23 +298,8 @@ final class PlaceListViewController: NNViewController, NNTippable {
     
     // MARK: - Actions
     @objc private func addButtonTapped() {
-        Task {
-            let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
-            if !hasUnlimitedPlaces {
-                let currentPlaceCount = places.filter { !$0.isTemporary }.count
-                if currentPlaceCount >= 3 {
-                    await MainActor.run {
-                        self.showPlaceLimitAlert()
-                    }
-                    return
-                }
-            }
-            
-            await MainActor.run {
-                let selectPlaceVC = SelectPlaceViewController()
-                self.navigationController?.pushViewController(selectPlaceVC, animated: true)
-            }
-        }
+        let selectPlaceVC = SelectPlaceViewController()
+        navigationController?.pushViewController(selectPlaceVC, animated: true)
     }
     
     @objc private func placeDidSave() {

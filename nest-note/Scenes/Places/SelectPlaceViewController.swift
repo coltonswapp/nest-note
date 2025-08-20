@@ -501,35 +501,18 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
                         
                         self.dismiss(animated: true)
                     } else {
-                        // Check place limit before creating new place
-                        Task {
-                            let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
-                            if !hasUnlimitedPlaces {
-                                let places = try await NestService.shared.fetchPlacesWithFilter(includeTemporary: true)
-                                let currentPlaceCount = places.filter { !$0.isTemporary }.count
-                                if currentPlaceCount >= 3 {
-                                    await MainActor.run {
-                                        self.showPlaceLimitAlert()
-                                    }
-                                    return
-                                }
-                            }
-                            
-                            await MainActor.run {
-                                // Create new place
-                                let newPlaceVC = PlaceDetailViewController(
-                                    placemark: placemark,
-                                    alias: self.suggestedPlaceName ?? "",
-                                    category: self.category,
-                                    thumbnail: thumbnail
-                                )
-                                
-                                let placeListViewController = self.navigationController?.viewControllers.first as? PlaceListViewController
-                                
-                                newPlaceVC.placeListDelegate = placeListViewController
-                                self.present(newPlaceVC, animated: true)
-                            }
-                        }
+                        // Create new place
+                        let newPlaceVC = PlaceDetailViewController(
+                            placemark: placemark,
+                            alias: self.suggestedPlaceName ?? "",
+                            category: self.category,
+                            thumbnail: thumbnail
+                        )
+                        
+                        let placeListViewController = self.navigationController?.viewControllers.first as? PlaceListViewController
+                        
+                        newPlaceVC.placeListDelegate = placeListViewController
+                        self.present(newPlaceVC, animated: true)
                     }
                 }
             }

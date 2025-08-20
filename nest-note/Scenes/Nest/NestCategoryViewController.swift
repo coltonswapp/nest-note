@@ -111,6 +111,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private var isEditOnlyMode: Bool = false
     weak var selectEntriesDelegate: NestCategoryViewControllerSelectEntriesDelegate?
     
+    // Selection limit properties
+    private var selectionLimit: Int? = nil
+    
     // Dynamic logging category based on repository type
     private var logCategory: Logger.Category {
         return entryRepository is NestService ? .nestService : .sitterViewService
@@ -464,14 +467,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         collectionView.contentInset.top = 30
         collectionView.verticalScrollIndicatorInsets.top = 30
         
-        // Adjust content inset to prevent button obstruction (only if not in edit-only mode)
-        if !isEditOnlyMode {
-            let buttonHeight: CGFloat = 55
-            let buttonPadding: CGFloat = 10
-            let totalInset = buttonHeight + buttonPadding * 2
-            collectionView.contentInset.bottom = totalInset
-            collectionView.verticalScrollIndicatorInsets.bottom = totalInset
-        }
+        let buttonHeight: CGFloat = 55
+        let buttonPadding: CGFloat = 10
+        let totalInset = buttonHeight + buttonPadding * 2
+        collectionView.contentInset.bottom = totalInset
+        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
         
         // Register cells
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
@@ -1143,18 +1143,59 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let total = allItemIdsInScope.count
         let currentSelectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
         let isAllSelected = total > 0 && currentSelectedCount >= total
+        
         if isAllSelected {
+            // Clear all selections
             selectedEntries.removeAll()
             selectedPlaces.removeAll()
             selectedRoutines.removeAll()
         } else {
-            // Ensure we have prepared items; if not, compute synchronously minimal by using current lists
-            if inScopeEntries.isEmpty && inScopePlaces.isEmpty && inScopeRoutines.isEmpty && !allItemIdsInScope.isEmpty {
-                // No-op; ids are filled but details aren't needed to set selection state
+            // Select items, respecting the limit
+            if let limit = selectionLimit {
+                // Calculate how many more items we can select
+                let globalSelectedCount = getCurrentTotalSelections()
+                let availableSlots = limit - globalSelectedCount
+                
+                if availableSlots <= 0 {
+                    // Already at limit, show alert
+                    showSelectionLimitAlert()
+                    return
+                }
+                
+                // Select up to the available slots
+                var itemsSelected = 0
+                
+                // Add entries first (up to limit)
+                for entry in inScopeEntries {
+                    if itemsSelected >= availableSlots { break }
+                    selectedEntries.insert(entry)
+                    itemsSelected += 1
+                }
+                
+                // Add places next (up to remaining limit)
+                for place in inScopePlaces {
+                    if itemsSelected >= availableSlots { break }
+                    selectedPlaces.insert(place)
+                    itemsSelected += 1
+                }
+                
+                // Add routines last (up to remaining limit)
+                for routine in inScopeRoutines {
+                    if itemsSelected >= availableSlots { break }
+                    selectedRoutines.insert(routine)
+                    itemsSelected += 1
+                }
+                
+                // Show alert if we couldn't select all items due to limit
+                if total > availableSlots {
+                    showSelectionLimitAlert()
+                }
+            } else {
+                // No limit (pro user), select all
+                selectedEntries = Set(inScopeEntries)
+                selectedPlaces = Set(inScopePlaces)
+                selectedRoutines = Set(inScopeRoutines)
             }
-            selectedEntries = Set(inScopeEntries)
-            selectedPlaces = Set(inScopePlaces)
-            selectedRoutines = Set(inScopeRoutines)
         }
         // Notify delegate in edit-only mode
         selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
@@ -1273,59 +1314,18 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func presentAddFolder() {
-        Task {
-            // Check if user has unlimited categories feature (Pro subscription)
-            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
-            if !hasUnlimitedCategories {
-                await MainActor.run {
-                    // You may need to implement showCategoryLimitUpgradePrompt for this VC
-                    // For now, we'll use a simple alert
-                    let alert = UIAlertController(
-                        title: "Pro Feature",
-                        message: "Creating custom folders requires a Pro subscription.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    self.present(alert, animated: true)
-                }
-                return
-            }
-            
-            await MainActor.run {
-                let categoryVC = CategoryDetailViewController()
-                categoryVC.categoryDelegate = self
-                self.present(categoryVC, animated: true)
-            }
-        }
+        let categoryVC = CategoryDetailViewController()
+        categoryVC.categoryDelegate = self
+        present(categoryVC, animated: true)
     }
     
     @objc private func addButtonTapped() {
         // Only allow adding entries for nest owners
         guard entryRepository is NestService else { return }
         
-        Task {
-            // Check entry limit for free tier users
-            let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
-            if !hasUnlimitedEntries {
-                do {
-                    let currentCount = try await (entryRepository as! NestService).getCurrentEntryCount()
-                    if currentCount >= 10 {
-                        await MainActor.run {
-                            self.showEntryLimitUpgradePrompt()
-                        }
-                        return
-                    }
-                } catch {
-                    Logger.log(level: .error, category: logCategory, message: "Failed to check entry count: \(error.localizedDescription)")
-                }
-            }
-            
-            await MainActor.run {
-                let newEntryVC = EntryDetailViewController(category: self.category)
-                newEntryVC.entryDelegate = self
-                self.present(newEntryVC, animated: true)
-            }
-        }
+        let newEntryVC = EntryDetailViewController(category: self.category)
+        newEntryVC.entryDelegate = self
+        self.present(newEntryVC, animated: true)
     }
     
     @objc private func moveButtonTapped() {
@@ -1773,34 +1773,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     func addPlaceTapped() {
         // Navigate to PlaceDetailViewController for creating a new place
-        Task {
-            // Check place limit for free tier users
-            let hasUnlimitedPlaces = await SubscriptionService.shared.isFeatureAvailable(.unlimitedPlaces)
-            if !hasUnlimitedPlaces {
-                // Get current place count from NestService
-                if let nestService = entryRepository as? NestService {
-                    do {
-                        let currentPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
-                        let nonTemporaryPlaces = currentPlaces.filter { !$0.isTemporary }
-                        if nonTemporaryPlaces.count >= 3 {
-                            await MainActor.run {
-                                self.showPlaceLimitAlert()
-                            }
-                            return
-                        }
-                    } catch {
-                        Logger.log(level: .error, category: logCategory, message: "Failed to check place count: \(error.localizedDescription)")
-                    }
-                }
-            }
-            
-            await MainActor.run {
-                let selectPlaceVC = SelectPlaceViewController()
-                selectPlaceVC.category = self.category
-                let navController = UINavigationController(rootViewController: selectPlaceVC)
-                self.present(navController, animated: true)
-            }
-        }
+        let selectPlaceVC = SelectPlaceViewController()
+        selectPlaceVC.category = self.category
+        let navController = UINavigationController(rootViewController: selectPlaceVC)
+        present(navController, animated: true)
     }
     
     func addRoutineTapped() {
@@ -1872,6 +1848,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     places: allPlaces
                 )
                 subfolderVC.selectEntriesDelegate = selectEntriesDelegate
+                subfolderVC.setSelectionLimit(selectionLimit)
                 
                 // Restore selection from flow controller to ensure persistence across navigation
                 Task { @MainActor in
@@ -1914,6 +1891,12 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     selectedPlaces.remove(selectedPlace)
                     collectionView.deselectItem(at: indexPath, animated: true)
                 } else {
+                    // Check selection limit before adding
+                    if !canAddMoreSelections() {
+                        showSelectionLimitAlert()
+                        collectionView.deselectItem(at: indexPath, animated: true)
+                        return
+                    }
                     selectedPlaces.insert(selectedPlace)
                 }
                 
@@ -1958,6 +1941,12 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                     selectedRoutines.remove(selectedRoutine)
                     collectionView.deselectItem(at: indexPath, animated: true)
                 } else {
+                    // Check selection limit before adding
+                    if !canAddMoreSelections() {
+                        showSelectionLimitAlert()
+                        collectionView.deselectItem(at: indexPath, animated: true)
+                        return
+                    }
                     selectedRoutines.insert(selectedRoutine)
                 }
                 
@@ -2004,6 +1993,12 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 selectedEntries.remove(selectedEntry)
                 collectionView.deselectItem(at: indexPath, animated: true)
             } else {
+                // Check selection limit before adding
+                if !canAddMoreSelections() {
+                    showSelectionLimitAlert()
+                    collectionView.deselectItem(at: indexPath, animated: true)
+                    return
+                }
                 selectedEntries.insert(selectedEntry)
             }
             
@@ -2293,6 +2288,39 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
         let routineIds = selectedRoutines.map { $0.id }
         return entryIds + placeIds + routineIds
     }
+    
+    // Set selection limit for this view controller
+    func setSelectionLimit(_ limit: Int?) {
+        selectionLimit = limit
+    }
+    
+    // Helper method to get current total selections across all types
+    private func getCurrentTotalSelections() -> Int {
+        return selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+    }
+    
+    // Helper method to check if adding more selections would exceed the limit
+    private func canAddMoreSelections(_ count: Int = 1) -> Bool {
+        guard let limit = selectionLimit else { return true }
+        return getCurrentTotalSelections() + count <= limit
+    }
+    
+    // Show an alert when selection limit is reached
+    private func showSelectionLimitAlert() {
+        let limit = FeatureFlagService.shared.getFreeUserSelectionLimit()
+        let alert = UIAlertController(
+            title: "Selection Limit Reached",
+            message: "Free users can select up to \(limit) items to share. Upgrade to Pro for unlimited selections.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { [weak self] _ in
+            self?.showUpgradeFlow()
+        })
+        
+        present(alert, animated: true)
+    }
 }
 
 // Add delegate conformance for empty state view
@@ -2343,36 +2371,14 @@ extension NestCategoryViewController: CommonItemsViewControllerDelegate {
         guard entryRepository is NestService else { return }
         Logger.log(level: .info, category: logCategory, message: "Selected common entry: \(entry.title)")
 
-        // Check entry limit for free tier users, then present EntryDetailViewController
-        Task {
-            let hasUnlimitedEntries = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
-            if !hasUnlimitedEntries {
-                do {
-                    let currentCount = try await (entryRepository as! NestService).getCurrentEntryCount()
-                    if currentCount >= 10 {
-                        await MainActor.run {
-                            self.dismiss(animated: true) {
-                                self.showEntryLimitUpgradePrompt()
-                            }
-                        }
-                        return
-                    }
-                } catch {
-                    Logger.log(level: .error, category: logCategory, message: "Failed to check entry count: \(error.localizedDescription)")
-                }
-            }
-
-            await MainActor.run {
-                let editEntryVC = EntryDetailViewController(
-                    category: self.category,
-                    title: entry.title,
-                    content: entry.content
-                )
-                editEntryVC.entryDelegate = self
-                self.dismiss(animated: true) {
-                    self.present(editEntryVC, animated: true)
-                }
-            }
+        let editEntryVC = EntryDetailViewController(
+            category: self.category,
+            title: entry.title,
+            content: entry.content
+        )
+        editEntryVC.entryDelegate = self
+        self.dismiss(animated: true) {
+            self.present(editEntryVC, animated: true)
         }
     }
 
@@ -2626,4 +2632,21 @@ extension NestCategoryViewController {
         widthDimension: .fractionalWidth(1.0),
         heightDimension: .absolute(12)
     )
+}
+// MARK: - PaywallViewControllerDelegate
+extension NestCategoryViewController {
+    func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        // Purchase successful - user is now Pro, update selection limit
+        selectionLimit = nil
+        
+        // Update the selection counter view if we're in edit-only mode
+        if isEditOnlyMode {
+        }
+        
+        controller.dismiss(animated: true)
+    }
+    
+    func paywallViewControllerWasDismissed(_ controller: PaywallViewController) {
+        // Paywall was dismissed without purchase - no action needed
+    }
 }

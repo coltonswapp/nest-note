@@ -47,20 +47,4 @@ extension NestLoadable {
 //import RevenueCatUI
 extension NNViewController {
     
-    func showPlaceLimitAlert() {
-        let alert = UIAlertController(
-            title: ProFeature.unlimitedPlaces.alertTitle,
-            message: ProFeature.unlimitedPlaces.alertMessage,
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { _ in
-//            let paywallViewController = PaywallViewController()
-//            self.present(paywallViewController, animated: true)
-        })
-        
-        present(alert, animated: true)
-    }
-    
 }

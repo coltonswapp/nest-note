@@ -187,7 +187,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
-        return .customCategories
+        return .unlimitedEntries
     }
     
     init(entryRepository: EntryRepository) {
@@ -496,42 +496,16 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func presentAddFolder() {
-        Task {
-            // Check if user has unlimited categories feature (Pro subscription)
-            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
-            if !hasUnlimitedCategories {
-                await MainActor.run {
-                    self.showCategoryLimitUpgradePrompt()
-                }
-                return
-            }
-            
-            await MainActor.run {
-                let categoryVC = CategoryDetailViewController()
-                categoryVC.categoryDelegate = self
-                self.present(categoryVC, animated: true)
-            }
-        }
+        let categoryVC = CategoryDetailViewController()
+        categoryVC.categoryDelegate = self
+        present(categoryVC, animated: true)
     }
     
     @objc private func addButtonTapped() {
-        Task {
-            // Check if user has unlimited categories feature (Pro subscription)
-            let hasUnlimitedCategories = await SubscriptionService.shared.isFeatureAvailable(.customCategories)
-            if !hasUnlimitedCategories {
-                await MainActor.run {
-                    self.showCategoryLimitUpgradePrompt()
-                }
-                return
-            }
-            
-            await MainActor.run {
-                let buttonFrame = self.newCategoryButton!.convert(self.newCategoryButton!.bounds, to: nil)
-                let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
-                categoryVC.categoryDelegate = self
-                self.present(categoryVC, animated: true)
-            }
-        }
+        let buttonFrame = self.newCategoryButton!.convert(self.newCategoryButton!.bounds, to: nil)
+        let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
+        categoryVC.categoryDelegate = self
+        present(categoryVC, animated: true)
     }
     
     private func applyInitialSnapshots() {
@@ -780,12 +754,6 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                 }
             }
         }
-    }
-    
-    // MARK: - Category Limit Handling
-    
-    private func showCategoryLimitUpgradePrompt() {
-        showUpgradePrompt(for: proFeature)
     }
     
 }
