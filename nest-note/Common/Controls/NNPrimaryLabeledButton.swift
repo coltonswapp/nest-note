@@ -116,7 +116,8 @@ class NNBaseControl: UIControl {
         translatesAutoresizingMaskIntoConstraints = false
         
         layer.borderWidth = 1
-        layer.borderColor = backgroundColor.lighter(by: 15).cgColor
+        let resolvedBG = backgroundColor.resolvedColor(with: traitCollection)
+        layer.borderColor = resolvedBG.lighter(by: 15).cgColor
     }
     
     private func setupLayout() {
@@ -188,8 +189,16 @@ class NNBaseControl: UIControl {
     
     override var backgroundColor: UIColor? {
         didSet {
-            layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
+            let resolvedBG = backgroundColor?.resolvedColor(with: traitCollection)
+            layer.borderColor = resolvedBG?.lighter(by: 15).cgColor
         }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true else { return }
+        let resolvedBG = backgroundColor?.resolvedColor(with: traitCollection)
+        layer.borderColor = resolvedBG?.lighter(by: 15).cgColor
     }
     
     /// Pins the button to the bottom of the superview with standard insets and optionally adds a blur effect
@@ -255,11 +264,26 @@ class NNBaseControl: UIControl {
 class NNPrimaryLabeledButton: NNBaseControl {
     
     private var primaryBackgroundColor: UIColor = NNColors.primary
+    private var contentInsets: UIEdgeInsets = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+    private lazy var feedbackLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .center
+        label.font = .h4
+        label.textColor = foregroundColor
+        label.isUserInteractionEnabled = false
+        label.isHidden = true
+        return label
+    }()
+    private var isAnimatingFeedback: Bool = false
     
     // MARK: - Initialization
     override init(title: String, image: UIImage? = nil, backgroundColor: UIColor = NNColors.primary, foregroundColor: UIColor = .white) {
         self.primaryBackgroundColor = backgroundColor
         super.init(title: title, image: image, backgroundColor: backgroundColor, foregroundColor: foregroundColor)
+        setupFeedbackLabel()
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
     }
     
     required init?(coder: NSCoder) {
@@ -273,8 +297,106 @@ class NNPrimaryLabeledButton: NNBaseControl {
                 self.backgroundColor = self.isEnabled ? self.primaryBackgroundColor : .systemGray4
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
                 self.imageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
+                self.feedbackLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
         }
+    }
+
+    override var foregroundColor: UIColor {
+        didSet {
+            feedbackLabel.textColor = foregroundColor
+        }
+    }
+
+    // MARK: - Public API
+    func setContentInsets(_ insets: UIEdgeInsets) {
+        self.contentInsets = insets
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    override func setTitle(_ title: String) {
+        super.setTitle(title)
+        invalidateIntrinsicContentSize()
+    }
+
+    override func setImage(_ image: UIImage?) {
+        super.setImage(image)
+        invalidateIntrinsicContentSize()
+    }
+
+    private func setupFeedbackLabel() {
+        addSubview(feedbackLabel)
+        NSLayoutConstraint.activate([
+            feedbackLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            feedbackLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            feedbackLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+            feedbackLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12)
+        ])
+        feedbackLabel.textColor = foregroundColor
+    }
+
+    // MARK: - Intrinsic Content Size
+    override var intrinsicContentSize: CGSize {
+        // Measure the stackView (title + optional image) and add content insets.
+        let targetSize = CGSize(width: UIView.layoutFittingCompressedSize.width,
+                                height: UIView.layoutFittingCompressedSize.height)
+        let fittingSize = stackView.systemLayoutSizeFitting(targetSize,
+                                                            withHorizontalFittingPriority: .fittingSizeLevel,
+                                                            verticalFittingPriority: .fittingSizeLevel)
+        // Default height if none specified via constraints
+        let defaultHeight: CGFloat = 55
+        let width = fittingSize.width + contentInsets.left + contentInsets.right
+        let height = max(defaultHeight, fittingSize.height + contentInsets.top + contentInsets.bottom)
+        return CGSize(width: width, height: height)
+    }
+
+    // MARK: - Quick Feedback Transition (vertical slide)
+    func showQuickFeedback(_ text: String, holdDuration: TimeInterval = 1.5, inOutDuration: TimeInterval = 0.2) {
+        guard !isAnimatingFeedback else { return }
+        isAnimatingFeedback = true
+        layoutIfNeeded()
+
+        let originalStackTransform = stackView.transform
+
+        feedbackLabel.text = text
+        feedbackLabel.isHidden = false
+        feedbackLabel.alpha = 1.0
+        feedbackLabel.transform = CGAffineTransform(translationX: 0, y: bounds.height)
+
+        let animateIn = UIViewPropertyAnimator(
+            duration: inOutDuration,
+            controlPoint1: CGPoint(x: 0.76, y: 0.0),
+            controlPoint2: CGPoint(x: 0.24, y: 1.0)
+        ) {
+            self.stackView.transform = CGAffineTransform(translationX: 0, y: -self.bounds.height)
+            self.feedbackLabel.transform = .identity
+        }
+
+        animateIn.addCompletion { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + holdDuration) {
+                let animateOut = UIViewPropertyAnimator(
+                    duration: inOutDuration,
+                    controlPoint1: CGPoint(x: 0.76, y: 0.0),
+                    controlPoint2: CGPoint(x: 0.24, y: 1.0)
+                ) {
+                    self.stackView.transform = originalStackTransform
+                    self.feedbackLabel.transform = CGAffineTransform(translationX: 0, y: self.bounds.height)
+                }
+                animateOut.addCompletion { _ in
+                    self.feedbackLabel.isHidden = true
+                    self.isAnimatingFeedback = false
+                }
+                animateOut.startAnimation()
+            }
+        }
+
+        animateIn.startAnimation()
+    }
+
+    func showCopiedFeedback() {
+        showQuickFeedback("Copied!")
     }
 }
 
@@ -632,7 +754,7 @@ class NNSmallPrimaryButton: UIButton {
         // Add stroke
         layer.borderWidth = 1
         layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
-        
+
         // Setup touch handling
         addTarget(self, action: #selector(touchDown), for: .touchDown)
         addTarget(self, action: #selector(touchDragExit), for: .touchDragExit)

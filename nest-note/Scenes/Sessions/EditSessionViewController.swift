@@ -2679,14 +2679,13 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         return label
     }()
     
-    private lazy var codeLabel: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
+    private lazy var codeLabel: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
             title: "Test",
             image: nil,
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
             foregroundColor: NNColors.primary
         )
-        button.titleLabel?.font = .h4
         button.isUserInteractionEnabled = true
         button.addTarget(self, action: #selector(codeButtonTapped), for: .touchUpInside)
         
@@ -2735,12 +2734,12 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         
         if let code = inviteCode, !code.isEmpty && code != "000-000" {
             let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
-            codeLabel.setTitle(formattedCode, for: .normal)
+            codeLabel.setTitle(formattedCode)
             codeLabel.isUserInteractionEnabled = true
         } else {
             codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
             codeLabel.foregroundColor = .secondaryLabel
-            codeLabel.setTitle("000-000", for: .normal)
+            codeLabel.setTitle("000-000")
             codeLabel.isUserInteractionEnabled = false
         }
     }
@@ -2751,21 +2750,7 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         // Copy the unformatted code to pasteboard
         UIPasteboard.general.string = code
         
-        // Haptic feedback
-        HapticsHelper.lightHaptic()
-        
-        // Store the original title and temporarily disable button interaction
-        let originalTitle = codeLabel.titleLabel?.text ?? ""
-        codeLabel.isUserInteractionEnabled = false
-        
-        // Change button title to "Copied!"
-        codeLabel.setTitle("Copied!", for: .normal)
-        
-        // Restore original title after 1.5 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.codeLabel.setTitle(originalTitle, for: .normal)
-            self?.codeLabel.isUserInteractionEnabled = true
-        }
+        codeLabel.showCopiedFeedback()
     }
     
     func configureDisabled() {
@@ -2776,7 +2761,7 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         currentInviteCode = nil
         codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
         codeLabel.foregroundColor = .secondaryLabel
-        codeLabel.setTitle("000-000", for: .normal)
+        codeLabel.setTitle("000-000")
         codeLabel.isUserInteractionEnabled = false
     }
 }

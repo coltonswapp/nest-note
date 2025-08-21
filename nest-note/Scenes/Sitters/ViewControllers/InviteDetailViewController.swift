@@ -8,6 +8,7 @@
 import UIKit
 import FirebaseFunctions
 import FirebaseAuth
+import QRCode
 
 class InviteDetailViewController: NNViewController {
     
@@ -48,25 +49,27 @@ class InviteDetailViewController: NNViewController {
     private var skipLabel: UILabel?
     private var skipStack: UIStackView?
     
+    private let circularButtonColor: UIColor = .label
+    
     private lazy var newCodeButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "arrow.trianglehead.2.clockwise"),
         title: "New Code",
-        backgroundColor: .systemBlue.withAlphaComponent(0.15),
-        foregroundColor: .systemBlue
+        backgroundColor: circularButtonColor.withAlphaComponent(0.10),
+        foregroundColor: circularButtonColor
     )
     
     private lazy var messageButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "message"),
         title: "Message",
-        backgroundColor: .systemBlue.withAlphaComponent(0.15),
-        foregroundColor: .systemBlue
+        backgroundColor: circularButtonColor.withAlphaComponent(0.10),
+        foregroundColor: circularButtonColor
     )
     
     private lazy var shareButton = NNCircularIconButtonWithLabel(
         icon: UIImage(systemName: "square.and.arrow.up"),
         title: "Share",
-        backgroundColor: .systemBlue.withAlphaComponent(0.15),
-        foregroundColor: .systemBlue
+        backgroundColor: circularButtonColor.withAlphaComponent(0.10),
+        foregroundColor: circularButtonColor
     )
     
     private lazy var deleteButton = NNCircularIconButtonWithLabel(
@@ -472,6 +475,7 @@ class InviteDetailViewController: NNViewController {
                     fatalError("Could not create CodeCell")
                 }
                 cell.configure(with: codeItem.code)
+                cell.delegate = self
                 cell.backgroundConfiguration = nil
                 return cell
             }
@@ -655,6 +659,19 @@ extension InviteDetailViewController: SitterCellDelegate {
         let sitterListVC = SitterListViewController(displayMode: .selectSitter, selectedSitter: selectedSitter)
         sitterListVC.delegate = self
         let navController = UINavigationController(rootViewController: sitterListVC)
+        present(navController, animated: true)
+    }
+}
+
+// MARK: - CodeCellDelegate
+extension InviteDetailViewController: CodeCellDelegate {
+    func codeCellDidTapQRCode() {
+        guard let code = inviteCode, code != "000-000" else { return }
+        
+        let qrViewController = QRCodeViewController(inviteCode: code)
+        let navController = UINavigationController(rootViewController: qrViewController)
+        navController.sheetPresentationController?.detents = [.medium()]
+        
         present(navController, animated: true)
     }
 }
@@ -955,8 +972,14 @@ class SectionFooterView: UICollectionReusableView {
 }
 
 // MARK: - CodeCell
+protocol CodeCellDelegate: AnyObject {
+    func codeCellDidTapQRCode()
+}
+
 class CodeCell: UICollectionViewListCell {
     static let reuseIdentifier = "CodeCell"
+    
+    weak var delegate: CodeCellDelegate?
     
     private let codeLabel: UILabel = {
         let label = UILabel()
@@ -964,6 +987,15 @@ class CodeCell: UICollectionViewListCell {
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
+    }()
+    
+    private let qrButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(weight: .semibold)
+        button.setImage(UIImage(systemName: "qrcode", withConfiguration: config), for: .normal)
+        button.tintColor = .label
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }()
     
     override init(frame: CGRect) {
@@ -977,15 +1009,27 @@ class CodeCell: UICollectionViewListCell {
     
     private func setupViews() {
         contentView.addSubview(codeLabel)
+        contentView.addSubview(qrButton)
         
         NSLayoutConstraint.activate([
             codeLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             codeLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             codeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            codeLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            codeLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            
+            qrButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            qrButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            qrButton.widthAnchor.constraint(equalToConstant: 32),
+            qrButton.heightAnchor.constraint(equalToConstant: 32),
             
             contentView.heightAnchor.constraint(equalToConstant: 56)
         ])
+        
+        qrButton.addTarget(self, action: #selector(qrButtonTapped), for: .touchUpInside)
+    }
+    
+    @objc private func qrButtonTapped() {
+        delegate?.codeCellDidTapQRCode()
     }
     
     func configure(with code: String) {

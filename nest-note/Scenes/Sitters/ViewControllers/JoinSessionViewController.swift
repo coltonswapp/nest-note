@@ -7,6 +7,7 @@
 
 import UIKit
 import Foundation
+import AVFoundation
 
 protocol JoinSessionViewControllerDelegate: AnyObject {
     func joinSessionViewController(didAcceptInvite session: SitterSession)
@@ -85,8 +86,16 @@ class JoinSessionViewController: NNViewController {
         return stack
     }()
 
+    private var scanButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(title: "Scan", image: UIImage(systemName: "qrcode.viewfinder"), backgroundColor: .systemBlue.withAlphaComponent(0.15), foregroundColor: .systemBlue)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(scanButtonTapped), for: .touchUpInside)
+        return button
+    }()
+
     private var findSessionButton: NNLoadingButton!
     private var buttonBottomConstraint: NSLayoutConstraint?
+    private var buttonStack: UIStackView!
     
     private let inviteCardView: SessionInviteCardView = {
         let view = SessionInviteCardView()
@@ -130,7 +139,6 @@ class JoinSessionViewController: NNViewController {
         // Layout constraints
         NSLayoutConstraint.activate([
             // Title Stack
-            
             titleStack.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 24),
             titleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
             titleStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
@@ -142,6 +150,55 @@ class JoinSessionViewController: NNViewController {
             codeStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             codeStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
         ])
+    }
+
+    @objc private func scanButtonTapped() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            presentScanner()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self.presentScanner()
+                    } else {
+                        self.presentCameraDeniedAlert()
+                    }
+                }
+            }
+        case .denied, .restricted:
+            presentCameraDeniedAlert()
+        @unknown default:
+            presentCameraDeniedAlert()
+        }
+    }
+
+    private func presentScanner() {
+        let scanner = QRScannerViewController()
+        scanner.onCodeScanned = { [weak self] value in
+            guard let self else { return }
+            // Extract first 6 digits from scanned value
+            let digits = value.filter { $0.isNumber }
+            if digits.count >= 6 {
+                let code = String(digits.prefix(6))
+                self.codeTextField.textField.text = self.formatCodeWithDash(code)
+                self.findSessionButtonTapped()
+            } else {
+                self.showToast(delay: 0.0, text: "QR does not contain a valid code", sentiment: .negative)
+            }
+        }
+        scanner.modalPresentationStyle = .fullScreen
+        present(scanner, animated: true)
+    }
+
+    private func presentCameraDeniedAlert() {
+        let alert = UIAlertController(
+            title: "Camera Access Needed",
+            message: "Enable camera access in Settings to scan QR codes.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
     
     private func setupInviteCard() {
@@ -163,15 +220,30 @@ class JoinSessionViewController: NNViewController {
         findSessionButton = NNLoadingButton(title: "Find Session", titleColor: .white, fillStyle: .fill(NNColors.primary), transitionStyle: .rightHide)
         findSessionButton.translatesAutoresizingMaskIntoConstraints = false
         findSessionButton.addTarget(self, action: #selector(findSessionButtonTapped), for: .touchUpInside)
-        view.addSubview(findSessionButton)
-        
-        buttonBottomConstraint = findSessionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
-        
+
+        buttonStack = UIStackView(arrangedSubviews: [findSessionButton, scanButton])
+        buttonStack.translatesAutoresizingMaskIntoConstraints = false
+        buttonStack.axis = .horizontal
+        buttonStack.alignment = .fill
+        buttonStack.distribution = .fill
+        buttonStack.spacing = 12
+
+        view.addSubview(buttonStack)
+
+        buttonBottomConstraint = buttonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+
         NSLayoutConstraint.activate([
-            findSessionButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            findSessionButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            // Stack constraints
+            buttonStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            buttonStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            buttonBottomConstraint!,
+
+            // Button heights
+            scanButton.heightAnchor.constraint(equalToConstant: 55),
             findSessionButton.heightAnchor.constraint(equalToConstant: 55),
-            buttonBottomConstraint!
+
+            // Width ratio 3:7 (~30% / 70%)
+            scanButton.widthAnchor.constraint(equalTo: findSessionButton.widthAnchor, multiplier: 3.0/7.0)
         ])
     }
     
@@ -190,6 +262,10 @@ class JoinSessionViewController: NNViewController {
         guard code.count == 6, code.allSatisfy({ $0.isNumber }) else {
             showToast(delay: 0.0, text: "Invalid code format", sentiment: .negative)
             return
+        }
+        
+        UIView.animate(withDuration: 0.2) {
+            self.scanButton.isHidden = true
         }
         
         findSessionButton.startLoading()
@@ -335,5 +411,13 @@ class JoinSessionViewController: NNViewController {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    private func formatCodeWithDash(_ code: String) -> String {
+        let digits = code.filter { $0.isNumber }
+        let first = String(digits.prefix(3))
+        let second = String(digits.dropFirst(3).prefix(3))
+        if second.isEmpty { return first }
+        return first + "-" + second
     }
 }

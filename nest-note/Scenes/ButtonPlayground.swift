@@ -29,6 +29,13 @@ class ButtonPlayground: UIViewController {
         return button
     }()
     
+    private lazy var transitionLabelButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(title: "608-123", backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
+        button.addTarget(self, action: #selector(handleRegularButtonTap), for: .touchUpInside)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+    
     private lazy var slowSpinner: NNLoadingSpinner = {
         let spinner = NNLoadingSpinner()
         spinner.setSpeed(duration: 0.9)
@@ -50,12 +57,6 @@ class ButtonPlayground: UIViewController {
         return spinner
     }()
     
-    private lazy var stepperProgress: StepperProgressView = {
-        let view = StepperProgressView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-    
     private lazy var glassButton: GlassyButton = {
         let button = GlassyButton()
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -66,38 +67,14 @@ class ButtonPlayground: UIViewController {
         return button
     }()
     
-    private lazy var progressUpdateButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("Update Progress", for: .normal)
-        button.addTarget(self, action: #selector(updateProgress), for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-    
-    private var currentStep = 0
-    private var currentProgress: CGFloat = 0
-    
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
-        
-        // Configure stepper with initial steps
-        let steps = [
-            ProgressStep(title: "Setup"),
-            ProgressStep(title: "Start"),
-            ProgressStep(title: "In Progress"),
-            ProgressStep(title: "Finish")
-        ]
-        stepperProgress.configure(with: steps)
     }
     
     private func setupUI() {
         view.backgroundColor = .systemBackground
         title = "Button Playground"
-        
-        // Add stepper and update button at the top
-        view.addSubview(stepperProgress)
-        view.addSubview(progressUpdateButton)
         
         // Add existing buttons below
         view.addSubview(loadingButton)
@@ -105,22 +82,15 @@ class ButtonPlayground: UIViewController {
         view.addSubview(tertiaryLoadingButton)
         view.addSubview(glassButton)
         view.addSubview(regularButton)
+        view.addSubview(transitionLabelButton)
         view.addSubview(slowSpinner)
         view.addSubview(mediumSpinner)
         view.addSubview(fastSpinner)
         
         NSLayoutConstraint.activate([
-            // Stepper constraints
-            stepperProgress.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            stepperProgress.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            stepperProgress.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            stepperProgress.heightAnchor.constraint(equalToConstant: 60),
-            
-            progressUpdateButton.topAnchor.constraint(equalTo: stepperProgress.bottomAnchor, constant: 20),
-            progressUpdateButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
             // Existing constraints, but now relative to progressUpdateButton
-            loadingButton.topAnchor.constraint(equalTo: progressUpdateButton.bottomAnchor, constant: 40),
+            loadingButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
             loadingButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             loadingButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             loadingButton.heightAnchor.constraint(equalToConstant: 55),
@@ -145,7 +115,11 @@ class ButtonPlayground: UIViewController {
             regularButton.trailingAnchor.constraint(equalTo: loadingButton.trailingAnchor),
             regularButton.heightAnchor.constraint(equalToConstant: 55),
             
-            slowSpinner.topAnchor.constraint(equalTo: regularButton.bottomAnchor, constant: 40),
+            transitionLabelButton.topAnchor.constraint(equalTo: regularButton.bottomAnchor, constant: 20),
+            transitionLabelButton.heightAnchor.constraint(equalToConstant: 46.0),
+            transitionLabelButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            
+            slowSpinner.topAnchor.constraint(equalTo: transitionLabelButton.bottomAnchor, constant: 40),
             slowSpinner.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 50),
             slowSpinner.widthAnchor.constraint(equalToConstant: 25),
             slowSpinner.heightAnchor.constraint(equalToConstant: 25),
@@ -190,29 +164,8 @@ class ButtonPlayground: UIViewController {
         }
     }
     
-    @objc private func updateProgress() {
-        // Increment progress
-        currentProgress += 0.33
-        if currentProgress >= 1 {
-            currentProgress = 0
-            currentStep += 1
-            if currentStep >= 4 {
-                currentStep = 0
-            }
-        }
-        
-        // Update current step
-        stepperProgress.updateProgress(at: currentStep, progress: currentProgress)
-        
-        // Update completed steps
-        for i in 0..<currentStep {
-            stepperProgress.updateProgress(at: i, progress: 1.0)
-        }
-        
-        // Reset future steps
-        for i in (currentStep + 1)..<4 {
-            stepperProgress.updateProgress(at: i, progress: 0)
-        }
+    @objc private func handleRegularButtonTap() {
+        transitionLabelButton.showCopiedFeedback()
     }
 }
 
