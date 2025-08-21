@@ -116,7 +116,8 @@ class NNBaseControl: UIControl {
         translatesAutoresizingMaskIntoConstraints = false
         
         layer.borderWidth = 1
-        layer.borderColor = backgroundColor.lighter(by: 15).cgColor
+        let resolvedBG = backgroundColor.resolvedColor(with: traitCollection)
+        layer.borderColor = resolvedBG.lighter(by: 15).cgColor
     }
     
     private func setupLayout() {
@@ -188,8 +189,16 @@ class NNBaseControl: UIControl {
     
     override var backgroundColor: UIColor? {
         didSet {
-            layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
+            let resolvedBG = backgroundColor?.resolvedColor(with: traitCollection)
+            layer.borderColor = resolvedBG?.lighter(by: 15).cgColor
         }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true else { return }
+        let resolvedBG = backgroundColor?.resolvedColor(with: traitCollection)
+        layer.borderColor = resolvedBG?.lighter(by: 15).cgColor
     }
     
     /// Pins the button to the bottom of the superview with standard insets and optionally adds a blur effect
