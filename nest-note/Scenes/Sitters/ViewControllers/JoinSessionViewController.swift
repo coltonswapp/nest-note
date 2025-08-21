@@ -17,13 +17,6 @@ class JoinSessionViewController: NNViewController {
     
     weak var delegate: JoinSessionViewControllerDelegate?
     
-    private let topImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        NNAssetHelper.configureImageView(imageView, for: .rectanglePatternSmall, with: NNColors.primary)
-        return imageView
-    }()
-    
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.text = "Join a Session"
@@ -87,7 +80,7 @@ class JoinSessionViewController: NNViewController {
     }()
 
     private var scanButton: NNPrimaryLabeledButton = {
-        let button = NNPrimaryLabeledButton(title: "Scan", image: UIImage(systemName: "qrcode.viewfinder"), backgroundColor: .systemBlue.withAlphaComponent(0.15), foregroundColor: .systemBlue)
+        let button = NNPrimaryLabeledButton(title: "Scan", image: UIImage(systemName: "qrcode.viewfinder"), backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(scanButtonTapped), for: .touchUpInside)
         return button
@@ -119,12 +112,10 @@ class JoinSessionViewController: NNViewController {
         setupFindSessionButton()
         setupInviteCard()
         setupKeyboardObservers()
+        setupTextFieldObserver()
     }
     
     override func addSubviews() {
-        view.addSubview(topImageView)
-        topImageView.pinToTop(of: view)
-        
         labelStack.addArrangedSubview(titleLabel)
         labelStack.addArrangedSubview(descriptionLabel)
         titleStack.addArrangedSubview(labelStack)
@@ -139,7 +130,7 @@ class JoinSessionViewController: NNViewController {
         // Layout constraints
         NSLayoutConstraint.activate([
             // Title Stack
-            titleStack.topAnchor.constraint(equalTo: topImageView.bottomAnchor, constant: 24),
+            titleStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 0),
             titleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
             titleStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
             
@@ -182,6 +173,7 @@ class JoinSessionViewController: NNViewController {
             if digits.count >= 6 {
                 let code = String(digits.prefix(6))
                 self.codeTextField.textField.text = self.formatCodeWithDash(code)
+                self.codeTextFieldDidChange()
                 self.findSessionButtonTapped()
             } else {
                 self.showToast(delay: 0.0, text: "QR does not contain a valid code", sentiment: .negative)
@@ -228,6 +220,7 @@ class JoinSessionViewController: NNViewController {
         findSessionButton = NNLoadingButton(title: "Find Session", titleColor: .white, fillStyle: .fill(NNColors.primary), transitionStyle: .rightHide)
         findSessionButton.translatesAutoresizingMaskIntoConstraints = false
         findSessionButton.addTarget(self, action: #selector(findSessionButtonTapped), for: .touchUpInside)
+        findSessionButton.isEnabled = false
 
         buttonStack = UIStackView(arrangedSubviews: [findSessionButton, scanButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
@@ -415,6 +408,15 @@ class JoinSessionViewController: NNViewController {
             self.buttonBottomConstraint?.constant = -16
             self.view.layoutIfNeeded()
         }
+    }
+    
+    private func setupTextFieldObserver() {
+        codeTextField.textField.addTarget(self, action: #selector(codeTextFieldDidChange), for: .editingChanged)
+    }
+    
+    @objc private func codeTextFieldDidChange() {
+        let text = codeTextField.textField.text?.replacingOccurrences(of: "-", with: "") ?? ""
+        findSessionButton.isEnabled = text.count == 6 && text.allSatisfy({ $0.isNumber })
     }
     
     deinit {
