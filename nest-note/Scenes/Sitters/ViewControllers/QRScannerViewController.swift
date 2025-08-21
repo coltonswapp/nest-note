@@ -5,6 +5,7 @@
 //  Created by Colton Swapp on 8/20/25.
 //
 import UIKit
+import AVFoundation
 
 // MARK: - QR Scanner
 final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
