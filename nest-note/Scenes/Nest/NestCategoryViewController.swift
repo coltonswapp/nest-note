@@ -10,7 +10,7 @@ import RevenueCat
 import RevenueCatUI
 import CoreLocation
 
-class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate, NNTippable, PlaceListViewControllerDelegate {
+class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate, PlaceListViewControllerDelegate {
     // MARK: - Properties
     internal let entryRepository: EntryRepository
     private let category: String
@@ -1295,9 +1295,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func showItemSuggestions() {
-        // Dismiss the suggestion tip when user opens suggestions
-        NNTipManager.shared.dismissTip(NestCategoryTips.entrySuggestionTip)
-
         // Present CommonItemsViewController as a sheet with medium and large detents
         let commonItemsVC = CommonItemsViewController(category: category, entryRepository: entryRepository)
         commonItemsVC.delegate = self
@@ -1473,29 +1470,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         addEntryButton.alpha = hasSelection ? 1.0 : 0.6
     }
     
-    func showTips() {
-        // Only show tips for nest owners
-        guard entryRepository is NestService else { return }
-        
-        trackScreenVisit()
-        
-        // Show suggestion tip for nest owners and if the menu button exists
-        if let suggestionsButton = emptyStateView.actionButtons.first(where: { $0.tag == 1 }),
-           NNTipManager.shared.shouldShowTip(NestCategoryTips.entrySuggestionTip) {
-            
-            // Show the tooltip anchored to the navigation bar menu button
-            // Using .bottom edge to show tooltip below the navigation bar
-            guard !(navigationController?.navigationBar.prefersLargeTitles ?? false) else { return }
-            
-            NNTipManager.shared.showTip(
-                NestCategoryTips.entrySuggestionTip,
-                sourceView: suggestionsButton,
-                in: self,
-                pinToEdge: .bottom,
-                offset: CGPoint(x: 0, y: 8)
-            )
-        }
-    }
+
     
     private func flashCell(for entry: BaseEntry) {
         guard let indexPath = dataSource?.indexPath(for: entry),
