@@ -31,14 +31,14 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		F6A81B962E56642A00D24D95 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
+			buildActionMask = 8;
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
 				F6A81B952E56642A00D24D95 /* QRCodeDetector in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
+			runOnlyForDeploymentPostprocessing = 1;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -134,8 +134,8 @@
 				F64DE3E52CB1C893006D21FC /* Sources */,
 				F64DE3E62CB1C893006D21FC /* Frameworks */,
 				F64DE3E72CB1C893006D21FC /* Resources */,
-				F64F4B1F2E2DB77D00F04C46 /* ShellScript */,
 				F6A81B962E56642A00D24D95 /* Embed Frameworks */,
+				F64F4B1F2E2DB77D00F04C46 /* Run Script */,
 			);
 			buildRules = (
 			);
@@ -219,7 +219,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		F64F4B1F2E2DB77D00F04C46 /* ShellScript */ = {
+		F64F4B1F2E2DB77D00F04C46 /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -230,6 +230,7 @@
 				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
 				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
 			);
+			name = "Run Script";
 			outputFileListPaths = (
 			);
 			outputPaths = (
