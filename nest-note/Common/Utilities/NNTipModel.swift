@@ -58,15 +58,7 @@ enum EntryDetailTips {
     )
 }
 
-enum NestCategoryTips {
 
-    static let entrySuggestionTip = NNTipModel(
-        id: "EntrySuggestionTip",
-        title: "Need Inspiration?",
-        message: "Browse our collection of item suggestions.",
-        systemImageName: "sparkles"
-    )
-}
 
 enum OwnerHomeTips {
     
