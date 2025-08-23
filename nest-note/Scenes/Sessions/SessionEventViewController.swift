@@ -341,11 +341,16 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     private func deleteEvent() {
-        guard let event = event, let sessionID = sessionID else { return }
+        guard let event = event else { return }
         
         Task {
             do {
-                try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                // Delete from server only if we have a sessionID (existing session)
+                if let sessionID = sessionID {
+                    try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                }
+                // If no sessionID (new session), skip server delete - the event will be removed via callback
+                
                 await MainActor.run {
                     eventDelegate?.sessionEventViewController(self, didDeleteEvent: event)
                     dismiss(animated: true)
@@ -450,8 +455,6 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     @objc private func saveButtonTapped() {
-        guard let sessionID else { shakeContainerView(); return }
-        
         guard let eventTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !eventTitle.isEmpty else {
             shakeContainerView()
@@ -476,7 +479,7 @@ final class SessionEventViewController: NNSheetViewController {
             eventColor: selectedColorType()
         )
         
-        // Save using SessionService
+        // Save based on context
         Task {
             do {
                 // First, if we have a temporary place that hasn't been saved yet, save it
@@ -484,8 +487,11 @@ final class SessionEventViewController: NNSheetViewController {
                     try await NestService.shared.createPlace(place)
                 }
                 
-                // Then save the event
-                try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                // Save to server only if we have a sessionID (existing session)
+                if let sessionID = sessionID {
+                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                }
+                // If no sessionID (new session), skip server save - the event will be saved via callback
                 
                 await MainActor.run {
                     saveButton.stopLoading(withSuccess: true)

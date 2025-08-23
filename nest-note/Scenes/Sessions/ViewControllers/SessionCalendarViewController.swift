@@ -58,6 +58,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     // Add property to track user role
     private let isSitter: Bool
     
+    // Add callback for when sessionID is nil (new sessions)
+    private var eventsUpdateCallback: (([SessionEvent]) -> Void)?
+    
     private lazy var emptyStateView: NNEmptyStateView = {
         let view = NNEmptyStateView(
             icon: UIImage(systemName: "calendar.badge.plus"),
@@ -80,10 +83,11 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, nestID: String, dateRange: DateInterval, events: [SessionEvent] = [], isSitter: Bool = false) {
+    init(sessionID: String? = nil, nestID: String, dateRange: DateInterval, events: [SessionEvent] = [], eventsUpdateCallback: (([SessionEvent]) -> Void)? = nil, isSitter: Bool = false) {
         self.sessionID = sessionID
         self.nestID = nestID
         self.isSitter = isSitter
+        self.eventsUpdateCallback = eventsUpdateCallback
         let calendar = Calendar.current
         
         // Strip time components and get start of day for both dates
@@ -197,12 +201,14 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         navigationController?.navigationBar.standardAppearance = appearance
         
         // Create debug button
+        #if DEBUG
         let debugButton = UIBarButtonItem(
             image: UIImage(systemName: "ellipsis"),
             style: .plain,
             target: self,
             action: #selector(debugButtonTapped)
         )
+        #endif
         
         // Only show add button for non-sitters
         if !isSitter {
@@ -215,9 +221,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             navigationItem.rightBarButtonItems = [addButton]
         }
         
-        if sessionID == nil {
-            navigationItem.rightBarButtonItems?.append(debugButton)
-        }
+    #if DEBUG
+    navigationItem.rightBarButtonItems?.append(debugButton)
+    #endif
     }
     
     @objc private func addEventTapped() {
@@ -725,57 +731,56 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
     }
     
     private func deleteEvent(_ event: SessionEvent) {
-        guard let sessionID = sessionID else { return }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: event.startDate)
         
-        Task {
-            do {
-                try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
-                
-                await MainActor.run {
-                    let calendar = Calendar.current
-                    let startOfDay = calendar.startOfDay(for: event.startDate)
-                    
-                    // Remove from events dictionary
-                    if var events = eventsByDate[startOfDay] {
-                        events.removeAll { $0.id == event.id }
-                        if events.isEmpty {
-                            eventsByDate.removeValue(forKey: startOfDay)
-                            
-                            // Instead of just deleting the item, recreate the snapshot
-                            // to properly handle empty sections
-                            applySnapshot()
-                        } else {
-                            eventsByDate[startOfDay] = events
-                            
-                            // If we still have events in the section, just delete the item
-                            var snapshot = dataSource.snapshot()
-                            snapshot.deleteItems([event])
-                            dataSource.apply(snapshot, animatingDifferences: true)
-                        }
-                    }
-                    
-                    // Update other views
-                    compactCalendarView.updateEvents(eventsByDate)
-                    updateEmptyState()
-                    
-                    // Notify delegate
-                    let allEvents = eventsByDate.values.flatMap { $0 }
-                    delegate?.calendarViewController(self, didUpdateEvents: allEvents)
-                }
-            } catch {
-                Logger.log(level: .error, category: .sessionService, message: "Failed to delete event: \(error.localizedDescription)")
-                
-                await MainActor.run {
-                    let alert = UIAlertController(
-                        title: "Error",
-                        message: "Failed to delete event. Please try again.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    self.present(alert, animated: true)
-                }
+        // Update UI immediately
+        if var events = eventsByDate[startOfDay] {
+            events.removeAll { $0.id == event.id }
+            if events.isEmpty {
+                eventsByDate.removeValue(forKey: startOfDay)
+                applySnapshot()
+            } else {
+                eventsByDate[startOfDay] = events
+                var snapshot = dataSource.snapshot()
+                snapshot.deleteItems([event])
+                dataSource.apply(snapshot, animatingDifferences: true)
             }
         }
+        
+        // Update other views
+        compactCalendarView.updateEvents(eventsByDate)
+        updateEmptyState()
+        
+        // Handle deletion based on context
+        let allEvents = eventsByDate.values.flatMap { $0 }
+        
+        if let sessionID = sessionID {
+            // Existing session - delete from server
+            Task {
+                do {
+                    try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to delete event: \(error.localizedDescription)")
+                    
+                    await MainActor.run {
+                        let alert = UIAlertController(
+                            title: "Error",
+                            message: "Failed to delete event. Please try again.",
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
+                    }
+                }
+            }
+        } else {
+            // New session - update parent's sessionEvents array via callback
+            eventsUpdateCallback?(allEvents)
+        }
+        
+        // Notify delegate
+        delegate?.calendarViewController(self, didUpdateEvents: allEvents)
     }
     
     private func duplicateEvent(_ event: SessionEvent) {
@@ -788,47 +793,51 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             eventColor: .blue
         )
         
-        guard let sessionID = sessionID else { return }
+        // Update UI immediately
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: duplicatedEvent.startDate)
         
-        Task {
-            do {
-                try await SessionService.shared.updateSessionEvent(duplicatedEvent, sessionID: sessionID)
-                
-                await MainActor.run {
-                    // Add to local storage
-                    let calendar = Calendar.current
-                    let startOfDay = calendar.startOfDay(for: duplicatedEvent.startDate)
+        if var events = eventsByDate[startOfDay] {
+            events.append(duplicatedEvent)
+            events.sort { $0.startDate < $1.startDate }
+            eventsByDate[startOfDay] = events
+        } else {
+            eventsByDate[startOfDay] = [duplicatedEvent]
+        }
+        
+        // Update views
+        compactCalendarView.updateEvents(eventsByDate)
+        applySnapshot()
+        
+        // Handle duplication based on context
+        let allEvents = eventsByDate.values.flatMap { $0 }
+        
+        if let sessionID = sessionID {
+            // Existing session - save to server
+            Task {
+                do {
+                    try await SessionService.shared.updateSessionEvent(duplicatedEvent, sessionID: sessionID)
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to duplicate event: \(error.localizedDescription)")
                     
-                    if var events = eventsByDate[startOfDay] {
-                        events.append(duplicatedEvent)
-                        events.sort { $0.startDate < $1.startDate }
-                        eventsByDate[startOfDay] = events
-                    } else {
-                        eventsByDate[startOfDay] = [duplicatedEvent]
+                    await MainActor.run {
+                        let alert = UIAlertController(
+                            title: "Error",
+                            message: "Failed to duplicate event. Please try again.",
+                            preferredStyle: .alert
+                        )
+                        alert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self.present(alert, animated: true)
                     }
-                    
-                    // Update views
-                    compactCalendarView.updateEvents(eventsByDate)
-                    applySnapshot()
-                    
-                    // Notify delegate
-                    let allEvents = eventsByDate.values.flatMap { $0 }
-                    delegate?.calendarViewController(self, didUpdateEvents: allEvents)
-                }
-            } catch {
-                Logger.log(level: .error, category: .sessionService, message: "Failed to duplicate event: \(error.localizedDescription)")
-                
-                await MainActor.run {
-                    let alert = UIAlertController(
-                        title: "Error",
-                        message: "Failed to duplicate event. Please try again.",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    self.present(alert, animated: true)
                 }
             }
+        } else {
+            // New session - update parent's sessionEvents array via callback
+            eventsUpdateCallback?(allEvents)
         }
+        
+        // Notify delegate
+        delegate?.calendarViewController(self, didUpdateEvents: allEvents)
     }
 }
 
@@ -859,8 +868,24 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
         compactCalendarView.updateEvents(eventsByDate)
         updateEmptyState()
         
-        // Notify delegate
+        // Handle deletion based on context
         let allEvents = eventsByDate.values.flatMap { $0 }
+        
+        if let sessionID = sessionID {
+            // Existing session - delete from server immediately
+            Task {
+                do {
+                    try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to delete event: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // New session - update parent's sessionEvents array via callback
+            eventsUpdateCallback?(allEvents)
+        }
+        
+        // Notify delegate
         delegate?.calendarViewController(self, didUpdateEvents: allEvents)
         
         showToast(text: "Event Deleted", sentiment: .positive)
@@ -930,8 +955,24 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
             }
         }
         
-        // Notify delegate of updated events
+        // Save the event based on context
         let allEvents = eventsByDate.values.flatMap { $0 }
+        
+        if let sessionID = sessionID {
+            // Existing session - save to server immediately
+            Task {
+                do {
+                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                } catch {
+                    Logger.log(level: .error, category: .sessionService, message: "Failed to save event: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // New session - update parent's sessionEvents array via callback
+            eventsUpdateCallback?(allEvents)
+        }
+        
+        // Notify delegate of updated events
         delegate?.calendarViewController(self, didUpdateEvents: allEvents)
         showToast(text: "Event Updated", sentiment: .positive)
     }
