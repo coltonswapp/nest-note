@@ -33,6 +33,47 @@ final class NestCreationCoordinator: NSObject, UINavigationControllerDelegate {
         return navigationController
     }
     
+    func setupCloseButton() {
+        let barButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "xmark"), target: self, action: #selector(handleCloseButtonTapped))
+        navigationController.navigationItem.rightBarButtonItem = barButton
+    }
+    
+    @objc func handleCloseButtonTapped() {
+        let alert = UIAlertController(
+            title: "Nest Creation Cancelled",
+            message: "Without a nest, you won't be able to access owner features. Would you like to switch back to sitter mode?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Continue Creating", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Back to Sitter Mode", style: .default) { [weak self] _ in
+            self?.switchBackToSitterMode()
+        })
+        
+        navigationController.present(alert, animated: true)
+    }
+    
+    private func switchBackToSitterMode() {
+        // Dismiss the nest creation flow first
+        navigationController.dismiss(animated: true) {
+            Task {
+                do {
+                    // Set the mode first
+                    ModeManager.shared.currentMode = .sitter
+                    
+                    // Then reconfigure with LaunchCoordinator if needed
+                    guard let launchCoordinator = LaunchCoordinator.shared else {
+                        return
+                    }
+                    
+                    try await launchCoordinator.switchMode(to: .sitter)
+                } catch {
+                    // Mode switch failed - could show error to user if needed
+                }
+            }
+        }
+    }
+    
     func validateNest(name: String, address: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,6 +162,9 @@ class ATFCreateNestViewController: NNOnboardingViewController {
         addressField.delegate = self
         
         ctaButton?.isEnabled = false
+        
+        // Set up navigation bar buttons (including close button)
+        setupNavigationBarButtons()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -173,7 +217,7 @@ class ATFCreateNestViewController: NNOnboardingViewController {
     }
     
     @objc func closeButtonTapped() {
-        self.dismiss(animated: true)
+        (coordinator as? NestCreationCoordinator)?.handleCloseButtonTapped()
     }
 
     private func setupActions() {

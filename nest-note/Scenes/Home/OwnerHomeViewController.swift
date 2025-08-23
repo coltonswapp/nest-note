@@ -27,6 +27,11 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     // Track whether we've already shown the happening now tip in this session
     private var hasShownHappeningNowTip = false
     
+    private var nestCreationCoordinator: NestCreationCoordinator?
+    
+    // Track if we're currently switching modes to avoid showing nest setup during transition
+    private var isSwitchingModes = false
+    
     private var hasCompletedSetup: Bool {
         return setupService.hasCompletedSetup
     }
@@ -53,6 +58,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         
         // Check setup status when the view loads
         checkSetupStatus()
+        
+        // Check if nest setup is required (for cases where mode already changed)
+        checkNestSetupRequirement()
         
 //        setFCMToken()
     }
@@ -138,6 +146,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             .sink { [weak self] _ in
                 // Update the setup progress immediately
                 self?.applySnapshot(animatingDifferences: true)
+            }
+            .store(in: &cancellables)
+            
+        // Subscribe to mode changes to check for nest setup requirement
+        NotificationCenter.default.publisher(for: .modeDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.checkNestSetupRequirement()
             }
             .store(in: &cancellables)
     }
@@ -511,6 +527,97 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         return "folder.fill"
     }
     
+    // MARK: - Nest Setup Methods
+    
+    private func checkNestSetupRequirement() {
+        // Don't show nest setup if we're currently switching modes
+        guard !isSwitchingModes else {
+            return
+        }
+        
+        // Only check if we're in owner mode and signed in
+        guard ModeManager.shared.isNestOwnerMode && UserService.shared.isSignedIn else {
+            return
+        }
+        
+        // Check if user has a nest setup
+        if NestService.shared.currentNest == nil {
+            // User switched to owner mode but doesn't have a nest - show ATF flow
+            showNestSetup()
+        }
+    }
+    
+    private func showNestSetup() {
+        let alert = UIAlertController(
+            title: "Nest Setup Required",
+            message: "You'll need to create your nest before you can access owner features. Would you like to set up your nest now?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Back to Sitter Mode", style: .cancel) { [weak self] _ in
+            self?.switchBackToSitterMode()
+        })
+        alert.addAction(UIAlertAction(title: "Create Nest", style: .default) { [weak self] _ in
+            self?.presentNestCreationFlow()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func presentNestCreationFlow() {
+        nestCreationCoordinator = NestCreationCoordinator()
+        guard let nestCreationCoordinator else { 
+            return 
+        }
+        
+        present(nestCreationCoordinator.start(), animated: true)
+    }
+    
+    private func switchBackToSitterMode() {
+        guard let launchCoordinator = LaunchCoordinator.shared else {
+            return
+        }
+        
+        // Dismiss any presented view controllers first to avoid the detached view controller warning
+        if presentedViewController != nil {
+            dismiss(animated: true) {
+                self.performModeSwitch(launchCoordinator: launchCoordinator)
+            }
+        } else {
+            performModeSwitch(launchCoordinator: launchCoordinator)
+        }
+    }
+    
+    private func performModeSwitch(launchCoordinator: LaunchCoordinator) {
+        isSwitchingModes = true
+        
+        Task {
+            do {
+                // Set the mode first
+                ModeManager.shared.currentMode = .sitter
+                
+                // Then reconfigure with LaunchCoordinator
+                try await launchCoordinator.switchMode(to: .sitter)
+                
+                // The LaunchCoordinator should handle the view controller transition
+            } catch {
+                // Only show error feedback if we're still in the view hierarchy
+                await MainActor.run {
+                    if self.view.window != nil {
+                        self.showToast(text: "Failed to switch modes. Please try again.")
+                    }
+                }
+            }
+            
+            // Reset the flag after a delay to allow the transition to complete
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.isSwitchingModes = false
+                }
+            }
+        }
+    }
+    
     
     // MARK: - Tooltip Methods
     
@@ -599,7 +706,13 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
         case .nest:
             // Dismiss the your nest tip when the nest cell is tapped
             NNTipManager.shared.dismissTip(OwnerHomeTips.yourNestTip)
-            presentHouseholdView()
+            
+            // If no current nest, show nest setup flow instead of household view
+            if NestService.shared.currentNest == nil {
+                showNestSetup()
+            } else {
+                presentHouseholdView()
+            }
         case .quickAccess(let type):
             switch type {
             case .ownerHousehold:
@@ -690,4 +803,5 @@ extension OwnerHomeViewController: SetupFlowDelegate {
         // Refresh the UI to reflect updated step status
         refreshData()
     }
-} 
+}
+
