@@ -391,6 +391,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
+            ("Test Subscription Status", "creditcard.circle"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -523,6 +524,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             present(vc, animated: true)
         case "Reset Tooltips":
             resetTooltipsDatastore()
+        case "Test Subscription Status":
+            showSubscriptionStatus()
         default:
             break
         }
@@ -597,7 +600,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     featurePreviewVC.modalPresentationStyle = .formSheet
                     present(featurePreviewVC, animated: true)
                 case "Subscription":
-                    showRevenueCatPaywall()
+                    Task {
+                        let hasProSubscription = await SubscriptionService.shared.hasProSubscription()
+                        await MainActor.run {
+                            if hasProSubscription {
+                                showSubscriptionStatus()
+                            } else {
+                                showRevenueCatPaywall()
+                            }
+                        }
+                    }
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -695,6 +707,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         // Mark the final setup step as complete when paywall is viewed
         SetupService.shared.markStepComplete(.finalStep)
+    }
+    
+    private func showSubscriptionStatus() {
+        let subscriptionStatusVC = SubscriptionStatusViewController()
+        subscriptionStatusVC.modalPresentationStyle = .pageSheet
+        
+        if let sheet = subscriptionStatusVC.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = false
+        }
+        
+        present(subscriptionStatusVC, animated: true)
     }
     
     private func showResetSetupConfirmation() {
