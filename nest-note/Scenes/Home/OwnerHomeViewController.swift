@@ -174,8 +174,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 formatter.timeStyle = .none
                 let duration = formatter.string(from: session.startDate, to: session.endDate)
                 
-                // Get sitter name or email
-                let sitterInfo: String? = session.assignedSitter?.name ?? session.assignedSitter?.email
+                // Get sitter name or email, but only if they're not empty strings
+                let sitterName = session.assignedSitter?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sitterEmail = session.assignedSitter?.email.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                let sitterInfo: String? = {
+                    if let name = sitterName, !name.isEmpty {
+                        return name
+                    } else if let email = sitterEmail, !email.isEmpty {
+                        return email
+                    } else {
+                        return nil
+                    }
+                }()
                 
                 let durationText: String = sitterInfo == nil ? duration : "\(sitterInfo!) • \(duration)"
                 
