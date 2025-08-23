@@ -428,13 +428,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         switch state {
         case .loading:
             collectionView.isHidden = true
-            emptyStateView.isHidden = true
+            hideEmptyState()
             loadingSpinner.startAnimating()
             
         case .ready(let session, let nest):
             loadingSpinner.stopAnimating()
             collectionView.isHidden = false
-            emptyStateView.isHidden = true
+            hideEmptyState()
             applySnapshot(session: session, nest: nest)
             // Fetch events for the current session
             fetchSessionEvents(session: session)
@@ -442,13 +442,9 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         case .noSession:
             loadingSpinner.stopAnimating()
             collectionView.isHidden = true
-            emptyStateView.isHidden = false
             
-            // Bring the empty state view to the front
-            view.bringSubviewToFront(emptyStateView)
-            
-            // Ensure it's interactive
-            emptyStateView.isUserInteractionEnabled = true
+            // Animate the empty state into view
+            animateEmptyStateIn()
             
             print("Empty state view is now visible and interactive: \(emptyStateView.isUserInteractionEnabled)")
             print("Empty state view delegate: \(String(describing: emptyStateView.delegate))")
@@ -458,7 +454,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         case .error(let error):
             loadingSpinner.stopAnimating()
             collectionView.isHidden = true
-            emptyStateView.isHidden = false
+            animateEmptyStateIn()
             handleError(error)
         }
     }
@@ -655,6 +651,37 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         
         // Fallback to folder icon if category not found
         return "folder.fill"
+    }
+    
+    // MARK: - Animation Methods
+    
+    private func animateEmptyStateIn() {
+        // Prepare the empty state view for animation
+        emptyStateView.isHidden = false
+        emptyStateView.alpha = 0.0
+        
+        // Set initial transform for slide-in effect (translate down by 20 points)
+        emptyStateView.transform = CGAffineTransform(translationX: 0, y: 20)
+        
+        // Bring the empty state view to the front
+        view.bringSubviewToFront(emptyStateView)
+        
+        // Ensure it's interactive
+        emptyStateView.isUserInteractionEnabled = true
+        
+        // Animate with easing over 0.15 seconds
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseOut], animations: {
+            // Fade in
+            self.emptyStateView.alpha = 1.0
+            // Slide into place
+            self.emptyStateView.transform = .identity
+        }, completion: nil)
+    }
+    
+    private func hideEmptyState() {
+        emptyStateView.isHidden = true
+        emptyStateView.alpha = 1.0
+        emptyStateView.transform = .identity
     }
     
     // MARK: - Helper Methods
