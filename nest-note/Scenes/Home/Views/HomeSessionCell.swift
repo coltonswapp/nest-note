@@ -165,7 +165,14 @@ final class HomeSessionCell: UICollectionViewListCell {
         titleLabel.text = session.title
         
         if let sitter = session.assignedSitter {
-            subtitleLabel.text = sitter.name
+            let sitterName = sitter.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sitterName.isEmpty {
+                subtitleLabel.text = sitterName
+            } else {
+                // If name is empty, try email
+                let sitterEmail = sitter.email.trimmingCharacters(in: .whitespacesAndNewlines)
+                subtitleLabel.text = !sitterEmail.isEmpty ? sitterEmail : "No sitter assigned"
+            }
         } else {
             subtitleLabel.text = "No sitter assigned"
         }
