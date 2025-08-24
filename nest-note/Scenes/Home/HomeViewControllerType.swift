@@ -1,5 +1,10 @@
 import UIKit
 
+// MARK: - Shared Notification Names
+extension Notification.Name {
+    static let appReturnedFromLongBackground = Notification.Name("AppReturnedFromLongBackground")
+}
+
 /// Protocol defining shared functionality between owner and sitter home view controllers
 protocol HomeViewControllerType: NNViewController {
     // MARK: - Properties

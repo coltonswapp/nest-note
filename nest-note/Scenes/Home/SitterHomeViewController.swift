@@ -26,6 +26,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         return spinner
     }()
     
+    private lazy var refreshControl: UIRefreshControl = {
+        let refreshControl = UIRefreshControl()
+        refreshControl.addTarget(self, action: #selector(handlePullToRefresh), for: .valueChanged)
+        return refreshControl
+    }()
+    
     private lazy var emptyStateView: NNEmptyStateView = {
         let view = NNEmptyStateView(
             icon: nil,
@@ -97,6 +103,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
+        collectionView.refreshControl = refreshControl
         view.addSubview(collectionView)
     }
     
@@ -415,6 +422,14 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             }
             .store(in: &cancellables)
         
+        // Subscribe to app returning from long background
+        NotificationCenter.default.publisher(for: .appReturnedFromLongBackground)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleAutoRefresh()
+            }
+            .store(in: &cancellables)
+        
         // Subscribe to viewState changes
         sitterViewService.$viewState
             .receive(on: DispatchQueue.main)
@@ -605,6 +620,41 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 try await sitterViewService.fetchCurrentSession()
             } catch {
                 handleError(error)
+            }
+        }
+    }
+    
+    @objc private func handlePullToRefresh() {
+        Task {
+            do {
+                try await sitterViewService.fetchCurrentSession()
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                }
+            } catch {
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                    self.handleError(error)
+                }
+            }
+        }
+    }
+    
+    private func handleAutoRefresh() {
+        // Show loading indicator for auto-refresh
+        loadingSpinner.startAnimating()
+        
+        Task {
+            do {
+                try await sitterViewService.fetchCurrentSession()
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                }
+            } catch {
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                    self.handleError(error)
+                }
             }
         }
     }
