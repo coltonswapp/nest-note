@@ -423,12 +423,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     func refreshEmptyState() {
         // Show or hide empty state view based on entries, folders, places, and routines count
-        if entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty {
-            emptyStateView.isHidden = false
-            view.bringSubviewToFront(emptyStateView)
+        let shouldShowEmptyState = entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty
+        
+        if shouldShowEmptyState {
+            emptyStateView.animateIn()
             addEntryButton?.isHidden = true
         } else {
-            emptyStateView.isHidden = true
+            emptyStateView.animateOut()
             addEntryButton?.isHidden = false
         }
     }

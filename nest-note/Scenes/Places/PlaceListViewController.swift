@@ -119,7 +119,7 @@ final class PlaceListViewController: NNViewController, NNTippable {
             if self.isLoading {
                 self.loadingIndicator.startAnimating()
                 self.collectionView.isHidden = true
-                self.emptyStateView?.isHidden = true
+                self.emptyStateView?.hideImmediately()
             } else {
                 self.loadingIndicator.stopAnimating()
                 self.updateEmptyState()
@@ -345,14 +345,20 @@ final class PlaceListViewController: NNViewController, NNTippable {
     
     private func updateEmptyState() {
         if isLoading {
-            emptyStateView?.isHidden = true
+            emptyStateView?.hideImmediately()
             collectionView.isHidden = true
             newPlaceButton?.isHidden = true
             return
         }
         
         let isEmpty = places.isEmpty
-        emptyStateView?.isHidden = !isEmpty
+        
+        if isEmpty {
+            emptyStateView?.animateIn()
+        } else {
+            emptyStateView?.animateOut()
+        }
+        
         collectionView.isHidden = isEmpty
         
         // Show new place button only when there are places and we're not in selection mode

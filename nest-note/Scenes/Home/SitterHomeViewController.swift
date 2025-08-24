@@ -444,8 +444,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             collectionView.isHidden = true
             emptyStateView.isHidden = false
             
-            // Bring the empty state view to the front
-            view.bringSubviewToFront(emptyStateView)
+            // Animate the empty state into view
+            emptyStateView.animateIn()
             
             // Ensure it's interactive
             emptyStateView.isUserInteractionEnabled = true
@@ -458,7 +458,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         case .error(let error):
             loadingSpinner.stopAnimating()
             collectionView.isHidden = true
-            emptyStateView.isHidden = false
+            emptyStateView.animateIn()
             handleError(error)
         }
     }
@@ -655,6 +655,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         
         // Fallback to folder icon if category not found
         return "folder.fill"
+    }
+    
+    // MARK: - Animation Methods
+    
+    
+    private func hideEmptyState() {
+        emptyStateView.hideImmediately()
     }
     
     // MARK: - Helper Methods

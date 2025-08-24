@@ -353,15 +353,16 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
             )
         }
         
-        // Update visibility based on data state
-        UIView.animate(withDuration: 0.3) {
-            self.emptyStateView.alpha = shouldShowEmptyState ? 1.0 : 0.0
-            self.collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
+        // Update visibility based on data state with crossfade
+        emptyStateView.crossFade(shouldShow: shouldShowEmptyState, duration: 0.3) { [weak self] in
+            guard let self = self else { return }
+            self.collectionView.isHidden = shouldShowEmptyState
         }
         
-        // Update hidden state after animation
-        emptyStateView.isHidden = !shouldShowEmptyState
-        collectionView.isHidden = shouldShowEmptyState
+        // Animate collection view alpha
+        UIView.animate(withDuration: 0.3) {
+            self.collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
+        }
     }
     
     private func setupBottomButtonStack() {

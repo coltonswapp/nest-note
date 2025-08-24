@@ -474,11 +474,13 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         // Only update empty state for non-sitters
         if !isSitter {
             let hasEvents = !eventsByDate.isEmpty
-            emptyStateView.isHidden = hasEvents
             
             if !hasEvents {
                 let (title, subtitle, icon) = emptyStateConfig(for: dateRange)
                 emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
+                emptyStateView.animateIn()
+            } else {
+                emptyStateView.animateOut()
             }
         }
     }
