@@ -22,8 +22,6 @@
 		F670378D2DFCEA8E000D897E /* nn-storekit-config.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */; };
 		F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */ = {isa = PBXBuildFile; fileRef = F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */; };
 		F6A81B902E56524600D24D95 /* QRCode in Frameworks */ = {isa = PBXBuildFile; productRef = F6A81B8F2E56524600D24D95 /* QRCode */; };
-		F6A81B922E56524600D24D95 /* QRCodeDetector in Frameworks */ = {isa = PBXBuildFile; productRef = F6A81B912E56524600D24D95 /* QRCodeDetector */; };
-		F6A81B952E56642A00D24D95 /* QRCodeDetector in Embed Frameworks */ = {isa = PBXBuildFile; productRef = F6A81B912E56524600D24D95 /* QRCodeDetector */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
 		F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = F6E9EE522DA596DF009113C6 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
@@ -35,7 +33,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				F6A81B952E56642A00D24D95 /* QRCodeDetector in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 1;
@@ -81,7 +78,6 @@
 				F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */,
 				F66E292A2CD077E900B90ABC /* FirebaseCrashlytics in Frameworks */,
 				F6A81B902E56524600D24D95 /* QRCode in Frameworks */,
-				F6A81B922E56524600D24D95 /* QRCodeDetector in Frameworks */,
 				F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */,
 				F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */,
 				F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */,
@@ -160,7 +156,6 @@
 				F670377E2DFCA5DD000D897E /* RevenueCat */,
 				F67037802DFCA5DD000D897E /* RevenueCatUI */,
 				F6A81B8F2E56524600D24D95 /* QRCode */,
-				F6A81B912E56524600D24D95 /* QRCodeDetector */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -563,11 +558,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */;
 			productName = QRCode;
-		};
-		F6A81B912E56524600D24D95 /* QRCodeDetector */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */;
-			productName = QRCodeDetector;
 		};
 		F6B678292CDDED5700FDCAE4 /* Toast */ = {
 			isa = XCSwiftPackageProductDependency;

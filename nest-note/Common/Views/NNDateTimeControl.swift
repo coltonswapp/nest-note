@@ -27,6 +27,9 @@ final class NNDateTimeControl: UIStackView {
             // Always update timeText
             formatter.dateFormat = "h:mm a"
             timeText = formatter.string(from: date)
+            
+            // Call the date changed callback
+            onDateChanged?()
         }
     }
     
@@ -59,6 +62,7 @@ final class NNDateTimeControl: UIStackView {
     
     var onDateTapped: (() -> Void)?
     var onTimeTapped: (() -> Void)?
+    var onDateChanged: (() -> Void)?
     
     var dateText: String {
         get { dateControl.text }

@@ -643,6 +643,29 @@ final class SessionEventViewController: NNSheetViewController {
         let nav = UINavigationController(rootViewController: view)
         present(nav, animated: true)
     }
+    
+    @objc private func titleFieldChanged() {
+        checkForUnsavedChanges()
+    }
+    
+    private func checkForUnsavedChanges() {
+        let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentStartDate = startControl.date
+        let currentEndDate = endControl.date
+        let currentPlaceId = locationView.place?.id
+        let currentColorIndex = selectedColorIndex
+        
+        hasUnsavedChanges = currentTitle != (originalTitle ?? "") ||
+                           currentStartDate != (originalStartDate ?? Date()) ||
+                           currentEndDate != (originalEndDate ?? Date()) ||
+                           currentPlaceId != originalPlaceId ||
+                           currentColorIndex != originalColorIndex
+    }
+    
+    private func updateSaveButtonState() {
+        saveButton.isEnabled = hasUnsavedChanges || event == nil
+        saveButton.alpha = saveButton.isEnabled ? 1.0 : 0.6
+    }
 }
 
 // MARK: - NNDateTimePickerSheetDelegate
