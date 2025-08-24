@@ -15,6 +15,20 @@ final class SessionEventViewController: NNSheetViewController {
     private var sessionDateRange: DateInterval?
     private let entryRepository: EntryRepository?
     
+    // Track original values for change detection
+    private var originalTitle: String?
+    private var originalStartDate: Date?
+    private var originalEndDate: Date?
+    private var originalPlaceId: String?
+    private var originalColorIndex: Int = 0
+    
+    // Track changes
+    private var hasUnsavedChanges: Bool = false {
+        didSet {
+            updateSaveButtonState()
+        }
+    }
+    
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
         control.translatesAutoresizingMaskIntoConstraints = false
@@ -23,6 +37,9 @@ final class SessionEventViewController: NNSheetViewController {
         }
         control.onTimeTapped = { [weak self] in
             self?.startTimeTapped()
+        }
+        control.onDateChanged = { [weak self] in
+            self?.checkForUnsavedChanges()
         }
         return control
     }()
@@ -35,6 +52,9 @@ final class SessionEventViewController: NNSheetViewController {
         }
         control.onTimeTapped = { [weak self] in
             self?.endTimeTapped()
+        }
+        control.onDateChanged = { [weak self] in
+            self?.checkForUnsavedChanges()
         }
         return control
     }()
@@ -151,6 +171,7 @@ final class SessionEventViewController: NNSheetViewController {
         itemsHiddenDuringTransition = [buttonStackView, infoButton]
         
         titleField.delegate = self
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
         
         // Configure with existing event
         if let event = event {
@@ -162,6 +183,13 @@ final class SessionEventViewController: NNSheetViewController {
             if let colorIndex = colors.firstIndex(where: { $0 == event.eventColor }) {
                 selectedColorIndex = colorIndex
             }
+            
+            // Store original values for change detection
+            originalTitle = event.title
+            originalStartDate = event.startDate
+            originalEndDate = event.endDate
+            originalPlaceId = event.placeID
+            originalColorIndex = selectedColorIndex
             
             Task {
                 if let placeID = event.placeID {
@@ -192,6 +220,9 @@ final class SessionEventViewController: NNSheetViewController {
             colorDividerView.isHidden = true
             buttonStackView.isHidden = true
         }
+        
+        // Initial save button state update
+        updateSaveButtonState()
     }
     
     override func viewDidAppear(_ animated: Bool) {
