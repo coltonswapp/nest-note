@@ -59,6 +59,9 @@ class Tracker {
         case regularSignUpSucceeded = "regularSignUpSucceeded"
         case userLoggedOut = "userLoggedOut"
         
+        // MARK: - App Lifecycle Events
+        case appBackgroundReturn = "app_background_return"
+        
         // MARK: - Misc
         case pinnedCategoriesUpdated = "pinnedCategoriesUpdated"
     }
@@ -101,5 +104,28 @@ class Tracker {
         }
         
         Analytics.logEvent(eventName, parameters: parameters)
+    }
+    
+    // MARK: - App Background Return Event
+    func trackAppBackgroundReturn(backgroundDurationMinutes: Int, requiresRefresh: Bool) {
+        var parameters: [String: Any] = [
+            "background_duration_minutes": backgroundDurationMinutes,
+            "requires_refresh": requiresRefresh
+        ]
+        
+        // Add user context
+        if let userEmail = cachedUserEmail {
+            parameters["user_email"] = userEmail
+        }
+        
+        if let userID = cachedUserID {
+            parameters["user_id"] = userID
+        }
+        
+        if let nestId = NestService.shared.currentNest?.id {
+            parameters["nest_id"] = nestId
+        }
+        
+        Analytics.logEvent(NNEventName.appBackgroundReturn.rawValue, parameters: parameters)
     }
 }

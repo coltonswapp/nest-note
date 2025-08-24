@@ -43,6 +43,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         return spinner
     }()
     
+    private lazy var refreshControl: UIRefreshControl = {
+        let refreshControl = UIRefreshControl()
+        refreshControl.addTarget(self, action: #selector(handlePullToRefresh), for: .valueChanged)
+        return refreshControl
+    }()
+    
     // MARK: - Lifecycle
     
     override func viewDidLoad() {
@@ -140,6 +146,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self?.applySnapshot(animatingDifferences: true)
             }
             .store(in: &cancellables)
+        
+        // Subscribe to app returning from long background
+        NotificationCenter.default.publisher(for: .appReturnedFromLongBackground)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleAutoRefresh()
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -148,6 +162,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
+        collectionView.refreshControl = refreshControl
         view.addSubview(collectionView)
     }
     
@@ -430,6 +445,25 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 }
             }
         }
+    }
+    
+    @objc private func handlePullToRefresh() {
+        Task {
+            await MainActor.run {
+                self.refreshData()
+                self.refreshControl.endRefreshing()
+            }
+        }
+    }
+    
+    private func handleAutoRefresh() {
+        // Show loading indicator for auto-refresh
+        loadingSpinner.startAnimating()
+        
+        // Refresh data
+        refreshData()
+        
+        // Note: loadingSpinner.stopAnimating() is called in refreshData() completion
     }
     
     // MARK: - Navigation
