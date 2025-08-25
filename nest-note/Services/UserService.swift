@@ -715,13 +715,18 @@ final class UserService {
     }
     
     // MARK: - Sign out & reset
-    func logout() async throws {
+    func logout(clearSavedCredentials: Bool = false) async throws {
         // Sign out from Firebase Auth
         do {
             try auth.signOut()
             currentUser = nil
             isAuthenticated = false
             clearAuthState()
+            
+            // Optionally clear saved credentials from keychain
+            if clearSavedCredentials {
+                _ = KeychainService.shared.deleteAllCredentials()
+            }
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
             Tracker.shared.track(.userLoggedOut)

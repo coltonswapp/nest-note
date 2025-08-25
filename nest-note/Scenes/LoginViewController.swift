@@ -49,6 +49,7 @@ final class LoginViewController: NNViewController {
         field.spellCheckingType = .no
         field.delegate = self
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
+        field.addTarget(self, action: #selector(emailFieldDidChange), for: .editingChanged)
         return field
     }()
     
@@ -146,7 +147,7 @@ final class LoginViewController: NNViewController {
     }()
     
     private lazy var bottomStack: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [forgotPasswordButton, signUpButton])
+        let stack = UIStackView(arrangedSubviews: [signUpButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .fill
@@ -157,6 +158,15 @@ final class LoginViewController: NNViewController {
     weak var delegate: AuthenticationDelegate?
     private var loginButtonBottomConstraint: NSLayoutConstraint?
     private var mainStackTopConstraint: NSLayoutConstraint?
+    
+    private let fieldStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.alignment = .trailing
+        return stack
+    }()
     
     private let loginStack: UIStackView = {
         let stack = UIStackView()
@@ -173,12 +183,17 @@ final class LoginViewController: NNViewController {
         view.backgroundColor = .systemBackground
         setupKeyboardObservers()
         setupNavBar()
+        loadSavedCredentials()
         updateLoginButtonState()
     }
     
     override func addSubviews() {
-        loginStack.addArrangedSubview(emailField)
-        loginStack.addArrangedSubview(passwordField)
+        fieldStack.addArrangedSubview(emailField)
+        fieldStack.addArrangedSubview(passwordField)
+        fieldStack.addArrangedSubview(forgotPasswordButton)
+        fieldStack.setCustomSpacing(4, after: passwordField)
+        loginStack.addArrangedSubview(fieldStack)
+        loginStack.setCustomSpacing(4, after: fieldStack)
         loginStack.addArrangedSubview(orDividerView)
         loginStack.addArrangedSubview(signInWithAppleButton)
         view.addSubview(topImageView)
@@ -187,6 +202,8 @@ final class LoginViewController: NNViewController {
         view.addSubview(loginStack)
         view.addSubview(loginButton)
         view.addSubview(bottomStack)
+        
+        setupAutofillConfiguration()
     }
     
     override func constrainSubviews() {
@@ -202,6 +219,9 @@ final class LoginViewController: NNViewController {
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            
+            fieldStack.leadingAnchor.constraint(equalTo: loginStack.leadingAnchor),
+            fieldStack.trailingAnchor.constraint(equalTo: loginStack.trailingAnchor),
             
             loginStack.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 32),
             loginStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
@@ -221,12 +241,28 @@ final class LoginViewController: NNViewController {
             
             bottomStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             bottomStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            bottomStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+            bottomStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4)
         ])
     }
     
     private func setupNavBar() {
         navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+    
+    private func setupAutofillConfiguration() {
+        // Set accessibility identifiers for autofill
+        emailField.accessibilityIdentifier = "email-field"
+        passwordField.accessibilityIdentifier = "password-field"
+        
+        // Ensure proper content types for autofill
+        emailField.textContentType = .username
+        passwordField.textContentType = .password
+        
+        // Enable autofill on the view
+        if #available(iOS 12.0, *) {
+            emailField.textContentType = .username
+            passwordField.textContentType = .password
+        }
     }
     
     @objc private func backTapped() {
@@ -235,6 +271,29 @@ final class LoginViewController: NNViewController {
     
     @objc private func textFieldDidChange() {
         updateLoginButtonState()
+    }
+    
+    @objc private func emailFieldDidChange() {
+        guard let email = emailField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty else {
+            passwordField.text = ""
+            return
+        }
+        
+        // Auto-populate password if available in keychain
+        if let savedPassword = KeychainService.shared.retrieveCredentials(for: email) {
+            passwordField.text = savedPassword
+            updateLoginButtonState()
+            
+            // Provide visual feedback that autofill occurred
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                HapticsHelper.lightHaptic()
+            }
+        } else {
+            // Clear password field if no saved credentials
+            passwordField.text = ""
+            updateLoginButtonState()
+        }
     }
     
     private func updateLoginButtonState() {
@@ -346,7 +405,7 @@ final class LoginViewController: NNViewController {
             do {
                 try await UserService.shared.sendPasswordReset(to: email)
                 await MainActor.run {
-                    self.showSuccessAlert(message: "Password reset email sent! Please check your inbox and follow the instructions to reset your password.")
+                    self.showSuccessAlert(message: "Password reset email sent! Please check your inbox and follow the instructions to reset your password.\n\n(Note: This email may be filtered as spam. If you don't see it, check your spam folder.)")
                 }
             } catch {
                 await MainActor.run {
@@ -402,8 +461,8 @@ final class LoginViewController: NNViewController {
                     loginButton.stopLoading(withSuccess: true)
                     Logger.log(level: .info, category: .general, message: "Successfully signed in")
                     
-                    // Prompt to save password to iCloud Keychain
-                    self.promptToSavePassword(email: email, password: password)
+                    // Save credentials to keychain
+                    self.saveCredentialsToKeychain(email: email, password: password)
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         self.delegate?.authenticationComplete()
@@ -427,32 +486,28 @@ final class LoginViewController: NNViewController {
         }
     }
     
-    private func promptToSavePassword(email: String, password: String) {
-        // Check if password is already saved to avoid duplicate prompts
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrServer as String: "nestnote.app",
-            kSecAttrAccount as String: email,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnAttributes as String: true
-        ]
+    private func saveCredentialsToKeychain(email: String, password: String) {
+        // Check if user wants to save credentials
+        guard KeychainService.shared.shouldPromptForSaving() else {
+            Logger.log(level: .info, category: .general, message: "Credential saving is disabled by user preference")
+            return
+        }
         
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        let success = KeychainService.shared.saveCredentials(email: email, password: password)
+        if success {
+            Logger.log(level: .info, category: .general, message: "Credentials saved to keychain successfully")
+        }
+    }
+    
+    private func loadSavedCredentials() {
+        // Get the most recently used email from user defaults or keychain
+        let storedEmails = KeychainService.shared.retrieveAllStoredEmails()
         
-        // If password is not already saved, prompt to save it
-        if status == errSecItemNotFound {
-            let savePasswordQuery: [String: Any] = [
-                kSecClass as String: kSecClassInternetPassword,
-                kSecAttrServer as String: "nestnote.app",
-                kSecAttrAccount as String: email,
-                kSecValueData as String: password.data(using: .utf8)!,
-                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            ]
-            
-            let saveStatus = SecItemAdd(savePasswordQuery as CFDictionary, nil)
-            if saveStatus == errSecSuccess {
-                Logger.log(level: .info, category: .general, message: "Password saved to iCloud Keychain")
-            }
+        // If we have stored emails, we could populate the most recent one
+        // For now, we'll let the user start typing and auto-populate from there
+        
+        if !storedEmails.isEmpty {
+            Logger.log(level: .info, category: .general, message: "Found \(storedEmails.count) saved email addresses in keychain")
         }
     }
     
