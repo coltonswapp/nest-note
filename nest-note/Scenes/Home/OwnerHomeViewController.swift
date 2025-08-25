@@ -111,7 +111,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         NotificationCenter.default.publisher(for: .sessionDidChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
         
@@ -134,7 +134,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 }
                 
                 // Refresh data from server to ensure UI is up-to-date
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
             
@@ -432,7 +432,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         }
     }
     
-    func refreshData() {
+    func refreshData(forceRefresh: Bool = false) {
         guard let nestID = nestService.currentNest?.id else {
             // No current nest, clear current session and update UI
             currentSession = nil
@@ -445,7 +445,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 loadingSpinner.startAnimating()
                 
                 // Fetch sessions, pinned categories, and categories concurrently
-                async let sessionsTask = sessionService.fetchSessions(nestID: nestID)
+                async let sessionsTask = sessionService.fetchSessions(nestID: nestID, forceRefresh: forceRefresh)
                 async let pinnedCategoriesTask = nestService.fetchPinnedCategories()
                 async let categoriesTask = nestService.fetchCategories()
                 
@@ -477,7 +477,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     @objc private func handlePullToRefresh() {
         Task {
             await MainActor.run {
-                self.refreshData()
+                self.refreshData(forceRefresh: true)
                 self.refreshControl.endRefreshing()
             }
         }
@@ -487,8 +487,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         // Show loading indicator for auto-refresh
         loadingSpinner.startAnimating()
         
-        // Refresh data
-        refreshData()
+        // Force refresh to bypass any cached data when returning from long background
+        refreshData(forceRefresh: true)
         
         // Note: loadingSpinner.stopAnimating() is called in refreshData() completion
     }

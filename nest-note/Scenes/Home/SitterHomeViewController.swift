@@ -410,7 +410,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             .receive(on: DispatchQueue.main)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
         
@@ -418,7 +418,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             .receive(on: DispatchQueue.main)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
         
@@ -614,7 +614,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
-    func refreshData() {
+    func refreshData(forceRefresh: Bool = false) {
         Task {
             do {
                 try await sitterViewService.fetchCurrentSession()

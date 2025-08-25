@@ -12,7 +12,7 @@ protocol HomeViewControllerType: NNViewController {
     var dataSource: UICollectionViewDiffableDataSource<HomeSection, HomeItem>! { get }
     
     // MARK: - Data Management
-    func refreshData()
+    func refreshData(forceRefresh: Bool)
     func handleError(_ error: Error)
     
     // MARK: - Collection View Setup
