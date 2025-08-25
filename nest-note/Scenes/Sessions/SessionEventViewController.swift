@@ -15,6 +15,20 @@ final class SessionEventViewController: NNSheetViewController {
     private var sessionDateRange: DateInterval?
     private let entryRepository: EntryRepository?
     
+    // Track original values for change detection
+    private var originalTitle: String?
+    private var originalStartDate: Date?
+    private var originalEndDate: Date?
+    private var originalPlaceId: String?
+    private var originalColorIndex: Int = 0
+    
+    // Track changes
+    private var hasUnsavedChanges: Bool = false {
+        didSet {
+            updateSaveButtonState()
+        }
+    }
+    
     lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
         control.translatesAutoresizingMaskIntoConstraints = false
@@ -23,6 +37,9 @@ final class SessionEventViewController: NNSheetViewController {
         }
         control.onTimeTapped = { [weak self] in
             self?.startTimeTapped()
+        }
+        control.onDateChanged = { [weak self] in
+            self?.checkForUnsavedChanges()
         }
         return control
     }()
@@ -35,6 +52,9 @@ final class SessionEventViewController: NNSheetViewController {
         }
         control.onTimeTapped = { [weak self] in
             self?.endTimeTapped()
+        }
+        control.onDateChanged = { [weak self] in
+            self?.checkForUnsavedChanges()
         }
         return control
     }()
@@ -151,6 +171,7 @@ final class SessionEventViewController: NNSheetViewController {
         itemsHiddenDuringTransition = [buttonStackView, infoButton]
         
         titleField.delegate = self
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
         
         // Configure with existing event
         if let event = event {
@@ -162,6 +183,13 @@ final class SessionEventViewController: NNSheetViewController {
             if let colorIndex = colors.firstIndex(where: { $0 == event.eventColor }) {
                 selectedColorIndex = colorIndex
             }
+            
+            // Store original values for change detection
+            originalTitle = event.title
+            originalStartDate = event.startDate
+            originalEndDate = event.endDate
+            originalPlaceId = event.placeID
+            originalColorIndex = selectedColorIndex
             
             Task {
                 if let placeID = event.placeID {
@@ -192,6 +220,9 @@ final class SessionEventViewController: NNSheetViewController {
             colorDividerView.isHidden = true
             buttonStackView.isHidden = true
         }
+        
+        // Initial save button state update
+        updateSaveButtonState()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -341,11 +372,16 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     private func deleteEvent() {
-        guard let event = event, let sessionID = sessionID else { return }
+        guard let event = event else { return }
         
         Task {
             do {
-                try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                // Delete from server only if we have a sessionID (existing session)
+                if let sessionID = sessionID {
+                    try await SessionService.shared.deleteSessionEvent(event.id, sessionID: sessionID)
+                }
+                // If no sessionID (new session), skip server delete - the event will be removed via callback
+                
                 await MainActor.run {
                     eventDelegate?.sessionEventViewController(self, didDeleteEvent: event)
                     dismiss(animated: true)
@@ -450,8 +486,6 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     @objc private func saveButtonTapped() {
-        guard let sessionID else { shakeContainerView(); return }
-        
         guard let eventTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !eventTitle.isEmpty else {
             shakeContainerView()
@@ -476,7 +510,7 @@ final class SessionEventViewController: NNSheetViewController {
             eventColor: selectedColorType()
         )
         
-        // Save using SessionService
+        // Save based on context
         Task {
             do {
                 // First, if we have a temporary place that hasn't been saved yet, save it
@@ -484,8 +518,11 @@ final class SessionEventViewController: NNSheetViewController {
                     try await NestService.shared.createPlace(place)
                 }
                 
-                // Then save the event
-                try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                // Save to server only if we have a sessionID (existing session)
+                if let sessionID = sessionID {
+                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                }
+                // If no sessionID (new session), skip server save - the event will be saved via callback
                 
                 await MainActor.run {
                     saveButton.stopLoading(withSuccess: true)
@@ -605,6 +642,29 @@ final class SessionEventViewController: NNSheetViewController {
         view.selectionDelegate = self
         let nav = UINavigationController(rootViewController: view)
         present(nav, animated: true)
+    }
+    
+    @objc private func titleFieldChanged() {
+        checkForUnsavedChanges()
+    }
+    
+    private func checkForUnsavedChanges() {
+        let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentStartDate = startControl.date
+        let currentEndDate = endControl.date
+        let currentPlaceId = locationView.place?.id
+        let currentColorIndex = selectedColorIndex
+        
+        hasUnsavedChanges = currentTitle != (originalTitle ?? "") ||
+                           currentStartDate != (originalStartDate ?? Date()) ||
+                           currentEndDate != (originalEndDate ?? Date()) ||
+                           currentPlaceId != originalPlaceId ||
+                           currentColorIndex != originalColorIndex
+    }
+    
+    private func updateSaveButtonState() {
+        saveButton.isEnabled = hasUnsavedChanges || event == nil
+        saveButton.alpha = saveButton.isEnabled ? 1.0 : 0.6
     }
 }
 

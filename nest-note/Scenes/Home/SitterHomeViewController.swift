@@ -26,6 +26,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         return spinner
     }()
     
+    private lazy var refreshControl: UIRefreshControl = {
+        let refreshControl = UIRefreshControl()
+        refreshControl.addTarget(self, action: #selector(handlePullToRefresh), for: .valueChanged)
+        return refreshControl
+    }()
+    
     private lazy var emptyStateView: NNEmptyStateView = {
         let view = NNEmptyStateView(
             icon: nil,
@@ -97,6 +103,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
+        collectionView.refreshControl = refreshControl
         view.addSubview(collectionView)
     }
     
@@ -403,7 +410,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             .receive(on: DispatchQueue.main)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
         
@@ -411,7 +418,15 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             .receive(on: DispatchQueue.main)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
+            }
+            .store(in: &cancellables)
+        
+        // Subscribe to app returning from long background
+        NotificationCenter.default.publisher(for: .appReturnedFromLongBackground)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleAutoRefresh()
             }
             .store(in: &cancellables)
         
@@ -444,8 +459,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             collectionView.isHidden = true
             emptyStateView.isHidden = false
             
-            // Bring the empty state view to the front
-            view.bringSubviewToFront(emptyStateView)
+            // Animate the empty state into view
+            emptyStateView.animateIn()
             
             // Ensure it's interactive
             emptyStateView.isUserInteractionEnabled = true
@@ -458,7 +473,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         case .error(let error):
             loadingSpinner.stopAnimating()
             collectionView.isHidden = true
-            emptyStateView.isHidden = false
+            emptyStateView.animateIn()
             handleError(error)
         }
     }
@@ -599,12 +614,47 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
-    func refreshData() {
+    func refreshData(forceRefresh: Bool = false) {
         Task {
             do {
                 try await sitterViewService.fetchCurrentSession()
             } catch {
                 handleError(error)
+            }
+        }
+    }
+    
+    @objc private func handlePullToRefresh() {
+        Task {
+            do {
+                try await sitterViewService.fetchCurrentSession()
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                }
+            } catch {
+                await MainActor.run {
+                    self.refreshControl.endRefreshing()
+                    self.handleError(error)
+                }
+            }
+        }
+    }
+    
+    private func handleAutoRefresh() {
+        // Show loading indicator for auto-refresh
+        loadingSpinner.startAnimating()
+        
+        Task {
+            do {
+                try await sitterViewService.fetchCurrentSession()
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                }
+            } catch {
+                await MainActor.run {
+                    self.loadingSpinner.stopAnimating()
+                    self.handleError(error)
+                }
             }
         }
     }
@@ -655,6 +705,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         
         // Fallback to folder icon if category not found
         return "folder.fill"
+    }
+    
+    // MARK: - Animation Methods
+    
+    
+    private func hideEmptyState() {
+        emptyStateView.hideImmediately()
     }
     
     // MARK: - Helper Methods

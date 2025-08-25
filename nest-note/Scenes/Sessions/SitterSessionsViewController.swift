@@ -315,7 +315,7 @@ class SitterSessionsViewController: NNViewController {
         Task {
             do {
                 filterView.isEnabled = false
-                emptyStateView.isHidden = true
+                emptyStateView.hideImmediately()
                 loadingSpinner.startAnimating()
                 guard let userID = UserService.shared.currentUser?.id else { return }
                 
@@ -397,11 +397,13 @@ class SitterSessionsViewController: NNViewController {
     
     private func updateEmptyState() {
         let hasItems = !filteredSessions.isEmpty
-        emptyStateView.isHidden = hasItems
         
         if !hasItems {
             let (title, subtitle, icon) = emptyStateConfig(for: currentBucket)
             emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
+            emptyStateView.animateIn()
+        } else {
+            emptyStateView.animateOut()
         }
     }
     

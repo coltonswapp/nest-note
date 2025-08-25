@@ -14,6 +14,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var coordinator: LaunchCoordinator?
     private var pendingURL: URL?
+    private var backgroundTime: Date?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let windowScene = (scene as? UIWindowScene) else { return }
@@ -81,16 +82,51 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Called as the scene transitions from the background to the foreground.
         // Use this method to undo the changes made on entering the background.
         
-        // Only trigger data refresh if user is authenticated
-        if UserService.shared.isAuthenticated {
+        // Only process background return if user is authenticated
+        guard UserService.shared.isAuthenticated else { return }
+        
+        // Check if we need to refresh based on background time
+        guard let backgroundTime = backgroundTime else {
+            // No background time recorded, just trigger normal refresh
+            NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+            return
+        }
+        
+        let elapsedTime = Date().timeIntervalSince(backgroundTime)
+        let thirtyMinutes: TimeInterval = 30 * 60
+        let elapsedMinutes = Int(elapsedTime / 60)
+        
+        if elapsedTime >= thirtyMinutes {
+            // Log Firebase event for extended background period
+            Tracker.shared.trackAppBackgroundReturn(
+                backgroundDurationMinutes: elapsedMinutes,
+                requiresRefresh: true
+            )
+            
+            // Trigger refresh on active view controllers
+            NotificationCenter.default.post(name: .appReturnedFromLongBackground, object: nil)
+        } else {
+            // Log Firebase event for shorter background period (optional)
+            Tracker.shared.trackAppBackgroundReturn(
+                backgroundDurationMinutes: elapsedMinutes,
+                requiresRefresh: false
+            )
+            
+            // Trigger normal session refresh
             NotificationCenter.default.post(name: .sessionDidChange, object: nil)
         }
+        
+        // Clear background time
+        self.backgroundTime = nil
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         // Called as the scene transitions from the foreground to the background.
         // Use this method to save data, release shared resources, and store enough scene-specific state information
         // to restore the scene back to its current state.
+        
+        // Track when app enters background
+        backgroundTime = Date()
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

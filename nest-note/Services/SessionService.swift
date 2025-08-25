@@ -199,16 +199,20 @@ class SessionService {
     }
     
     // MARK: - Fetch Organized Sessions
-    func fetchSessions(nestID: String) async throws -> SessionCollection {
-        Logger.log(level: .info, category: .sessionService, message: "Fetching and organizing sessions for nest: \(nestID)")
+    func fetchSessions(nestID: String, forceRefresh: Bool = false) async throws -> SessionCollection {
+        Logger.log(level: .info, category: .sessionService, message: "Fetching and organizing sessions for nest: \(nestID) (forceRefresh: \(forceRefresh))")
         
-        #if DEBUG
-        let sessions = self.sessions.isEmpty ? try await getAllSessions(nestID: nestID) : self.sessions
-        #else
-        let sessions = try await getAllSessions(nestID: nestID)
-        #endif
-        
-        let now = Date()
+        let sessions: [SessionItem]
+        if forceRefresh {
+            // Force refresh - always fetch from server
+            sessions = try await getAllSessions(nestID: nestID)
+        } else {
+            #if DEBUG
+            sessions = self.sessions.isEmpty ? try await getAllSessions(nestID: nestID) : self.sessions
+            #else
+            sessions = try await getAllSessions(nestID: nestID)
+            #endif
+        }
         
         // Update status and sort sessions into appropriate buckets
         let sorted = sessions.reduce(into: (
@@ -249,8 +253,8 @@ class SessionService {
     }
     
     // Helper method for specific bucket
-    func fetchSessions(nestID: String, bucket: SessionBucket) async throws -> [SessionItem] {
-        let collection = try await fetchSessions(nestID: nestID)
+    func fetchSessions(nestID: String, bucket: SessionBucket, forceRefresh: Bool = false) async throws -> [SessionItem] {
+        let collection = try await fetchSessions(nestID: nestID, forceRefresh: forceRefresh)
         switch bucket {
         case .upcoming:
             return collection.upcoming

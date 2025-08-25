@@ -59,6 +59,17 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     let entry: BaseEntry?
     private let category: String
     
+    // Track original values for change detection
+    private var originalTitle: String?
+    private var originalContent: String?
+    
+    // Track changes
+    private var hasUnsavedChanges: Bool = false {
+        didSet {
+            updateSaveButtonState()
+        }
+    }
+    
     // MARK: - Initialization
     init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
@@ -92,6 +103,13 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         contentTextView.text = entry?.content
         contentTextView.delegate = self
         
+        // Store original values for change detection
+        originalTitle = entry?.title
+        originalContent = entry?.content
+        
+        // Add target for title field changes
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
+        
         // Configure folder label with last 2 components
         configureFolderLabel()
         
@@ -108,6 +126,9 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         } else if entry == nil && !isReadOnly {
             contentTextView.becomeFirstResponder()
         }
+        
+        // Initial save button state update
+        updateSaveButtonState()
     }
     
     // MARK: - Setup Methods
@@ -305,6 +326,9 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                     // Create entry (limit check is done before showing this VC)
                     try await NestService.shared.createEntry(newEntry)
                     savedEntry = newEntry
+                    
+                    // Track entry creation for rating prompt
+                    RatingManager.shared.trackEntryCreation()
                 }
                 
                 HapticsHelper.lightHaptic()
@@ -367,6 +391,45 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         }
     }
     
+    // MARK: - Change Detection
+    
+    @objc private func titleFieldChanged() {
+        checkForUnsavedChanges()
+    }
+    
+    private func checkForUnsavedChanges() {
+        let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentContent = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let titleChanged = currentTitle != originalTitle
+        let contentChanged = currentContent != originalContent
+        
+        hasUnsavedChanges = titleChanged || contentChanged
+    }
+    
+    private func updateSaveButtonState() {
+        if isReadOnly {
+            saveButton.isHidden = true
+            return
+        }
+        
+        // For new entries, enable save button when title and content are not empty
+        if entry == nil {
+            let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let contentString = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let hasRequiredContent = !titleString.isEmpty && !contentString.isEmpty
+            saveButton.isEnabled = hasRequiredContent
+            return
+        }
+        
+        // For existing entries, enable save button only when there are changes
+        let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let contentString = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasRequiredContent = !titleString.isEmpty && !contentString.isEmpty
+        
+        saveButton.isEnabled = hasRequiredContent && hasUnsavedChanges
+    }
+    
     // MARK: - Error Handling
     
     private func showErrorAlert(message: String) {
@@ -396,6 +459,10 @@ extension EntryDetailViewController: UITextFieldDelegate {
 extension EntryDetailViewController: UITextViewDelegate {
     func textViewDidBeginEditing(_ textView: UITextView) {
         //
+    }
+    
+    func textViewDidChange(_ textView: UITextView) {
+        checkForUnsavedChanges()
     }
     
     func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {

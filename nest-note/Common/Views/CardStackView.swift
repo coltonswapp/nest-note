@@ -338,9 +338,9 @@ class CardStackView: UIView {
                 card.layer.zPosition = CGFloat(self.cards.count - index)
             }
             
-            // Show spinner if this is the last card
+            // Show empty state if this is the last card
             if isLastCard {
-                self.emptyStateView.alpha = 1
+                self.emptyStateView.animateIn()
             }
         }) { _ in
             cardToRemove.removeFromSuperview()
@@ -555,8 +555,8 @@ class CardStackView: UIView {
     private func showSuccessState() {
         UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut) {
             self.progressLabel.alpha = 0
-            self.emptyStateView.alpha = 1
         }
+        emptyStateView.animateIn()
     }
     
     // Add public method for programmatic right swipe
@@ -716,9 +716,7 @@ class CardStackView: UIView {
         )
         
         // Show empty state view with animation
-        UIView.animate(withDuration: 0.3) {
-            self.emptyStateView.alpha = 1.0
-        }
+        emptyStateView.animateIn()
         
         // Hide progress label
         progressLabel.alpha = 0

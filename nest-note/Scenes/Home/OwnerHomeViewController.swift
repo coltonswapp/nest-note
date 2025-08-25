@@ -27,6 +27,11 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     // Track whether we've already shown the happening now tip in this session
     private var hasShownHappeningNowTip = false
     
+    private var nestCreationCoordinator: NestCreationCoordinator?
+    
+    // Track if we're currently switching modes to avoid showing nest setup during transition
+    private var isSwitchingModes = false
+    
     private var hasCompletedSetup: Bool {
         return setupService.hasCompletedSetup
     }
@@ -43,6 +48,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         return spinner
     }()
     
+    private lazy var refreshControl: UIRefreshControl = {
+        let refreshControl = UIRefreshControl()
+        refreshControl.addTarget(self, action: #selector(handlePullToRefresh), for: .valueChanged)
+        return refreshControl
+    }()
+    
     // MARK: - Lifecycle
     
     override func viewDidLoad() {
@@ -53,6 +64,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         
         // Check setup status when the view loads
         checkSetupStatus()
+        
+        // Check if nest setup is required (for cases where mode already changed)
+        checkNestSetupRequirement()
         
 //        setFCMToken()
     }
@@ -97,7 +111,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         NotificationCenter.default.publisher(for: .sessionDidChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
         
@@ -120,7 +134,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 }
                 
                 // Refresh data from server to ensure UI is up-to-date
-                self?.refreshData()
+                self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
             
@@ -140,6 +154,22 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self?.applySnapshot(animatingDifferences: true)
             }
             .store(in: &cancellables)
+            
+        // Subscribe to mode changes to check for nest setup requirement
+        NotificationCenter.default.publisher(for: .modeDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.checkNestSetupRequirement()
+            }
+            .store(in: &cancellables)
+        
+        // Subscribe to app returning from long background
+        NotificationCenter.default.publisher(for: .appReturnedFromLongBackground)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.handleAutoRefresh()
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -148,6 +178,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
+        collectionView.refreshControl = refreshControl
         view.addSubview(collectionView)
     }
     
@@ -174,8 +205,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 formatter.timeStyle = .none
                 let duration = formatter.string(from: session.startDate, to: session.endDate)
                 
-                // Get sitter name or email
-                let sitterInfo: String? = session.assignedSitter?.name ?? session.assignedSitter?.email
+                // Get sitter name or email, but only if they're not empty strings
+                let sitterName = session.assignedSitter?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sitterEmail = session.assignedSitter?.email.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                let sitterInfo: String? = {
+                    if let name = sitterName, !name.isEmpty {
+                        return name
+                    } else if let email = sitterEmail, !email.isEmpty {
+                        return email
+                    } else {
+                        return nil
+                    }
+                }()
                 
                 let durationText: String = sitterInfo == nil ? duration : "\(sitterInfo!) • \(duration)"
                 
@@ -390,7 +432,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         }
     }
     
-    func refreshData() {
+    func refreshData(forceRefresh: Bool = false) {
         guard let nestID = nestService.currentNest?.id else {
             // No current nest, clear current session and update UI
             currentSession = nil
@@ -403,7 +445,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 loadingSpinner.startAnimating()
                 
                 // Fetch sessions, pinned categories, and categories concurrently
-                async let sessionsTask = sessionService.fetchSessions(nestID: nestID)
+                async let sessionsTask = sessionService.fetchSessions(nestID: nestID, forceRefresh: forceRefresh)
                 async let pinnedCategoriesTask = nestService.fetchPinnedCategories()
                 async let categoriesTask = nestService.fetchCategories()
                 
@@ -430,6 +472,25 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 }
             }
         }
+    }
+    
+    @objc private func handlePullToRefresh() {
+        Task {
+            await MainActor.run {
+                self.refreshData(forceRefresh: true)
+                self.refreshControl.endRefreshing()
+            }
+        }
+    }
+    
+    private func handleAutoRefresh() {
+        // Show loading indicator for auto-refresh
+        loadingSpinner.startAnimating()
+        
+        // Force refresh to bypass any cached data when returning from long background
+        refreshData(forceRefresh: true)
+        
+        // Note: loadingSpinner.stopAnimating() is called in refreshData() completion
     }
     
     // MARK: - Navigation
@@ -498,6 +559,97 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         
         // Fallback to folder icon if category not found
         return "folder.fill"
+    }
+    
+    // MARK: - Nest Setup Methods
+    
+    private func checkNestSetupRequirement() {
+        // Don't show nest setup if we're currently switching modes
+        guard !isSwitchingModes else {
+            return
+        }
+        
+        // Only check if we're in owner mode and signed in
+        guard ModeManager.shared.isNestOwnerMode && UserService.shared.isSignedIn else {
+            return
+        }
+        
+        // Check if user has a nest setup
+        if NestService.shared.currentNest == nil {
+            // User switched to owner mode but doesn't have a nest - show ATF flow
+            showNestSetup()
+        }
+    }
+    
+    private func showNestSetup() {
+        let alert = UIAlertController(
+            title: "Nest Setup Required",
+            message: "You'll need to create your nest before you can access owner features. Would you like to set up your nest now?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Back to Sitter Mode", style: .cancel) { [weak self] _ in
+            self?.switchBackToSitterMode()
+        })
+        alert.addAction(UIAlertAction(title: "Create Nest", style: .default) { [weak self] _ in
+            self?.presentNestCreationFlow()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func presentNestCreationFlow() {
+        nestCreationCoordinator = NestCreationCoordinator()
+        guard let nestCreationCoordinator else { 
+            return 
+        }
+        
+        present(nestCreationCoordinator.start(), animated: true)
+    }
+    
+    private func switchBackToSitterMode() {
+        guard let launchCoordinator = LaunchCoordinator.shared else {
+            return
+        }
+        
+        // Dismiss any presented view controllers first to avoid the detached view controller warning
+        if presentedViewController != nil {
+            dismiss(animated: true) {
+                self.performModeSwitch(launchCoordinator: launchCoordinator)
+            }
+        } else {
+            performModeSwitch(launchCoordinator: launchCoordinator)
+        }
+    }
+    
+    private func performModeSwitch(launchCoordinator: LaunchCoordinator) {
+        isSwitchingModes = true
+        
+        Task {
+            do {
+                // Set the mode first
+                ModeManager.shared.currentMode = .sitter
+                
+                // Then reconfigure with LaunchCoordinator
+                try await launchCoordinator.switchMode(to: .sitter)
+                
+                // The LaunchCoordinator should handle the view controller transition
+            } catch {
+                // Only show error feedback if we're still in the view hierarchy
+                await MainActor.run {
+                    if self.view.window != nil {
+                        self.showToast(text: "Failed to switch modes. Please try again.")
+                    }
+                }
+            }
+            
+            // Reset the flag after a delay to allow the transition to complete
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.isSwitchingModes = false
+                }
+            }
+        }
     }
     
     
@@ -588,7 +740,13 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
         case .nest:
             // Dismiss the your nest tip when the nest cell is tapped
             NNTipManager.shared.dismissTip(OwnerHomeTips.yourNestTip)
-            presentHouseholdView()
+            
+            // If no current nest, show nest setup flow instead of household view
+            if NestService.shared.currentNest == nil {
+                showNestSetup()
+            } else {
+                presentHouseholdView()
+            }
         case .quickAccess(let type):
             switch type {
             case .ownerHousehold:
@@ -679,4 +837,5 @@ extension OwnerHomeViewController: SetupFlowDelegate {
         // Refresh the UI to reflect updated step status
         refreshData()
     }
-} 
+}
+

@@ -711,6 +711,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     let newSession = try await SessionService.shared.createSession(sessionItem)
                     sessionItem = newSession // Update sessionItem with the created session
                     
+                    // Save any events that were created during session setup
+                    if !sessionEvents.isEmpty {
+                        try await savePendingEvents(to: newSession.id)
+                    }
+                    
                     try await Task.sleep(for: .seconds(0.75))
                     saveButton.stopLoading(withSuccess: true)
                     
@@ -1179,7 +1184,32 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         let dateRange = DateInterval(start: startDate, end: endDate)
-        let calendarVC = SessionCalendarViewController(sessionID: sessionItem.id, nestID: sessionItem.nestID, dateRange: dateRange, events: sessionEvents)
+        
+        let calendarVC: SessionCalendarViewController
+        
+        if isEditingSession {
+            // Existing session - use live events
+            calendarVC = SessionCalendarViewController(
+                sessionID: sessionItem.id, 
+                nestID: sessionItem.nestID, 
+                dateRange: dateRange, 
+                events: sessionEvents
+            )
+        } else {
+            // New session - use local events with callback
+            calendarVC = SessionCalendarViewController(
+                sessionID: nil,
+                nestID: sessionItem.nestID, 
+                dateRange: dateRange,
+                events: sessionEvents,
+                eventsUpdateCallback: { [weak self] updatedEvents in
+                    self?.sessionEvents = updatedEvents
+                    self?.updateEventsSection(with: updatedEvents)
+                    self?.checkForChanges()
+                }
+            )
+        }
+        
         calendarVC.delegate = self
         let nav = UINavigationController(rootViewController: calendarVC)
         present(nav, animated: true)
@@ -1650,6 +1680,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         return isValid
+    }
+    
+    private func savePendingEvents(to sessionID: String) async throws {
+        guard !sessionEvents.isEmpty else { return }
+        
+        // Use batch update for better performance and atomicity
+        try await SessionService.shared.updateSessionEvents(sessionEvents, sessionID: sessionID)
+        
+        Logger.log(level: .debug, category: .sessionService, message: "Successfully batch saved \(sessionEvents.count) pending events to session \(sessionID)")
     }
     
     private func updateSession() async throws {

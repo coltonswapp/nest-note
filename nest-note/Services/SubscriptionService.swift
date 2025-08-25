@@ -34,7 +34,7 @@ final class SubscriptionService {
     /// - Returns: The user's current subscription tier
     func getCurrentTier() async -> SubscriptionTier {
         do {
-            let customerInfo = try await getCustomerInfo()
+            let customerInfo = try await getCustomerInfoInternal()
             return determineTier(from: customerInfo)
         } catch {
             Logger.log(level: .error, category: .subscription, message: "Failed to get customer info: \(error.localizedDescription)")
@@ -56,10 +56,22 @@ final class SubscriptionService {
         return tier == .pro
     }
     
+    /// Gets the current customer info from RevenueCat (public method)
+    /// Uses cached data if available and not expired
+    /// - Returns: CustomerInfo from RevenueCat, or nil if there's an error
+    func getCustomerInfo() async -> CustomerInfo? {
+        do {
+            return try await getCustomerInfoInternal()
+        } catch {
+            Logger.log(level: .error, category: .subscription, message: "Failed to get customer info: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
     /// Gets the current customer info from RevenueCat
     /// Uses cached data if available and not expired
     /// - Returns: CustomerInfo from RevenueCat
-    private func getCustomerInfo() async throws -> CustomerInfo {
+    private func getCustomerInfoInternal() async throws -> CustomerInfo {
         // Check if we have cached data that's still valid
         if let cachedInfo = cachedCustomerInfo,
            let lastFetch = lastFetchTime,
@@ -110,7 +122,7 @@ final class SubscriptionService {
             cachedCustomerInfo = nil
             lastFetchTime = nil
             
-            let _ = try await getCustomerInfo()
+            let _ = try await getCustomerInfoInternal()
             Logger.log(level: .info, category: .subscription, message: "Customer info refreshed successfully")
         } catch {
             Logger.log(level: .error, category: .subscription, message: "Failed to refresh customer info: \(error.localizedDescription)")

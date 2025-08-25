@@ -1,5 +1,10 @@
 import UIKit
 
+// MARK: - Shared Notification Names
+extension Notification.Name {
+    static let appReturnedFromLongBackground = Notification.Name("AppReturnedFromLongBackground")
+}
+
 /// Protocol defining shared functionality between owner and sitter home view controllers
 protocol HomeViewControllerType: NNViewController {
     // MARK: - Properties
@@ -7,7 +12,7 @@ protocol HomeViewControllerType: NNViewController {
     var dataSource: UICollectionViewDiffableDataSource<HomeSection, HomeItem>! { get }
     
     // MARK: - Data Management
-    func refreshData()
+    func refreshData(forceRefresh: Bool)
     func handleError(_ error: Error)
     
     // MARK: - Collection View Setup

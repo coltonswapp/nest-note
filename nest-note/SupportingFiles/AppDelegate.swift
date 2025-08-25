@@ -34,6 +34,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Initialize feature flags
         _ = FeatureFlagService.shared
         
+        // Initialize rating manager to track app launches
+        _ = RatingManager.shared
+        
         return true
     }
     

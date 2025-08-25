@@ -354,6 +354,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         let generalItems = [
             ("Notifications", "bell"),
             ("App Icon", "app"),
+            ("Rate App", "star"),
             ("Terms & Privacy", "doc.text"),
             ("Support", "questionmark.circle"),
             ("Reset Setup", "arrow.counterclockwise")
@@ -391,6 +392,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
+            ("Test Subscription Status", "creditcard.circle"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -523,6 +525,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             present(vc, animated: true)
         case "Reset Tooltips":
             resetTooltipsDatastore()
+        case "Test Subscription Status":
+            showSubscriptionStatus()
         default:
             break
         }
@@ -597,7 +601,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     featurePreviewVC.modalPresentationStyle = .formSheet
                     present(featurePreviewVC, animated: true)
                 case "Subscription":
-                    showRevenueCatPaywall()
+                    Task {
+                        let hasProSubscription = await SubscriptionService.shared.hasProSubscription()
+                        await MainActor.run {
+                            if hasProSubscription {
+                                showSubscriptionStatus()
+                            } else {
+                                showRevenueCatPaywall()
+                            }
+                        }
+                    }
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -613,6 +626,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 let vc = AppIconViewController()
                 let nav = UINavigationController(rootViewController: vc)
                 present(nav, animated: true)
+            case "Rate App":
+                RatingManager.shared.requestRatingManually()
             case "Reset Setup":
                 showResetSetupConfirmation()
             case "Terms & Privacy":
@@ -697,6 +712,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         SetupService.shared.markStepComplete(.finalStep)
     }
     
+    private func showSubscriptionStatus() {
+        let subscriptionStatusVC = SubscriptionStatusViewController()
+        subscriptionStatusVC.modalPresentationStyle = .pageSheet
+        
+        if let sheet = subscriptionStatusVC.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = false
+        }
+        
+        present(subscriptionStatusVC, animated: true)
+    }
+    
     private func showResetSetupConfirmation() {
         let alert = UIAlertController(
             title: "Reset Setup",
@@ -765,6 +792,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         present(alert, animated: true)
     }
+    
     
     deinit {
         NotificationCenter.default.removeObserver(self)
