@@ -694,6 +694,26 @@ final class UserService {
         }
     }
     
+    func sendPasswordReset(to email: String) async throws {
+        Logger.log(level: .info, category: .userService, message: "Attempting to send password reset email to: \(email)")
+        do {
+            try await auth.sendPasswordReset(withEmail: email)
+            Logger.log(level: .info, category: .userService, message: "Password reset email sent successfully")
+        } catch let error as NSError {
+            Logger.log(level: .error, category: .userService, message: "Password reset failed - Error: \(error.localizedDescription)")
+            switch error.code {
+            case AuthErrorCode.userNotFound.rawValue:
+                throw AuthError.userNotFound
+            case AuthErrorCode.invalidEmail.rawValue:
+                throw AuthError.emailInvalid
+            case AuthErrorCode.networkError.rawValue:
+                throw AuthError.networkError
+            default:
+                throw AuthError.unknown
+            }
+        }
+    }
+    
     // MARK: - Sign out & reset
     func logout() async throws {
         // Sign out from Firebase Auth
@@ -889,6 +909,7 @@ enum AuthError: LocalizedError {
     case weakPassword
     case emailInvalid
     case passwordTooWeak
+    case userNotFound
     
     var errorDescription: String? {
         switch self {
@@ -908,6 +929,8 @@ enum AuthError: LocalizedError {
             return "Please enter a valid email address"
         case .passwordTooWeak:
             return "Password must be at least 6 characters"
+        case .userNotFound:
+            return "No account found with this email address"
         }
     }
 }

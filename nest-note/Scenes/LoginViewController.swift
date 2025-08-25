@@ -126,6 +126,16 @@ final class LoginViewController: NNViewController {
         return button
     }()
     
+    private lazy var forgotPasswordButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Forgot Password?", for: .normal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setTitleColor(NNColors.primary, for: .normal)
+        button.titleLabel?.font = .bodyS
+        button.addTarget(self, action: #selector(forgotPasswordTapped), for: .touchUpInside)
+        return button
+    }()
+    
     private lazy var signUpButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("Don't have an account? Sign Up", for: .normal)
@@ -136,7 +146,7 @@ final class LoginViewController: NNViewController {
     }()
     
     private lazy var bottomStack: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [signUpButton])
+        let stack = UIStackView(arrangedSubviews: [forgotPasswordButton, signUpButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .fill
@@ -292,6 +302,78 @@ final class LoginViewController: NNViewController {
         self.dismiss(animated: true) {
             self.delegate?.signUpTapped()
         }
+    }
+    
+    @objc private func forgotPasswordTapped() {
+        showForgotPasswordAlert()
+    }
+    
+    private func showForgotPasswordAlert() {
+        let alert = UIAlertController(
+            title: "Reset Password",
+            message: "Enter your email address and we'll send you a link to reset your password.",
+            preferredStyle: .alert
+        )
+        
+        alert.addTextField { textField in
+            textField.placeholder = "Email"
+            textField.keyboardType = .emailAddress
+            textField.autocorrectionType = .no
+            textField.autocapitalizationType = .none
+            textField.text = self.emailField.text // Pre-fill with current email if available
+        }
+        
+        let sendAction = UIAlertAction(title: "Send Reset Link", style: .default) { _ in
+            guard let email = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !email.isEmpty else {
+                self.showErrorAlert(message: "Please enter a valid email address.")
+                return
+            }
+            
+            self.sendPasswordResetEmail(to: email)
+        }
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+        
+        alert.addAction(sendAction)
+        alert.addAction(cancelAction)
+        
+        present(alert, animated: true)
+    }
+    
+    private func sendPasswordResetEmail(to email: String) {
+        Task {
+            do {
+                try await UserService.shared.sendPasswordReset(to: email)
+                await MainActor.run {
+                    self.showSuccessAlert(message: "Password reset email sent! Please check your inbox and follow the instructions to reset your password.")
+                }
+            } catch {
+                await MainActor.run {
+                    self.showErrorAlert(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+    
+    private func showSuccessAlert(message: String) {
+        let alert = UIAlertController(
+            title: "Success",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    
+    private func showErrorAlert(message: String) {
+        let alert = UIAlertController(
+            title: "Error",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
     
     private func sha256(_ input: String) -> String {
