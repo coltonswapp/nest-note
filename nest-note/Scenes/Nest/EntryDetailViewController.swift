@@ -326,6 +326,9 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                     // Create entry (limit check is done before showing this VC)
                     try await NestService.shared.createEntry(newEntry)
                     savedEntry = newEntry
+                    
+                    // Track entry creation for rating prompt
+                    RatingManager.shared.trackEntryCreation()
                 }
                 
                 HapticsHelper.lightHaptic()

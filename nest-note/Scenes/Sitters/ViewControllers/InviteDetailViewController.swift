@@ -309,6 +309,9 @@ class InviteDetailViewController: NNViewController {
                     self.applySnapshot()
                     self.delegate?.inviteSitterViewControllerDidSendInvite(to: selectedSitter, inviteId: invite.id)
                     
+                    // Track sitter invitation for rating prompt
+                    RatingManager.shared.trackSitterInvitation()
+                    
                     // Call the closure to notify that invite creation is complete
                     self.onInviteCreation?()
                     

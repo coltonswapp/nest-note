@@ -354,6 +354,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         let generalItems = [
             ("Notifications", "bell"),
             ("App Icon", "app"),
+            ("Rate App", "star"),
             ("Terms & Privacy", "doc.text"),
             ("Support", "questionmark.circle"),
             ("Reset Setup", "arrow.counterclockwise")
@@ -625,6 +626,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 let vc = AppIconViewController()
                 let nav = UINavigationController(rootViewController: vc)
                 present(nav, animated: true)
+            case "Rate App":
+                RatingManager.shared.requestRatingManually()
             case "Reset Setup":
                 showResetSetupConfirmation()
             case "Terms & Privacy":
@@ -789,6 +792,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         present(alert, animated: true)
     }
+    
     
     deinit {
         NotificationCenter.default.removeObserver(self)
