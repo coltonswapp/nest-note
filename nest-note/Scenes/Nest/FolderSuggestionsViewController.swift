@@ -26,12 +26,13 @@ class FolderSuggestionsViewController: UIViewController {
     private struct FolderSuggestion: Hashable {
         let name: String
         let icon: String
+        let itemCount: Int
         
         var folderData: FolderData {
             return FolderData(
                 title: name,
                 image: UIImage(systemName: icon) ?? UIImage(systemName: "folder")!,
-                itemCount: 0,
+                itemCount: itemCount,
                 fullPath: name,
                 category: nil
             )
@@ -40,13 +41,13 @@ class FolderSuggestionsViewController: UIViewController {
     
     // MARK: - Folder Suggestions Data
     private let folderSuggestions: [FolderSuggestion] = [
-        FolderSuggestion(name: "Emergency", icon: "exclamationmark.triangle"),
-        FolderSuggestion(name: "Pets", icon: "pawprint.fill"),
-        FolderSuggestion(name: "Rules", icon: "list.bullet"),
-        FolderSuggestion(name: "School", icon: "studentdesk"),
-        FolderSuggestion(name: "Medical", icon: "pills.fill"),
-        FolderSuggestion(name: "Activities", icon: "american.football.fill"),
-        FolderSuggestion(name: "Meals", icon: "heart.fill")
+        FolderSuggestion(name: "Emergency", icon: "exclamationmark.triangle", itemCount: 4),
+        FolderSuggestion(name: "Pets", icon: "pawprint.fill", itemCount: 8),
+        FolderSuggestion(name: "Rules", icon: "list.bullet", itemCount: 6),
+        FolderSuggestion(name: "School", icon: "studentdesk", itemCount: 12),
+        FolderSuggestion(name: "Medical", icon: "pills.fill", itemCount: 5),
+        FolderSuggestion(name: "Activities", icon: "american.football.fill", itemCount: 15),
+        FolderSuggestion(name: "Meals", icon: "heart.fill", itemCount: 9)
     ]
     
     // MARK: - Lifecycle
