@@ -23,11 +23,19 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     private var currentStepIndex: Int = 0
     private lazy var steps: [NNOnboardingViewController] = {
-        // Base steps that are common to all users
+        // Start with the new image-based onboarding screens
         var baseSteps: [NNOnboardingViewController] = [
+            NNImageOnboardingViewController(content: .aboutNestNote),
+            NNImageOnboardingViewController(content: .createSessions),
+            NNImageOnboardingViewController(content: .pickAndChoose),
+            NNImageOnboardingViewController(content: .inviteWithEase)
+        ]
+        
+        // Add the original onboarding steps
+        baseSteps.append(contentsOf: [
             OBNameViewController(),
             OBRoleViewController()
-        ]
+        ])
         
         // Add remaining steps
         baseSteps.append(contentsOf: [
@@ -203,6 +211,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Override this method to add validation logic for each step
         // For example:
         switch viewController {
+        case is NNImageOnboardingViewController:
+            return true // Image onboarding screens don't need validation
         case is OBNameViewController:
             return validateNameStep(viewController as! OBNameViewController)
         default:

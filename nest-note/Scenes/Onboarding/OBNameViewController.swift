@@ -18,7 +18,7 @@ final class OBNameViewController: NNOnboardingViewController {
         super.viewDidLoad()
         
         setupOnboarding(
-            title: "First, lets get your name",
+            title: "Lets get your name",
             subtitle: "Don't worry, this is for display purposes only."
         )
         
