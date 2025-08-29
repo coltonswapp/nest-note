@@ -17,7 +17,7 @@ enum SetupStepType: Int, CaseIterable {
         case .setupNest:
             return "Setup your Nest"
         case .addFirstEntry:
-            return "Explore Folders"
+            return "Add your first item"
         case .enableNotifications:
             return "Enable Notifications"
         case .feedback:
@@ -34,7 +34,7 @@ enum SetupStepType: Int, CaseIterable {
         case .setupNest:
             return "Add a nest name and address."
         case .addFirstEntry:
-            return "Folders contain information, important places, & routines"
+            return "Items are pieces of information related to your nest. These can be entries (plain text), important places, or routines"
         case .enableNotifications:
             return "Stay in the know."
         case .feedback:

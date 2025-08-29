@@ -114,6 +114,9 @@ final class CategoryDetailViewController: NNSheetViewController {
     private var selectedIcon: String?
     private let category: String?
     
+    private var suggestedFolderName: String?
+    private var suggestedIcon: String?
+    
     // MARK: - Icons Array
     private let icons = [
         // Home & Security
@@ -192,16 +195,42 @@ final class CategoryDetailViewController: NNSheetViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         titleLabel.text = category == nil ? "New Folder" : "Edit Folder"
-        titleField.text = category
+        
+        // Use suggested folder name if provided, otherwise use category
+        titleField.text = suggestedFolderName ?? category
         titleField.placeholder = "Folder name"
+        
+        // Set suggested icon if provided
+        if let suggestedIcon = suggestedIcon {
+            selectedIcon = suggestedIcon
+            selectedIconImageView.image = UIImage(systemName: suggestedIcon)
+            selectedIconImageView.tintColor = NNColors.primary
+        }
         
         iconCollectionView.delegate = self
         iconCollectionView.dataSource = self
         
         itemsHiddenDuringTransition = [buttonStackView]
         
-        if category == nil {
+        if category == nil && suggestedFolderName == nil {
             titleField.becomeFirstResponder()
+        }
+    }
+    
+    // MARK: - Public Methods
+    func setSuggestedFolderName(_ name: String, withIcon icon: String) {
+        suggestedFolderName = name
+        suggestedIcon = icon
+        
+        // If view is already loaded, update the UI immediately
+        if isViewLoaded {
+            titleField.text = name
+            selectedIcon = icon
+            selectedIconImageView.image = UIImage(systemName: icon)
+            selectedIconImageView.tintColor = NNColors.primary
+            
+            // Reload collection view to show the selected icon
+            iconCollectionView.reloadData()
         }
     }
     
