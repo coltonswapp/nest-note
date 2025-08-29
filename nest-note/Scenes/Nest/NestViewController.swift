@@ -177,6 +177,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private let sectionHeaders = ["", "Folders"]
     
     private var newCategoryButton: NNPrimaryLabeledButton?
+    private var newFolderButton: NNSmallPrimaryButton?
     
     internal let entryRepository: EntryRepository
     
@@ -463,7 +464,14 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             self?.presentPinnedCategories()
         }
         
-        var menuChildren: [UIMenuElement] = [pinnedCategoriesAction]
+        let folderSuggestionsAction = UIAction(
+            title: "Folder Suggestions",
+            image: UIImage(systemName: "sparkles")
+        ) { [weak self] _ in
+            self?.presentFolderSuggestions()
+        }
+        
+        var menuChildren: [UIMenuElement] = [pinnedCategoriesAction, folderSuggestionsAction]
         
         // Only show "Add Folder" if we haven't reached max depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -501,6 +509,21 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         present(categoryVC, animated: true)
     }
     
+    private func presentFolderSuggestions() {
+        let folderSuggestionsVC = FolderSuggestionsViewController()
+        folderSuggestionsVC.delegate = self
+        let navController = UINavigationController(rootViewController: folderSuggestionsVC)
+        
+        if let sheet = navController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+            sheet.prefersEdgeAttachedInCompactHeight = true
+        }
+        
+        present(navController, animated: true)
+    }
+    
     @objc private func addButtonTapped() {
         let buttonFrame = self.newCategoryButton!.convert(self.newCategoryButton!.bounds, to: nil)
         let categoryVC = CategoryDetailViewController(sourceFrame: buttonFrame)
@@ -530,6 +553,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         // Update UI elements based on current folder depth
         setupNavigationBar()
         setupNewCategoryButton()
+        setupNewFolderButton()
     }
     
     private func setupNewCategoryButton() {
@@ -546,6 +570,42 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             collectionView.verticalScrollIndicatorInsets.bottom = 0
             return 
         }
+    }
+    
+    private func setupNewFolderButton() {
+        // Only show new folder button for nest owners
+        guard entryRepository is NestService else { return }
+        
+        // Check if we've reached max folder depth
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+        guard currentDepth < 3 else { 
+            // Remove existing button if we're at max depth
+            newFolderButton?.removeFromSuperview()
+            newFolderButton = nil
+            return 
+        }
+        
+        // Create the button if it doesn't exist
+        if newFolderButton == nil {
+            newFolderButton = NNSmallPrimaryButton(title: "New Folder", image: UIImage(systemName: "folder.fill.badge.plus"))
+            newFolderButton?.translatesAutoresizingMaskIntoConstraints = false
+            newFolderButton?.addTarget(self, action: #selector(newFolderButtonTapped), for: .touchUpInside)
+            
+            view.addSubview(newFolderButton!)
+            
+            NSLayoutConstraint.activate([
+                newFolderButton!.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+                newFolderButton!.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+                newFolderButton!.heightAnchor.constraint(equalToConstant: 44),
+                newFolderButton!.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
+            ])
+        }
+    }
+    
+    @objc private func newFolderButtonTapped() {
+        let categoryVC = CategoryDetailViewController()
+        categoryVC.categoryDelegate = self
+        present(categoryVC, animated: true)
     }
     
     private func loadEntries() async {
@@ -707,6 +767,19 @@ extension NestViewController {
                 }
             }
         }
+    }
+}
+
+extension NestViewController: FolderSuggestionsViewControllerDelegate {
+    func folderSuggestionsViewController(_ controller: FolderSuggestionsViewController, didSelectFolder name: String, withIcon icon: String) {
+        // Present CategoryDetailViewController with the selected folder name and icon pre-filled
+        let categoryVC = CategoryDetailViewController()
+        categoryVC.categoryDelegate = self
+        
+        // Set the suggested values - we'll need to modify CategoryDetailViewController to accept these
+        categoryVC.setSuggestedFolderName(name, withIcon: icon)
+        
+        present(categoryVC, animated: true)
     }
 }
 

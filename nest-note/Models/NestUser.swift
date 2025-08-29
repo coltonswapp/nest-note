@@ -32,7 +32,7 @@ class NestUser: Codable {
         var otherNotifications: Bool
         
         static var `default`: NotificationPreferences {
-            NotificationPreferences(sessionNotifications: false, otherNotifications: false)
+            NotificationPreferences(sessionNotifications: true, otherNotifications: true)
         }
     }
     
