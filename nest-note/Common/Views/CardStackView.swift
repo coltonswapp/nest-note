@@ -735,4 +735,42 @@ class CardStackView: UIView {
     public func showProgressLabel() {
         progressLabel.alpha = 1.0
     }
+    
+    // Add method to update a specific card view at an index
+    public func updateCardView(at index: Int, with cardView: UIView) {
+        guard usesCustomCards, index >= 0, index < customCardViews.count else { 
+            Logger.log(level: .warning, category: .general, message: "Cannot update card view at index \(index): out of bounds or not using custom cards")
+            return 
+        }
+        
+        // Replace the card view in the customCardViews array
+        customCardViews[index] = cardView
+        
+        // If this card is currently visible (in the cards array), update it there too
+        // We need to find the visual index in the cards array based on currentIndex
+        let visualIndex = index - currentIndex
+        if visualIndex >= 0 && visualIndex < cards.count {
+            let oldCard = cards[visualIndex]
+            cards[visualIndex] = cardView
+            
+            // Replace the old card view in the UI
+            cardView.translatesAutoresizingMaskIntoConstraints = false
+            insertSubview(cardView, aboveSubview: oldCard)
+            setupConstraints(for: cardView)
+            oldCard.removeFromSuperview()
+            
+            // Apply the same transform as the old card
+            cardView.transform = oldCard.transform
+            cardView.layer.zPosition = oldCard.layer.zPosition
+            
+            // If this was the active card (top card), update gestures
+            if visualIndex == 0 {
+                setupGesturesForTopCard()
+            }
+            
+            Logger.log(level: .debug, category: .general, message: "Replaced visible card at visual index \(visualIndex) for item index \(index)")
+        } else {
+            Logger.log(level: .debug, category: .general, message: "Updated card view at index \(index) (not currently visible)")
+        }
+    }
 } 

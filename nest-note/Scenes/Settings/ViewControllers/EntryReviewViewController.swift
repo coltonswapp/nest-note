@@ -481,6 +481,43 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         }
         // For left swipes, we don't need to update the entry
     }
+    
+    // MARK: - Card View Updates
+    
+    /// Updates the card view at the specified index to reflect changes in the underlying data
+    private func updateCardViewForUpdatedItem(at index: Int) {
+        guard index >= 0 && index < reviewItems.count else { 
+            Logger.log(level: .warning, category: .general, message: "Cannot update card view: index \(index) out of bounds (reviewItems count: \(reviewItems.count))")
+            return 
+        }
+        
+        let item = reviewItems[index]
+        
+        // Create a new card view with the updated data
+        let newCardView: UIView
+        switch item {
+        case .entry(let entry):
+            let entryView = MiniEntryDetailView()
+            entryView.translatesAutoresizingMaskIntoConstraints = false
+            entryView.configure(key: entry.title, value: entry.content, lastModified: entry.updatedAt)
+            newCardView = entryView
+        case .place(let place):
+            let placeView = MiniPlaceReviewView()
+            placeView.translatesAutoresizingMaskIntoConstraints = false
+            placeView.configure(with: place)
+            newCardView = placeView
+        case .routine(let routine):
+            let routineView = MiniRoutineReviewView()
+            routineView.translatesAutoresizingMaskIntoConstraints = false
+            routineView.configure(with: routine)
+            newCardView = routineView
+        }
+        
+        // Update the card view in the CardStackView
+        cardStackView.updateCardView(at: index, with: newCardView)
+        
+        Logger.log(level: .debug, category: .general, message: "Updated card view for item at index \(index)")
+    }
 }
 
 // Add this extension to handle entry updates
@@ -495,6 +532,9 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
         // Update the entry in our local array
         if let index = reviewItems.firstIndex(where: { if case .entry(let e) = $0 { return e.id == entry.id } else { return false } }) {
             reviewItems[index] = .entry(entry)
+            
+            // Update the corresponding card view to reflect the changes
+            updateCardViewForUpdatedItem(at: index)
             
             // Update in the repository
             Task {
@@ -567,6 +607,10 @@ extension EntryReviewViewController: PlaceListViewControllerDelegate {
     func placeListViewController(didUpdatePlace place: PlaceItem) {
         if let index = reviewItems.firstIndex(where: { if case .place(let p) = $0 { return p.id == place.id } else { return false } }) {
             reviewItems[index] = .place(place)
+            
+            // Update the corresponding card view to reflect the changes
+            updateCardViewForUpdatedItem(at: index)
+            
             showToast(text: "Place updated")
             if cardStackView.canGoNext {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -606,6 +650,10 @@ extension EntryReviewViewController: RoutineDetailViewControllerDelegate {
         guard let routine else { return }
         if let index = reviewItems.firstIndex(where: { if case .routine(let r) = $0 { return r.id == routine.id } else { return false } }) {
             reviewItems[index] = .routine(routine)
+            
+            // Update the corresponding card view to reflect the changes
+            updateCardViewForUpdatedItem(at: index)
+            
             showToast(text: "Routine updated")
             if cardStackView.canGoNext {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
