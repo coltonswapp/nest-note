@@ -702,11 +702,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     pinToEdge: .bottom,
                     offset: CGPoint(x: 0, y: 8)
                 )
+                return // Return after successfully showing the tip
             }
-            return // Always return after attempting to show this tip
+            return // Always return after attempting to show this tip, even if cell not visible
         }
         
-        // Priority 3: Current session tip (lower priority)
+        // Priority 3: Current session tip (lowest priority)
         if let currentSessionSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .currentSession),
            let _ = dataSource.snapshot().itemIdentifiers(inSection: .currentSession).first,
            NNTipManager.shared.shouldShowTip(HomeTips.happeningNowTip),
