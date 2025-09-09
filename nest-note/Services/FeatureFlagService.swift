@@ -25,7 +25,7 @@ final class FeatureFlagService {
             case .bypassPaywallForTesting, .testFlightBypassEnabled:
                 return false // Default to requiring subscriptions
             case .debugAsProUser:
-                return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
+                return false // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
             }
         }
     }
