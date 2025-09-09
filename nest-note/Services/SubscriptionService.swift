@@ -100,18 +100,35 @@ final class SubscriptionService {
     /// - Parameter customerInfo: RevenueCat customer info
     /// - Returns: The user's subscription tier
     private func determineTier(from customerInfo: CustomerInfo) -> SubscriptionTier {
+        // Log detailed info for debugging
+        Logger.log(level: .debug, category: .subscription, message: "=== Subscription Debug Info ===")
+        Logger.log(level: .debug, category: .subscription, message: "Active entitlements: \(customerInfo.entitlements.active.keys)")
+        Logger.log(level: .debug, category: .subscription, message: "Active subscriptions: \(customerInfo.activeSubscriptions)")
+        Logger.log(level: .debug, category: .subscription, message: "All purchased products: \(customerInfo.allPurchasedProductIdentifiers)")
+        
         // Check if user has any active entitlements
         if customerInfo.entitlements.active.isEmpty {
+            Logger.log(level: .debug, category: .subscription, message: "No active entitlements found - returning .free")
             return .free
         }
         
         // Check specifically for pro entitlement
         // You'll need to configure this entitlement identifier in RevenueCat dashboard
         if customerInfo.entitlements.active["Pro"] != nil {
+            Logger.log(level: .debug, category: .subscription, message: "Found 'Pro' entitlement - returning .pro")
+            return .pro
+        }
+        
+        // Check for any active subscription as fallback
+        if !customerInfo.activeSubscriptions.isEmpty {
+            Logger.log(level: .debug, category: .subscription, message: "Found active subscriptions but no 'Pro' entitlement - this may indicate a configuration issue")
+            // For now, assume any active subscription means pro access
+            // TODO: Fix entitlement configuration in RevenueCat dashboard
             return .pro
         }
         
         // Default to free if no pro entitlement found
+        Logger.log(level: .debug, category: .subscription, message: "No qualifying subscriptions found - returning .free")
         return .free
     }
     

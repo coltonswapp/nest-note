@@ -248,7 +248,8 @@ class CardStackView: UIView {
     }
     
     var canGoNext: Bool {
-        return currentIndex < cardData.count
+        let totalCount = usesCustomCards ? customCardViews.count : cardData.count
+        return currentIndex < totalCount - 1
     }
     
     var canGoPrevious: Bool {
@@ -290,11 +291,12 @@ class CardStackView: UIView {
         // Total number of cards depending on mode
         let totalCount = usesCustomCards ? customCardViews.count : cardData.count
         
-        // Check if this is the last card
-        let isLastCard = currentIndex == totalCount
+        // Check if this is the last card (0-indexed, so last card is at totalCount - 1)
+        let isLastCard = currentIndex >= totalCount - 1
         let cardToRemove = cards.removeFirst()
         
-        if !isLastCard {   
+        // Only increment currentIndex if we're not already on the last card
+        if !isLastCard {
             currentIndex += 1
         }
         
@@ -435,10 +437,9 @@ class CardStackView: UIView {
             let rotationAngle = translation.x / card.bounds.width * (.pi / 8)
             card.transform = transform.rotated(by: rotationAngle)
             
-            feedbackOverlay.backgroundColor = translation.x > 0 ?
-                NNColors.primary.withAlphaComponent(0.15) :
-                .clear
-            feedbackOverlay.alpha = percentage / 100
+            // Remove the green background overlay - using labels instead
+            feedbackOverlay.backgroundColor = .clear
+            feedbackOverlay.alpha = 0
             
         case .ended, .cancelled:
             // Use the same cardWidth here
@@ -543,13 +544,16 @@ class CardStackView: UIView {
             progressLabel.text = "0/0"
             return
         }
-        progressLabel.text = "\(currentIndex + 1)/\(totalCount)"
+        
+        // Ensure we never exceed the total count in display
+        let displayIndex = min(currentIndex + 1, totalCount)
+        progressLabel.text = "\(displayIndex)/\(totalCount)"
         
         // Always make sure the label is visible when updating it
         progressLabel.alpha = 1.0
         
         // Log the updated value
-        Logger.log(level: .debug, category: .general, message: "CardStackView: Updated progress label to \(progressLabel.text ?? "nil")")
+        Logger.log(level: .debug, category: .general, message: "CardStackView: Updated progress label to \(progressLabel.text ?? "nil") (currentIndex: \(currentIndex), totalCount: \(totalCount))")
     }
     
     private func showSuccessState() {
@@ -566,8 +570,8 @@ class CardStackView: UIView {
         // Total number of cards depending on mode
         let totalCount = usesCustomCards ? customCardViews.count : cardData.count
         
-        // Check if this is the last card
-        let isLastCard = currentIndex == totalCount - 1
+        // Check if this is the last card (0-indexed)
+        let isLastCard = currentIndex >= totalCount - 1
         
         // Store swipe direction for potential restoration
         swipeDirections[topCard] = .right
@@ -577,7 +581,11 @@ class CardStackView: UIView {
         
         // Remove the card from the array immediately
         cards.removeFirst()
-        currentIndex += 1
+        
+        // Only increment currentIndex if we're not already on the last card
+        if !isLastCard {
+            currentIndex += 1
+        }
         
         // Keep progress label visible during the transition
         showProgressLabel()
@@ -739,7 +747,7 @@ class CardStackView: UIView {
     // Add method to update a specific card view at an index
     public func updateCardView(at index: Int, with cardView: UIView) {
         guard usesCustomCards, index >= 0, index < customCardViews.count else { 
-            Logger.log(level: .warning, category: .general, message: "Cannot update card view at index \(index): out of bounds or not using custom cards")
+            Logger.log(level: .info, category: .general, message: "Cannot update card view at index \(index): out of bounds or not using custom cards")
             return 
         }
         

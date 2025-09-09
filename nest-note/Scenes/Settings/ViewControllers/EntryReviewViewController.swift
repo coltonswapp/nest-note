@@ -17,7 +17,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     // Add delegate property
     weak var reviewDelegate: EntryReviewViewControllerDelegate?
     
-    private let outOfDateThreshold: Int = 90
+    private let outOfDateThreshold: Int = 1
     
     private let cardStackView: CardStackView = {
         let stack = CardStackView()
@@ -35,6 +35,36 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         return stack
     }()
     
+    private lazy var ignoreLabel: UILabel = {
+        let label = UILabel()
+        label.text = "IGNORE"
+        label.textColor = .systemRed
+        label.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        label.textAlignment = .center
+        label.alpha = 0
+        label.backgroundColor = UIColor.systemRed.withAlphaComponent(0.15)
+        label.layer.cornerRadius = 20
+        label.clipsToBounds = true
+        label.transform = CGAffineTransform(rotationAngle: -15 * .pi / 180) // -15 degrees
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var looksGoodLabel: UILabel = {
+        let label = UILabel()
+        label.text = "LOOKS GOOD"
+        label.textColor = .systemGreen
+        label.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        label.textAlignment = .center
+        label.alpha = 0
+        label.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.15)
+        label.layer.cornerRadius = 20
+        label.clipsToBounds = true
+        label.transform = CGAffineTransform(rotationAngle: 15 * .pi / 180) // +15 degrees
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     private lazy var previousButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("Previous", for: .normal)
@@ -46,12 +76,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         return button
     }()
     
-    private lazy var approveButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(title: "Looks good 👍", image: nil, backgroundColor: .systemBlue, foregroundColor: .white)
-        button.addTarget(self, action: #selector(approveTapped), for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
+    // Remove the approve button - replaced with swipe labels
     
     private lazy var nextButton: UIButton = {
         let button = UIButton(type: .system)
@@ -147,11 +172,11 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     override func addSubviews() {
         view.backgroundColor = .systemBackground
         
-        [subtitleLabel, cardStackView, buttonStack, doneButton].forEach {
+        [subtitleLabel, cardStackView, buttonStack, doneButton, ignoreLabel, looksGoodLabel].forEach {
             view.addSubview($0)
         }
         
-        [previousButton, approveButton, nextButton].forEach {
+        [previousButton, nextButton].forEach {
             buttonStack.addArrangedSubview($0)
         }
     }
@@ -167,12 +192,20 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
             cardStackView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             cardStackView.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.6),
             
+            // Position swipe indicator labels on the left and right sides
+            ignoreLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            ignoreLabel.centerYAnchor.constraint(equalTo: cardStackView.centerYAnchor),
+            ignoreLabel.widthAnchor.constraint(equalToConstant: 100),
+            ignoreLabel.heightAnchor.constraint(equalToConstant: 40),
+            
+            looksGoodLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            looksGoodLabel.centerYAnchor.constraint(equalTo: cardStackView.centerYAnchor),
+            looksGoodLabel.widthAnchor.constraint(equalToConstant: 120),
+            looksGoodLabel.heightAnchor.constraint(equalToConstant: 40),
+            
             buttonStack.topAnchor.constraint(equalTo: cardStackView.bottomAnchor, constant: 20),
             buttonStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             buttonStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-
-            approveButton.heightAnchor.constraint(equalToConstant: 46.0),
-            approveButton.widthAnchor.constraint(equalToConstant: view.frame.width * 0.4),
             
             doneButton.topAnchor.constraint(equalTo: buttonStack.bottomAnchor, constant: 20),
             doneButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -323,49 +356,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         cardStackView.previous()
     }
     
-    @objc private func approveTapped() {
-        // Get the top card index to find the corresponding item
-        guard let topCardIndex = cardStackView.topCardIndex,
-              topCardIndex < reviewItems.count else {
-            cardStackView.approveCard()
-            return
-        }
-        
-        var item = reviewItems[topCardIndex]
-        
-        Task {
-            do {
-                switch item {
-                case .entry(var e):
-                    e.updatedAt = Date()
-                    try await entryRepository.updateEntry(e)
-                    await MainActor.run { self.reviewItems[topCardIndex] = .entry(e) }
-                case .place(var p):
-                    p.updatedAt = Date()
-                    if let nest = self.entryRepository as? NestService {
-                        try await nest.updatePlace(p)
-                        await MainActor.run { self.reviewItems[topCardIndex] = .place(p) }
-                    }
-                case .routine(var r):
-                    r.updatedAt = Date()
-                    if let nest = self.entryRepository as? NestService {
-                        try await nest.updateRoutine(r)
-                        await MainActor.run { self.reviewItems[topCardIndex] = .routine(r) }
-                    }
-                }
-                await MainActor.run {
-                    HapticsHelper.mediumHaptic()
-                    cardStackView.approveCard()
-                }
-            } catch {
-                await MainActor.run {
-                    self.showToast(text: "Error updating item", sentiment: .negative)
-                    Logger.log(level: .error, category: .nestService, message: "Error updating item: \(error.localizedDescription)")
-                    self.cardStackView.approveCard()
-                }
-            }
-        }
-    }
+    // Approve functionality now handled through swipe gestures
     
     private func updateButtonStates() {
         previousButton.isEnabled = cardStackView.canGoPrevious
@@ -434,6 +425,11 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         
         if !stackView.canGoNext {
             doneButton.isEnabled = true
+            
+            // If all items have been reviewed, ensure the success message shows
+            if reviewItems.isEmpty || stackView.topCardIndex == nil {
+                Logger.log(level: .debug, category: .general, message: "All cards reviewed, showing success state")
+            }
         }
     }
     
@@ -442,10 +438,32 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     }
     
     func cardStackView(_ stackView: CardStackView, didUpdateSwipe translation: CGFloat, velocity: CGFloat) {
-        // No additional action needed
+        // Calculate the swipe percentage (0-100)
+        let cardWidth = UIScreen.main.bounds.width
+        let percentage = min(abs(translation) / cardWidth, 1.0)
+        
+        if translation < 0 {
+            // Swiping left - show IGNORE label
+            ignoreLabel.alpha = percentage * 0.8  // Max opacity of 0.8
+            looksGoodLabel.alpha = 0
+        } else if translation > 0 {
+            // Swiping right - show LOOKS GOOD label
+            looksGoodLabel.alpha = percentage * 0.8  // Max opacity of 0.8
+            ignoreLabel.alpha = 0
+        } else {
+            // No swipe - hide both labels
+            ignoreLabel.alpha = 0
+            looksGoodLabel.alpha = 0
+        }
     }
     
     func cardStackView(_ stackView: CardStackView, didFinishSwipe translation: CGFloat, velocity: CGFloat, dismissed: Bool) {
+        // Hide swipe indicators when swipe finishes
+        UIView.animate(withDuration: 0.2) {
+            self.ignoreLabel.alpha = 0
+            self.looksGoodLabel.alpha = 0
+        }
+        
         // This is called when a card is swiped by the user
         if dismissed && translation > 0 {
             guard let topCardIndex = stackView.topCardIndex,
@@ -487,7 +505,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     /// Updates the card view at the specified index to reflect changes in the underlying data
     private func updateCardViewForUpdatedItem(at index: Int) {
         guard index >= 0 && index < reviewItems.count else { 
-            Logger.log(level: .warning, category: .general, message: "Cannot update card view: index \(index) out of bounds (reviewItems count: \(reviewItems.count))")
+            Logger.log(level: .info, category: .general, message: "Cannot update card view: index \(index) out of bounds (reviewItems count: \(reviewItems.count))")
             return 
         }
         

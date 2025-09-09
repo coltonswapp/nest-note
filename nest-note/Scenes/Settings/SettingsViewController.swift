@@ -602,6 +602,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     present(featurePreviewVC, animated: true)
                 case "Subscription":
                     Task {
+                        // Force refresh subscription info before checking
+                        await SubscriptionService.shared.refreshCustomerInfo()
                         let hasProSubscription = await SubscriptionService.shared.hasProSubscription()
                         await MainActor.run {
                             if hasProSubscription {
