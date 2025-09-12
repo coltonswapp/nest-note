@@ -34,7 +34,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Add the original onboarding steps
         baseSteps.append(contentsOf: [
             OBNameViewController(),
-            OBRoleViewController()
+            OBRoleViewController(),
+            OBReferralViewController()  // Add referral step after role selection
         ])
         
         // Add remaining steps
@@ -63,6 +64,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var nestInfo: NestInfo?
         var surveyResponses: [String: [String]] = [:]
         var isAppleSignIn: Bool = false
+        var referralCode: String?
         
         struct NestInfo {
             var name: String?
@@ -260,6 +262,22 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
         Logger.log(level: .info, category: .signup, message: "Successfully completed signup for user: \(user.personalInfo.name)")
         
+        // Record referral if one was provided
+        if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
+            do {
+                try await ReferralService.shared.recordReferral(
+                    referralCode: referralCode,
+                    for: user.id,
+                    email: user.personalInfo.email,
+                    role: userInfo.role.rawValue
+                )
+                Logger.log(level: .info, category: .signup, message: "Successfully recorded referral for code: \(referralCode)")
+            } catch {
+                Logger.log(level: .error, category: .signup, message: "Failed to record referral: \(error)")
+                // Continue with onboarding even if referral fails
+            }
+        }
+        
         // Save survey responses
         if !userInfo.surveyResponses.isEmpty {
             let response = SurveyResponse(
@@ -363,6 +381,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         userInfo.surveyResponses.merge(responses) { _, new in new }
     }
     
+    func updateReferralCode(_ referralCode: String?) {
+        userInfo.referralCode = referralCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : referralCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
     // MARK: - Validation Methods
     func validateName(_ name: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -427,6 +449,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Add nest creation step for owners if it doesn't exist
         if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBCreateNestViewController }) {
             steps.append(OBCreateNestViewController())
+        }
+        
+        // Add paywall step for nest owners only if it doesn't exist
+        if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBPaywallViewController }) {
+            steps.append(OBPaywallViewController())
         }
         
         // Add finish step if it doesn't exist
@@ -494,6 +521,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         userInfo.isAppleSignIn = true
         
         // Remove password step since we don't need it for Apple users
+        // Keep referral step since they can still use referral codes
         steps.removeAll { $0 is OBPasswordViewController }
         
         // Update container's total steps count
@@ -505,6 +533,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     private func skipToRoleSelection() {
         // For Apple users, remove the email and password steps from the flow
+        // Keep the referral step since they can still use referral codes
         steps.removeAll { $0 is OBEmailViewController || $0 is OBPasswordViewController }
         
         // Update container's total steps count
@@ -584,6 +613,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             self?.skipToViewController(OBCreateNestViewController.self)
         })
         
+        alert.addAction(UIAlertAction(title: "Skip to Paywall", style: .default) { [weak self] _ in
+            self?.skipToViewController(OBPaywallViewController.self)
+        })
+        
         alert.addAction(UIAlertAction(title: "Skip to Finalizing", style: .default) { [weak self] _ in
             self?.skipToViewController(OBFinishViewController.self)
         })
@@ -646,6 +679,7 @@ extension OnboardingCoordinator {
             if userInfo.role == .nestOwner {
                 nextStep = steps.first { $0 is OBCreateNestViewController }
             } else {
+                // For sitters, go directly to finish step since they don't get paywall
                 nextStep = steps.first { $0 is OBFinishViewController }
             }
         } else {

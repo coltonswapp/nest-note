@@ -123,6 +123,7 @@ public extension Logger {
 
         case testing = "🧪 Testing"
         case survey = "📝 Survey"
+        case referral = "🎟️ Referral"
     }
 
 }

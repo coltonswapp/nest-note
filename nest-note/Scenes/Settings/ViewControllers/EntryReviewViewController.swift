@@ -6,16 +6,21 @@
 //
 
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 // Add delegate protocol to notify when review is completed
 protocol EntryReviewViewControllerDelegate: AnyObject {
     func entryReviewDidComplete()
 }
 
-class EntryReviewViewController: NNViewController, CardStackViewDelegate {
+class EntryReviewViewController: NNViewController, CardStackViewDelegate, PaywallPresentable, PaywallViewControllerDelegate {
 
     // Add delegate property
     weak var reviewDelegate: EntryReviewViewControllerDelegate?
+    
+    // PaywallPresentable requirement
+    var proFeature: ProFeature { return .nestReview }
     
     private let outOfDateThreshold: Int = 1
     
@@ -90,7 +95,6 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
     
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Ensure that your Nest information is current. Swipe left to skip, swipe right to mark as up-to-date, tap to edit."
         label.textAlignment = .center
         label.textColor = .secondaryLabel
         label.font = .bodyM
@@ -159,13 +163,15 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         setupLoadingIndicator()
         navigationItem.title = "Review Items"
         navigationController?.navigationBar.prefersLargeTitles = false
+        updateSubtitleText()
     }
     
     override func setupNavigationBarButtons() {
-        let closeButton = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(closeButtonTapped))
-        let buttons = [closeButton]
-        buttons.forEach { $0.tintColor = .label }
-        navigationItem.rightBarButtonItems = buttons
+        let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), style: .plain, target: nil, action: nil)
+        menuButton.menu = createOptionsMenu()
+        menuButton.tintColor = .label
+        
+        navigationItem.rightBarButtonItems = [menuButton]
         navigationController?.isModalInPresentation = true
     }
     
@@ -200,7 +206,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
             
             looksGoodLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             looksGoodLabel.centerYAnchor.constraint(equalTo: cardStackView.centerYAnchor),
-            looksGoodLabel.widthAnchor.constraint(equalToConstant: 120),
+            looksGoodLabel.widthAnchor.constraint(equalToConstant: 140),
             looksGoodLabel.heightAnchor.constraint(equalToConstant: 40),
             
             buttonStack.topAnchor.constraint(equalTo: cardStackView.bottomAnchor, constant: 20),
@@ -237,11 +243,26 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
             do {
                 isLoading = true
                 
+                // Check pro status first
+                let hasProAccess = await SubscriptionService.shared.isFeatureAvailable(.nestReview)
+                
+                // Always load the items first so users can see what they're upgrading for
+                // We'll show the upgrade prompt after displaying the content
+                
+                // Get review cadence from current nest or use default
+                let reviewCadenceInDays: Int
+                if let nestService = entryRepository as? NestService,
+                   let currentNest = nestService.currentNest {
+                    reviewCadenceInDays = currentNest.reviewCadenceInDays
+                } else {
+                    reviewCadenceInDays = 90 // Default 3 months = 90 days
+                }
+                
                 let calendar = Calendar.current
-                let threshold = calendar.date(byAdding: .day, value: -outOfDateThreshold, to: Date()) ?? Date()
+                let threshold = calendar.date(byAdding: .day, value: -reviewCadenceInDays, to: Date()) ?? Date()
 
                 // Gather items: entries via protocol, places and routines via repository services
-                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: outOfDateThreshold)
+                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: reviewCadenceInDays)
                 var places: [PlaceItem] = []
                 var routines: [RoutineItem] = []
                 
@@ -321,6 +342,17 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
                         
                         // Log the progress label text for debugging
                         Logger.log(level: .debug, category: .general, message: "Progress label text: \(cardStackView.progressLabel.text ?? "nil")")
+                        
+                        // Now check pro status and show upgrade prompt if needed (with cards visible)
+                        if !hasProAccess {
+                            // Disable interactions but keep content visible
+                            disableInteractionsForUpgradePrompt()
+                            
+                            // Show upgrade prompt after a brief delay to let content settle
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                self.showUpgradePromptForOutdatedItems()
+                            }
+                        }
                     }
                 }
             } catch {
@@ -500,6 +532,191 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         // For left swipes, we don't need to update the entry
     }
     
+    // MARK: - UI Updates
+    
+    private func updateSubtitleText() {
+        let currentCadence = getCurrentCadence()
+        let cadenceText = currentCadence == 1 ? "1 month" : "\(currentCadence) months"
+        
+        subtitleLabel.text = "Showing entries older than \(cadenceText). Swipe left (skip), right (current), tap (edit). Adjust review cadence via top-right."
+    }
+    
+    private func disableInteractionsForUpgradePrompt() {
+        // Disable interactions while keeping content visible
+        cardStackView.isUserInteractionEnabled = false
+        buttonStack.isUserInteractionEnabled = false
+        doneButton.isUserInteractionEnabled = false
+        
+        // Dim the content slightly to indicate it's not interactive
+        cardStackView.alpha = 0.6
+        buttonStack.alpha = 0.6
+        doneButton.alpha = 0.6
+    }
+    
+    private func enableInteractionsAfterUpgrade() {
+        // Re-enable interactions
+        cardStackView.isUserInteractionEnabled = true
+        buttonStack.isUserInteractionEnabled = true
+        doneButton.isUserInteractionEnabled = true
+        
+        // Restore full opacity
+        UIView.animate(withDuration: 0.3) {
+            self.cardStackView.alpha = 1.0
+            self.buttonStack.alpha = 1.0
+            self.doneButton.alpha = 1.0
+        }
+    }
+    
+    // MARK: - Menu Creation
+    
+    private func createOptionsMenu() -> UIMenu {
+        let cadenceMenu = createCadenceMenu()
+        
+        let finishAction = UIAction(
+            title: "Finish Review",
+            image: UIImage(systemName: "checkmark.circle")
+        ) { [weak self] _ in
+            self?.doneButtonTapped()
+        }
+        
+        return UIMenu(children: [cadenceMenu, finishAction])
+    }
+    
+    private func createCadenceMenu() -> UIMenu {
+        let currentCadence = getCurrentCadence()
+        
+        let cadenceOptions = [
+            (1, "1 Month"),
+            (3, "3 Months"),
+            (6, "6 Months"),
+            (12, "12 Months")
+        ]
+        
+        let cadenceActions = cadenceOptions.map { months, title in
+            UIAction(
+                title: title,
+                state: currentCadence == months ? .on : .off
+            ) { [weak self] _ in
+                self?.updateReviewCadence(months)
+            }
+        }
+        
+        return UIMenu(
+            title: "Review Cadence",
+            image: UIImage(systemName: "calendar.circle"),
+            children: cadenceActions
+        )
+    }
+    
+    private func getCurrentCadence() -> Int {
+        if let nestService = entryRepository as? NestService,
+           let currentNest = nestService.currentNest {
+            return currentNest.reviewCadenceInMonths
+        }
+        return 3 // Default
+    }
+    
+    private func updateReviewCadence(_ months: Int) {
+        Task {
+            guard let nestService = entryRepository as? NestService,
+                  var currentNest = nestService.currentNest else {
+                await MainActor.run {
+                    showToast(text: "Unable to update review cadence", sentiment: .negative)
+                }
+                return
+            }
+            
+            do {
+                // Update the nest with new cadence
+                currentNest.nestReviewCadence = months
+                
+                // Save to Firestore
+                try await nestService.updateNest(currentNest)
+                
+                await MainActor.run {
+                    // Update the current nest in the service
+                    nestService.setCurrentNest(currentNest)
+                    
+                    // Update the subtitle text to reflect new cadence
+                    updateSubtitleText()
+                    showToast(text: "Review cadence updated")
+                    
+                    // Refresh the menu to show the new selection
+                    setupNavigationBarButtons()
+                    
+                    // Optionally reload the outdated items with new cadence
+                    loadOutdatedItems()
+                }
+            } catch {
+                await MainActor.run {
+                    showToast(text: "Error updating review cadence", sentiment: .negative)
+                    Logger.log(level: .error, category: .nestService, message: "Error updating review cadence: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Pro Feature Handling
+    
+    private func showUpgradePromptForOutdatedItems() {
+        Task {
+            // Count outdated items for the alert message
+            let outdatedCount = await countOutdatedItems()
+            
+            let alertMessage = outdatedCount > 0 ? 
+                "You have \(outdatedCount) items which haven't been updated in longer than 90 days. Upgrade to Pro to quickly get things up to date." :
+                "Nest Review is a Pro feature. Upgrade to Pro to quickly review and update your nest information."
+            
+            let alert = UIAlertController(
+                title: "Pro Feature",
+                message: alertMessage,
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(title: "Maybe Later", style: .cancel) { [weak self] _ in
+                // Re-enable interactions if user decides not to upgrade
+                self?.enableInteractionsAfterUpgrade()
+                self?.dismiss(animated: true)
+            })
+            
+            alert.addAction(UIAlertAction(title: "Upgrade to Pro", style: .default) { [weak self] _ in
+                self?.showUpgradeFlow()
+            })
+            
+            present(alert, animated: true)
+        }
+    }
+    
+    private func countOutdatedItems() async -> Int {
+        do {
+            let threshold = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
+            
+            let entries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
+            var places: [PlaceItem] = []
+            var routines: [RoutineItem] = []
+            
+            if let nestService = entryRepository as? NestService {
+                places = try await nestService.fetchPlaces()
+                routines = try await nestService.fetchItems(ofType: .routine)
+            } else if let sitterService = entryRepository as? SitterViewService {
+                places = try await sitterService.fetchNestPlaces()
+                routines = try await sitterService.fetchNestRoutines()
+            } else {
+                let all = try await entryRepository.fetchAllItems()
+                places = all.compactMap { $0 as? PlaceItem }
+                routines = all.compactMap { $0 as? RoutineItem }
+            }
+            
+            let outdatedPlaces = places.filter { $0.updatedAt < threshold }
+            let outdatedRoutines = routines.filter { $0.updatedAt < threshold }
+            
+            return entries.count + outdatedPlaces.count + outdatedRoutines.count
+        } catch {
+            Logger.log(level: .error, category: .nestService, message: "Error counting outdated items: \(error.localizedDescription)")
+            return 0
+        }
+    }
+    
     // MARK: - Card View Updates
     
     /// Updates the card view at the specified index to reflect changes in the underlying data
@@ -535,6 +752,47 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate {
         cardStackView.updateCardView(at: index, with: newCardView)
         
         Logger.log(level: .debug, category: .general, message: "Updated card view for item at index \(index)")
+    }
+}
+
+// MARK: - PaywallViewControllerDelegate
+extension EntryReviewViewController {
+    func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        controller.dismiss(animated: true) { [weak self] in
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+                await MainActor.run {
+                    // Re-enable interactions now that user has pro access
+                    self?.enableInteractionsAfterUpgrade()
+                    self?.showToast(text: self?.proFeature.successMessage ?? "Subscription activated!")
+                    // Reload the view now that user has pro access
+                    self?.loadOutdatedItems()
+                }
+            }
+        }
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFailPurchasingWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription purchase failed: \(error.localizedDescription)")
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        controller.dismiss(animated: true) { [weak self] in
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+                await MainActor.run {
+                    // Re-enable interactions now that user has pro access
+                    self?.enableInteractionsAfterUpgrade()
+                    self?.showToast(text: self?.proFeature.successMessage ?? "Subscription restored!")
+                    // Reload the view now that user has pro access
+                    self?.loadOutdatedItems()
+                }
+            }
+        }
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFailRestoringWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription restore failed: \(error.localizedDescription)")
     }
 }
 

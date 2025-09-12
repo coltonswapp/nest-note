@@ -1281,6 +1281,19 @@ extension NestService {
             throw error
         }
     }
+    
+    func updateNest(_ nest: NestItem) async throws {
+        let db = Firestore.firestore()
+        let data = try Firestore.Encoder().encode(nest)
+        
+        do {
+            try await db.collection("nests").document(nest.id).setData(data)
+            Logger.log(level: .info, category: .nestService, message: "Nest updated successfully")
+        } catch {
+            Logger.log(level: .error, category: .nestService, message: "Error updating nest: \(error.localizedDescription)")
+            throw error
+        }
+    }
 }
 
 // MARK: - Pinned Folders Methods

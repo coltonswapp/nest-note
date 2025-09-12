@@ -62,6 +62,11 @@ class Tracker {
         // MARK: - App Lifecycle Events
         case appBackgroundReturn = "app_background_return"
         
+        // MARK: - Referral Related Events
+        case referralCodeEntered = "referralCodeEntered"
+        case referralRecorded = "referralRecorded"
+        case referralValidationFailed = "referralValidationFailed"
+        
         // MARK: - Misc
         case pinnedCategoriesUpdated = "pinnedCategoriesUpdated"
     }
