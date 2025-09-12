@@ -46,6 +46,20 @@ final class SubscriptionService {
     /// Checks if the user has an active pro subscription
     /// - Returns: True if user has pro subscription, false otherwise
     func hasProSubscription() async -> Bool {
+        // Check debug pro user flag first - this OVERRIDES everything for testing
+        #if DEBUG
+        let debugAsProUser = FeatureFlagService.shared.isEnabled(.debugAsProUser)
+        Logger.log(level: .info, category: .subscription, message: "DEBUG: debugAsProUser flag = \(debugAsProUser)")
+        
+        if debugAsProUser {
+            Logger.log(level: .info, category: .subscription, message: "Pro subscription status allowed via debugAsProUser flag")
+            return true
+        } else {
+            Logger.log(level: .info, category: .subscription, message: "Pro subscription status DENIED via debugAsProUser flag (debugging as free user)")
+            return false
+        }
+        #endif
+        
         // Check if paywall bypass is enabled (for TestFlight or testing)
         if FeatureFlagService.shared.shouldBypassPaywall() {
             Logger.log(level: .info, category: .subscription, message: "Pro subscription status bypassed via feature flag")
@@ -178,6 +192,20 @@ extension SubscriptionService {
     /// - Parameter feature: The feature to check
     /// - Returns: True if feature is available, false otherwise
     func isFeatureAvailable(_ feature: ProFeature) async -> Bool {
+        // Check debug pro user flag first - this OVERRIDES everything for testing
+        #if DEBUG
+        let debugAsProUser = FeatureFlagService.shared.isEnabled(.debugAsProUser)
+        Logger.log(level: .info, category: .subscription, message: "DEBUG: debugAsProUser flag = \(debugAsProUser)")
+        
+        if debugAsProUser {
+            Logger.log(level: .info, category: .subscription, message: "Feature '\(feature.displayName)' allowed via debugAsProUser flag")
+            return true
+        } else {
+            Logger.log(level: .info, category: .subscription, message: "Feature '\(feature.displayName)' DENIED via debugAsProUser flag (debugging as free user)")
+            return false
+        }
+        #endif
+        
         // Check if paywall bypass is enabled (for TestFlight or testing)
         if FeatureFlagService.shared.shouldBypassPaywall() {
             Logger.log(level: .info, category: .subscription, message: "Feature '\(feature.displayName)' allowed via paywall bypass")
@@ -194,6 +222,7 @@ enum ProFeature {
     case unlimitedEntries
     case multiDaySessions
     case sessionEvents
+    case nestReview
     
     func isAvailable(for tier: SubscriptionService.SubscriptionTier) -> Bool {
         switch tier {
@@ -212,6 +241,8 @@ enum ProFeature {
             return "Multi-day Sessions"
         case .sessionEvents:
             return "Session Events"
+        case .nestReview:
+            return "Nest Review"
         }
     }
     
@@ -223,6 +254,8 @@ enum ProFeature {
             return "Schedule overnight stays and extended care sessions"
         case .sessionEvents:
             return "Add detailed scheduling within sessions"
+        case .nestReview:
+            return "Quickly review and update outdated nest information"
         }
     }
     
@@ -236,6 +269,8 @@ enum ProFeature {
             return "Pro Feature"
         case .sessionEvents:
             return "Pro Feature"
+        case .nestReview:
+            return "Pro Feature"
         }
     }
     
@@ -247,6 +282,8 @@ enum ProFeature {
             return "Multi-day sessions are a Pro feature. Upgrade to Pro for multi-day sessions and more features."
         case .sessionEvents:
             return "Session events are a Pro feature. Upgrade to Pro for session events and more features."
+        case .nestReview:
+            return "Nest Review is a Pro feature. Upgrade to Pro to quickly update outdated information and more features."
         }
     }
     
@@ -258,6 +295,8 @@ enum ProFeature {
             return "Subscription activated! You can now create multi-day sessions & do so much more!"
         case .sessionEvents:
             return "Subscription activated! You can now create session events & do so much more!"
+        case .nestReview:
+            return "Subscription activated! You can now use Nest Review & do so much more!"
         }
     }
 }

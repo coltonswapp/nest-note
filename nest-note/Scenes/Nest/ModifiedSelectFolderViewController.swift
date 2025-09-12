@@ -101,20 +101,8 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Check user's pro status and set selection limit
     private func checkProStatusAndSetLimit() async {
-        // Check actual subscription status first
-        let hasProSubscription = await SubscriptionService.shared.hasProSubscription()
-        
-        // Allow override for testing purposes - this overrides even paywall bypass
-        #if DEBUG
-        let debugAsProFlag = FeatureFlagService.shared.isEnabled(.debugAsProUser)
-        let shouldBypassPaywall = FeatureFlagService.shared.shouldBypassPaywall()
-        
-        // The debug flag takes priority over everything else for testing selection limits
-        isProUser = debugAsProFlag
-        #else
-        isProUser = hasProSubscription
-        #endif
-        
+        // Use the same pro status checking as other features for consistency
+        isProUser = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
         selectionLimit = isProUser ? nil : FeatureFlagService.shared.getFreeUserSelectionLimit()
         
         await MainActor.run {
@@ -655,13 +643,34 @@ extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEn
 extension ModifiedSelectFolderViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
         // Purchase successful - refresh pro status and update UI
-        Task {
-            await checkProStatusAndSetLimit()
+        controller.dismiss(animated: true) { [weak self] in
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+                await self?.checkProStatusAndSetLimit()
+                await MainActor.run {
+                    self?.showToast(text: self?.proFeature.successMessage ?? "Subscription activated!")
+                }
+            }
         }
-        controller.dismiss(animated: true)
     }
     
-    func paywallViewControllerWasDismissed(_ controller: PaywallViewController) {
-        // Paywall was dismissed without purchase - no action needed
+    func paywallViewController(_ controller: PaywallViewController, didFailPurchasingWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription purchase failed: \(error.localizedDescription)")
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        controller.dismiss(animated: true) { [weak self] in
+            Task {
+                await SubscriptionService.shared.refreshCustomerInfo()
+                await self?.checkProStatusAndSetLimit()
+                await MainActor.run {
+                    self?.showToast(text: self?.proFeature.successMessage ?? "Subscription restored!")
+                }
+            }
+        }
+    }
+    
+    func paywallViewController(_ controller: PaywallViewController, didFailRestoringWith error: Error) {
+        Logger.log(level: .error, category: .purchases, message: "Subscription restore failed: \(error.localizedDescription)")
     }
 }

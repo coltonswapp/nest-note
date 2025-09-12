@@ -13,6 +13,7 @@ struct NestItem: Codable {
     var entries: [BaseEntry]?
     var categories: [NestCategory]?
     var pinnedCategories: [String]?
+    var nestReviewCadence: Int? // In months: 1, 3, 6, or 12. Default: 3
     
     init(id: String = UUID().uuidString, ownerId: String, name: String, address: String) {
         self.id = id
@@ -22,6 +23,7 @@ struct NestItem: Codable {
         self.entries = nil
         self.categories = nil
         self.pinnedCategories = nil
+        self.nestReviewCadence = 3 // Default to 3 months
     }
 }
 
@@ -35,5 +37,17 @@ extension NestItem: CustomStringConvertible {
             address: \(address)
         )
         """
+    }
+}
+
+extension NestItem {
+    /// Returns the review cadence in months, with a default of 3 months if not set
+    var reviewCadenceInMonths: Int {
+        return nestReviewCadence ?? 3
+    }
+    
+    /// Returns the review cadence in days for threshold calculations
+    var reviewCadenceInDays: Int {
+        return reviewCadenceInMonths * 30 // Approximate days per month
     }
 } 
