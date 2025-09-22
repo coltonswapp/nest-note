@@ -45,6 +45,7 @@ class Tracker {
         case sessionInviteAccepted = "sessionInviteAccepted"
     
         // MARK: - Profile Related Events
+        case userProfileCreated = "userProfileCreated"
         case nameUpdated = "nameUpdated"
         case modeSwitched = "modeSwitched"
         
