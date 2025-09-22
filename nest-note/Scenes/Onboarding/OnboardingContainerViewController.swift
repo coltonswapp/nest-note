@@ -63,8 +63,6 @@ final class OnboardingContainerViewController: UIViewController {
         
         progressBar.layer.cornerRadius = 2
         progressBar.clipsToBounds = true
-        progressBar.layer.sublayers![1].cornerRadius = 2
-        progressBar.subviews[1].clipsToBounds = true
     }
     
     // MARK: - Setup

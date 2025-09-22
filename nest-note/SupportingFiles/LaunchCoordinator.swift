@@ -2,6 +2,33 @@ import UIKit
 import FirebaseAuth
 import AuthenticationServices
 
+// MARK: - Timeout Helper
+func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
+    return try await withThrowingTaskGroup(of: T.self) { group in
+        // Add the main operation
+        group.addTask {
+            try await operation()
+        }
+
+        // Add timeout task
+        group.addTask {
+            try await Task.sleep(for: .seconds(seconds))
+            throw TimeoutError()
+        }
+
+        // Return the first result (either success or timeout)
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
+    }
+}
+
+struct TimeoutError: LocalizedError {
+    var errorDescription: String? {
+        return "Operation timed out"
+    }
+}
+
 enum UserType {
     case owner
     case sitter
@@ -77,26 +104,70 @@ final class LaunchCoordinator {
     
     // MARK: - Public Methods
     func start() async throws {
-        // Configure services
-        try await Launcher.shared.configure()
-        Logger.log(level: .info, category: .launcher, message: "Services configured successfully")
-        
+        Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Starting app launch sequence")
+
+        do {
+            // Configure services with timeout to prevent infinite loading
+            Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Configuring services...")
+
+            try await withTimeout(seconds: 10) {
+                try await Launcher.shared.configure()
+            }
+
+            Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: ✅ Services configured successfully")
+
+        } catch {
+            Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ Service configuration failed: \(error)")
+            Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ Falling back to authentication flow")
+
+            // If service configuration fails, force user to re-authenticate
+            await MainActor.run {
+                let navigationController = UINavigationController(rootViewController: LoadingViewController())
+                self.navigationController = navigationController
+                window?.rootViewController = navigationController
+                window?.makeKeyAndVisible()
+
+                // Force show auth flow on configuration failure
+                showAuthenticationFlow()
+            }
+            return
+        }
+
         await MainActor.run {
             // Create initial navigation controller with loading placeholder
             let navigationController = UINavigationController(rootViewController: LoadingViewController())
             self.navigationController = navigationController
-            
+
             // Set as root and make visible
             window?.rootViewController = navigationController
             window?.makeKeyAndVisible()
-            
+
+            Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Determining user state...")
+            Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: UserService.isSignedIn = \(UserService.shared.isSignedIn)")
+            Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: UserService.isAuthenticated = \(UserService.shared.isAuthenticated)")
+
             // Show auth flow if needed or configure for current user
             if !UserService.shared.isSignedIn {
+                Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: User not signed in, showing auth flow")
                 showAuthenticationFlow()
             } else {
+                Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: User signed in, configuring for current user...")
                 // If already signed in, determine user type and set correct home view controller
                 Task {
-                    try await self.configureForCurrentUser()
+                    do {
+                        try await withTimeout(seconds: 5) {
+                            try await self.configureForCurrentUser()
+                        }
+                        Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: ✅ User configuration complete")
+                    } catch {
+                        Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ User configuration failed: \(error)")
+                        Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ Forcing re-authentication")
+
+                        // If user configuration fails, force re-authentication
+                        await MainActor.run {
+                            self.showAuthenticationFlow()
+                        }
+                    }
                 }
             }
         }

@@ -41,40 +41,66 @@ final class UserService {
                 Logger.log(level: .info, category: .userService, message: "Auth state change skipped - setup already in progress for user: \(firebaseUser.uid)")
                 return
             }
-            
+
+            Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: Handling auth state change for user: \(firebaseUser.uid)")
+
             do {
                 let nestUser = try await fetchUserProfile(userId: firebaseUser.uid)
                 self.currentUser = nestUser
                 self.isAuthenticated = true
-                
+
+                Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: ✅ User profile loaded successfully")
+
                 // Set user context in Events service
                 Tracker.shared.setUserContext(email: nestUser.personalInfo.email, userID: nestUser.id)
-                
-                // Log in to RevenueCat with user ID
-                Purchases.shared.logIn(nestUser.id) { (customerInfo, created, error) in
-                    if let error = error {
-                        Logger.log(level: .error, category: .userService, message: "RevenueCat login error: \(error.localizedDescription)")
-                    } else {
-                        Logger.log(level: .info, category: .userService, message: "RevenueCat login successful for user: \(nestUser.id)")
-                        // Refresh subscription info after successful login
-                        Task {
-                            await SubscriptionService.shared.refreshCustomerInfo()
+
+                // Log in to RevenueCat with user ID (if not already logged in with this ID)
+                // This handles existing users logging in, while new users get logged in during profile creation
+                if Purchases.shared.appUserID != nestUser.id {
+                    Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: RevenueCat user ID differs, logging in...")
+                    Purchases.shared.logIn(nestUser.id) { (customerInfo, created, error) in
+                        if let error = error {
+                            Logger.log(level: .error, category: .userService, message: "RevenueCat login error: \(error.localizedDescription)")
+                        } else {
+                            Logger.log(level: .info, category: .userService, message: "RevenueCat login successful for user: \(nestUser.id)")
+                            // Refresh subscription info after successful login
+                            Task {
+                                await SubscriptionService.shared.refreshCustomerInfo()
+                            }
                         }
                     }
+                } else {
+                    Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: RevenueCat already logged in with correct user ID: \(nestUser.id)")
                 }
-                
+
                 // Try to save any pending FCM token
                 if let token = pendingFCMToken {
                     try await updateFCMToken(token)
                     pendingFCMToken = nil
                 }
-                
+
                 Logger.log(level: .info, category: .userService, message: "Auth state changed - User logged in: \(nestUser)")
             } catch {
-                self.currentUser = nil
-                self.isAuthenticated = false
-                Tracker.shared.clearUserContext()
-                Logger.log(level: .error, category: .userService, message: "Auth state changed - Failed to fetch profile: \(error.localizedDescription)")
+                // Check if this is likely a new user whose profile hasn't been created yet
+                if let authError = error as? AuthError, authError == .invalidUserData {
+                    Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: ⏳ User profile not found - likely new user during signup process")
+                    Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: ⏳ Keeping user authenticated but waiting for profile creation")
+
+                    // Keep the user authenticated but without full profile
+                    // This allows signup flow to continue without interference
+                    self.isAuthenticated = true
+                    self.currentUser = nil // Will be set later when profile is created
+
+                    // Don't clear user context or set RevenueCat yet - wait for profile
+                    Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: ⏳ Auth state preserved for ongoing signup")
+                } else {
+                    // Other errors (network issues, permissions, etc.) should invalidate auth
+                    Logger.log(level: .error, category: .userService, message: "🔄 AUTH STATE: ❌ Non-profile error during auth state change: \(error.localizedDescription)")
+                    self.currentUser = nil
+                    self.isAuthenticated = false
+                    Tracker.shared.clearUserContext()
+                    Logger.log(level: .error, category: .userService, message: "Auth state changed - Failed to fetch profile: \(error.localizedDescription)")
+                }
             }
         } else {
             self.currentUser = nil
@@ -581,11 +607,13 @@ final class UserService {
             self.isAuthenticated = true
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
-            
+            Tracker.shared.track(.appleSignUpSucceeded)
+
             return user
             
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In profile setup failed: \(error)")
+            Tracker.shared.track(.appleSignUpSucceeded, result: false, error: error.localizedDescription)
             throw error
         }
     }
@@ -598,23 +626,51 @@ final class UserService {
     ///   - updateCurrentUser: If true and the user is the current user, updates their roles
     /// - Returns: The created NestItem
     func setupNestForUser(userId: String, nestName: String, nestAddress: String, surveyResponses: [String: [String]]? = nil, updateCurrentUser: Bool = false) async throws -> NestItem {
-        
-        Logger.log(level: .info, category: .userService, message: "Setting up nest for user: \(userId)")
-        
-        // Extract care responsibilities from survey responses
-        let careResponsibilities = surveyResponses?["care_responsibilities"]
-        
-        // Create nest for user with personalized categories
-        let nest = try await NestService.shared.createNest(
-            ownerId: userId,
-            name: nestName,
-            address: nestAddress,
-            careResponsibilities: careResponsibilities
-        )
-        
-        Logger.log(level: .info, category: .userService, message: "Successfully created nest: \(nest.name) with care responsibilities: \(careResponsibilities ?? [])")
-        
-        return nest
+
+        Logger.log(level: .info, category: .userService, message: "🏗️ SETUP NEST: Starting nest setup for user: \(userId)")
+        Logger.log(level: .info, category: .userService, message: "🏗️ SETUP NEST: Nest name: '\(nestName)'")
+        Logger.log(level: .info, category: .userService, message: "🏗️ SETUP NEST: Nest address: '\(nestAddress)'")
+        Logger.log(level: .info, category: .userService, message: "🏗️ SETUP NEST: Survey responses keys: \(surveyResponses?.keys.sorted() ?? [])")
+        Logger.log(level: .info, category: .userService, message: "🏗️ SETUP NEST: Update current user: \(updateCurrentUser)")
+
+        do {
+            // Step 1: Extract care responsibilities from survey responses
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 1: Extracting care responsibilities from survey...")
+            let careResponsibilities = surveyResponses?["care_responsibilities"]
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 1: ✅ Care responsibilities extracted: \(careResponsibilities ?? [])")
+
+            // Step 2: Call NestService to create nest
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 2: Calling NestService.createNest()...")
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 2: Parameters - ownerId: \(userId), name: '\(nestName)', address: '\(nestAddress)'")
+
+            let nest = try await NestService.shared.createNest(
+                ownerId: userId,
+                name: nestName,
+                address: nestAddress,
+                careResponsibilities: careResponsibilities
+            )
+
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 2: ✅ NestService.createNest() completed successfully")
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 2: ✅ Returned nest ID: \(nest.id)")
+            Logger.log(level: .info, category: .userService, message: "🏗️ STEP 2: ✅ Returned nest name: '\(nest.name)'")
+
+            Logger.log(level: .info, category: .userService, message: "🏗️ ✅ SETUP NEST COMPLETE: Successfully created nest '\(nest.name)' for user \(userId)")
+
+            // Track successful nest setup during signup
+            Tracker.shared.track(.nestCreated)
+
+            return nest
+
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "🏗️ ❌ SETUP NEST FAILED: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .userService, message: "🏗️ ❌ Error type: \(type(of: error))")
+            Logger.log(level: .error, category: .userService, message: "🏗️ ❌ Full error: \(error)")
+            Logger.log(level: .error, category: .userService, message: "🏗️ ❌ Failed for user: \(userId), nest name: '\(nestName)', address: '\(nestAddress)'")
+
+            // Track nest setup failure during signup
+            Tracker.shared.track(.nestCreated, result: false, error: error.localizedDescription)
+            throw error
+        }
     }
     
     /// Adds nest access to a user's roles
@@ -793,10 +849,55 @@ final class UserService {
     }
     
     private func saveUserProfile(_ user: NestUser) async throws {
-        Logger.log(level: .debug, category: .userService, message: "Saving user profile for ID: \(user.id)")
-        
-        let docRef = db.collection("users").document(user.id)
-        try await docRef.setData(try Firestore.Encoder().encode(user))
+        Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Saving user profile for ID: \(user.id)")
+        Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User name: '\(user.personalInfo.name)'")
+        Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User email: '\(user.personalInfo.email)'")
+
+        do {
+            let docRef = db.collection("users").document(user.id)
+            try await docRef.setData(try Firestore.Encoder().encode(user))
+
+            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ User profile saved to Firestore successfully!")
+
+            // Track successful user profile creation
+            Tracker.shared.track(.userProfileCreated)
+
+            // Immediately log in to RevenueCat with the user ID after profile creation
+            // This ensures any purchases made during onboarding get properly attributed
+            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Logging in to RevenueCat with user ID: \(user.id)")
+
+            await withCheckedContinuation { continuation in
+                Purchases.shared.logIn(user.id) { (customerInfo, created, error) in
+                    if let error = error {
+                        Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: RevenueCat login error: \(error.localizedDescription)")
+                    } else {
+                        Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ RevenueCat login successful for user: \(user.id)")
+                        if created {
+                            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: New RevenueCat customer created")
+                        } else {
+                            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Existing RevenueCat customer found")
+                        }
+
+                        // Refresh subscription info after successful login
+                        Task {
+                            await SubscriptionService.shared.refreshCustomerInfo()
+                        }
+                    }
+                    continuation.resume()
+                }
+            }
+
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ Failed to save user profile: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ Error type: \(type(of: error))")
+            Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ Full error: \(error)")
+            Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ User ID: \(user.id), Name: '\(user.personalInfo.name)'")
+
+            // Track user profile creation failure
+            Tracker.shared.track(.userProfileCreated, result: false, error: error.localizedDescription)
+
+            throw error
+        }
     }
     
     // MARK: - User Update Methods

@@ -243,8 +243,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     func finishSetup() async throws {
+        Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: Starting finish setup process")
+        Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: User role: \(userInfo.role), Apple sign in: \(userInfo.isAppleSignIn)")
+
         #if DEBUG
         if isDebugMode {
+            Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: Debug mode enabled - using mock flow")
             try await Task.sleep(for: .seconds(2))
             UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
             self.authenticationDelegate?.signUpComplete()
@@ -252,63 +256,93 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
         #endif
 
-        // First handle the signup logic
-        let user: NestUser
-        if userInfo.isAppleSignIn {
-            // User is already authenticated, just need to complete profile setup
-            user = try await UserService.shared.completeAppleSignUp(with: userInfo)
-        } else {
-            user = try await UserService.shared.signUp(with: userInfo)
-        }
-        Logger.log(level: .info, category: .signup, message: "Successfully completed signup for user: \(user.personalInfo.name)")
-        
-        // Record referral if one was provided
-        if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
-            do {
-                try await ReferralService.shared.recordReferral(
-                    referralCode: referralCode,
-                    for: user.id,
-                    email: user.personalInfo.email,
-                    role: userInfo.role.rawValue
+        do {
+            // First handle the signup logic
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Starting user signup/profile creation...")
+            let user: NestUser
+            if userInfo.isAppleSignIn {
+                // User is already authenticated, just need to complete profile setup
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Using Apple Sign In profile completion")
+                user = try await UserService.shared.completeAppleSignUp(with: userInfo)
+            } else {
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Using regular email signup")
+                user = try await UserService.shared.signUp(with: userInfo)
+            }
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: ✅ Successfully completed signup for user: \(user.personalInfo.name)")
+
+            // Record referral if one was provided
+            if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: Recording referral code: \(referralCode)")
+                do {
+                    try await ReferralService.shared.recordReferral(
+                        referralCode: referralCode,
+                        for: user.id,
+                        email: user.personalInfo.email,
+                        role: userInfo.role.rawValue
+                    )
+                    Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: ✅ Successfully recorded referral for code: \(referralCode)")
+                    Tracker.shared.track(.referralRecorded)
+                } catch {
+                    Logger.log(level: .error, category: .signup, message: "🎯 STEP 2: ⚠️ Failed to record referral: \(error)")
+                    Tracker.shared.track(.referralRecorded, result: false, error: error.localizedDescription)
+                    // Continue with onboarding even if referral fails
+                }
+            } else {
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: No referral code provided, skipping")
+            }
+
+            // Save survey responses
+            if !userInfo.surveyResponses.isEmpty {
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: Submitting survey responses...")
+                let response = SurveyResponse(
+                    id: UUID().uuidString,
+                    timestamp: Date(),
+                    surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
+                    version: "1.0", // TODO: Get from config
+                    responses: userInfo.surveyResponses.map { SurveyResponse.QuestionResponse(questionId: $0.key, answers: $0.value) },
+                    metadata: [
+                        "userId": user.id,
+                        "role": userInfo.role.rawValue
+                    ]
                 )
-                Logger.log(level: .info, category: .signup, message: "Successfully recorded referral for code: \(referralCode)")
-            } catch {
-                Logger.log(level: .error, category: .signup, message: "Failed to record referral: \(error)")
-                // Continue with onboarding even if referral fails
+
+                do {
+                    try await SurveyService.shared.submitSurveyResponse(response)
+                    Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: ✅ Successfully submitted survey responses for user: \(user.personalInfo.name)")
+                } catch {
+                    Logger.log(level: .error, category: .signup, message: "🎯 STEP 3: ⚠️ Failed to submit survey responses: \(error)")
+                    // Continue with onboarding even if submission fails
+                }
+            } else {
+                Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: No survey responses to submit, skipping")
             }
-        }
-        
-        // Save survey responses
-        if !userInfo.surveyResponses.isEmpty {
-            let response = SurveyResponse(
-                id: UUID().uuidString,
-                timestamp: Date(),
-                surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
-                version: "1.0", // TODO: Get from config
-                responses: userInfo.surveyResponses.map { SurveyResponse.QuestionResponse(questionId: $0.key, answers: $0.value) },
-                metadata: [
-                    "userId": user.id,
-                    "role": userInfo.role.rawValue
-                ]
-            )
-            
-            do {
-                try await SurveyService.shared.submitSurveyResponse(response)
-                Logger.log(level: .info, category: .survey, message: "Successfully submitted survey responses for user: \(user.personalInfo.name)")
-            } catch {
-                Logger.log(level: .error, category: .survey, message: "Failed to submit survey responses: \(error)")
-                // Continue with onboarding even if submission fails
+
+            // Set onboarding completion flag
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 4: Setting onboarding completion flag...")
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 4: ✅ Onboarding completion flag set")
+
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 5: Notifying authentication delegate...")
+            authenticationDelegate?.signUpComplete()
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 5: ✅ Authentication delegate notified")
+
+            Logger.log(level: .info, category: .signup, message: "🎯 ✅ FINISH SETUP COMPLETE: All steps completed successfully!")
+
+        } catch {
+            Logger.log(level: .error, category: .signup, message: "🎯 ❌ FINISH SETUP FAILED: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .signup, message: "🎯 ❌ Error type: \(type(of: error))")
+            Logger.log(level: .error, category: .signup, message: "🎯 ❌ Full error: \(error)")
+            Logger.log(level: .error, category: .signup, message: "🎯 ❌ User info - Role: \(userInfo.role), Apple: \(userInfo.isAppleSignIn), Email: \(userInfo.email)")
+
+            // Track the overall finish setup failure
+            if userInfo.isAppleSignIn {
+                Tracker.shared.track(.appleSignUpAttempted, result: false, error: error.localizedDescription)
+            } else {
+                Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
             }
+
+            throw error
         }
-        
-        // Then configure all services
-//        Logger.log(level: .info, category: .signup, message: "Moving to configure launcher...")
-//        try await Launcher.shared.configure()
-        
-        // Set onboarding completion flag
-        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        
-        authenticationDelegate?.signUpComplete()
     }
     
     func handleErrorNavigation(_ error: Error) {

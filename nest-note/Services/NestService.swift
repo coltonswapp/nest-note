@@ -117,33 +117,62 @@ final class NestService: EntryRepository {
     
     // MARK: - Firestore Methods
     func createNest(ownerId: String, name: String, address: String, careResponsibilities: [String]? = nil) async throws -> NestItem {
-        Logger.log(level: .info, category: .nestService, message: "Creating new nest for user: \(ownerId)")
-        
+        Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Starting nest creation for user: \(ownerId)")
+        Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Name: '\(name)', Address: '\(address)'")
+        Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Care responsibilities: \(careResponsibilities ?? [])")
+
         do {
+            // Step 1: Create NestItem object
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 1: Creating NestItem object...")
             var nest = NestItem(
                 ownerId: ownerId,
                 name: name,
                 address: address
             )
-            
             nest.pinnedCategories = ["Household"]
-            
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 1: ✅ NestItem created with ID: \(nest.id)")
+
+            // Step 2: Encode nest data
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 2: Encoding nest data...")
+            let nestData = try Firestore.Encoder().encode(nest)
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 2: ✅ Nest data encoded successfully")
+
+            // Step 3: Save nest to Firestore
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 3: Saving nest to Firestore...")
             let docRef = db.collection("nests").document(nest.id)
-            try await docRef.setData(try Firestore.Encoder().encode(nest))
-            
-            // Create categories based on survey responses
-            try await createCategoriesBasedOnSurvey(for: nest.id, careResponsibilities: careResponsibilities)
-            
-            Logger.log(level: .info, category: .nestService, message: "Nest created successfully with personalized categories ✅")
-            
-            // Set as current nest after creation
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 3: Document path: nests/\(nest.id)")
+
+            try await docRef.setData(nestData)
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 3: ✅ Nest document saved to Firestore")
+
+            // Step 4: Create categories separately after nest creation
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 4: Creating categories for nest...")
+            do {
+                try await createCategoriesForNest(nestId: nest.id, careResponsibilities: careResponsibilities)
+                Logger.log(level: .info, category: .nestService, message: "🏠 STEP 4: ✅ Categories created successfully")
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "🏠 STEP 4: ⚠️ Category creation failed: \(error.localizedDescription)")
+                Logger.log(level: .error, category: .nestService, message: "🏠 STEP 4: ⚠️ Continuing without categories - nest creation still successful")
+                // Don't throw - nest creation succeeded, categories can be created later
+            }
+
+            // Step 5: Set as current nest
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 5: Setting as current nest...")
             setCurrentNest(nest)
-            
-            // Log success event
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 5: ✅ Current nest set")
+
+            // Step 6: Track success
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 6: Logging success event...")
             Tracker.shared.track(.nestCreated)
-            
+            Logger.log(level: .info, category: .nestService, message: "🏠 STEP 6: ✅ Success event logged")
+
+            Logger.log(level: .info, category: .nestService, message: "🏠 ✅ NEST CREATION COMPLETE: Nest '\(nest.name)' created successfully!")
             return nest
         } catch {
+            Logger.log(level: .error, category: .nestService, message: "🏠 ❌ NEST CREATION FAILED: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .nestService, message: "🏠 ❌ Error type: \(type(of: error))")
+            Logger.log(level: .error, category: .nestService, message: "🏠 ❌ Full error: \(error)")
+
             // Log failure event
             Tracker.shared.track(.nestCreated, result: false, error: error.localizedDescription)
             throw error
@@ -874,6 +903,7 @@ extension NestService {
         case imageConversionFailed
         case imageUploadFailed
         case invalidImageURL
+        case creationFailed
         
         var errorDescription: String? {
             switch self {
@@ -891,6 +921,8 @@ extension NestService {
                 return "Failed to upload image to storage"
             case .invalidImageURL:
                 return "Invalid image URL"
+            case .creationFailed:
+                return "Failed to create nest and categories"
             }
         }
     }
@@ -921,6 +953,57 @@ extension NestService {
         Logger.log(level: .info, category: .nestService, message: "Created \(Self.defaultCategories.count) default categories")
     }
     
+    /// Creates categories for a nest based on survey responses. Called after nest creation.
+    func createCategoriesForNest(nestId: String, careResponsibilities: [String]? = nil) async throws {
+        Logger.log(level: .info, category: .nestService, message: "📁 CATEGORY CREATION: Starting category creation for nest: \(nestId)")
+        Logger.log(level: .info, category: .nestService, message: "📁 CATEGORY CREATION: Care responsibilities: \(careResponsibilities ?? [])")
+
+        do {
+            let categoriesRef = db.collection("nests").document(nestId).collection("nestCategories")
+            var categoriesToCreate: [NestCategory] = []
+
+            // Step 1: Always create "Household" folder as default
+            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: Creating default Household category...")
+            let householdCategory = NestCategory(name: "Household", symbolName: "house.fill", isDefault: true, isPinned: true)
+            categoriesToCreate.append(householdCategory)
+            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: ✅ Household category prepared")
+
+            // Step 2: Create categories based on care responsibilities from survey
+            if let careResponsibilities = careResponsibilities {
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: Processing \(careResponsibilities.count) care responsibilities...")
+                for responsibility in careResponsibilities {
+                    let category = createCategoryForCareResponsibility(responsibility)
+                    if !categoriesToCreate.contains(where: { $0.name == category.name }) {
+                        categoriesToCreate.append(category)
+                        Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: Added category for '\(responsibility)': \(category.name)")
+                    } else {
+                        Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: Skipped duplicate category for '\(responsibility)'")
+                    }
+                }
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: ✅ Care responsibility categories prepared")
+            } else {
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: No care responsibilities provided, using default only")
+            }
+
+            // Step 3: Create all categories in Firestore
+            Logger.log(level: .info, category: .nestService, message: "📁 STEP 3: Creating \(categoriesToCreate.count) categories in Firestore...")
+            for (index, category) in categoriesToCreate.enumerated() {
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 3: Creating category \(index + 1)/\(categoriesToCreate.count): '\(category.name)'")
+                try await categoriesRef.document(category.id).setData(try Firestore.Encoder().encode(category))
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 3: ✅ Category '\(category.name)' created successfully")
+            }
+
+            Logger.log(level: .info, category: .nestService, message: "📁 ✅ CATEGORY CREATION COMPLETE: Created \(categoriesToCreate.count) categories successfully!")
+
+        } catch {
+            Logger.log(level: .error, category: .nestService, message: "📁 ❌ CATEGORY CREATION FAILED: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .nestService, message: "📁 ❌ Error type: \(type(of: error))")
+            Logger.log(level: .error, category: .nestService, message: "📁 ❌ Full error: \(error)")
+            throw error
+        }
+    }
+
+    @available(*, deprecated, message: "This method is no longer used. Category creation is now handled by createCategoriesForNest.")
     func createCategoriesBasedOnSurvey(for nestId: String, careResponsibilities: [String]? = nil) async throws {
         let categoriesRef = db.collection("nests").document(nestId).collection("nestCategories")
         var categoriesToCreate: [NestCategory] = []
