@@ -34,7 +34,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
-    private var addEntryButton: NNSmallPrimaryButton!
+    private var addEntryButton: UIButton!
+    private var addEntryButtonWidthConstraint: NSLayoutConstraint?
+    private var addEntryButtonBlurView: UIVisualEffectView?
     private var emptyStateView: NNEmptyStateView!
     
     enum Section: Int, CaseIterable {
@@ -1416,19 +1418,56 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private func setupAddEntryButton() {
         // Only show add entry button for nest owners and not in edit-only mode
         guard entryRepository is NestService && !isEditOnlyMode else { return }
-        
-        addEntryButton = NNSmallPrimaryButton(title: "", image: UIImage(systemName: "plus"))
+
+        addEntryButton = UIButton(type: .system)
         addEntryButton.translatesAutoresizingMaskIntoConstraints = false
-        
+
+        // Configure button appearance with glass effect
+        var config = UIButton.Configuration.filled()
+        config.image = UIImage(systemName: "plus")
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = .systemBackground.withAlphaComponent(0.8)
+        config.baseForegroundColor = .label
+
+        addEntryButton.configuration = config
+
+        // Add glass effect
+        addEntryButton.layer.shadowColor = UIColor.black.cgColor
+        addEntryButton.layer.shadowOpacity = 0.1
+        addEntryButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        addEntryButton.layer.shadowRadius = 4
+
+        // Add blur effect
+        let blurEffect = UIBlurEffect(style: .systemMaterial)
+        let blurView = UIVisualEffectView(effect: blurEffect)
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.layer.cornerRadius = 22
+        blurView.layer.masksToBounds = true
+        blurView.isUserInteractionEnabled = false
+
+        // Store reference for later updates
+        addEntryButtonBlurView = blurView
+
+        addEntryButton.insertSubview(blurView, at: 0)
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: addEntryButton.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: addEntryButton.trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: addEntryButton.topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: addEntryButton.bottomAnchor)
+        ])
+
         view.addSubview(addEntryButton)
-        
+
+        // Store the width constraint for later manipulation
+        addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(equalToConstant: 44)
+
         NSLayoutConstraint.activate([
             addEntryButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
             addEntryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
             addEntryButton.heightAnchor.constraint(equalToConstant: 44),
-            addEntryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80)
+            addEntryButtonWidthConstraint!
         ])
-        
+
         // Setup UIMenu for Entry/Place/Routine creation
         setupAddButtonMenu()
     }
@@ -1440,24 +1479,50 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func updateAddEntryButtonForEditMode() {
         guard let addEntryButton = addEntryButton else { return }
-        
+
         if isEditingMode {
             // Change to "Move" button with arrow.right icon and disable menu
-            addEntryButton.setTitle("Move", for: .normal)
-            addEntryButton.setImage(UIImage(systemName: "arrow.right"), for: .normal)
+            var config = addEntryButton.configuration ?? UIButton.Configuration.filled()
+            config.title = "Move"
+            config.image = UIImage(systemName: "arrow.right")
+            config.imagePlacement = .leading
+            config.imagePadding = 8
+            addEntryButton.configuration = config
+
             addEntryButton.menu = nil
             addEntryButton.showsMenuAsPrimaryAction = false
             addEntryButton.addTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
-            
+
+            // Update width constraint to accommodate text
+            addEntryButtonWidthConstraint?.isActive = false
+            addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80)
+            addEntryButtonWidthConstraint?.isActive = true
+
+            // Update glass effect corner radius for rectangular button (height is 44, so radius should be 22)
+            addEntryButtonBlurView?.layer.cornerRadius = 22
+
             // Update button state based on selection
             updateMoveButtonState()
         } else {
             // Change back to add button with plus icon and restore menu
-            addEntryButton.setTitle("", for: .normal)
-            addEntryButton.setImage(UIImage(systemName: "plus"), for: .normal)
+            var config = addEntryButton.configuration ?? UIButton.Configuration.filled()
+            config.title = ""
+            config.image = UIImage(systemName: "plus")
+            config.imagePlacement = .leading
+            config.imagePadding = 0
+            addEntryButton.configuration = config
+
             addEntryButton.removeTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
             setupAddButtonMenu() // Restore the menu
             addEntryButton.isEnabled = true // Ensure it's enabled when not in edit mode
+
+            // Update width constraint back to square button
+            addEntryButtonWidthConstraint?.isActive = false
+            addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(equalToConstant: 44)
+            addEntryButtonWidthConstraint?.isActive = true
+
+            // Update glass effect corner radius for square button
+            addEntryButtonBlurView?.layer.cornerRadius = 22
         }
     }
     

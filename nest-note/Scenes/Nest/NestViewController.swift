@@ -177,7 +177,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private let sectionHeaders = ["", "Folders"]
     
     private var newCategoryButton: NNPrimaryLabeledButton?
-    private var newFolderButton: NNSmallPrimaryButton?
+    private var newFolderButton: UIButton?
     
     internal let entryRepository: EntryRepository
     
@@ -587,12 +587,47 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         
         // Create the button if it doesn't exist
         if newFolderButton == nil {
-            newFolderButton = NNSmallPrimaryButton(title: "New Folder", image: UIImage(systemName: "folder.fill.badge.plus"))
+            newFolderButton = UIButton(type: .system)
             newFolderButton?.translatesAutoresizingMaskIntoConstraints = false
+
+            // Configure button appearance with glass effect
+            var config = UIButton.Configuration.filled()
+            config.title = "New Folder"
+            config.image = UIImage(systemName: "folder.fill.badge.plus")
+            config.imagePlacement = .leading
+            config.imagePadding = 8
+            config.cornerStyle = .capsule
+            config.baseBackgroundColor = .systemBackground.withAlphaComponent(0.8)
+            config.baseForegroundColor = .label
+
+            newFolderButton?.configuration = config
+
+            // Add glass effect
+            newFolderButton?.layer.shadowColor = UIColor.black.cgColor
+            newFolderButton?.layer.shadowOpacity = 0.1
+            newFolderButton?.layer.shadowOffset = CGSize(width: 0, height: 2)
+            newFolderButton?.layer.shadowRadius = 4
+
+            // Add blur effect
+            let blurEffect = UIBlurEffect(style: .systemMaterial)
+            let blurView = UIVisualEffectView(effect: blurEffect)
+            blurView.translatesAutoresizingMaskIntoConstraints = false
+            blurView.layer.cornerRadius = 22
+            blurView.layer.masksToBounds = true
+            blurView.isUserInteractionEnabled = false
+
+            newFolderButton?.insertSubview(blurView, at: 0)
+            NSLayoutConstraint.activate([
+                blurView.leadingAnchor.constraint(equalTo: newFolderButton!.leadingAnchor),
+                blurView.trailingAnchor.constraint(equalTo: newFolderButton!.trailingAnchor),
+                blurView.topAnchor.constraint(equalTo: newFolderButton!.topAnchor),
+                blurView.bottomAnchor.constraint(equalTo: newFolderButton!.bottomAnchor)
+            ])
+
             newFolderButton?.addTarget(self, action: #selector(newFolderButtonTapped), for: .touchUpInside)
-            
+
             view.addSubview(newFolderButton!)
-            
+
             NSLayoutConstraint.activate([
                 newFolderButton!.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
                 newFolderButton!.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),

@@ -8,14 +8,15 @@
 import UIKit
 
 class SelectEntriesCountView: UIView {
-    
+
     // MARK: - Properties
     private let icon = UIImageView()
     private let countLabel = UILabel()
     private let iconLabelStack = UIStackView()
     private let continueButton = UIButton(type: .system)
     private let stackView = UIStackView()
-    
+    private var liquidGlassEffectView: UIVisualEffectView?
+
     var onContinueTapped: (() -> Void)?
     
     var count: Int = 0 {
@@ -54,16 +55,19 @@ class SelectEntriesCountView: UIView {
     }
     
     private func setupAppearance() {
-        backgroundColor = .init(dynamicProvider: { traitCollection in
-            return traitCollection.userInterfaceStyle == .dark ? NNColors.NNSystemBackground4 : .systemBackground
-        })
+        // Clear background since we'll use liquid glass
+        backgroundColor = .clear
+
         layer.cornerRadius = 25
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOffset = CGSize(width: 0, height: 2)
         layer.shadowOpacity = 0.15
         layer.shadowRadius = 8
         translatesAutoresizingMaskIntoConstraints = false
-        
+
+        // Apply liquid glass effect
+        liquidGlassEffectView = applyLiquidGlass(style: .systemMaterial, animated: false)
+
         // Start offscreen (translated down by 100 points)
         transform = CGAffineTransform(translationX: 0, y: 100)
     }
@@ -142,12 +146,29 @@ class SelectEntriesCountView: UIView {
     private func updateVisibility() {
         let shouldShow = count > 0
         let targetTransform = shouldShow ? .identity : CGAffineTransform(translationX: 0, y: 100)
-        
+
         let animator = UIViewPropertyAnimator(duration: 0.4, controlPoint1: CGPoint(x: 0.34, y: 1.56), controlPoint2: CGPoint(x: 0.28, y: 0.94), animations: {
             self.transform = targetTransform
         })
-        
+
+        // Add liquid glass animation when showing
+        if shouldShow && liquidGlassEffectView?.effect == nil {
+            animateLiquidGlassAppearance()
+        }
+
         animator.startAnimation()
+    }
+
+    private func animateLiquidGlassAppearance() {
+        guard let effectView = liquidGlassEffectView else { return }
+
+        let glassEffect = UIBlurEffect(style: .systemMaterial)
+        UIView.animate(withDuration: 0.6,
+                      delay: 0.1,
+                      options: [.curveEaseOut],
+                      animations: {
+            effectView.effect = glassEffect
+        })
     }
     
     @objc private func continueButtonTapped() {

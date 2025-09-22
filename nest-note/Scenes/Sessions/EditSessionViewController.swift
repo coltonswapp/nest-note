@@ -36,7 +36,7 @@ protocol InviteSitterViewControllerDelegate: AnyObject {
 }
 
 // MARK: - EditSessionViewController
-class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate, QLPreviewControllerDataSource {
+class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate, QLPreviewControllerDataSource, UIAdaptivePresentationControllerDelegate {
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -1128,7 +1128,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         inviteDetailVC.delegate = self
-        present(UINavigationController(rootViewController: inviteDetailVC), animated: true)
+
+        let navController = UINavigationController(rootViewController: inviteDetailVC)
+        present(navController, animated: true)
+
+        // Add completion handler for when the invite detail is dismissed
+        navController.presentationController?.delegate = self
     }
     
     private func expenseButtonTapped() {
@@ -2600,7 +2605,7 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
                 email: sitter.email,
                 userID: existingAssignedSitter.userID,
                 inviteStatus: existingAssignedSitter.inviteStatus,
-                inviteID: existingAssignedSitter.inviteID
+                inviteID: inviteId // Use the new invite ID
             )
         } else {
             // Create new assigned sitter (for new invites)
@@ -2609,24 +2614,39 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
                 name: sitter.name,
                 email: sitter.email,
                 userID: nil,
-                inviteStatus: .none,
+                inviteStatus: .invited,
                 inviteID: inviteId
             )
         }
-        
-        // Update originalSession to reflect saved changes
-        originalSession.assignedSitter = sessionItem.assignedSitter
-        
-        // Update the UI
-        var snapshot = dataSource.snapshot()
-        if snapshot.sectionIdentifiers.contains(.sitter),
-           let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
-            snapshot.reloadItems([existingItem])
-            dataSource.apply(snapshot, animatingDifferences: true)
+
+        // Save the session changes to persist the invite data
+        Task {
+            do {
+                guard let nestID = NestService.shared.currentNest?.id else { return }
+                try await SessionService.shared.updateSession(sessionItem)
+
+                await MainActor.run {
+                    // Update originalSession to reflect saved changes
+                    self.originalSession.assignedSitter = self.sessionItem.assignedSitter
+
+                    // Notify delegate about the updated session
+                    self.delegate?.editSessionViewController(self, didUpdateSession: self.sessionItem)
+
+                    // Update the UI
+                    var snapshot = self.dataSource.snapshot()
+                    if snapshot.sectionIdentifiers.contains(.sitter),
+                       let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+                        snapshot.reloadItems([existingItem])
+                        self.dataSource.apply(snapshot, animatingDifferences: true)
+                    }
+
+                    // Mark as having no unsaved changes since we just saved
+                    self.checkForChanges()
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Error saving session after invite creation: \(error)")
+            }
         }
-        
-        // Mark as having unsaved changes
-        checkForChanges()
     }
     
     func inviteSitterViewControllerDidCancel() {
@@ -2802,6 +2822,45 @@ class SessionInviteSitterCell: UICollectionViewListCell {
         codeLabel.foregroundColor = .secondaryLabel
         codeLabel.setTitle("000-000")
         codeLabel.isUserInteractionEnabled = false
+    }
+}
+
+// MARK: - UIAdaptivePresentationControllerDelegate
+extension EditSessionViewController {
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        // This is called when the InviteDetailViewController is dismissed
+        // Refresh the session data from the server to get the latest invite information
+        refreshSessionData()
+    }
+
+    private func refreshSessionData() {
+        guard let nestID = NestService.shared.currentNest?.id else { return }
+
+        Task {
+            do {
+                // Fetch the updated session data from the server
+                if let refreshedSession = try await SessionService.shared.getSession(nestID: nestID, sessionID: sessionItem.id) {
+                    await MainActor.run {
+                        // Update our local session item with fresh data
+                        self.sessionItem = refreshedSession
+                        self.originalSession.assignedSitter = refreshedSession.assignedSitter
+
+                        // Force a complete refresh of the data source to show updated invite codes
+                        var snapshot = self.dataSource.snapshot()
+                        if snapshot.sectionIdentifiers.contains(.sitter),
+                           let existingItem = snapshot.itemIdentifiers(inSection: .sitter).first {
+                            snapshot.reloadItems([existingItem])
+                            self.dataSource.apply(snapshot, animatingDifferences: true)
+                        }
+
+                        // Notify the delegate (SessionsViewController) with the updated session
+                        self.delegate?.editSessionViewController(self, didUpdateSession: refreshedSession)
+                    }
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Error refreshing session data after invite dismissal: \(error)")
+            }
+        }
     }
 }
 

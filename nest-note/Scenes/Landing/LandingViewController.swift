@@ -21,6 +21,7 @@ final class LandingViewController: NNViewController {
     
     override func loadView() {
         super.loadView()
+        self.navigationController?.isNavigationBarHidden = true
     }
     
     // MARK: - Lifecycle Methods

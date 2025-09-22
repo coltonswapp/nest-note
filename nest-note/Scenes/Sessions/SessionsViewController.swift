@@ -55,7 +55,7 @@ class NestSessionsViewController: NNViewController {
         }
     }
     
-    private var filterView: SessionFilterView!
+    private var filterSegmentedControl: UISegmentedControl!
     internal var loadingIndicator: UIActivityIndicatorView!
     internal var refreshControl: UIRefreshControl!
     
@@ -129,10 +129,10 @@ class NestSessionsViewController: NNViewController {
         super.viewDidLoad()
         setupNotificationObservers()
         loadSessions()
-        
+
         // Set initial filter to inProgress
         currentBucket = .inProgress
-        filterView.selectBucket(.inProgress)
+        filterSegmentedControl.selectedSegmentIndex = 1 // inProgress is at index 1
     }
     
     override func viewDidLayoutSubviews() {
@@ -195,12 +195,12 @@ class NestSessionsViewController: NNViewController {
     
     override func setup() {
         title = "Nest Sessions"
-        setupFilterView()
+        setupFilterSegmentedControl()
         setupCollectionView()
         setupEmptyStateView()
         setupNewSessionButton()
         configureDataSource()
-        
+
         // Add loading spinner
         view.addSubview(loadingSpinner)
         NSLayoutConstraint.activate([
@@ -209,11 +209,41 @@ class NestSessionsViewController: NNViewController {
         ])
     }
     
-    private func setupFilterView() {
-        filterView = SessionFilterView()
-        filterView.delegate = self
-        filterView.frame.size.height = 40
-        addNavigationBarPalette(filterView)
+    private func setupFilterSegmentedControl() {
+        filterSegmentedControl = UISegmentedControl(items: ["Past", "In Progress", "Upcoming"])
+        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
+        filterSegmentedControl.addTarget(self, action: #selector(segmentedControlValueChanged), for: .valueChanged)
+
+        // Create a container view for the segmented control with proper sizing
+        let containerView = UIView()
+        containerView.addSubview(filterSegmentedControl)
+        filterSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            filterSegmentedControl.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            filterSegmentedControl.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            filterSegmentedControl.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+            filterSegmentedControl.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
+            filterSegmentedControl.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        containerView.frame.size.height = 48
+        addNavigationBarPalette(containerView)
+    }
+
+    @objc private func segmentedControlValueChanged() {
+        let selectedIndex = filterSegmentedControl.selectedSegmentIndex
+        let newBucket: SessionService.SessionBucket
+
+        switch selectedIndex {
+        case 0: newBucket = .past
+        case 1: newBucket = .inProgress
+        case 2: newBucket = .upcoming
+        default: newBucket = .inProgress
+        }
+
+        currentBucket = newBucket
+        updateDisplayedSessions()
     }
     
     private func setupCollectionView() {
@@ -257,6 +287,7 @@ class NestSessionsViewController: NNViewController {
                     title: "Delete",
                     style: .destructive
                 ) { _ in
+                    self.deleteSession(sessionItem, completion: completion)
                     self.deleteSession(sessionItem, completion: completion)
                 })
                 
@@ -415,7 +446,7 @@ class NestSessionsViewController: NNViewController {
     }
     
     private func fetchNestSessions() {
-        filterView.isEnabled = false
+        filterSegmentedControl.isEnabled = false
         Task {
             do {
                 emptyStateView.hideImmediately()
@@ -436,16 +467,16 @@ class NestSessionsViewController: NNViewController {
                     }
                     return
                 }
-                
+
                 // Fetch all sessions and archived sessions in parallel
                 async let sessionsCollection = sessionService.fetchSessions(nestID: nestID)
                 async let archivedSessions = sessionService.fetchArchivedSessions(nestID: nestID)
-                
+
                 let (collection, archived) = try await (sessionsCollection, archivedSessions)
-                
+
                 await MainActor.run {
                     // Store all sessions
-                    filterView.isEnabled = true
+                    filterSegmentedControl.isEnabled = true
                     self.allSessions = collection.upcoming + collection.inProgress + collection.past
                     self.archivedSessions = archived
                     updateEmptyState()
@@ -454,7 +485,7 @@ class NestSessionsViewController: NNViewController {
                 }
             } catch {
                 // Handle error
-                filterView.isEnabled = false
+                filterSegmentedControl.isEnabled = false
                 print("Error loading sessions: \(error)")
                 await MainActor.run {
                     self.loadingSpinner.stopAnimating()
@@ -574,13 +605,12 @@ extension NestSessionsViewController: UICollectionViewDelegate {
             collectionView.deselectItem(at: indexPath, animated: true)
             return
         }
-        
+
         // Handle both SessionItem and ArchivedSession
         if let sessionItem = session as? SessionItem {
-            let editVC = EditSessionViewController(sessionItem: sessionItem)
-            editVC.delegate = self
-            editVC.modalPresentationStyle = .pageSheet
-            present(editVC, animated: true)
+            // ALWAYS refresh the session data from server before presenting EditSessionViewController
+            // to ensure we have the latest invite codes
+            refreshAndPresentSession(sessionItem)
         } else if let archivedSession = session as? ArchivedSession {
             // Use the new initializer for ArchivedSession
             let editVC = EditSessionViewController(archivedSession: archivedSession)
@@ -588,17 +618,53 @@ extension NestSessionsViewController: UICollectionViewDelegate {
             editVC.modalPresentationStyle = .pageSheet
             present(editVC, animated: true)
         }
-        
+
         collectionView.deselectItem(at: indexPath, animated: true)
+    }
+
+    private func refreshAndPresentSession(_ sessionItem: SessionItem) {
+        guard let nestID = NestService.shared.currentNest?.id else {
+            // Fallback to cached data if no nest
+            let editVC = EditSessionViewController(sessionItem: sessionItem)
+            editVC.delegate = self
+            editVC.modalPresentationStyle = .pageSheet
+            present(editVC, animated: true)
+            return
+        }
+
+        Task {
+            do {
+                // Fetch the latest session data from server to get updated invite codes
+                if let refreshedSession = try await sessionService.getSession(nestID: nestID, sessionID: sessionItem.id) {
+                    await MainActor.run {
+                        let editVC = EditSessionViewController(sessionItem: refreshedSession)
+                        editVC.delegate = self
+                        editVC.modalPresentationStyle = .pageSheet
+                        present(editVC, animated: true)
+                    }
+                } else {
+                    // Fallback to cached data if server fetch fails
+                    await MainActor.run {
+                        let editVC = EditSessionViewController(sessionItem: sessionItem)
+                        editVC.delegate = self
+                        editVC.modalPresentationStyle = .pageSheet
+                        present(editVC, animated: true)
+                    }
+                }
+            } catch {
+                Logger.log(level: .error, category: .sessionService, message: "Error refreshing session data: \(error)")
+                // Fallback to cached data if refresh fails
+                await MainActor.run {
+                    let editVC = EditSessionViewController(sessionItem: sessionItem)
+                    editVC.delegate = self
+                    editVC.modalPresentationStyle = .pageSheet
+                    present(editVC, animated: true)
+                }
+            }
+        }
     }
 }
 
-extension NestSessionsViewController: SessionFilterViewDelegate {
-    func sessionFilterView(_ filterView: SessionFilterView, didSelectFilter filter: SessionService.SessionBucket) {
-        currentBucket = filter
-        updateDisplayedSessions()
-    }
-}
 
 // Helper extension
 extension Calendar {
@@ -625,11 +691,14 @@ extension NestSessionsViewController: EditSessionViewControllerDelegate {
         let sessionStatus = session.status
         switch sessionStatus {
         case .upcoming, .earlyAccess:
-            filterView.selectBucket(.upcoming)
+            currentBucket = .upcoming
+            filterSegmentedControl.selectedSegmentIndex = 2
         case .inProgress, .extended:
-            filterView.selectBucket(.inProgress)
+            currentBucket = .inProgress
+            filterSegmentedControl.selectedSegmentIndex = 1
         case .completed, .archived:
-            filterView.selectBucket(.past)
+            currentBucket = .past
+            filterSegmentedControl.selectedSegmentIndex = 0
         }
     }
     
@@ -663,7 +732,15 @@ extension NestSessionsViewController: EditSessionViewControllerDelegate {
         
         // If the session's bucket is different from current view, switch to it
         if currentBucket != updatedBucket {
-            filterView.selectBucket(updatedBucket)
+            currentBucket = updatedBucket
+            switch updatedBucket {
+            case .past:
+                filterSegmentedControl.selectedSegmentIndex = 0
+            case .inProgress:
+                filterSegmentedControl.selectedSegmentIndex = 1
+            case .upcoming:
+                filterSegmentedControl.selectedSegmentIndex = 2
+            }
         }
     }
 }

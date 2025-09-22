@@ -121,7 +121,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         
         itemsHiddenDuringTransition = [saveButton, infoButton]
         
-        if entry == nil && !isReadOnly && titleField.text == nil {
+        if entry == nil && !isReadOnly && titleField.text?.isEmpty ?? false {
             titleField.becomeFirstResponder()
         } else if entry == nil && !isReadOnly {
             contentTextView.becomeFirstResponder()
