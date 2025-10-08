@@ -180,7 +180,15 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var newFolderButton: UIButton?
     
     internal let entryRepository: EntryRepository
-    
+
+    // Toolbar support
+    private var isUsingToolbar: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     // Dynamic logging category based on repository type
     private var logCategory: Logger.Category {
         return entryRepository is NestService ? .nestService : .sitterViewService
@@ -210,6 +218,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         configureDataSource()
         setupNavigationBar()
         collectionView.delegate = self
+
+        if isUsingToolbar {
+            // Setup toolbar for iOS 26+
+            if #available(iOS 26.0, *) {
+                setupToolbar()
+            }
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -335,7 +350,14 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(collectionView)
-        
+
+        // Set content insets based on iOS version and toolbar usage
+        if isUsingToolbar {
+            // For iOS 26+, account for toolbar
+            collectionView.contentInset.bottom = 20
+            collectionView.verticalScrollIndicatorInsets.bottom = 20
+        }
+
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
     }
@@ -554,6 +576,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         setupNavigationBar()
         setupNewCategoryButton()
         setupNewFolderButton()
+
+        if isUsingToolbar {
+            // Setup toolbar for iOS 26+
+            if #available(iOS 26.0, *) {
+                setupToolbar()
+            }
+        }
     }
     
     private func setupNewCategoryButton() {
@@ -573,8 +602,8 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func setupNewFolderButton() {
-        // Only show new folder button for nest owners
-        guard entryRepository is NestService else { return }
+        // Only show floating button for pre-iOS 26 and nest owners
+        guard !isUsingToolbar && entryRepository is NestService else { return }
         
         // Check if we've reached max folder depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -641,6 +670,36 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         let categoryVC = CategoryDetailViewController()
         categoryVC.categoryDelegate = self
         present(categoryVC, animated: true)
+    }
+
+    @available(iOS 26.0, *)
+    private func setupToolbar() {
+        // Only show toolbar for nest owners
+        guard entryRepository is NestService else {
+            toolbarItems = []
+            navigationController?.setToolbarHidden(true, animated: true)
+            return
+        }
+
+        // Check depth limit
+        let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
+
+        if currentDepth < 3 {
+            let addFolderBarButtonItem = UIBarButtonItem(
+                title: "New Folder",
+                style: .plain,
+                target: self,
+                action: #selector(newFolderButtonTapped)
+            )
+            addFolderBarButtonItem.image = UIImage(systemName: "folder.badge.plus")
+
+            toolbarItems = [.flexibleSpace(), addFolderBarButtonItem]
+            navigationController?.setToolbarHidden(false, animated: true)
+        } else {
+            // At max depth, hide toolbar
+            toolbarItems = []
+            navigationController?.setToolbarHidden(true, animated: true)
+        }
     }
     
     private func loadEntries() async {
