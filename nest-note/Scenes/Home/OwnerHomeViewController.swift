@@ -28,9 +28,22 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     private var hasShownHappeningNowTip = false
     
     private var nestCreationCoordinator: NestCreationCoordinator?
-    
+
     // Track if we're currently switching modes to avoid showing nest setup during transition
     private var isSwitchingModes = false
+
+    // Create Session button
+    private lazy var createSessionButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
+            title: "Create Session",
+            image: UIImage(systemName: "plus"),
+            backgroundColor: NNColors.primaryAlt,
+            foregroundColor: .white
+        )
+        button.addTarget(self, action: #selector(createSessionButtonTapped), for: .touchUpInside)
+        button.isHidden = true // Initially hidden
+        return button
+    }()
     
     private var hasCompletedSetup: Bool {
         return setupService.hasCompletedSetup
@@ -85,6 +98,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
+
+        // Setup and pin the create session button
+        createSessionButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
     }
     
     override func setupNavigationBarButtons() {
@@ -418,9 +434,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         }
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
-        
+
+        // Show/hide create session button based on current session state
+        let hasCurrentSession = updatedSnapshot.sectionIdentifiers.contains(.currentSession)
+        createSessionButton.isHidden = hasCurrentSession
+
         // Show tips if current session, setup progress, or nest cell is visible
-        if updatedSnapshot.sectionIdentifiers.contains(.currentSession) || 
+        if updatedSnapshot.sectionIdentifiers.contains(.currentSession) ||
            updatedSnapshot.sectionIdentifiers.contains(.setupProgress) ||
            updatedSnapshot.sectionIdentifiers.contains(.nest) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -534,6 +554,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         let settingsVC = SettingsViewController()
         let nav = UINavigationController(rootViewController: settingsVC)
         present(nav, animated: true)
+    }
+
+    @objc private func createSessionButtonTapped() {
+        let editSessionVC = EditSessionViewController()
+        let navController = UINavigationController(rootViewController: editSessionVC)
+        navController.modalPresentationStyle = .pageSheet
+        present(navController, animated: true)
     }
     
     private func checkSetupStatus() {
@@ -775,10 +802,11 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
         case .currentSession(let session):
             // Dismiss the happening now tip when the current session cell is tapped
             NNTipManager.shared.dismissTip(HomeTips.happeningNowTip)
-            
+
             let vc = EditSessionViewController(sessionItem: session)
-            vc.modalPresentationStyle = .pageSheet
-            present(vc, animated: true)
+            let navController = UINavigationController(rootViewController: vc)
+            navController.modalPresentationStyle = .pageSheet
+            present(navController, animated: true)
         case .setupProgress:
             // Mark the setup tip as dismissed when user taps on it
             NNTipManager.shared.dismissTip(OwnerHomeTips.finishSetupTip)
@@ -834,7 +862,7 @@ extension OwnerHomeViewController: SetupFlowDelegate {
         // Log step update
         let completedSteps = SetupStepType.allCases.filter { setupService.isStepComplete($0) }
         Logger.log(level: .info, category: .general, message: "Setup step status updated - \(completedSteps.count)/\(SetupStepType.allCases.count) steps completed")
-        
+
         // Refresh the UI to reflect updated step status
         refreshData()
     }
