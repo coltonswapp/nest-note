@@ -803,8 +803,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             switch item {
             case .inviteSitter:
                 // Determine the sitter to display from assignedSitter
-                if isEditingSession {
-                    
+                if isEditingSession && !isArchivedSession {
+
                     let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
                     let assignedSitter = self.sessionItem.assignedSitter
 
@@ -824,6 +824,18 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     }()
 
                     cell.configure(name: displayName, inviteCode: derivedCode)
+                } else if isEditingSession && isArchivedSession {
+                    // For archived sessions, show sitter name but hide invite code
+                    let displaySitter = self.sessionItem.assignedSitter?.asSitterItem()
+                    let displayName: String = {
+                        if let sitter = displaySitter {
+                            return sitter.name.isEmpty ? sitter.email : sitter.name
+                        } else {
+                            return "Open Invite"
+                        }
+                    }()
+
+                    cell.configure(name: displayName, inviteCode: nil) // Hide invite code for archived sessions
                 } else {
                     cell.configureDisabled()
                 }
@@ -1133,11 +1145,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
             // We'll add the nest review section later after checking if entries need review
         } else {
-            snapshot.appendSections([.sitter, .date, .status, .selectEntries])
+            // For archived sessions, don't show the selectEntries section
+            snapshot.appendSections([.sitter, .date, .status])
             snapshot.appendItems([.inviteSitter], toSection: .sitter)
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
