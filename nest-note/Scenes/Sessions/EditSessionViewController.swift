@@ -902,7 +902,45 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             
             cell.contentConfiguration = content
         }
-        
+
+        let endSessionRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
+
+            guard let self else { return }
+
+            var content = cell.defaultContentConfiguration()
+
+            switch item {
+            case .endSession:
+                content.text = "End Session"
+                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+                let image = UIImage(systemName: "xmark.octagon.fill", withConfiguration: symbolConfiguration)?
+                    .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
+                content.image = image
+
+                content.imageProperties.tintColor = .systemRed
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 8
+
+                content.directionalLayoutMargins.top = 17
+                content.directionalLayoutMargins.bottom = 17
+
+                content.textProperties.font = .preferredFont(forTextStyle: .body)
+                content.textProperties.color = .systemRed
+
+                // Set red background with alpha
+                var backgroundConfig = UIBackgroundConfiguration.listGroupedCell()
+                backgroundConfig.backgroundColor = .systemRed.withAlphaComponent(0.2)
+                cell.backgroundConfiguration = backgroundConfig
+
+                // No disclosure indicator for direct action
+                cell.accessories = []
+            default:
+                break
+            }
+
+            cell.contentConfiguration = content
+        }
+
         let selectEntriesRegistration = UICollectionView.CellRegistration<SelectEntriesCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
             if case let .selectEntries(count) = item {
@@ -1038,6 +1076,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 return collectionView.dequeueConfiguredReusableCell(using: sessionEventRegistration, for: indexPath, item: item)
             case .moreEvents(let count):
                 return collectionView.dequeueConfiguredReusableCell(using: moreEventsRegistration, for: indexPath, item: item)
+            case .endSession:
+                return collectionView.dequeueConfiguredReusableCell(using: endSessionRegistration, for: indexPath, item: item)
             }
         }
         
@@ -1084,7 +1124,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 snapshot.appendSections([.exportPDF])
                 snapshot.appendItems([.exportPDF], toSection: .exportPDF)
             }
-            
+
+            // Add End Session section only for in-progress sessions
+            if isEditingSession && sessionItem.status == .inProgress && !isArchivedSession {
+                snapshot.appendSections([.endSession])
+                snapshot.appendItems([.endSession], toSection: .endSession)
+            }
+
             // We'll add the nest review section later after checking if entries need review
         } else {
             snapshot.appendSections([.sitter, .date, .status, .selectEntries])
@@ -1140,7 +1186,30 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let vc = NNFeaturePreviewViewController(feature: .expenses)
         present(vc, animated: true)
     }
-    
+
+    private func endSessionButtonTapped() {
+        let alert = UIAlertController(
+            title: "End Session?",
+            message: "This will mark the session as completed. Sitters will need to be reinvited to access the session again. Are you sure you want to continue?",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(
+            title: "Cancel",
+            style: .cancel
+        ))
+
+        alert.addAction(UIAlertAction(
+            title: "End Session",
+            style: .destructive
+        ) { [weak self] _ in
+            self?.applyStatusChange(.completed)
+            self?.saveButtonTapped()
+        })
+
+        present(alert, animated: true)
+    }
+
     private func exportPDFButtonTapped() {
         // Create alert with PDF export warning
         let alert = UIAlertController(
@@ -1885,6 +1954,7 @@ extension EditSessionViewController {
         case events
         case time
         case notes
+        case endSession
     }
     
     enum Item: Hashable {
@@ -1898,6 +1968,7 @@ extension EditSessionViewController {
         case events
         case sessionEvent(SessionEvent)
         case moreEvents(Int)
+        case endSession
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -1929,6 +2000,8 @@ extension EditSessionViewController {
             case .moreEvents(let count):
                 hasher.combine(10)
                 hasher.combine(count)
+            case .endSession:
+                hasher.combine(11)
             }
         }
         
@@ -1937,7 +2010,8 @@ extension EditSessionViewController {
             case (.inviteSitter, .inviteSitter),
                  (.expenses, .expenses),
                  (.exportPDF, .exportPDF),
-                 (.events, .events):
+                 (.events, .events),
+                 (.endSession, .endSession):
                 return true
             case let (.selectEntries(c1), .selectEntries(c2)):
                 return c1 == c2
@@ -1968,7 +2042,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .events, .moreEvents:
             // Don't allow highlighting events if they are currently loading
             return !isLoadingEvents
-        case .expenses, .exportPDF, .sessionEvent:
+        case .expenses, .exportPDF, .sessionEvent, .endSession:
             return true
         default:
             return false
@@ -2049,8 +2123,10 @@ extension EditSessionViewController: UICollectionViewDelegate {
                     self.present(eventVC, animated: true)
                 }
             }
+        case .endSession:
+            endSessionButtonTapped()
         }
-        
+
         collectionView.deselectItem(at: indexPath, animated: true)
     }
 }
