@@ -27,14 +27,14 @@ final class ReferralAnalyticsViewController: NNViewController {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Referral Analytics"
+        label.text = "All Referrals Analytics"
         label.font = .h1
         label.textColor = .label
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
-    private let totalReferralsCard: UIView = {
+    private let summaryCard: UIView = {
         let card = UIView()
         card.backgroundColor = .systemBackground
         card.layer.cornerRadius = 12
@@ -46,24 +46,47 @@ final class ReferralAnalyticsViewController: NNViewController {
         return card
     }()
     
+    private let summaryStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.spacing = 20
+        stackView.distribution = .fillEqually
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
+    }()
+
     private let totalReferralsLabel: UILabel = {
         let label = UILabel()
         label.text = "Total Referrals"
-        label.font = .bodyL
+        label.font = .bodyM
         label.textColor = .secondaryLabel
+        label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
-    
+
     private let totalReferralsCountLabel: UILabel = {
         let label = UILabel()
         label.text = "0"
-        label.font = .systemFont(ofSize: 32, weight: .bold)
+        label.font = .systemFont(ofSize: 28, weight: .bold)
         label.textColor = .label
+        label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
+    private let activeCodesCard: UIView = {
+        let card = UIView()
+        card.backgroundColor = .systemBackground
+        card.layer.cornerRadius = 12
+        card.layer.shadowColor = UIColor.label.cgColor
+        card.layer.shadowOffset = CGSize(width: 0, height: 2)
+        card.layer.shadowOpacity = 0.1
+        card.layer.shadowRadius = 4
+        card.translatesAutoresizingMaskIntoConstraints = false
+        return card
+    }()
+
     private let thisMonthCard: UIView = {
         let card = UIView()
         card.backgroundColor = .systemBackground
@@ -76,49 +99,76 @@ final class ReferralAnalyticsViewController: NNViewController {
         return card
     }()
     
+    private let activeCodesLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Active Codes"
+        label.font = .bodyM
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let activeCodesCountLabel: UILabel = {
+        let label = UILabel()
+        label.text = "0"
+        label.font = .systemFont(ofSize: 28, weight: .bold)
+        label.textColor = .systemGreen
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
     private let thisMonthLabel: UILabel = {
         let label = UILabel()
         label.text = "This Month"
-        label.font = .bodyL
+        label.font = .bodyM
         label.textColor = .secondaryLabel
+        label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
-    
+
     private let thisMonthCountLabel: UILabel = {
         let label = UILabel()
         label.text = "0"
-        label.font = .systemFont(ofSize: 32, weight: .bold)
+        label.font = .systemFont(ofSize: 28, weight: .bold)
         label.textColor = .systemBlue
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-    
-    private let referralCodeLabel: UILabel = {
-        let label = UILabel()
-        label.text = "Your Referral Code"
-        label.font = .bodyL
-        label.textColor = .secondaryLabel
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-    
-    private let referralCodeValueLabel: UILabel = {
-        let label = UILabel()
-        label.text = "Contact admin for your referral code"
-        label.font = .bodyL
-        label.textColor = .secondaryLabel
-        label.numberOfLines = 0
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
-    private let copyCodeButton: NNPrimaryLabeledButton = {
-        let button = NNPrimaryLabeledButton(title: "Copy Code")
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.isHidden = true  // Hidden until we have a valid code
-        return button
+    private let topCodesLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Top Performing Codes"
+        label.font = .h2
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let topCodesTableView: UITableView = {
+        let tableView = UITableView(frame: .zero, style: .grouped)
+        tableView.backgroundColor = .clear
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        return tableView
+    }()
+
+    private let recentReferralsLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Recent Referrals"
+        label.font = .h2
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let recentReferralsTableView: UITableView = {
+        let tableView = UITableView(frame: .zero, style: .grouped)
+        tableView.backgroundColor = .clear
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        return tableView
     }()
     
     private let loadingIndicator: UIActivityIndicatorView = {
@@ -127,7 +177,9 @@ final class ReferralAnalyticsViewController: NNViewController {
         return indicator
     }()
     
-    private var userReferralCode: String?
+    private var analytics: ReferralAnalytics?
+    private var topCodes: [(code: String, count: Int)] = []
+    private var recentReferrals: [RecentReferral] = []
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
@@ -147,26 +199,32 @@ final class ReferralAnalyticsViewController: NNViewController {
         view.addSubview(scrollView)
         scrollView.addSubview(contentStackView)
         
-        // Setup total referrals card
-        totalReferralsCard.addSubview(totalReferralsLabel)
-        totalReferralsCard.addSubview(totalReferralsCountLabel)
-        
-        // Setup this month card
-        thisMonthCard.addSubview(thisMonthLabel)
-        thisMonthCard.addSubview(thisMonthCountLabel)
+        // Setup summary card with stack view
+        summaryCard.addSubview(summaryStackView)
+
+        // Create summary sections
+        let totalSection = createSummarySection(titleLabel: totalReferralsLabel, countLabel: totalReferralsCountLabel)
+        let activeSection = createSummarySection(titleLabel: activeCodesLabel, countLabel: activeCodesCountLabel)
+        let monthSection = createSummarySection(titleLabel: thisMonthLabel, countLabel: thisMonthCountLabel)
+
+        summaryStackView.addArrangedSubview(totalSection)
+        summaryStackView.addArrangedSubview(activeSection)
+        summaryStackView.addArrangedSubview(monthSection)
+
+        // Setup table views
+        topCodesTableView.delegate = self
+        topCodesTableView.dataSource = self
+
+        recentReferralsTableView.delegate = self
+        recentReferralsTableView.dataSource = self
         
         // Add components to stack
         contentStackView.addArrangedSubview(titleLabel)
-        
-        let cardsStackView = UIStackView(arrangedSubviews: [totalReferralsCard, thisMonthCard])
-        cardsStackView.axis = .horizontal
-        cardsStackView.spacing = 16
-        cardsStackView.distribution = .fillEqually
-        contentStackView.addArrangedSubview(cardsStackView)
-        
-        contentStackView.addArrangedSubview(referralCodeLabel)
-        contentStackView.addArrangedSubview(referralCodeValueLabel)
-        contentStackView.addArrangedSubview(copyCodeButton)
+        contentStackView.addArrangedSubview(summaryCard)
+        contentStackView.addArrangedSubview(topCodesLabel)
+        contentStackView.addArrangedSubview(topCodesTableView)
+        contentStackView.addArrangedSubview(recentReferralsLabel)
+        contentStackView.addArrangedSubview(recentReferralsTableView)
         contentStackView.addArrangedSubview(loadingIndicator)
         
         // Start loading
@@ -188,81 +246,54 @@ final class ReferralAnalyticsViewController: NNViewController {
             contentStackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -24),
             contentStackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -48),
             
-            // Card heights
-            totalReferralsCard.heightAnchor.constraint(equalToConstant: 120),
-            thisMonthCard.heightAnchor.constraint(equalToConstant: 120),
-            
-            // Total referrals card content
-            totalReferralsLabel.topAnchor.constraint(equalTo: totalReferralsCard.topAnchor, constant: 16),
-            totalReferralsLabel.leadingAnchor.constraint(equalTo: totalReferralsCard.leadingAnchor, constant: 16),
-            totalReferralsLabel.trailingAnchor.constraint(equalTo: totalReferralsCard.trailingAnchor, constant: -16),
-            
-            totalReferralsCountLabel.topAnchor.constraint(equalTo: totalReferralsLabel.bottomAnchor, constant: 8),
-            totalReferralsCountLabel.leadingAnchor.constraint(equalTo: totalReferralsCard.leadingAnchor, constant: 16),
-            totalReferralsCountLabel.trailingAnchor.constraint(equalTo: totalReferralsCard.trailingAnchor, constant: -16),
-            
-            // This month card content
-            thisMonthLabel.topAnchor.constraint(equalTo: thisMonthCard.topAnchor, constant: 16),
-            thisMonthLabel.leadingAnchor.constraint(equalTo: thisMonthCard.leadingAnchor, constant: 16),
-            thisMonthLabel.trailingAnchor.constraint(equalTo: thisMonthCard.trailingAnchor, constant: -16),
-            
-            thisMonthCountLabel.topAnchor.constraint(equalTo: thisMonthLabel.bottomAnchor, constant: 8),
-            thisMonthCountLabel.leadingAnchor.constraint(equalTo: thisMonthCard.leadingAnchor, constant: 16),
-            thisMonthCountLabel.trailingAnchor.constraint(equalTo: thisMonthCard.trailingAnchor, constant: -16),
-            
-            // Copy button
-            copyCodeButton.heightAnchor.constraint(equalToConstant: 50)
+            // Summary card
+            summaryCard.heightAnchor.constraint(equalToConstant: 100),
+            summaryStackView.topAnchor.constraint(equalTo: summaryCard.topAnchor, constant: 16),
+            summaryStackView.leadingAnchor.constraint(equalTo: summaryCard.leadingAnchor, constant: 16),
+            summaryStackView.trailingAnchor.constraint(equalTo: summaryCard.trailingAnchor, constant: -16),
+            summaryStackView.bottomAnchor.constraint(equalTo: summaryCard.bottomAnchor, constant: -16),
+
+            // Table views
+            topCodesTableView.heightAnchor.constraint(equalToConstant: 250),
+            recentReferralsTableView.heightAnchor.constraint(equalToConstant: 300)
         ])
     }
     
     private func setupActions() {
-        copyCodeButton.addTarget(self, action: #selector(copyCodeTapped), for: .touchUpInside)
+        // No actions needed for analytics view
+    }
+
+    private func createSummarySection(titleLabel: UILabel, countLabel: UILabel) -> UIStackView {
+        let stackView = UIStackView(arrangedSubviews: [titleLabel, countLabel])
+        stackView.axis = .vertical
+        stackView.spacing = 4
+        stackView.alignment = .center
+        return stackView
     }
     
     // MARK: - Data Loading
     private func loadReferralData() {
-        // Check if user has been assigned a referral code
-        checkForAssignedReferralCode()
+        loadAllReferralsAnalytics()
     }
     
-    private func checkForAssignedReferralCode() {
-        guard let currentUser = UserService.shared.currentUser else {
-            referralCodeValueLabel.text = "ERROR: No User"
-            loadingIndicator.stopAnimating()
-            loadingIndicator.isHidden = true
-            return
-        }
-        
+    private func loadAllReferralsAnalytics() {
         Task {
             do {
-                // Check all referral codes to see if any are assigned to this user's email
-                let allCodes = try await ReferralService.shared.getAllReferralCodes()
-                let assignedCode = allCodes.first { codeInfo in
-                    codeInfo.creatorEmail.lowercased() == currentUser.personalInfo.email.lowercased() && codeInfo.isActive
-                }
-                
+                let analytics = try await ReferralService.shared.getAllReferralsAnalytics()
+
                 await MainActor.run {
-                    if let assignedCode = assignedCode {
-                        // User has a referral code assigned
-                        self.userReferralCode = assignedCode.code
-                        self.referralCodeValueLabel.text = assignedCode.code
-                        self.referralCodeValueLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-                        self.referralCodeValueLabel.textColor = .label
-                        self.copyCodeButton.isHidden = false
-                        
-                        // Load stats for this code
-                        self.loadReferralStats(for: assignedCode.code)
-                    } else {
-                        // No code assigned
-                        self.referralCodeValueLabel.text = "Contact admin for your referral code"
-                        self.loadingIndicator.stopAnimating()
-                        self.loadingIndicator.isHidden = true
-                    }
+                    self.analytics = analytics
+                    self.topCodes = analytics.topCodes
+                    self.recentReferrals = analytics.recentReferrals
+                    self.updateUI(with: analytics)
+                    self.topCodesTableView.reloadData()
+                    self.recentReferralsTableView.reloadData()
+                    self.loadingIndicator.stopAnimating()
+                    self.loadingIndicator.isHidden = true
                 }
             } catch {
                 await MainActor.run {
-                    Logger.log(level: .error, category: .referral, message: "Failed to check for assigned referral code: \(error)")
-                    self.referralCodeValueLabel.text = "Error loading referral code"
+                    Logger.log(level: .error, category: .referral, message: "Failed to load referrals analytics: \(error)")
                     self.loadingIndicator.stopAnimating()
                     self.loadingIndicator.isHidden = true
                 }
@@ -270,29 +301,10 @@ final class ReferralAnalyticsViewController: NNViewController {
         }
     }
     
-    private func loadReferralStats(for referralCode: String) {
-        Task {
-            do {
-                // Load referral summary
-                let summary = try await ReferralService.shared.getReferralSummary(for: referralCode)
-                let currentMonth = currentMonthKey()
-                let thisMonthCount = summary?.monthlyReferrals[currentMonth] ?? 0
-                
-                await MainActor.run {
-                    self.totalReferralsCountLabel.text = "\(summary?.totalReferrals ?? 0)"
-                    self.thisMonthCountLabel.text = "\(thisMonthCount)"
-                    self.loadingIndicator.stopAnimating()
-                    self.loadingIndicator.isHidden = true
-                }
-            } catch {
-                await MainActor.run {
-                    Logger.log(level: .error, category: .referral, message: "Failed to load referral stats: \(error)")
-                    self.loadingIndicator.stopAnimating()
-                    self.loadingIndicator.isHidden = true
-                    // Show error state or default to 0
-                }
-            }
-        }
+    private func updateUI(with analytics: ReferralAnalytics) {
+        totalReferralsCountLabel.text = "\(analytics.totalReferrals)"
+        activeCodesCountLabel.text = "\(analytics.totalActiveCodes)"
+        thisMonthCountLabel.text = "\(analytics.thisMonthReferrals)"
     }
     
     private func currentMonthKey() -> String {
@@ -301,18 +313,65 @@ final class ReferralAnalyticsViewController: NNViewController {
         return formatter.string(from: Date())
     }
     
-    // MARK: - Actions
-    @objc private func copyCodeTapped() {
-        guard let referralCode = userReferralCode else { return }
-        
-        UIPasteboard.general.string = referralCode
-        
-        // Show success feedback
-        let alert = UIAlertController(title: "Copied!", message: "Your referral code has been copied to the clipboard.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-        
-        // Track analytics
-        Tracker.shared.track(.referralCodeEntered)
+}
+
+// MARK: - UITableViewDataSource
+extension ReferralAnalyticsViewController: UITableViewDataSource {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if tableView == topCodesTableView {
+            return topCodes.count
+        } else {
+            return recentReferrals.count
+        }
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        if tableView == topCodesTableView {
+            let cell = UITableViewCell(style: .value1, reuseIdentifier: "TopCodeCell")
+            let codeData = topCodes[indexPath.row]
+
+            let rankEmoji = ["🥇", "🥈", "🥉"]
+            let rank = indexPath.row < 3 ? rankEmoji[indexPath.row] : "\(indexPath.row + 1)."
+
+            cell.textLabel?.text = "\(rank) \(codeData.code)"
+            cell.detailTextLabel?.text = "\(codeData.count) uses"
+            cell.textLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+            cell.detailTextLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+            cell.detailTextLabel?.textColor = .systemBlue
+            cell.backgroundColor = .clear
+
+            return cell
+        } else {
+            let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "RecentReferralCell")
+            let referralData = recentReferrals[indexPath.row]
+
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .short
+
+            cell.textLabel?.text = referralData.referralCode
+            cell.detailTextLabel?.text = dateFormatter.string(from: referralData.date)
+            cell.textLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+            cell.detailTextLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+            cell.detailTextLabel?.textColor = .systemGreen
+            cell.backgroundColor = .clear
+
+            return cell
+        }
+    }
+}
+
+// MARK: - UITableViewDelegate
+extension ReferralAnalyticsViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+    }
+
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        if tableView == topCodesTableView {
+            return "Top Performing Codes"
+        } else {
+            return "Recent Referrals"
+        }
     }
 }
