@@ -19,6 +19,7 @@ final class FeatureFlagService {
         case bypassPaywallForTesting = "bypass_paywall_for_testing"
         case testFlightBypassEnabled = "testflight_bypass_enabled"
         case debugAsProUser = "debug_as_pro_user"
+        case captureSignupLogs = "capture_signup_logs"
         
         var defaultValue: Bool {
             switch self {
@@ -26,6 +27,8 @@ final class FeatureFlagService {
                 return false // Default to requiring subscriptions
             case .debugAsProUser:
                 return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
+            case .captureSignupLogs:
+                return false // Default to not capturing logs for privacy
             }
         }
     }
@@ -143,6 +146,12 @@ final class FeatureFlagService {
         #endif
         
         return shouldBypass
+    }
+    
+    /// Checks if signup log capture is enabled
+    /// - Returns: True if signup logs should be captured, false otherwise
+    func shouldCaptureSignupLogs() -> Bool {
+        return isEnabled(.captureSignupLogs)
     }
     
     // MARK: - Private Methods
