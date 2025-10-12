@@ -5,6 +5,7 @@ class SurveyDashboardViewController: NNViewController {
     // MARK: - Properties
     private let surveyService = SurveyService.shared
     private var surveyMetrics: [SurveyResponse.SurveyType: SurveyMetrics] = [:]
+    private var survey30DayCounts: [SurveyResponse.SurveyType: Int] = [:]
     private var featureMetrics: [SurveyService.Feature: FeatureMetrics] = [:]
     private var feedbackMetrics: FeedbackMetrics?
     
@@ -93,23 +94,29 @@ class SurveyDashboardViewController: NNViewController {
             headerView.configure(title: section.title)
         }
         
-        let surveyCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+        let surveyCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
             if case let .surveyResult(type, metrics) = item {
                 var content = cell.defaultContentConfiguration()
-                
+
                 // Set the title based on survey type
                 content.text = type == .parentSurvey ? "Parent Survey" : "Sitter Survey"
-                
-                // Add a secondary text for the number of responses
+
+                // Add a secondary text for the number of responses with 30-day count
                 let responsesString = String(AttributedString(
                     localized: "^[\(metrics.totalResponses) \("response")](inflect: true)"
                 ).characters)
-                content.secondaryText = responsesString
-                
+
+                // Add 30-day count if available
+                if let thirtyDayCount = self?.survey30DayCounts[type] {
+                    content.secondaryText = "\(responsesString) (\(thirtyDayCount) in last 30 days)"
+                } else {
+                    content.secondaryText = responsesString
+                }
+
                 // Set layout margins
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
-                
+
                 cell.contentConfiguration = content
                 cell.accessories = [.disclosureIndicator()]
             }
@@ -125,17 +132,32 @@ class SurveyDashboardViewController: NNViewController {
             if case let .feedback(metrics) = item {
                 var content = cell.defaultContentConfiguration()
                 content.text = "User Feedback"
-                
+
                 // Add a secondary text for the number of submissions
                 let submissionsString = String(AttributedString(
                     localized: "^[\(metrics.totalSubmissions) \("submission")](inflect: true)"
                 ).characters)
                 content.secondaryText = submissionsString
-                
+
                 // Set layout margins
                 content.directionalLayoutMargins.top = 16
                 content.directionalLayoutMargins.bottom = 16
-                
+
+                cell.contentConfiguration = content
+                cell.accessories = [.disclosureIndicator()]
+            }
+        }
+
+        let recentSurveysCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case .recentSurveysView = item {
+                var content = cell.defaultContentConfiguration()
+                content.text = "View Recent Surveys"
+                content.secondaryText = "See the 25 most recent survey responses"
+
+                // Set layout margins
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+
                 cell.contentConfiguration = content
                 cell.accessories = [.disclosureIndicator()]
             }
@@ -149,6 +171,8 @@ class SurveyDashboardViewController: NNViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: featureCellRegistration, for: indexPath, item: item)
             case .feedback:
                 return collectionView.dequeueConfiguredReusableCell(using: feedbackCellRegistration, for: indexPath, item: item)
+            case .recentSurveysView:
+                return collectionView.dequeueConfiguredReusableCell(using: recentSurveysCellRegistration, for: indexPath, item: item)
             }
         }
         
@@ -159,22 +183,26 @@ class SurveyDashboardViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.surveyResults, .featureVotes, .feedback])
-        
+        snapshot.appendSections([.surveyResults, .featureVotes, .feedback, .recentSurveys])
+
         // Add survey results
         let surveyItems = surveyMetrics.map { Item.surveyResult(type: $0.key, metrics: $0.value) }
         snapshot.appendItems(surveyItems, toSection: .surveyResults)
-        
+
         // Add feature votes
         let featureItems = featureMetrics.map { Item.featureVote(feature: $0.key, metrics: $0.value) }
         snapshot.appendItems(featureItems, toSection: .featureVotes)
-        
+
         // Add feedback
         if let feedbackMetrics = feedbackMetrics {
             let feedbackItems = [Item.feedback(metrics: feedbackMetrics)]
             snapshot.appendItems(feedbackItems, toSection: .feedback)
         }
-        
+
+        // Add recent surveys view
+        let recentSurveysItems = [Item.recentSurveysView]
+        snapshot.appendItems(recentSurveysItems, toSection: .recentSurveys)
+
         dataSource.apply(snapshot, animatingDifferences: false)
     }
     
@@ -190,24 +218,32 @@ class SurveyDashboardViewController: NNViewController {
             // Fetch survey metrics
             let parentMetrics = try await surveyService.getSurveyMetrics(type: .parentSurvey)
             let sitterMetrics = try await surveyService.getSurveyMetrics(type: .sitterSurvey)
-            
+
+            // Fetch 30-day survey counts
+            let parent30DayCount = try await surveyService.getSurveyResponsesInLast30Days(type: .parentSurvey)
+            let sitter30DayCount = try await surveyService.getSurveyResponsesInLast30Days(type: .sitterSurvey)
+
             // Fetch feature metrics
             let nestMembersMetrics = try await surveyService.getFeatureMetrics(featureId: SurveyService.Feature.nestMembers.rawValue)
-            
+
             // Fetch feedback metrics
             let feedbackMetrics = try await surveyService.getFeedbackMetrics()
-            
+
             await MainActor.run {
                 // Update survey metrics
                 surveyMetrics[.parentSurvey] = parentMetrics
                 surveyMetrics[.sitterSurvey] = sitterMetrics
-                
+
+                // Update 30-day counts
+                survey30DayCounts[.parentSurvey] = parent30DayCount
+                survey30DayCounts[.sitterSurvey] = sitter30DayCount
+
                 // Update feature metrics
                 featureMetrics[.nestMembers] = nestMembersMetrics
-                
+
                 // Update feedback metrics
                 self.feedbackMetrics = feedbackMetrics
-                
+
                 // Apply new snapshot
                 applyInitialSnapshots()
             }
@@ -229,13 +265,17 @@ extension SurveyDashboardViewController: UICollectionViewDelegate {
         case .surveyResult(let type, let metrics):
             let vc = SurveyDetailViewController(surveyType: type, metrics: metrics)
             navigationController?.pushViewController(vc, animated: true)
-            
+
         case .featureVote(let feature, let metrics):
             let vc = FeatureDetailViewController(feature: feature, metrics: metrics)
             navigationController?.pushViewController(vc, animated: true)
-            
+
         case .feedback(let metrics):
             let vc = FeedbackDetailViewController(metrics: metrics)
+            navigationController?.pushViewController(vc, animated: true)
+
+        case .recentSurveysView:
+            let vc = RecentSurveysViewController()
             navigationController?.pushViewController(vc, animated: true)
         }
         
@@ -249,12 +289,14 @@ extension SurveyDashboardViewController {
         case surveyResults
         case featureVotes
         case feedback
-        
+        case recentSurveys
+
         var title: String {
             switch self {
             case .surveyResults: return "Survey Results"
             case .featureVotes: return "Feature Votes"
             case .feedback: return "User Feedback"
+            case .recentSurveys: return "Recent Surveys"
             }
         }
     }
@@ -263,6 +305,7 @@ extension SurveyDashboardViewController {
         case surveyResult(type: SurveyResponse.SurveyType, metrics: SurveyMetrics)
         case featureVote(feature: SurveyService.Feature, metrics: FeatureMetrics)
         case feedback(metrics: FeedbackMetrics)
+        case recentSurveysView
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -277,6 +320,8 @@ extension SurveyDashboardViewController {
             case .feedback(let metrics):
                 hasher.combine(2) // Discriminator for feedback case
                 hasher.combine(metrics)
+            case .recentSurveysView:
+                hasher.combine(3) // Discriminator for recentSurveysView case
             }
         }
         
@@ -288,6 +333,8 @@ extension SurveyDashboardViewController {
                 return feature1 == feature2 && metrics1 == metrics2
             case let (.feedback(metrics1), .feedback(metrics2)):
                 return metrics1 == metrics2
+            case (.recentSurveysView, .recentSurveysView):
+                return true
             default:
                 return false
             }

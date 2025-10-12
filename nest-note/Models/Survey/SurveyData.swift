@@ -2,7 +2,7 @@ import Foundation
 import FirebaseFirestore
 
 // MARK: - Survey Response
-struct SurveyResponse: Codable {
+struct SurveyResponse: Codable, Hashable {
     let id: String
     let timestamp: Date
     let surveyType: SurveyType
@@ -10,12 +10,12 @@ struct SurveyResponse: Codable {
     let responses: [QuestionResponse]
     let metadata: [String: String]
     
-    struct QuestionResponse: Codable {
+    struct QuestionResponse: Codable, Hashable {
         let questionId: String
         let answers: [String]
     }
     
-    enum SurveyType: String, Codable, CaseIterable {
+    enum SurveyType: String, Codable, CaseIterable, Hashable {
         case parentSurvey = "parent_survey"
         case sitterSurvey = "sitter_survey"
     }
