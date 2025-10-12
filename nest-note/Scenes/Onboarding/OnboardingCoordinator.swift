@@ -9,6 +9,25 @@ import UIKit
 import Combine
 import AuthenticationServices
 
+// MARK: - Onboarding Errors
+enum OnboardingError: LocalizedError {
+    case setupFailed(underlyingError: Error, completedSteps: [String], failedAtStep: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .setupFailed(let underlyingError, let completedSteps, let failedAtStep):
+            return "Setup failed at step '\(failedAtStep)'. Completed: \(completedSteps.joined(separator: ", ")). Error: \(underlyingError.localizedDescription)"
+        }
+    }
+
+    var failureInfo: (underlyingError: Error, completedSteps: [String], failedAtStep: String)? {
+        switch self {
+        case .setupFailed(let underlyingError, let completedSteps, let failedAtStep):
+            return (underlyingError, completedSteps, failedAtStep)
+        }
+    }
+}
+
 protocol OnboardingCoordinatorDelegate: AnyObject {
     func onboardingDidComplete()
 }
@@ -256,23 +275,35 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
         #endif
 
+        var completedSteps: [String] = []
+        var criticalFailure: Error?
+
         do {
-            // First handle the signup logic
+            // STEP 1: Critical - User Profile Creation (MUST succeed)
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Starting user signup/profile creation...")
+            Tracker.shared.trackOnboardingStep("profile_creation", additionalInfo: [
+                "is_apple_signin": userInfo.isAppleSignIn,
+                "user_role": userInfo.role.rawValue
+            ])
+
             let user: NestUser
             if userInfo.isAppleSignIn {
-                // User is already authenticated, just need to complete profile setup
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Using Apple Sign In profile completion")
                 user = try await UserService.shared.completeAppleSignUp(with: userInfo)
             } else {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Using regular email signup")
                 user = try await UserService.shared.signUp(with: userInfo)
             }
-            Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: ✅ Successfully completed signup for user: \(user.personalInfo.name)")
 
-            // Record referral if one was provided
+            Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: ✅ Successfully completed signup for user: \(user.personalInfo.name)")
+            Tracker.shared.trackOnboardingStep("profile_creation", result: true, additionalInfo: ["user_id": user.id])
+            completedSteps.append("profile_creation")
+
+            // STEP 2: Semi-Critical - Referral Recording (warn but continue on failure)
             if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: Recording referral code: \(referralCode)")
+                Tracker.shared.trackOnboardingStep("referral_recording", additionalInfo: ["referral_code": referralCode])
+
                 do {
                     try await ReferralService.shared.recordReferral(
                         referralCode: referralCode,
@@ -281,19 +312,28 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                         role: userInfo.role.rawValue
                     )
                     Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: ✅ Successfully recorded referral for code: \(referralCode)")
+                    Tracker.shared.trackOnboardingStep("referral_recording", result: true)
                     Tracker.shared.track(.referralRecorded)
+                    completedSteps.append("referral_recording")
                 } catch {
                     Logger.log(level: .error, category: .signup, message: "🎯 STEP 2: ⚠️ Failed to record referral: \(error)")
-                    Tracker.shared.track(.referralRecorded, result: false, error: error.localizedDescription)
-                    // Continue with onboarding even if referral fails
+                    Tracker.shared.trackOnboardingStep("referral_recording", result: false, error: error.localizedDescription)
+                    Tracker.shared.track(.referralRecordingFailed, error: error.localizedDescription)
+                    // Continue with onboarding - referral failure is not critical
                 }
             } else {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: No referral code provided, skipping")
+                completedSteps.append("referral_recording")
             }
 
-            // Save survey responses
+            // STEP 3: Optional - Survey Submission (non-blocking)
             if !userInfo.surveyResponses.isEmpty {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: Submitting survey responses...")
+                Tracker.shared.trackOnboardingStep("survey_submission", additionalInfo: [
+                    "question_count": userInfo.surveyResponses.count,
+                    "survey_type": userInfo.role == .nestOwner ? "parent" : "sitter"
+                ])
+
                 let response = SurveyResponse(
                     id: UUID().uuidString,
                     timestamp: Date(),
@@ -309,30 +349,56 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 do {
                     try await SurveyService.shared.submitSurveyResponse(response)
                     Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: ✅ Successfully submitted survey responses for user: \(user.personalInfo.name)")
+                    Tracker.shared.trackOnboardingStep("survey_submission", result: true)
+                    completedSteps.append("survey_submission")
                 } catch {
                     Logger.log(level: .error, category: .signup, message: "🎯 STEP 3: ⚠️ Failed to submit survey responses: \(error)")
-                    // Continue with onboarding even if submission fails
+                    Tracker.shared.trackOnboardingStep("survey_submission", result: false, error: error.localizedDescription)
+                    Tracker.shared.track(.surveySubmissionFailed, error: error.localizedDescription)
+                    // Continue with onboarding - survey failure is not critical
                 }
             } else {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: No survey responses to submit, skipping")
+                completedSteps.append("survey_submission")
             }
 
-            // Set onboarding completion flag
+            // STEP 4: Critical - Onboarding Completion (MUST succeed)
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 4: Setting onboarding completion flag...")
+            Tracker.shared.trackOnboardingStep("onboarding_completion")
+
             UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 4: ✅ Onboarding completion flag set")
+            Tracker.shared.trackOnboardingStep("onboarding_completion", result: true)
+            completedSteps.append("onboarding_completion")
 
+            // STEP 5: Critical - Notify Completion (MUST succeed)
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 5: Notifying authentication delegate...")
             authenticationDelegate?.signUpComplete()
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 5: ✅ Authentication delegate notified")
+            completedSteps.append("delegate_notification")
 
             Logger.log(level: .info, category: .signup, message: "🎯 ✅ FINISH SETUP COMPLETE: All steps completed successfully!")
+            Logger.log(level: .info, category: .signup, message: "🎯 ✅ Completed steps: \(completedSteps.joined(separator: ", "))")
 
         } catch {
+            criticalFailure = error
+
             Logger.log(level: .error, category: .signup, message: "🎯 ❌ FINISH SETUP FAILED: \(error.localizedDescription)")
             Logger.log(level: .error, category: .signup, message: "🎯 ❌ Error type: \(type(of: error))")
             Logger.log(level: .error, category: .signup, message: "🎯 ❌ Full error: \(error)")
             Logger.log(level: .error, category: .signup, message: "🎯 ❌ User info - Role: \(userInfo.role), Apple: \(userInfo.isAppleSignIn), Email: \(userInfo.email)")
+            Logger.log(level: .error, category: .signup, message: "🎯 ❌ Completed steps before failure: \(completedSteps.joined(separator: ", "))")
+
+            // Track specific failure type based on completed steps
+            if completedSteps.contains("profile_creation") {
+                // Profile was created but something else failed
+                if !completedSteps.contains("onboarding_completion") {
+                    Tracker.shared.track(.onboardingCompletionFailed, error: error.localizedDescription)
+                }
+            } else {
+                // Profile creation failed - this is critical
+                Tracker.shared.track(.userProfileCreationFailed, error: error.localizedDescription)
+            }
 
             // Track the overall finish setup failure
             if userInfo.isAppleSignIn {
@@ -341,8 +407,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
             }
 
-            throw error
+            throw OnboardingError.setupFailed(
+                underlyingError: error,
+                completedSteps: completedSteps,
+                failedAtStep: determineFailedStep(completedSteps: completedSteps)
+            )
         }
+    }
+
+    private func determineFailedStep(completedSteps: [String]) -> String {
+        let allSteps = ["profile_creation", "referral_recording", "survey_submission", "onboarding_completion", "delegate_notification"]
+
+        for step in allSteps {
+            if !completedSteps.contains(step) {
+                return step
+            }
+        }
+
+        return "unknown"
     }
     
     func handleErrorNavigation(_ error: Error) {

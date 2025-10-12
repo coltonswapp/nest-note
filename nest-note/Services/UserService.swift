@@ -395,7 +395,7 @@ final class UserService {
             }
             
             let firebaseCredential = OAuthProvider.credential(
-                withProviderID: "apple.com",
+                providerID: AuthProviderID.apple,
                 idToken: idTokenString,
                 rawNonce: nonce
             )
@@ -484,7 +484,7 @@ final class UserService {
             }
             
             let firebaseCredential = OAuthProvider.credential(
-                withProviderID: "apple.com",
+                providerID: AuthProviderID.apple,
                 idToken: idTokenString,
                 rawNonce: nonce
             )
@@ -814,8 +814,23 @@ final class UserService {
         UserDefaults.standard.removeObject(forKey: "userData")
     }
     
+    // MARK: - Recovery Methods
+    /// Directly sets the current user (for recovery purposes only)
+    /// WARNING: This bypasses normal authentication flow and should only be used for state recovery
+    func setCurrentUserDirectly(_ user: NestUser) {
+        Logger.log(level: .info, category: .userService, message: "🔧 RECOVERY: Directly setting current user: \(user.personalInfo.name)")
+        self.currentUser = user
+        self.isAuthenticated = true
+
+        // Set user context in Events service
+        Tracker.shared.setUserContext(email: user.personalInfo.email, userID: user.id)
+
+        // Save state
+        saveAuthState()
+    }
+
     // MARK: - Firestore Methods
-    private func fetchUserProfile(userId: String) async throws -> NestUser {
+    func fetchUserProfile(userId: String) async throws -> NestUser {
         // Check if we're already fetching this user's profile
         if isFetchingProfile && currentUser?.id == userId {
             Logger.log(level: .info, category: .userService, message: "Profile fetch already in progress for user: \(userId), skipping duplicate request")

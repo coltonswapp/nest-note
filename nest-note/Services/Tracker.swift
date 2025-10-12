@@ -67,7 +67,18 @@ class Tracker {
         case referralCodeEntered = "referralCodeEntered"
         case referralRecorded = "referralRecorded"
         case referralValidationFailed = "referralValidationFailed"
-        
+
+        // MARK: - Onboarding Step-Specific Events
+        case onboardingStepStarted = "onboardingStepStarted"
+        case userProfileCreationFailed = "userProfileCreationFailed"
+        case nestCreationFailed = "nestCreationFailed"
+        case surveySubmissionFailed = "surveySubmissionFailed"
+        case referralRecordingFailed = "referralRecordingFailed"
+        case onboardingCompletionFailed = "onboardingCompletionFailed"
+        case authStateRecoveryAttempted = "authStateRecoveryAttempted"
+        case authStateRecoverySucceeded = "authStateRecoverySucceeded"
+        case authStateRecoveryFailed = "authStateRecoveryFailed"
+
         // MARK: - Misc
         case pinnedCategoriesUpdated = "pinnedCategoriesUpdated"
     }
@@ -86,30 +97,63 @@ class Tracker {
     // MARK: - Event Logging Method
     func track(_ event: NNEventName, result: Bool = true, error: String? = nil) {
         let eventName = result ? event.rawValue : "\(event.rawValue)_failure"
-        
+
         var parameters: [String: Any] = [:]
-        
+
         // Use provided parameters or fall back to cached values
         let finalUserEmail = cachedUserEmail
         let finalUserID = cachedUserID
-        
+
         if let finalUserEmail = finalUserEmail {
             parameters["user_email"] = finalUserEmail
         }
-        
+
         if let finalUserID = finalUserID {
             parameters["user_id"] = finalUserID
         }
-        
+
         if let nestId = NestService.shared.currentNest?.id {
             parameters["nest_id"] = nestId
         }
-        
+
         if let error = error {
             parameters["error"] = error
         }
-        
+
         Analytics.logEvent(eventName, parameters: parameters)
+    }
+
+    // MARK: - Onboarding Step Tracking
+    func trackOnboardingStep(_ step: String, result: Bool = true, error: String? = nil, additionalInfo: [String: Any]? = nil) {
+        var parameters: [String: Any] = [
+            "step": step,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+
+        // Add user context
+        if let userEmail = cachedUserEmail {
+            parameters["user_email"] = userEmail
+        }
+
+        if let userID = cachedUserID {
+            parameters["user_id"] = userID
+        }
+
+        // Add error info
+        if let error = error {
+            parameters["error"] = error
+        }
+
+        // Add any additional step-specific info
+        if let additionalInfo = additionalInfo {
+            parameters.merge(additionalInfo) { _, new in new }
+        }
+
+        let eventName = result ? "onboarding_step_success" : "onboarding_step_failure"
+        Analytics.logEvent(eventName, parameters: parameters)
+
+        // Also track the specific step event
+        track(.onboardingStepStarted, result: result, error: error)
     }
     
     // MARK: - App Background Return Event

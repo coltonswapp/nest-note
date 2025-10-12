@@ -2,6 +2,24 @@ import UIKit
 import FirebaseAuth
 import AuthenticationServices
 
+// MARK: - Authentication State Errors
+enum AuthStateError: LocalizedError {
+    case notAuthenticated
+    case serviceStateInconsistent
+    case profileIncomplete(firebaseUserId: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "User is not authenticated with Firebase"
+        case .serviceStateInconsistent:
+            return "Authentication state is inconsistent between Firebase and UserService"
+        case .profileIncomplete(let firebaseUserId):
+            return "User profile is incomplete for Firebase user: \(firebaseUserId)"
+        }
+    }
+}
+
 // MARK: - Timeout Helper
 func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
     return try await withThrowingTaskGroup(of: T.self) { group in
@@ -161,11 +179,10 @@ final class LaunchCoordinator {
                         Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: ✅ User configuration complete")
                     } catch {
                         Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ User configuration failed: \(error)")
-                        Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ Forcing re-authentication")
 
-                        // If user configuration fails, force re-authentication
+                        // Handle different types of configuration failures
                         await MainActor.run {
-                            self.showAuthenticationFlow()
+                            self.handleConfigurationFailure(error)
                         }
                     }
                 }
@@ -198,6 +215,9 @@ final class LaunchCoordinator {
     }
     
     private func configureForCurrentUser() async throws {
+        // First, validate authentication state
+        try await validateAuthenticationState()
+
         // Determine user type from UserService's currentUser
         let userType: UserType
         let savedMode = ModeManager.shared.currentMode
@@ -207,14 +227,14 @@ final class LaunchCoordinator {
         case .sitter:
             userType = .sitter
         }
-        
+
         self.userType = userType
-        
+
         await MainActor.run {
             guard let navigationController = self.navigationController else {
                 Logger.log(level: .error, category: .launcher, message: "Could not configure for current user ❌")
                 return }
-            
+
             // Create the appropriate home view controller
             let homeVC: UIViewController
             switch userType {
@@ -231,7 +251,7 @@ final class LaunchCoordinator {
                     homeVC = initialVC
                 }
             }
-            
+
             // Smoothly set the new root view controller of the navigation controller
             UIView.transition(with: navigationController.view,
                              duration: 0.3,
@@ -239,6 +259,123 @@ final class LaunchCoordinator {
                              animations: {
                 navigationController.setViewControllers([homeVC], animated: false)
             })
+        }
+    }
+
+    /// Validates that the user's authentication state is consistent and complete
+    private func validateAuthenticationState() async throws {
+        Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Validating authentication state...")
+        Tracker.shared.track(.authStateRecoveryAttempted)
+
+        // Check Firebase authentication
+        guard let firebaseUser = Auth.auth().currentUser else {
+            Logger.log(level: .error, category: .launcher, message: "🔍 AUTH VALIDATION: No Firebase user found")
+            throw AuthStateError.notAuthenticated
+        }
+
+        Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Firebase user exists: \(firebaseUser.uid)")
+
+        // Check if UserService thinks user is signed in
+        guard UserService.shared.isSignedIn else {
+            Logger.log(level: .error, category: .launcher, message: "🔍 AUTH VALIDATION: UserService says not signed in")
+            throw AuthStateError.serviceStateInconsistent
+        }
+
+        // Check if we have a current user profile
+        if UserService.shared.currentUser == nil {
+            Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: No current user profile - attempting recovery...")
+            try await recoverUserProfile(firebaseUserId: firebaseUser.uid)
+        }
+
+        // Check onboarding completion
+        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        if !hasCompletedOnboarding {
+            Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Onboarding not marked as complete - attempting recovery...")
+            try await recoverOnboardingState()
+        }
+
+        Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: ✅ Authentication state is valid")
+        Tracker.shared.track(.authStateRecoverySucceeded)
+    }
+
+    /// Attempts to recover user profile when Firebase user exists but UserService.currentUser is nil
+    private func recoverUserProfile(firebaseUserId: String) async throws {
+        Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: Attempting to recover user profile for: \(firebaseUserId)")
+
+        do {
+            // Try to fetch user profile directly
+            let userProfile = try await UserService.shared.fetchUserProfile(userId: firebaseUserId)
+
+            // Profile exists - update UserService state
+            UserService.shared.setCurrentUserDirectly(userProfile) // We'll need to add this method
+
+            Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: ✅ Successfully recovered user profile: \(userProfile.personalInfo.name)")
+
+        } catch {
+            Logger.log(level: .error, category: .launcher, message: "🔧 RECOVERY: ❌ Failed to recover user profile: \(error)")
+
+            // Profile doesn't exist - this user needs to complete onboarding
+            throw AuthStateError.profileIncomplete(firebaseUserId: firebaseUserId)
+        }
+    }
+
+    /// Attempts to recover onboarding state for users who have profiles but onboarding isn't marked complete
+    private func recoverOnboardingState() async throws {
+        Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: Attempting to recover onboarding state...")
+
+        // If user has a complete profile, they've essentially completed onboarding
+        guard let currentUser = UserService.shared.currentUser else {
+            throw AuthStateError.profileIncomplete(firebaseUserId: "unknown")
+        }
+
+        // Check if profile has minimum required fields
+        if !currentUser.personalInfo.name.isEmpty && !currentUser.personalInfo.email.isEmpty {
+            Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: Profile appears complete, marking onboarding as done")
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        } else {
+            Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: Profile incomplete - user needs to complete setup")
+            throw AuthStateError.profileIncomplete(firebaseUserId: currentUser.id)
+        }
+    }
+
+    /// Shows profile completion flow for users with incomplete profiles
+    private func showProfileCompletionFlow() {
+        Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: Showing profile completion flow")
+
+        // For now, show the regular onboarding flow
+        // In the future, we could create a specialized "complete profile" flow
+        showAuthenticationFlow()
+    }
+
+    /// Handles different types of configuration failures during launch
+    private func handleConfigurationFailure(_ error: Error) {
+        if let authStateError = error as? AuthStateError {
+            switch authStateError {
+            case .notAuthenticated:
+                Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Not authenticated - showing auth flow")
+                showAuthenticationFlow()
+
+            case .serviceStateInconsistent:
+                Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Service state inconsistent - clearing and re-authenticating")
+                Tracker.shared.track(.authStateRecoveryFailed, error: error.localizedDescription)
+                // Clear all state and force re-authentication
+                Task {
+                    try? await UserService.shared.logout(clearSavedCredentials: true)
+                    await MainActor.run {
+                        self.showAuthenticationFlow()
+                    }
+                }
+
+            case .profileIncomplete(let firebaseUserId):
+                Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Profile incomplete for \(firebaseUserId) - showing profile completion flow")
+                Tracker.shared.track(.authStateRecoveryFailed, error: error.localizedDescription)
+                showProfileCompletionFlow()
+            }
+        } else {
+            // Generic configuration failure
+            Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ Generic configuration failure - forcing re-authentication")
+            Tracker.shared.track(.authStateRecoveryFailed, error: error.localizedDescription)
+            showAuthenticationFlow()
         }
     }
     
