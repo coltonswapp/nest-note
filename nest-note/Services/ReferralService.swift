@@ -281,6 +281,84 @@ final class ReferralService {
             )
         }
     }
+
+    // MARK: - Analytics Methods
+    func getAllReferralsAnalytics() async throws -> ReferralAnalytics {
+        // Get all referral summaries
+        let summariesSnapshot = try await db.collection(referralSummariesCollection).getDocuments()
+        var totalReferrals = 0
+        var totalActiveCodes = 0
+        var monthlyBreakdown: [String: Int] = [:]
+        var topCodes: [(code: String, count: Int)] = []
+
+        for document in summariesSnapshot.documents {
+            if let summary = try? document.data(as: ReferralSummary.self) {
+                totalReferrals += summary.totalReferrals
+                totalActiveCodes += 1
+
+                // Aggregate monthly data
+                for (month, count) in summary.monthlyReferrals {
+                    monthlyBreakdown[month, default: 0] += count
+                }
+
+                // Track top codes
+                topCodes.append((code: summary.referralCode, count: summary.totalReferrals))
+            }
+        }
+
+        // Sort top codes by count
+        topCodes.sort { $0.count > $1.count }
+
+        // Get current month count
+        let currentMonth = currentMonthKey()
+        let thisMonthCount = monthlyBreakdown[currentMonth] ?? 0
+
+        // Get recent referrals
+        let recentReferrals = try await getRecentReferrals(limit: 20)
+
+        return ReferralAnalytics(
+            totalReferrals: totalReferrals,
+            totalActiveCodes: totalActiveCodes,
+            thisMonthReferrals: thisMonthCount,
+            monthlyBreakdown: monthlyBreakdown,
+            topCodes: Array(topCodes.prefix(10)),
+            recentReferrals: recentReferrals
+        )
+    }
+
+    private func getRecentReferrals(limit: Int) async throws -> [RecentReferral] {
+        let referralsSnapshot = try await db.collection(referralsCollection)
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+            .getDocuments()
+
+        return referralsSnapshot.documents.compactMap { document in
+            if let referral = try? document.data(as: Referral.self) {
+                return RecentReferral(
+                    referralCode: referral.referralCode,
+                    date: referral.timestamp,
+                    userEmail: referral.referredUserEmail
+                )
+            }
+            return nil
+        }
+    }
+}
+
+// MARK: - Analytics Types
+struct ReferralAnalytics {
+    let totalReferrals: Int
+    let totalActiveCodes: Int
+    let thisMonthReferrals: Int
+    let monthlyBreakdown: [String: Int]
+    let topCodes: [(code: String, count: Int)]
+    let recentReferrals: [RecentReferral]
+}
+
+struct RecentReferral {
+    let referralCode: String
+    let date: Date
+    let userEmail: String
 }
 
 // MARK: - Error Types

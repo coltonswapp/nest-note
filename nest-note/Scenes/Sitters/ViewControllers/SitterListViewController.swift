@@ -33,7 +33,7 @@ extension SitterItem {
     }
 }
 
-class SitterListViewController: NNViewController, CollectionViewLoadable {
+class SitterListViewController: NNViewController, CollectionViewLoadable, UISearchResultsUpdating {
     // MARK: - Properties
     private var currentSession: SessionItem?
     private var selectedSitter: SitterItem?
@@ -47,16 +47,19 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     // MARK: - UI Elements
     var collectionView: UICollectionView!
     
+    private var searchController: UISearchController!
+
     private let searchBarView: NNSearchBarView = {
         let view = NNSearchBarView(placeholder: "Search for a sitter")
         view.frame.size.height = 60
         return view
     }()
-    
-    private var inviteButton: NNPrimaryLabeledButton!
-    private var bottomButtonStack: UIStackView!
-    private var selectSitterButton: NNPrimaryLabeledButton!
+
+    private var isSearchBarAdded: Bool = false
+
+    // Buttons for pre-iOS 26 versions
     private var addSitterButton: NNPrimaryLabeledButton!
+
     private let initialSelectedSitter: SitterItem?
     private let displayMode: SitterListDisplayMode
     
@@ -87,7 +90,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
 
     private var allSitters: [SitterItem] = []
     private var filteredSitters: [SitterItem] = []
-    private var isSearchBarAdded: Bool = false
     
     // used to determine whether can or cannot send invite
     private var isEditingSession: Bool
@@ -113,7 +115,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         // Set initial selection first
         if let sitter = initialSelectedSitter {
             selectedSitter = sitter
-            updateBottomButtonStackState()
         } else if let session = currentSession,
                   let assignedSitter = session.assignedSitter {
             // If no initial sitter but we have an assigned sitter, use that
@@ -122,7 +123,6 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
                 name: assignedSitter.name,
                 email: assignedSitter.email
             )
-            updateBottomButtonStackState()
         }
         
         // Setup loading indicator and refresh control
@@ -138,40 +138,118 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
     override func setup() {
         // Set title based on mode
         title = displayMode == .default ? "Sitters" : "Select a Sitter"
-        
-        // Setup search bar delegate if in selectSitter mode (visibility handled in addSubviews)
+
+        // Setup search based on iOS version
         if displayMode == .selectSitter {
-            searchBarView.searchBar.delegate = self
+            if #available(iOS 26.0, *) {
+                setupSearchController()
+            } else {
+                // Setup search bar delegate for older iOS versions
+                searchBarView.searchBar.delegate = self
+            }
         }
+
+        // Setup UI based on iOS version
+        if #available(iOS 26.0, *) {
+            // Setup toolbar with search placement and add button
+            setupToolbar()
+        }
+    }
+
+    private func setupSearchController() {
+        searchController = UISearchController(searchResultsController: nil)
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search for a sitter"
+        searchController.hidesNavigationBarDuringPresentation = false
+
+        // Setup search bar delegate
+        searchController.searchBar.delegate = self
+    }
+
+    @available(iOS 26.0, *)
+    private func setupToolbar() {
+        // Create system add button
+        let addBarButtonItem = UIBarButtonItem(systemItem: .add)
+        addBarButtonItem.target = self
+        addBarButtonItem.action = #selector(addSitterButtonTapped)
+
+        // Setup toolbar items based on display mode
+        if displayMode == .selectSitter {
+            // Use iOS 26 search placement API
+            navigationItem.searchController = searchController
+            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), addBarButtonItem]
+        } else {
+            // In default mode, just show the add button
+            toolbarItems = [.flexibleSpace(), addBarButtonItem]
+        }
+
+        // Enable toolbar
+        navigationController?.setToolbarHidden(false, animated: false)
+    }
+
+    private func setupOriginalButtons() {
+        // Create the original NNPrimaryLabeledButton
+        addSitterButton = NNPrimaryLabeledButton(title: "Add Sitter", image: UIImage(systemName: "plus"))
+        addSitterButton.addTarget(self, action: #selector(addSitterButtonTapped), for: .touchUpInside)
     }
     
     override func addSubviews() {
-        // Search bar visibility will be handled in updateSearchBarVisibility() after data loads
-        // since allSitters is empty at this point
-        
         setupCollectionView()
-        setupBottomButtonStack()
-        
+
         // Add empty state view
         setupEmptyStateView()
+
+        // Add original button for pre-iOS 26 versions
+        if !isAvailableIOS26() {
+            setupOriginalButtonLayout()
+        }
     }
-    
+
+    private func setupOriginalButtonLayout() {
+        // Create the button here since addSubviews() is called before setup()
+        setupOriginalButtons()
+
+        guard let addSitterButton = addSitterButton else { return }
+
+        view.addSubview(addSitterButton)
+        addSitterButton.pinToBottom(
+            of: view,
+            addBlurEffect: true,
+            blurMaskImage: UIImage(named: "testBG3")!
+        )
+    }
+
+    // MARK: - UISearchResultsUpdating
+    func updateSearchResults(for searchController: UISearchController) {
+        let searchText = searchController.searchBar.text ?? ""
+        filterSitters(with: searchText)
+    }
+
     func setupPaletteSearch() {
         addNavigationBarPalette(searchBarView)
         isSearchBarAdded = true
     }
-    
+
     private func updateSearchBarVisibility() {
-        // Only show search bar in selectSitter mode when user has saved sitters
-        if displayMode == .selectSitter {
+        // Only show search bar in selectSitter mode when user has saved sitters (pre-iOS 26)
+        if displayMode == .selectSitter && !isAvailableIOS26() {
             let shouldShowSearchBar = !allSitters.isEmpty
-            
+
             // If we should show search bar but it's not added yet, add it
             if shouldShowSearchBar && !isSearchBarAdded {
                 setupPaletteSearch()
             }
         }
     }
+
+    private func isAvailableIOS26() -> Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     
     override func setupNavigationBarButtons() {
         let closeButton = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(closeButtonTapped))
@@ -233,16 +311,27 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.allowsSelection = true
         view.addSubview(collectionView)
-        
-        // Add content insets
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 16
-        collectionView.contentInset = UIEdgeInsets(
-            top: 20,
-            left: 0,
-            bottom: buttonHeight + (buttonPadding * 2),
-            right: 0
-        )
+
+        // Add content insets based on iOS version
+        if isAvailableIOS26() {
+            // For iOS 26+, account for toolbar
+            collectionView.contentInset = UIEdgeInsets(
+                top: 20,
+                left: 0,
+                bottom: 20,
+                right: 0
+            )
+        } else {
+            // For pre-iOS 26, account for bottom button
+            let buttonHeight: CGFloat = 55
+            let buttonPadding: CGFloat = 16
+            collectionView.contentInset = UIEdgeInsets(
+                top: 20,
+                left: 0,
+                bottom: buttonHeight + (buttonPadding * 2),
+                right: 0
+            )
+        }
         collectionView.backgroundColor = .systemGroupedBackground
         collectionView.register(InviteSitterCell.self, forCellWithReuseIdentifier: InviteSitterCell.reuseIdentifier)
         collectionView.register(
@@ -330,9 +419,12 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         // Only show empty state when there are no sitters
         let sittersToCheck = displayMode == .selectSitter ? filteredSitters : allSitters
         let shouldShowEmptyState = sittersToCheck.isEmpty
-        
+
+        print("DEBUG: updateEmptyStateVisibility - sittersToCheck.count: \(sittersToCheck.count), shouldShowEmptyState: \(shouldShowEmptyState)")
+
         // Update empty state message based on search context in selectSitter mode
-        if displayMode == .selectSitter && shouldShowEmptyState && searchBarView.searchBar.text?.isEmpty == false {
+        let searchText = isAvailableIOS26() ? searchController?.searchBar.text : searchBarView.searchBar.text
+        if displayMode == .selectSitter && shouldShowEmptyState && searchText?.isEmpty == false {
             // If we're searching and found nothing
             emptyStateView.configure(
                 icon: UIImage(systemName: "magnifyingglass"),
@@ -342,86 +434,27 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         } else {
             // Default empty state
             let title = displayMode == .default ? "No Sitters Yet" : "No Sitters Found"
-            let subtitle = displayMode == .default ? 
-                "Add your first sitter by tapping the button below" : 
+            let subtitle = displayMode == .default ?
+                "Add your first sitter by tapping the button below" :
                 "Try adjusting your search or add a new sitter"
-            
+
             emptyStateView.configure(
                 icon: UIImage(systemName: "person.2.slash"),
                 title: title,
                 subtitle: subtitle
             )
         }
-        
-        // Update visibility based on data state with crossfade
-        emptyStateView.crossFade(shouldShow: shouldShowEmptyState, duration: 0.3) { [weak self] in
-            guard let self = self else { return }
-            self.collectionView.isHidden = shouldShowEmptyState
-        }
-        
-        // Animate collection view alpha
-        UIView.animate(withDuration: 0.3) {
-            self.collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
-        }
+
+        // Immediately set collection view visibility without animation first
+        collectionView.isHidden = shouldShowEmptyState
+        collectionView.alpha = shouldShowEmptyState ? 0.0 : 1.0
+
+        print("DEBUG: collectionView.isHidden: \(collectionView.isHidden), collectionView.alpha: \(collectionView.alpha)")
+
+        // Update empty state visibility with crossfade
+        emptyStateView.crossFade(shouldShow: shouldShowEmptyState, duration: 0.3)
     }
     
-    private func setupBottomButtonStack() {
-        // Create the stack view
-        bottomButtonStack = UIStackView()
-        bottomButtonStack.axis = .horizontal
-        bottomButtonStack.distribution = .fillEqually
-        bottomButtonStack.spacing = 12
-        bottomButtonStack.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Create buttons
-        selectSitterButton = NNPrimaryLabeledButton(title: "Select Sitter", backgroundColor: NNColors.primary, foregroundColor: .white)
-        addSitterButton = NNPrimaryLabeledButton(title: "Add Sitter", image: UIImage(systemName: "plus"), backgroundColor: NNColors.primary, foregroundColor: .white)
-        
-        // Add targets
-        selectSitterButton.addTarget(self, action: #selector(selectSitterButtonTapped), for: .touchUpInside)
-        addSitterButton.addTarget(self, action: #selector(addSitterButtonTapped), for: .touchUpInside)
-        
-        // Add buttons to stack
-        bottomButtonStack.addArrangedSubview(selectSitterButton)
-        bottomButtonStack.addArrangedSubview(addSitterButton)
-        
-        // Pin the stack to bottom with blur effect
-        pinBottomButtonStackToBottom()
-        
-        // Update button visibility and state
-        updateBottomButtonStackState()
-    }
-    
-    private func pinBottomButtonStackToBottom() {
-        view.addSubview(bottomButtonStack)
-        
-        // Create variable blur effect view matching NNPrimaryLabeledButton implementation
-        let blurEffectView = UIVisualEffectView()
-        if let maskImage = UIImage(named: "testBG3") {
-            blurEffectView.effect = UIBlurEffect.variableBlurEffect(radius: 16, maskImage: maskImage)
-        } else {
-            blurEffectView.effect = UIBlurEffect(style: .regular)
-        }
-        blurEffectView.translatesAutoresizingMaskIntoConstraints = false
-        
-        // Insert blur view behind the stack
-        view.insertSubview(blurEffectView, belowSubview: bottomButtonStack)
-        
-        // Pin constraints
-        NSLayoutConstraint.activate([
-            // Button stack constraints
-            bottomButtonStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            bottomButtonStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            bottomButtonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            bottomButtonStack.heightAnchor.constraint(equalToConstant: 55),
-            
-            // Blur effect constraints matching NNPrimaryLabeledButton
-            blurEffectView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            blurEffectView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            blurEffectView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            blurEffectView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -55 - 80)
-        ])
-    }
     
     @objc private func selectSitterButtonTapped() {
         guard let selectedSitter = selectedSitter else { return }
@@ -455,30 +488,11 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         dismiss(animated: true)
     }
     
-    private func updateBottomButtonStackState() {
-        let hasSitters = !allSitters.isEmpty
-        
-        if displayMode == .selectSitter {
-            // In selectSitter mode, hide "Select Sitter" button (auto-select on tap)
-            // Show only "Add Sitter" button
-            selectSitterButton.isHidden = true
-            addSitterButton.isHidden = false
-            addSitterButton.isEnabled = true
-        } else {
-            // In default mode, never show "Select Sitter" button
-            // Only show "Add Sitter" button
-            selectSitterButton.isHidden = true
-            addSitterButton.isHidden = false
-            
-            // Add Sitter button is always enabled in default mode
-            addSitterButton.isEnabled = true
-        }
-    }
     
     private func updateInviteButtonState() {
         // Keep this method for backward compatibility if needed elsewhere
         if displayMode == .selectSitter {
-            inviteButton?.isEnabled = selectedSitter != nil
+//            inviteButton?.isEnabled = selectedSitter != nil
         }
     }
     
@@ -491,21 +505,11 @@ class SitterListViewController: NNViewController, CollectionViewLoadable {
         } else {
             sitters = allSitters
         }
-        
-        // Update UI based on data
-        if sitters.isEmpty {
-            emptyStateView.isHidden = false
-            collectionView.isHidden = true
-        } else {
-            emptyStateView.isHidden = true
-            collectionView.isHidden = false
-            applySnapshot()
-        }
-        
-        // Update button stack state after data loads
-        updateBottomButtonStackState()
-        
-        // Update search bar visibility after data loads
+
+        // Apply snapshot to update the collection view
+        applySnapshot()
+
+        // Update search bar visibility for pre-iOS 26 versions
         updateSearchBarVisibility()
     }
     
@@ -682,7 +686,6 @@ extension SitterListViewController: UICollectionViewDelegate {
         }
         
         print("DEBUG: After selection, selectedSitter: \(String(describing: selectedSitter?.name))")
-        updateBottomButtonStackState()
         
         // If the session has an invite, delete it, so we can
         // generate a new invite for the newly selected sitter
@@ -702,8 +705,12 @@ extension SitterListViewController: UICollectionViewDelegate {
         
         // If in selectSitter mode, dismiss the search keyboard and auto-select after delay
         if displayMode == .selectSitter {
-            searchBarView.searchBar.resignFirstResponder()
-            
+            if isAvailableIOS26() {
+                searchController?.searchBar.resignFirstResponder()
+            } else {
+                searchBarView.searchBar.resignFirstResponder()
+            }
+
             // Auto-dismiss with delay if a sitter was selected (not deselected)
             if selectedSitter != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in

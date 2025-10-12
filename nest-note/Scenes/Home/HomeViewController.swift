@@ -83,12 +83,7 @@ class HomeViewController: NNViewController, UICollectionViewDelegate {
     }
     
     override func setup() {
-        navigationItem.title = "NestNote"
-        navigationItem.weeTitle = "Welcome to"
-        navigationController?.navigationBar.prefersLargeTitles = true
         
-        // Set the navigation bar tint color to NNColors.primary
-        navigationController?.navigationBar.tintColor = NNColors.primary
     }
     
     override func setupNavigationBarButtons() {

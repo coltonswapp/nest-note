@@ -393,6 +393,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
+            ("Referral Admin", "person.badge.plus.fill"),
+            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -527,6 +529,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             resetTooltipsDatastore()
         case "Test Subscription Status":
             showSubscriptionStatus()
+        case "Referral Admin":
+            let vc = ReferralAdminViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Referral Analytics":
+            let vc = ReferralAnalyticsViewController()
+            navigationController?.pushViewController(vc, animated: true)
         default:
             break
         }

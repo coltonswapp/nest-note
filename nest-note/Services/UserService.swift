@@ -656,9 +656,7 @@ final class UserService {
 
             Logger.log(level: .info, category: .userService, message: "🏗️ ✅ SETUP NEST COMPLETE: Successfully created nest '\(nest.name)' for user \(userId)")
 
-            // Track successful nest setup during signup
-            Tracker.shared.track(.nestCreated)
-
+            // Note: nestCreated event is tracked by NestService.createNest() to avoid duplicate events
             return nest
 
         } catch {

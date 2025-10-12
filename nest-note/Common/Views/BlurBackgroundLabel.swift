@@ -61,13 +61,17 @@ class BlurBackgroundLabel: UIView {
 
     // MARK: - Configuration
     private func configureBlurView(with effect: UIBlurEffect.Style) {
-        let blur = UIBlurEffect(style: effect)
-        let blurView = UIVisualEffectView(effect: blur)
+        let blurView = UIVisualEffectView()
         blurView.translatesAutoresizingMaskIntoConstraints = false
         blurView.layer.cornerRadius = 12
         blurView.clipsToBounds = true
         blurView.layer.borderWidth = 1.5
         blurView.layer.borderColor = UIColor.systemBackground.cgColor
+
+        // Apply liquid glass effect instead of regular blur
+        let glassEffect = UIBlurEffect(style: .systemMaterial)
+        blurView.effect = glassEffect
+
         self.blurView = blurView
         self.containerView = blurView
     }
@@ -114,5 +118,21 @@ class BlurBackgroundLabel: UIView {
 
     @objc private func clearButtonTapped() {
         onClearTapped?()
+    }
+
+    // MARK: - Liquid Glass Animation
+    func animateLiquidGlassAppearance(duration: TimeInterval = 0.4) {
+        guard let blurView = self.blurView else { return }
+
+        // Start with no effect
+        blurView.effect = nil
+
+        // Animate the glass effect
+        UIView.animate(withDuration: duration,
+                      delay: 0,
+                      options: [.curveEaseOut],
+                      animations: {
+            blurView.effect = UIBlurEffect(style: .systemMaterial)
+        })
     }
 } 

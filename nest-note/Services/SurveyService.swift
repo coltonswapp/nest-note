@@ -157,11 +157,11 @@ final class SurveyService {
     func getSurveyResponses(type: SurveyResponse.SurveyType, version: String? = nil) async throws -> [SurveyResponse] {
         var query = db.collection("surveyData").document("surveyResponses").collection("responses")
             .whereField("surveyType", isEqualTo: type.rawValue)
-        
+
         if let version = version {
             query = query.whereField("version", isEqualTo: version)
         }
-        
+
         let snapshot = try await query.getDocuments()
         return snapshot.documents.compactMap { document -> SurveyResponse? in
             guard let timestamp = document.data()["timestamp"] as? Timestamp,
@@ -171,7 +171,7 @@ final class SurveyService {
                   let metadata = document.data()["metadata"] as? [String: String] else {
                 return nil
             }
-            
+
             let questionResponses = responses.compactMap { response -> SurveyResponse.QuestionResponse? in
                 guard let questionId = response["questionId"] as? String,
                       let answers = response["answers"] as? [String] else {
@@ -179,7 +179,7 @@ final class SurveyService {
                 }
                 return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
             }
-            
+
             return SurveyResponse(
                 id: document.documentID,
                 timestamp: timestamp.dateValue(),
@@ -189,6 +189,55 @@ final class SurveyService {
                 metadata: metadata
             )
         }
+    }
+
+    func getRecentSurveyResponses(limit: Int = 25) async throws -> [SurveyResponse] {
+        let query = db.collection("surveyData")
+            .document("surveyResponses")
+            .collection("responses")
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+
+        let snapshot = try await query.getDocuments()
+        return snapshot.documents.compactMap { document -> SurveyResponse? in
+            guard let timestamp = document.data()["timestamp"] as? Timestamp,
+                  let surveyType = document.data()["surveyType"] as? String,
+                  let version = document.data()["version"] as? String,
+                  let responses = document.data()["responses"] as? [[String: Any]],
+                  let metadata = document.data()["metadata"] as? [String: String] else {
+                return nil
+            }
+
+            let questionResponses = responses.compactMap { response -> SurveyResponse.QuestionResponse? in
+                guard let questionId = response["questionId"] as? String,
+                      let answers = response["answers"] as? [String] else {
+                    return nil
+                }
+                return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
+            }
+
+            return SurveyResponse(
+                id: document.documentID,
+                timestamp: timestamp.dateValue(),
+                surveyType: SurveyResponse.SurveyType(rawValue: surveyType) ?? .parentSurvey,
+                version: version,
+                responses: questionResponses,
+                metadata: metadata
+            )
+        }
+    }
+
+    func getSurveyResponsesInLast30Days(type: SurveyResponse.SurveyType) async throws -> Int {
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+
+        let query = db.collection("surveyData")
+            .document("surveyResponses")
+            .collection("responses")
+            .whereField("surveyType", isEqualTo: type.rawValue)
+            .whereField("timestamp", isGreaterThan: Timestamp(date: thirtyDaysAgo))
+
+        let snapshot = try await query.getDocuments()
+        return snapshot.documents.count
     }
     
     // MARK: - Feedback Methods

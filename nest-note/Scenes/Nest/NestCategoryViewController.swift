@@ -14,6 +14,22 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     // MARK: - Properties
     internal let entryRepository: EntryRepository
     private let category: String
+
+    // Toolbar support
+    private var isUsingToolbar: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
+    // Glass container support
+    private var isUsingGlassContainer: Bool {
+        if #available(iOS 18.0, *) {
+            return !isUsingToolbar // Use glass container for iOS 18-25
+        }
+        return false
+    }
     // Expose current category path to selection flow controller for scoping
     func getCurrentCategoryPath() -> String { category }
     private var selectAllBarButtonItem: UIBarButtonItem?
@@ -34,8 +50,18 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, AnyHashable>!
-    private var addEntryButton: NNSmallPrimaryButton!
+    private var addEntryButton: UIButton!
+    private var addEntryButtonWidthConstraint: NSLayoutConstraint?
+    private var addEntryButtonBlurView: UIVisualEffectView?
     private var emptyStateView: NNEmptyStateView!
+
+    // Glass container for edit mode buttons (iOS 18+)
+    @available(iOS 18.0, *)
+    private var glassContainerView: UIVisualEffectView?
+    @available(iOS 18.0, *)
+    private var glassMoveButton: UIButton?
+    @available(iOS 18.0, *)
+    private var glassDeleteButton: UIButton?
     
     enum Section: Int, CaseIterable {
         case folders, codes, other, places, routines
@@ -292,7 +318,21 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         configureDataSource()
         setupEmptyStateView()
         collectionView.delegate = self
-        
+
+        if isUsingToolbar {
+            // Setup toolbar for iOS 26+
+            if #available(iOS 26.0, *) {
+                setupToolbar()
+            }
+        }
+
+        // Setup glass container for iOS 18-25
+        if isUsingGlassContainer {
+            if #available(iOS 26.0, *) {
+                setupGlassContainer()
+            }
+        }
+
         // Set up notification observers for place updates
         setupNotificationObservers()
         
@@ -468,11 +508,19 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         collectionView.contentInset.top = 30
         collectionView.verticalScrollIndicatorInsets.top = 30
         
-        let buttonHeight: CGFloat = 55
-        let buttonPadding: CGFloat = 10
-        let totalInset = buttonHeight + buttonPadding * 2
-        collectionView.contentInset.bottom = totalInset
-        collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        // Set content insets based on iOS version and toolbar usage
+        if isUsingToolbar {
+            // For iOS 26+, account for toolbar
+            collectionView.contentInset.bottom = 20
+            collectionView.verticalScrollIndicatorInsets.bottom = 20
+        } else {
+            // For pre-iOS 26, account for floating button
+            let buttonHeight: CGFloat = 55
+            let buttonPadding: CGFloat = 10
+            let totalInset = buttonHeight + buttonPadding * 2
+            collectionView.contentInset.bottom = totalInset
+            collectionView.verticalScrollIndicatorInsets.bottom = totalInset
+        }
         
         // Register cells
         collectionView.register(AddressCell.self, forCellWithReuseIdentifier: AddressCell.reuseIdentifier)
@@ -1212,12 +1260,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private func updateEditModeUI() {
         setupNavigationBar() // Refresh navigation bar to update menu
         collectionView.allowsMultipleSelection = isEditingMode
-        
+
         if !isEditingMode {
             selectedEntries.removeAll()
             selectedPlaces.removeAll()
             selectedRoutines.removeAll()
-            
+
             // Notify delegate when clearing selections in edit-only mode
             if isEditOnlyMode {
                 selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
@@ -1225,10 +1273,31 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
             }
         }
-        
-        // Update the add entry button for edit mode
-        updateAddEntryButtonForEditMode()
-        
+
+        // Update the add entry button for edit mode (floating button)
+        if !isUsingToolbar && !isUsingGlassContainer {
+            updateAddEntryButtonForEditMode()
+        }
+
+        // Update toolbar for iOS 26+
+        if isUsingToolbar {
+            // Setup toolbar for iOS 26+
+            if #available(iOS 26.0, *) {
+                setupToolbar()
+            }
+        }
+
+        // Update glass container for iOS 18-25
+        if isUsingGlassContainer {
+            if #available(iOS 18.0, *) {
+                if isEditingMode {
+                    showGlassContainer()
+                } else {
+                    hideGlassContainer()
+                }
+            }
+        }
+
         // Reload visible cells to update their appearance
         DispatchQueue.main.async {
             self.collectionView.reloadData()
@@ -1241,7 +1310,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     @objc private func doneButtonTapped() {
         isEditingMode = false
-        addEntryButton.alpha = 1.0
+        addEntryButton?.alpha = 1.0
     }
     
     private func updateCellSelection(for entry: BaseEntry) {
@@ -1328,10 +1397,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     @objc private func moveButtonTapped() {
         // Handle move action for selected entries and places
-        
+
         let selectedEntriesArray = Array(selectedEntries)
         let selectedPlacesArray = Array(selectedPlaces)
-        
+
         // Handle moving both entries and places between categories
         if !selectedEntriesArray.isEmpty || !selectedPlacesArray.isEmpty {
             let selectFolderVC = SelectFolderViewController(
@@ -1341,12 +1410,106 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 selectedPlaces: selectedPlacesArray
             )
             selectFolderVC.delegate = self
-            
+
             let navController = UINavigationController(rootViewController: selectFolderVC)
             present(navController, animated: true)
         }
     }
-    
+
+    @objc private func deleteButtonTapped() {
+        // Only allow deletion for nest owners
+        guard entryRepository is NestService else { return }
+
+        let selectedEntriesArray = Array(selectedEntries)
+        let selectedPlacesArray = Array(selectedPlaces)
+        let selectedRoutinesArray = Array(selectedRoutines)
+
+        let totalItems = selectedEntriesArray.count + selectedPlacesArray.count + selectedRoutinesArray.count
+        guard totalItems > 0 else { return }
+
+        // Show confirmation alert
+        let itemText = totalItems == 1 ? "item" : "items"
+        let alert = UIAlertController(
+            title: "Delete \(totalItems) \(itemText)?",
+            message: "This action cannot be undone.",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.performBulkDelete(
+                entries: selectedEntriesArray,
+                places: selectedPlacesArray,
+                routines: selectedRoutinesArray
+            )
+        })
+
+        present(alert, animated: true)
+    }
+
+    private func performBulkDelete(entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem]) {
+        guard let nestService = entryRepository as? NestService else { return }
+
+        Task {
+            do {
+                // Delete entries
+                for entry in entries {
+                    try await nestService.deleteEntry(entry)
+                }
+
+                // Delete places
+                for place in places {
+                    try await nestService.deletePlace(place)
+                }
+
+                // Delete routines
+                for routine in routines {
+                    try await nestService.deleteRoutine(routine)
+                }
+
+                // Invalidate cache after bulk operations
+                nestService.invalidateItemsCache()
+
+                await MainActor.run {
+                    // Remove deleted items from local arrays
+                    for entry in entries {
+                        if let index = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                            self.entries.remove(at: index)
+                        }
+                    }
+
+                    for place in places {
+                        if let index = self.places.firstIndex(where: { $0.id == place.id }) {
+                            self.places.remove(at: index)
+                        }
+                    }
+
+                    for routine in routines {
+                        if let index = self.routines.firstIndex(where: { $0.id == routine.id }) {
+                            self.routines.remove(at: index)
+                        }
+                    }
+
+                    // Exit edit mode
+                    self.isEditingMode = false
+
+                    // Show success message
+                    let totalDeleted = entries.count + places.count + routines.count
+                    let itemText = totalDeleted == 1 ? "item" : "items"
+                    self.showToast(text: "\(totalDeleted) \(itemText) deleted")
+
+                    // Refresh empty state
+                    self.refreshEmptyState()
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.log(level: .error, category: self.logCategory, message: "Failed to delete items: \(error)")
+                    self.showToast(text: "Failed to delete items")
+                }
+            }
+        }
+    }
+
     // MARK: - Entry Limit Handling
     
     internal func showEntryLimitUpgradePrompt() {
@@ -1414,21 +1577,58 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
 
     private func setupAddEntryButton() {
-        // Only show add entry button for nest owners and not in edit-only mode
-        guard entryRepository is NestService && !isEditOnlyMode else { return }
-        
-        addEntryButton = NNSmallPrimaryButton(title: "", image: UIImage(systemName: "plus"))
+        // Only show floating button for pre-iOS 18, nest owners, and not in edit-only mode
+        guard !isUsingToolbar && !isUsingGlassContainer && entryRepository is NestService && !isEditOnlyMode else { return }
+
+        addEntryButton = UIButton(type: .system)
         addEntryButton.translatesAutoresizingMaskIntoConstraints = false
-        
+
+        // Configure button appearance with glass effect
+        var config = UIButton.Configuration.filled()
+        config.image = UIImage(systemName: "plus")
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = .systemBackground.withAlphaComponent(0.8)
+        config.baseForegroundColor = .label
+
+        addEntryButton.configuration = config
+
+        // Add glass effect
+        addEntryButton.layer.shadowColor = UIColor.black.cgColor
+        addEntryButton.layer.shadowOpacity = 0.1
+        addEntryButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        addEntryButton.layer.shadowRadius = 4
+
+        // Add blur effect
+        let blurEffect = UIBlurEffect(style: .systemMaterial)
+        let blurView = UIVisualEffectView(effect: blurEffect)
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.layer.cornerRadius = 22
+        blurView.layer.masksToBounds = true
+        blurView.isUserInteractionEnabled = false
+
+        // Store reference for later updates
+        addEntryButtonBlurView = blurView
+
+        addEntryButton.insertSubview(blurView, at: 0)
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: addEntryButton.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: addEntryButton.trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: addEntryButton.topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: addEntryButton.bottomAnchor)
+        ])
+
         view.addSubview(addEntryButton)
-        
+
+        // Store the width constraint for later manipulation
+        addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(equalToConstant: 44)
+
         NSLayoutConstraint.activate([
             addEntryButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
             addEntryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
             addEntryButton.heightAnchor.constraint(equalToConstant: 44),
-            addEntryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80)
+            addEntryButtonWidthConstraint!
         ])
-        
+
         // Setup UIMenu for Entry/Place/Routine creation
         setupAddButtonMenu()
     }
@@ -1440,35 +1640,106 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func updateAddEntryButtonForEditMode() {
         guard let addEntryButton = addEntryButton else { return }
-        
+
         if isEditingMode {
-            // Change to "Move" button with arrow.right icon and disable menu
-            addEntryButton.setTitle("Move", for: .normal)
-            addEntryButton.setImage(UIImage(systemName: "arrow.right"), for: .normal)
-            addEntryButton.menu = nil
-            addEntryButton.showsMenuAsPrimaryAction = false
-            addEntryButton.addTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
-            
+            // Change to "Actions" button with ellipsis icon and show menu
+            var config = addEntryButton.configuration ?? UIButton.Configuration.filled()
+            config.title = "Actions"
+            config.image = UIImage(systemName: "ellipsis")
+            config.imagePlacement = .leading
+            config.imagePadding = 8
+            addEntryButton.configuration = config
+
+            // Create menu with Move and Delete options
+            addEntryButton.menu = createEditActionsMenu()
+            addEntryButton.showsMenuAsPrimaryAction = true
+
+            // Remove any previous target actions
+            addEntryButton.removeTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
+
+            // Update width constraint to accommodate text
+            addEntryButtonWidthConstraint?.isActive = false
+            addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
+            addEntryButtonWidthConstraint?.isActive = true
+
+            // Update glass effect corner radius for rectangular button (height is 44, so radius should be 22)
+            addEntryButtonBlurView?.layer.cornerRadius = 22
+
             // Update button state based on selection
             updateMoveButtonState()
         } else {
             // Change back to add button with plus icon and restore menu
-            addEntryButton.setTitle("", for: .normal)
-            addEntryButton.setImage(UIImage(systemName: "plus"), for: .normal)
+            var config = addEntryButton.configuration ?? UIButton.Configuration.filled()
+            config.title = ""
+            config.image = UIImage(systemName: "plus")
+            config.imagePlacement = .leading
+            config.imagePadding = 0
+            addEntryButton.configuration = config
+
             addEntryButton.removeTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
             setupAddButtonMenu() // Restore the menu
             addEntryButton.isEnabled = true // Ensure it's enabled when not in edit mode
+
+            // Update width constraint back to square button
+            addEntryButtonWidthConstraint?.isActive = false
+            addEntryButtonWidthConstraint = addEntryButton.widthAnchor.constraint(equalToConstant: 44)
+            addEntryButtonWidthConstraint?.isActive = true
+
+            // Update glass effect corner radius for square button
+            addEntryButtonBlurView?.layer.cornerRadius = 22
         }
+    }
+
+    private func createEditActionsMenu() -> UIMenu {
+        let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+
+        let moveAction = UIAction(
+            title: "Move",
+            image: UIImage(systemName: "arrow.right"),
+            attributes: hasSelection ? [] : .disabled
+        ) { _ in
+            self.moveButtonTapped()
+        }
+
+        let deleteAction = UIAction(
+            title: "Delete",
+            image: UIImage(systemName: "trash"),
+            attributes: hasSelection ? .destructive : [.disabled, .destructive]
+        ) { _ in
+            self.deleteButtonTapped()
+        }
+
+        return UIMenu(title: "Actions", children: [moveAction, deleteAction])
     }
     
     private func updateMoveButtonState() {
-        guard let addEntryButton = addEntryButton, isEditingMode else { return }
-        
         let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
-        addEntryButton.isEnabled = hasSelection
-        
-        // Update visual appearance based on enabled state
-        addEntryButton.alpha = hasSelection ? 1.0 : 0.6
+
+        if isUsingToolbar {
+            // Update toolbar buttons (both move and delete)
+            if let toolbarItems = self.toolbarItems {
+                for item in toolbarItems {
+                    if item.action == #selector(moveButtonTapped) {
+                        item.isEnabled = hasSelection && entryRepository is NestService
+                    } else if item.action == #selector(deleteButtonTapped) {
+                        item.isEnabled = hasSelection && entryRepository is NestService
+                    }
+                }
+            }
+        } else if isUsingGlassContainer {
+            // Update glass container buttons
+            if #available(iOS 18.0, *) {
+                updateGlassButtonStates()
+            }
+        } else {
+            // Update floating button
+            guard let addEntryButton = addEntryButton, isEditingMode else { return }
+            addEntryButton.isEnabled = true // Always enabled, but menu items may be disabled
+            addEntryButton.alpha = 1.0
+
+            // Refresh the menu to update enabled/disabled states
+            addEntryButton.menu = createEditActionsMenu()
+        }
     }
     
 
@@ -1762,8 +2033,59 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         present(newRoutineVC, animated: true)
     }
     
+    @available(iOS 26.0, *)
+    private func setupToolbar() {
+        if isEditingMode {
+            // Move and Delete buttons in edit mode
+            let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+
+            let deleteBarButtonItem = UIBarButtonItem(
+                title: "Delete",
+                style: .plain,
+                target: self,
+                action: #selector(deleteButtonTapped)
+            )
+            deleteBarButtonItem.image = UIImage(systemName: "trash")
+            deleteBarButtonItem.tintColor = .systemRed
+            deleteBarButtonItem.isEnabled = hasSelection && entryRepository is NestService // Only nest owners can delete
+
+            let moveBarButtonItem = UIBarButtonItem(
+                title: "Move",
+                style: .plain,
+                target: self,
+                action: #selector(moveButtonTapped)
+            )
+            moveBarButtonItem.image = UIImage(systemName: "arrow.right")
+            moveBarButtonItem.isEnabled = hasSelection && entryRepository is NestService // Only nest owners can move
+
+            if entryRepository is NestService && !isEditOnlyMode {
+                // Full functionality for nest owners
+                toolbarItems = [deleteBarButtonItem, .flexibleSpace(), moveBarButtonItem]
+            } else if isEditOnlyMode {
+                // Edit-only mode: no delete or move, just selection
+                toolbarItems = []
+            } else {
+                // Sitters: no actions available
+                toolbarItems = []
+            }
+        } else {
+            // Add menu in normal mode (only for nest owners and not edit-only mode)
+            if entryRepository is NestService && !isEditOnlyMode {
+                let addBarButtonItem = UIBarButtonItem(systemItem: .add)
+                addBarButtonItem.menu = createAddItemMenu()
+
+                toolbarItems = [.flexibleSpace(), addBarButtonItem]
+            } else {
+                // No toolbar items for sitters or edit-only mode
+                toolbarItems = []
+            }
+        }
+
+        navigationController?.setToolbarHidden(toolbarItems?.isEmpty ?? true, animated: true)
+    }
+
     func createAddItemMenu() -> UIMenu {
-        
+
         let addFolderAction = UIAction(
             title: "Add Folder",
             image: UIImage(systemName: "folder.badge.plus")
@@ -1777,21 +2099,21 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         ) { _ in
             self.addEntryTapped()
         }
-        
+
         let addPlaceAction = UIAction(
             title: "Add Place",
             image: UIImage(systemName: "mappin.and.ellipse")
         ) { _ in
             self.addPlaceTapped()
         }
-        
+
         let addRoutineAction = UIAction(
             title: "Add Routine",
             image: UIImage(systemName: "checklist")
         ) { _ in
             self.addRoutineTapped()
         }
-        
+
         // Mirror the depth restriction used in the top-right nav menu
         let currentDepth = category.components(separatedBy: "/").count
         var children: [UIMenuElement] = [addEntryAction, addPlaceAction, addRoutineAction]
@@ -1799,8 +2121,158 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             // Prefer showing Add Folder first
             children.insert(addFolderAction, at: 0)
         }
-        
+
         return UIMenu(title: "Add Item", children: children)
+    }
+
+    @available(iOS 26.0, *)
+    private func setupGlassContainer() {
+        // Only setup for nest owners and not in edit-only mode
+        guard entryRepository is NestService && !isEditOnlyMode else { return }
+
+        // Create the glass container effect
+        let glassContainerEffect = UIGlassContainerEffect()
+        glassContainerEffect.spacing = 20
+
+        glassContainerView = UIVisualEffectView(effect: glassContainerEffect)
+        glassContainerView?.translatesAutoresizingMaskIntoConstraints = false
+        glassContainerView?.isHidden = true // Start hidden
+
+        view.addSubview(glassContainerView!)
+
+        // Setup initial position (same as add button would be)
+        NSLayoutConstraint.activate([
+            glassContainerView!.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            glassContainerView!.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            glassContainerView!.heightAnchor.constraint(equalToConstant: 44)
+        ])
+
+        setupGlassButtons()
+    }
+
+    @available(iOS 26.0, *)
+    private func setupGlassButtons() {
+        guard let containerView = glassContainerView else { return }
+
+        // Create glass effect for individual buttons
+        let glassEffect = UIGlassEffect()
+
+        // Delete button
+        let deleteButtonView = UIVisualEffectView(effect: glassEffect)
+        deleteButtonView.translatesAutoresizingMaskIntoConstraints = false
+
+        glassDeleteButton = UIButton(type: .system)
+        glassDeleteButton?.translatesAutoresizingMaskIntoConstraints = false
+        glassDeleteButton?.setImage(UIImage(systemName: "trash"), for: .normal)
+        glassDeleteButton?.tintColor = .systemRed
+        glassDeleteButton?.addTarget(self, action: #selector(deleteButtonTapped), for: .touchUpInside)
+
+        deleteButtonView.contentView.addSubview(glassDeleteButton!)
+        containerView.contentView.addSubview(deleteButtonView)
+
+        // Move button
+        let moveButtonView = UIVisualEffectView(effect: glassEffect)
+        moveButtonView.translatesAutoresizingMaskIntoConstraints = false
+
+        glassMoveButton = UIButton(type: .system)
+        glassMoveButton?.translatesAutoresizingMaskIntoConstraints = false
+        glassMoveButton?.setImage(UIImage(systemName: "arrow.right"), for: .normal)
+        glassMoveButton?.tintColor = .label
+        glassMoveButton?.addTarget(self, action: #selector(moveButtonTapped), for: .touchUpInside)
+
+        moveButtonView.contentView.addSubview(glassMoveButton!)
+        containerView.contentView.addSubview(moveButtonView)
+
+        // Layout constraints
+        NSLayoutConstraint.activate([
+            // Delete button
+            deleteButtonView.leadingAnchor.constraint(equalTo: containerView.contentView.leadingAnchor),
+            deleteButtonView.topAnchor.constraint(equalTo: containerView.contentView.topAnchor),
+            deleteButtonView.bottomAnchor.constraint(equalTo: containerView.contentView.bottomAnchor),
+            deleteButtonView.widthAnchor.constraint(equalToConstant: 44),
+
+            glassDeleteButton!.leadingAnchor.constraint(equalTo: deleteButtonView.contentView.leadingAnchor),
+            glassDeleteButton!.trailingAnchor.constraint(equalTo: deleteButtonView.contentView.trailingAnchor),
+            glassDeleteButton!.topAnchor.constraint(equalTo: deleteButtonView.contentView.topAnchor),
+            glassDeleteButton!.bottomAnchor.constraint(equalTo: deleteButtonView.contentView.bottomAnchor),
+
+            // Move button
+            moveButtonView.trailingAnchor.constraint(equalTo: containerView.contentView.trailingAnchor),
+            moveButtonView.topAnchor.constraint(equalTo: containerView.contentView.topAnchor),
+            moveButtonView.bottomAnchor.constraint(equalTo: containerView.contentView.bottomAnchor),
+            moveButtonView.widthAnchor.constraint(equalToConstant: 44),
+
+            glassMoveButton!.leadingAnchor.constraint(equalTo: moveButtonView.contentView.leadingAnchor),
+            glassMoveButton!.trailingAnchor.constraint(equalTo: moveButtonView.contentView.trailingAnchor),
+            glassMoveButton!.topAnchor.constraint(equalTo: moveButtonView.contentView.topAnchor),
+            glassMoveButton!.bottomAnchor.constraint(equalTo: moveButtonView.contentView.bottomAnchor),
+
+            // Container layout
+            containerView.contentView.widthAnchor.constraint(equalToConstant: 108) // 44 + 20 + 44
+        ])
+
+        updateGlassButtonStates()
+    }
+
+    @available(iOS 18.0, *)
+    private func updateGlassButtonStates() {
+        let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+
+        glassMoveButton?.isEnabled = hasSelection
+        glassDeleteButton?.isEnabled = hasSelection
+
+        glassMoveButton?.alpha = hasSelection ? 1.0 : 0.6
+        glassDeleteButton?.alpha = hasSelection ? 1.0 : 0.6
+    }
+
+    @available(iOS 18.0, *)
+    private func showGlassContainer(animated: Bool = true) {
+        guard let containerView = glassContainerView else { return }
+
+        containerView.isHidden = false
+
+        if animated {
+            // Start from collapsed state
+            containerView.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+            containerView.alpha = 0
+
+            UIView.animate(
+                withDuration: 0.4,
+                delay: 0,
+                usingSpringWithDamping: 0.7,
+                initialSpringVelocity: 0.3,
+                options: [.curveEaseOut],
+                animations: {
+                    containerView.transform = .identity
+                    containerView.alpha = 1.0
+                }
+            )
+        }
+    }
+
+    @available(iOS 18.0, *)
+    private func hideGlassContainer(animated: Bool = true) {
+        guard let containerView = glassContainerView else { return }
+
+        if animated {
+            UIView.animate(
+                withDuration: 0.3,
+                delay: 0,
+                usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.5,
+                options: [.curveEaseIn],
+                animations: {
+                    containerView.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+                    containerView.alpha = 0
+                },
+                completion: { _ in
+                    containerView.isHidden = true
+                    containerView.transform = .identity
+                }
+            )
+        } else {
+            containerView.isHidden = true
+        }
     }
 }
 
