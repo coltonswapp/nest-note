@@ -380,6 +380,14 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             Logger.log(level: .info, category: .signup, message: "🎯 ✅ FINISH SETUP COMPLETE: All steps completed successfully!")
             Logger.log(level: .info, category: .signup, message: "🎯 ✅ Completed steps: \(completedSteps.joined(separator: ", "))")
 
+            // SUCCESS: Upload logs with all completed steps info
+            await SignupLogService.shared.stopCaptureAndUpload(
+                result: .success,
+                identifier: userInfo.email,
+                error: nil
+            )
+            Logger.log(level: .info, category: .signup, message: "📋 LOG UPLOAD: ✅ Successfully uploaded complete onboarding logs")
+
         } catch {
             criticalFailure = error
 
@@ -407,10 +415,21 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
             }
 
+            // FAILURE: Upload logs with detailed failure information
+            let failedStep = determineFailedStep(completedSteps: completedSteps)
+            let detailedError = "Failed at step '\(failedStep)'. Completed: [\(completedSteps.joined(separator: ", "))]. Error: \(error.localizedDescription)"
+
+            await SignupLogService.shared.stopCaptureAndUpload(
+                result: .failure,
+                identifier: userInfo.email,
+                error: detailedError
+            )
+            Logger.log(level: .info, category: .signup, message: "📋 LOG UPLOAD: ✅ Uploaded failure logs with step details")
+
             throw OnboardingError.setupFailed(
                 underlyingError: error,
                 completedSteps: completedSteps,
-                failedAtStep: determineFailedStep(completedSteps: completedSteps)
+                failedAtStep: failedStep
             )
         }
     }

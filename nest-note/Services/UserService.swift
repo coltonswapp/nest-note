@@ -270,6 +270,11 @@ final class UserService {
     
     // MARK: - Authentication Methods
     func login(email: String, password: String) async throws -> AuthDataResult {
+        let identifier = email
+        
+        // Start capturing logs for this login attempt
+        SignupLogService.shared.startCapturing(identifier: identifier)
+        
         Logger.log(level: .info, category: .userService, message: "Attempting login for email: \(email)")
         Tracker.shared.track(.regularLoginAttempted)
         do {
@@ -287,11 +292,19 @@ final class UserService {
             }
             
             Tracker.shared.track(.regularLoginSucceeded)
+
+            // Note: For login (not signup), we stop capture here since there's no onboarding
+            await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
+
             return result
             
         } catch let error as NSError {
             Logger.log(level: .error, category: .userService, message: "Login failed - Error: \(error.localizedDescription)")
             Tracker.shared.track(.regularLoginAttempted, result: false, error: error.localizedDescription)
+            
+            // Stop log capture and upload (failure) - login failed
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
+            
             switch error.code {
             case AuthErrorCode.wrongPassword.rawValue,
                  AuthErrorCode.invalidEmail.rawValue,
@@ -306,6 +319,11 @@ final class UserService {
     }
     
     func signUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
+        let identifier = info.email
+        
+        // Start capturing logs for this signup attempt
+        SignupLogService.shared.startCapturing(identifier: identifier)
+        
         Logger.log(level: .info, category: .userService, message: "Attempting signup for email: \(info.email)")
         Tracker.shared.track(.regularSignUpAttempted)
         do {
@@ -355,15 +373,23 @@ final class UserService {
             self.isAuthenticated = true
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
             Tracker.shared.track(.regularSignUpSucceeded)
-            
+
             // Save authentication state
             saveAuthState()
-            
+
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation, survey submission, and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
+
             return user
             
         } catch let error as NSError {
             Logger.log(level: .error, category: .userService, message: "Signup failed - Error: \(error.localizedDescription)")
             Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
+            
+            // Stop log capture and upload (failure)
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
+            
             switch error.code {
             case AuthErrorCode.emailAlreadyInUse.rawValue:
                 throw AuthError.emailAlreadyInUse
@@ -380,17 +406,25 @@ final class UserService {
     }
     
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> (user: NestUser, isNewUser: Bool, isIncompleteSignup: Bool) {
+        // Use email from credential or create timestamp-based identifier
+        let identifier = credential.email ?? "apple_signin_\(Int(Date().timeIntervalSince1970))"
+        
+        // Start capturing logs for this Apple Sign In attempt
+        SignupLogService.shared.startCapturing(identifier: identifier)
+        
         Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In")
         Tracker.shared.track(.appleSignInAttempted)
         
         do {
             // Create Firebase credential from Apple credential
             guard let nonce = self.currentNonce else {
+                await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "No nonce available")
                 throw AuthError.unknown
             }
             
             guard let appleIDToken = credential.identityToken,
                   let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "Invalid Apple ID token")
                 throw AuthError.unknown
             }
             
@@ -421,6 +455,11 @@ final class UserService {
                 )
                 
                 Tracker.shared.track(.appleSignInSucceeded)
+
+                // Note: Don't stop log capture here - new users will continue to onboarding
+                // This ensures we capture the full signup flow including nest creation
+                Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: New Apple user continuing to onboarding - keeping capture active")
+
                 return (user: tempUser, isNewUser: true, isIncompleteSignup: false)
             } else {
                 // Firebase says existing user, but try to fetch their profile
@@ -433,7 +472,10 @@ final class UserService {
                     
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
                     Tracker.shared.track(.appleSignInSucceeded)
-                    
+
+                    // Stop log capture and upload (success) - existing user logged in, no onboarding needed
+                    await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
+
                     return (user: user, isNewUser: false, isIncompleteSignup: false)
                 } catch {
                     // Profile doesn't exist - they authenticated before but never completed onboarding
@@ -450,6 +492,11 @@ final class UserService {
                     )
                     
                     Tracker.shared.track(.appleSignInSucceeded)
+
+                    // Note: Don't stop log capture here - incomplete signup will continue to onboarding
+                    // This ensures we capture the completion of the signup process
+                    Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Incomplete Apple signup continuing to onboarding - keeping capture active")
+
                     return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
                 }
             }
@@ -457,6 +504,9 @@ final class UserService {
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In failed: \(error)")
             Tracker.shared.track(.appleSignInAttempted, result: false, error: error.localizedDescription)
+            
+            // Stop log capture and upload (failure) - Apple Sign In failed
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
             
             let authError = error as NSError
             switch authError.code {
@@ -469,6 +519,11 @@ final class UserService {
     }
     
     func signUpWithApple(credential: ASAuthorizationAppleIDCredential, with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
+        let identifier = credential.email ?? info.email
+        
+        // Start capturing logs for this Apple signup attempt
+        SignupLogService.shared.startCapturing(identifier: identifier)
+        
         Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In signup")
         Tracker.shared.track(.appleSignUpAttempted)
         
@@ -543,12 +598,19 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
-            
+
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
+
             return user
             
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In signup failed: \(error)")
             Tracker.shared.track(.appleSignUpAttempted, result: false, error: error.localizedDescription)
+            
+            // Stop log capture and upload (failure)
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
             
             // Convert Firebase errors to custom errors
             let authError = error as NSError
@@ -562,10 +624,17 @@ final class UserService {
     }
     
     func completeAppleSignUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
+        // Use email as identifier, or fallback to a timestamp-based identifier
+        let identifier = info.email.isEmpty ? "apple_signup_\(Int(Date().timeIntervalSince1970))" : info.email
+        
+        // Start capturing logs for this Apple signup completion
+        SignupLogService.shared.startCapturing(identifier: identifier)
+        
         Logger.log(level: .info, category: .userService, message: "Completing Apple Sign In profile setup")
         
         // User is already authenticated with Firebase, just need to create their profile
         guard let firebaseUser = auth.currentUser else {
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "No Firebase user found")
             throw AuthError.unknown
         }
         
@@ -609,11 +678,19 @@ final class UserService {
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
 
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation, survey submission, and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
+
             return user
             
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In profile setup failed: \(error)")
             Tracker.shared.track(.appleSignUpSucceeded, result: false, error: error.localizedDescription)
+            
+            // Stop log capture and upload (failure)
+            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
+            
             throw error
         }
     }
