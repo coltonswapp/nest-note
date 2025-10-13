@@ -8,6 +8,7 @@
 import Foundation
 import FirebaseStorage
 import Combine
+import UIKit
 
 /**
  * SignupLogService
@@ -40,6 +41,7 @@ final class SignupLogService {
     private let storage = Storage.storage()
     private lazy var storageRef = Storage.storage(url: "gs://nest-note-21a2a.firebasestorage.app").reference()
     private let dateFormatter: DateFormatter
+    private let monthYearFormatter: DateFormatter
     
     // Log capture state
     private var capturedLogs: [LogLine] = []
@@ -52,6 +54,12 @@ final class SignupLogService {
         dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         dateFormatter.timeZone = TimeZone.current
+
+        // Initialize month/year formatter for folder organization
+        monthYearFormatter = DateFormatter()
+        monthYearFormatter.dateFormat = "MMM_yyyy"
+        monthYearFormatter.timeZone = TimeZone.current
+        monthYearFormatter.locale = Locale(identifier: "en_US") // Ensure consistent month names
     }
     
     // MARK: - Public Methods
@@ -74,12 +82,15 @@ final class SignupLogService {
         isCapturing = true
         capturedLogs.removeAll()
         
-        // Subscribe to logger updates
-        logCancellable = Logger.shared.$lines.sink { [weak self] lines in
-            DispatchQueue.global(qos: .background).async {
-                self?.capturedLogs = lines
+        // Subscribe to logger updates on main thread, then move to background for processing
+        logCancellable = Logger.shared.$lines
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] lines in
+                // Process on background queue to avoid blocking UI
+                DispatchQueue.global(qos: .background).async {
+                    self?.capturedLogs = Array(lines) // Create a copy to avoid reference issues
+                }
             }
-        }
         
         // Add initial log entry
         Logger.log(level: .info, category: .signup, message: "📋 LOG CAPTURE: Started capturing logs for signup attempt - identifier: \(identifier ?? "unknown")")
@@ -88,15 +99,15 @@ final class SignupLogService {
     /// Stops capturing logs and uploads them to Firebase Storage
     /// - Parameters:
     ///   - result: The result of the signup attempt (success/failure)
-    ///   - identifier: A unique identifier for this signup attempt 
+    ///   - identifier: A unique identifier for this signup attempt
     ///   - error: Optional error if the signup failed
     func stopCaptureAndUpload(result: SignupResult, identifier: String? = nil, error: String? = nil) async {
         guard FeatureFlagService.shared.isEnabled(.captureSignupLogs) else {
             return
         }
-        
+
         guard isCapturing else {
-            Logger.log(level: .debug, category: .signup, message: "📋 LOG CAPTURE: Not currently capturing logs")
+            Logger.log(level: .info, category: .signup, message: "📋 LOG CAPTURE: Not currently capturing logs - this may indicate capture was never started or already completed")
             return
         }
         
@@ -161,25 +172,38 @@ final class SignupLogService {
             let logContent = generateLogContent(result: result, identifier: identifier, error: error)
             
             Logger.log(level: .info, category: .signup, message: "📋 LOG UPLOAD: Uploading \(capturedLogs.count) log lines to file: \(filename)")
+
+            // Create storage reference with monthly folder organization
+            let monthYear = monthYearFormatter.string(from: Date()).lowercased()
+            let storagePath = "signup_logs/\(monthYear)/\(filename)"
+            let logsRef = storageRef.child(storagePath)
+
+            Logger.log(level: .info, category: .signup, message: "📋 LOG UPLOAD: Storage path: \(storagePath)")
             
-            // Create storage reference
-            let logsRef = storageRef.child("signup_logs/\(filename)")
-            
-            // Convert log content to data
+            // Convert log content to data with explicit UTF-8 encoding
             guard let logData = logContent.data(using: .utf8) else {
                 Logger.log(level: .error, category: .signup, message: "📋 LOG UPLOAD: Failed to convert log content to data")
                 return
             }
             
-            // Set metadata
+            // Set metadata with explicit UTF-8 encoding and app version info
             let metadata = StorageMetadata()
-            metadata.contentType = "text/plain"
+            metadata.contentType = "text/plain; charset=utf-8"
+
+            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+            let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+
             metadata.customMetadata = [
                 "signup_result": result.rawValue,
                 "identifier": identifier ?? "unknown",
                 "error": error ?? "none",
                 "log_count": String(capturedLogs.count),
-                "upload_timestamp": ISO8601DateFormatter().string(from: Date())
+                "upload_timestamp": ISO8601DateFormatter().string(from: Date()),
+                "app_version": appVersion,
+                "build_number": buildNumber,
+                "ios_version": UIDevice.current.systemVersion,
+                "device_model": UIDevice.current.model,
+                "month_year": monthYear
             ]
             
             // Upload the file
@@ -204,9 +228,19 @@ final class SignupLogService {
     
     /// Generates the content for the log file
     private func generateLogContent(result: SignupResult, identifier: String?, error: String?) -> String {
+        // Get app version information
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "unknown"
+
         var content = """
         =================================
         NEST NOTE SIGNUP LOG
+        =================================
+        App Version: \(appVersion) (\(buildNumber))
+        Bundle ID: \(bundleIdentifier)
+        iOS Version: \(UIDevice.current.systemVersion)
+        Device Model: \(UIDevice.current.model)
         =================================
         Signup Result: \(result.rawValue.uppercased())
         Identifier: \(identifier ?? "unknown")
@@ -214,7 +248,7 @@ final class SignupLogService {
         Timestamp: \(ISO8601DateFormatter().string(from: Date()))
         Total Log Lines: \(capturedLogs.count)
         =================================
-        
+
         """
         
         // Add all captured logs

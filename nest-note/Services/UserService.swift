@@ -292,10 +292,10 @@ final class UserService {
             }
             
             Tracker.shared.track(.regularLoginSucceeded)
-            
-            // Stop log capture and upload (success) - login succeeded
+
+            // Note: For login (not signup), we stop capture here since there's no onboarding
             await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-            
+
             return result
             
         } catch let error as NSError {
@@ -373,13 +373,14 @@ final class UserService {
             self.isAuthenticated = true
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
             Tracker.shared.track(.regularSignUpSucceeded)
-            
+
             // Save authentication state
             saveAuthState()
-            
-            // Stop log capture and upload (success)
-            await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-            
+
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation, survey submission, and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
+
             return user
             
         } catch let error as NSError {
@@ -454,10 +455,11 @@ final class UserService {
                 )
                 
                 Tracker.shared.track(.appleSignInSucceeded)
-                
-                // Stop log capture and upload (success) - new user will continue to onboarding
-                await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-                
+
+                // Note: Don't stop log capture here - new users will continue to onboarding
+                // This ensures we capture the full signup flow including nest creation
+                Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: New Apple user continuing to onboarding - keeping capture active")
+
                 return (user: tempUser, isNewUser: true, isIncompleteSignup: false)
             } else {
                 // Firebase says existing user, but try to fetch their profile
@@ -470,10 +472,10 @@ final class UserService {
                     
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
                     Tracker.shared.track(.appleSignInSucceeded)
-                    
-                    // Stop log capture and upload (success) - existing user logged in
+
+                    // Stop log capture and upload (success) - existing user logged in, no onboarding needed
                     await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-                    
+
                     return (user: user, isNewUser: false, isIncompleteSignup: false)
                 } catch {
                     // Profile doesn't exist - they authenticated before but never completed onboarding
@@ -490,10 +492,11 @@ final class UserService {
                     )
                     
                     Tracker.shared.track(.appleSignInSucceeded)
-                    
-                    // Stop log capture and upload (success) - incomplete signup will be handled
-                    await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-                    
+
+                    // Note: Don't stop log capture here - incomplete signup will continue to onboarding
+                    // This ensures we capture the completion of the signup process
+                    Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Incomplete Apple signup continuing to onboarding - keeping capture active")
+
                     return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
                 }
             }
@@ -595,10 +598,11 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
-            
-            // Stop log capture and upload (success)
-            await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-            
+
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
+
             return user
             
         } catch {
@@ -673,9 +677,10 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
-            
-            // Stop log capture and upload (success)
-            await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
+
+            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
+            // This ensures we capture nest creation, survey submission, and final completion
+            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
 
             return user
             
