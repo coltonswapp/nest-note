@@ -24,7 +24,7 @@ final class RatingManager {
     
     // MARK: - Properties
     private let defaults = UserDefaults.standard
-    private let minimumDaysBetweenRequests: Double = 90 // 3 months between rating requests
+    private let minimumDaysBetweenRequests: Double = 5 // 5 days between rating requests
     
     // MARK: - Initialization
     private init() {
