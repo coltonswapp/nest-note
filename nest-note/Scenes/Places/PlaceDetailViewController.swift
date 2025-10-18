@@ -239,7 +239,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         createdAt: existingPlace.createdAt,
                         updatedAt: Date()
                     )
-                    
+
                     // Apply pending location update if exists
                     if let locationUpdate = pendingLocationUpdate {
                         updatedPlace = PlaceItem(
@@ -249,15 +249,22 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                             alias: placeAlias,
                             address: locationUpdate.address,
                             coordinate: locationUpdate.coordinate,
-                            thumbnailURLs: existingPlace.thumbnailURLs,
+                            thumbnailURLs: existingPlace.thumbnailURLs, // Will be replaced by new method
                             isTemporary: existingPlace.isTemporary,
                             createdAt: existingPlace.createdAt,
                             updatedAt: Date()
                         )
+
+                        // Use enhanced update method with thumbnail regeneration
+                        updatedPlace = try await NestService.shared.updatePlace(
+                            updatedPlace,
+                            shouldRegenerateThumbnails: true,
+                            newCoordinate: locationUpdate.coordinate
+                        )
+                    } else {
+                        // No location change - use standard update
+                        try await NestService.shared.updatePlace(updatedPlace)
                     }
-                    
-                    // Update using new method
-                    try await NestService.shared.updatePlace(updatedPlace)
                     
                     await MainActor.run {
                         self.placeListDelegate?.placeListViewController(didUpdatePlace: updatedPlace)

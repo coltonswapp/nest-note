@@ -119,14 +119,13 @@ extension PlaceItem {
         return alias ?? address.components(separatedBy: ",").first ?? address
     }
     
-    // Override hash to include place-specific properties
+    // Hash only by ID for stable diffable data source behavior
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
-        hasher.combine(alias)
-        hasher.combine(address)
-        hasher.combine(coordinate.latitude)
-        hasher.combine(coordinate.longitude)
-        hasher.combine(thumbnailURLs)
-        hasher.combine(updatedAt)
+    }
+
+    // Equatable implementation - items are equal if they have the same ID
+    static func == (lhs: PlaceItem, rhs: PlaceItem) -> Bool {
+        return lhs.id == rhs.id
     }
 }

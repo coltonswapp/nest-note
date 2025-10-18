@@ -1807,16 +1807,21 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func updateLocalPlace(_ place: PlaceItem) {
         DispatchQueue.main.async {
+            // First update the local places array with the new place data
+            if let index = self.places.firstIndex(where: { $0.id == place.id }) {
+                self.places[index] = place
+            }
+
             guard let dataSource = self.dataSource else { return }
             var snapshot = dataSource.snapshot()
-            
+
             // Use reconfigureItems instead of reloadItems for better performance
             if #available(iOS 15.0, *) {
                 snapshot.reconfigureItems([place])
             } else {
                 snapshot.reloadItems([place])
             }
-            
+
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
                 self?.flashPlaceCell(for: place)
             }
