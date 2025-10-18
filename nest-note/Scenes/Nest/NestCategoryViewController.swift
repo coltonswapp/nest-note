@@ -2376,7 +2376,8 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             let placeDetailVC = PlaceDetailViewController(
                 place: selectedPlace,
                 thumbnail: nil, // TODO: Get thumbnail from cell if needed
-                isReadOnly: isReadOnly
+                isReadOnly: isReadOnly,
+                sourceFrame: cellFrame
             )
             placeDetailVC.placeListDelegate = self
             present(placeDetailVC, animated: true)
