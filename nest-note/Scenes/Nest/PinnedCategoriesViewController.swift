@@ -139,7 +139,7 @@ class PinnedCategoriesViewController: UIViewController {
     }
     
     private func setupInstructionLabel() {
-        instructionLabel = BlurBackgroundLabel(with: .systemThickMaterial)
+        instructionLabel = BlurBackgroundLabel()
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionLabel.text = "Pinned Folders will be visible to sitters. Limit: 4 categories."
         instructionLabel.font = .bodyL

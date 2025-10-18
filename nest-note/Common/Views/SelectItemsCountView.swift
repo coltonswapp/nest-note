@@ -7,15 +7,14 @@
 
 import UIKit
 
-class SelectEntriesCountView: UIView {
-
+class SelectItemsCountView: UIVisualEffectView {
+    
     // MARK: - Properties
     private let icon = UIImageView()
     private let countLabel = UILabel()
     private let iconLabelStack = UIStackView()
     private let continueButton = UIButton(type: .system)
     private let stackView = UIStackView()
-    private var liquidGlassEffectView: UIVisualEffectView?
 
     var onContinueTapped: (() -> Void)?
     
@@ -33,11 +32,22 @@ class SelectEntriesCountView: UIView {
     }
     
     // MARK: - Initialization
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    override init(effect: UIVisualEffect?) {
+        super.init(effect: effect)
         setupView()
     }
-    
+
+    convenience init() {
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect(style: .regular)
+            glassEffect.isInteractive = true
+            self.init(effect: glassEffect)
+        } else {
+            // Fallback: No effect for older iOS versions
+            self.init(effect: nil)
+        }
+    }
+
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupView()
@@ -55,18 +65,20 @@ class SelectEntriesCountView: UIView {
     }
     
     private func setupAppearance() {
-        // Clear background since we'll use liquid glass
-        backgroundColor = .clear
-
         layer.cornerRadius = 25
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOffset = CGSize(width: 0, height: 2)
-        layer.shadowOpacity = 0.15
-        layer.shadowRadius = 8
         translatesAutoresizingMaskIntoConstraints = false
 
-        // Apply liquid glass effect
-        liquidGlassEffectView = applyLiquidGlass(style: .systemMaterial, animated: false)
+        // Add background styling for non-glass versions
+        if #available(iOS 26.0, *) {
+            // Glass effect handles the background
+        } else {
+            // Fallback: Add background color and shadow for non-glass
+            backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOffset = CGSize(width: 0, height: 2)
+            layer.shadowOpacity = 0.1
+            layer.shadowRadius = 8
+        }
 
         // Start offscreen (translated down by 100 points)
         transform = CGAffineTransform(translationX: 0, y: 100)
@@ -97,7 +109,7 @@ class SelectEntriesCountView: UIView {
         var configuration = UIButton.Configuration.filled()
         
         var container = AttributeContainer()
-        container.font = .h4
+        container.font = .systemFont(ofSize: 18, weight: .bold)
         configuration.attributedTitle = AttributedString("Continue", attributes: container)
 
         configuration.baseBackgroundColor = .systemBlue
@@ -119,16 +131,16 @@ class SelectEntriesCountView: UIView {
         
         stackView.addArrangedSubview(iconLabelStack)
         stackView.addArrangedSubview(continueButton)
-        addSubview(stackView)
+        contentView.addSubview(stackView)
     }
     
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-            
+            stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+
             heightAnchor.constraint(greaterThanOrEqualToConstant: 50)
         ])
     }
@@ -151,25 +163,11 @@ class SelectEntriesCountView: UIView {
             self.transform = targetTransform
         })
 
-        // Add liquid glass animation when showing
-        if shouldShow && liquidGlassEffectView?.effect == nil {
-            animateLiquidGlassAppearance()
-        }
+        // Glass effect is built into the view itself
 
         animator.startAnimation()
     }
 
-    private func animateLiquidGlassAppearance() {
-        guard let effectView = liquidGlassEffectView else { return }
-
-        let glassEffect = UIBlurEffect(style: .systemMaterial)
-        UIView.animate(withDuration: 0.6,
-                      delay: 0.1,
-                      options: [.curveEaseOut],
-                      animations: {
-            effectView.effect = glassEffect
-        })
-    }
     
     @objc private func continueButtonTapped() {
         onContinueTapped?()

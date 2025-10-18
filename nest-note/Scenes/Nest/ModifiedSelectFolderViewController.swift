@@ -16,7 +16,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, FolderItem>!
-    private var selectionCounterView: SelectEntriesCountView!
+    private var selectionCounterView: SelectItemsCountView!
     private var selectAllBarButtonItem: UIBarButtonItem?
     
     private var categories: [NestCategory] = []
@@ -265,7 +265,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     }
     
     private func setupSelectionCounterView() {
-        selectionCounterView = SelectEntriesCountView()
+        selectionCounterView = SelectItemsCountView()
         selectionCounterView.selectionLimit = selectionLimit
         selectionCounterView.onContinueTapped = { [weak self] in
             guard let self = self else { return }
