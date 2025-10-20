@@ -314,7 +314,7 @@ final class ReferralService {
         let thisMonthCount = monthlyBreakdown[currentMonth] ?? 0
 
         // Get recent referrals
-        let recentReferrals = try await getRecentReferrals(limit: 20)
+        let recentReferrals = try await getRecentReferrals(limit: 25)
 
         return ReferralAnalytics(
             totalReferrals: totalReferrals,
