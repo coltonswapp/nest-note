@@ -287,16 +287,30 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             cell.layer.masksToBounds = true
         }
         
-        // Pinned category registration
-        let pinnedCategoryCellRegistration = UICollectionView.CellRegistration<QuickAccessCell, HomeItem> { cell, indexPath, item in
+        // Pinned category registration using FolderCollectionViewCell
+        let pinnedCategoryCellRegistration = UICollectionView.CellRegistration<FolderCollectionViewCell, HomeItem> { [weak self] cell, indexPath, item in
             if case let .pinnedCategory(name, icon) = item {
-                let image = UIImage(systemName: icon)
-                cell.configure(with: name, image: image)
+                // Create FolderData for the pinned category
+                let image = UIImage(systemName: icon) ?? UIImage(systemName: "folder")
+
+                // Find the full path for this display name
+                let fullPath = self?.pinnedCategories.first { categoryName in
+                    let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                    return displayName == name
+                } ?? name
+
+                let folderData = FolderData(
+                    title: name,
+                    image: image,
+                    itemCount: 3, // Always show 3 pieces of paper
+                    fullPath: fullPath,
+                    category: nil // We don't need the category object for display
+                )
+
+                cell.configure(with: folderData)
+                // Hide the count label for home view pinned folders
+                cell.subtitleLabel.isHidden = true
             }
-            
-            cell.backgroundColor = .secondarySystemGroupedBackground
-            cell.layer.cornerRadius = 12
-            cell.layer.masksToBounds = true
         }
         
         
@@ -578,15 +592,16 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         if categoryName == "Places" {
             return "map.fill"
         }
-        
+
         // Find the category in our categories array
         if let category = categories.first(where: { $0.name == categoryName }) {
             return category.symbolName
         }
-        
+
         // Fallback to folder icon if category not found
         return "folder.fill"
     }
+
     
     // MARK: - Nest Setup Methods
     
