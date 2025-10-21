@@ -58,7 +58,7 @@ final class ReferralAnalyticsViewController: NNViewController, UICollectionViewD
             case .summary:
                 return self.createSummarySection()
             case .topCodes, .recentReferrals:
-                return self.createListSection()
+                return self.createListSection(layoutEnvironment: layoutEnvironment)
             }
         }
     }
@@ -79,11 +79,11 @@ final class ReferralAnalyticsViewController: NNViewController, UICollectionViewD
         return section
     }
 
-    private func createListSection() -> NSCollectionLayoutSection {
+    private func createListSection(layoutEnvironment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.headerMode = .supplementary
 
-        let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: NSCollectionLayoutEnvironment(container: collectionView, traitCollection: traitCollection))
+        let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
 
         // Add header
         let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
