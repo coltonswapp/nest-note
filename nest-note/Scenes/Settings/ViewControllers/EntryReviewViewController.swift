@@ -441,7 +441,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
             present(vc, animated: true)
         case .place(let place):
             let isReadOnly = !(entryRepository is NestService)
-            let vc = PlaceDetailViewController(place: place, isReadOnly: isReadOnly)
+            let vc = PlaceDetailViewController(place: place, isReadOnly: isReadOnly, sourceFrame: card.frame)
             vc.placeListDelegate = self
             present(vc, animated: true)
         case .routine(let routine):

@@ -1,17 +1,15 @@
 import UIKit
 
-class BlurBackgroundLabel: UIView {
+class BlurBackgroundLabel: UIVisualEffectView {
     private let label: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.numberOfLines = 0
         label.textAlignment = .center
+        label.textColor = .secondaryLabel
         return label
     }()
 
-    // Container that holds either a blur view or a colored view
-    private var containerView: UIView!
-    private var blurView: UIVisualEffectView?
     private var shimmerTimer: Timer?
     private let shimmerLayer = CAGradientLayer()
     private let borderShapeLayer = CAShapeLayer()
@@ -33,86 +31,63 @@ class BlurBackgroundLabel: UIView {
         set { label.textColor = newValue }
     }
 
-    override var alpha: CGFloat {
-        get { containerView?.alpha ?? super.alpha }
-        set { containerView?.alpha = newValue }
-    }
 
     // MARK: - Initializers
-    init(with effect: UIBlurEffect.Style = .systemUltraThinMaterial) {
-        super.init(frame: .zero)
-        configureBlurView(with: effect)
+    override init(effect: UIVisualEffect?) {
+        super.init(effect: effect)
         setupViews()
     }
 
-    convenience init(backgroundColor: UIColor, foregroundColor: UIColor) {
-        self.init(frame: .zero)
-        configureColorView(with: backgroundColor, foregroundColor: foregroundColor)
-        setupViews()
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    convenience init() {
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect(style: .clear)
+            glassEffect.isInteractive = true
+            self.init(effect: glassEffect)
+        } else {
+            // Fallback: No effect for older iOS versions
+            self.init(effect: nil)
+        }
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        super.init(coder: coder)
+        setupViews()
     }
 
-    // MARK: - Configuration
-    private func configureBlurView(with effect: UIBlurEffect.Style) {
-        let blurView = UIVisualEffectView()
-        blurView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.layer.cornerRadius = 12
-        blurView.clipsToBounds = true
-        blurView.layer.borderWidth = 1.5
-        blurView.layer.borderColor = UIColor.systemBackground.cgColor
-
-        // Apply liquid glass effect instead of regular blur
-        let glassEffect = UIBlurEffect(style: .systemMaterial)
-        blurView.effect = glassEffect
-
-        self.blurView = blurView
-        self.containerView = blurView
-    }
-
-    private func configureColorView(with color: UIColor, foregroundColor: UIColor) {
-        let colorView = UIView()
-        colorView.translatesAutoresizingMaskIntoConstraints = false
-        colorView.layer.cornerRadius = 12
-        colorView.clipsToBounds = true
-        colorView.backgroundColor = color
-        colorView.layer.borderWidth = 1.5
-        colorView.layer.borderColor = foregroundColor.cgColor
-        label.textColor = foregroundColor
-        self.containerView = colorView
-        self.blurView = nil
-    }
-
+    // MARK: - Setup
     private func setupViews() {
-        guard containerView != nil else { return }
+        setupAppearance()
+        setupLabel()
+        setupConstraints()
+    }
 
-        addSubview(containerView)
+    private func setupAppearance() {
+        layer.cornerRadius = 18
+        translatesAutoresizingMaskIntoConstraints = false
 
-        // Host for label: blur contentView when blurred, else the container itself
-        let hostView: UIView
-        if let blurView = containerView as? UIVisualEffectView {
-            hostView = blurView.contentView
+        // Add background styling for non-glass versions
+        if #available(iOS 26.0, *) {
+            // Glass effect handles the background
         } else {
-            hostView = containerView
+            // Fallback: Add background color and shadow for non-glass
+            backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOffset = CGSize(width: 0, height: 2)
+            layer.shadowOpacity = 0.1
+            layer.shadowRadius = 8
         }
-        hostView.addSubview(label)
+    }
 
+    private func setupLabel() {
+        contentView.addSubview(label)
+    }
+
+    private func setupConstraints() {
         NSLayoutConstraint.activate([
-            containerView.topAnchor.constraint(equalTo: topAnchor),
-            containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            label.topAnchor.constraint(equalTo: hostView.topAnchor, constant: 12),
-            label.leadingAnchor.constraint(equalTo: hostView.leadingAnchor, constant: 16),
-            label.trailingAnchor.constraint(equalTo: hostView.trailingAnchor, constant: -16),
-            label.bottomAnchor.constraint(equalTo: hostView.bottomAnchor, constant: -12)
+            label.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)
         ])
     }
 
@@ -120,19 +95,4 @@ class BlurBackgroundLabel: UIView {
         onClearTapped?()
     }
 
-    // MARK: - Liquid Glass Animation
-    func animateLiquidGlassAppearance(duration: TimeInterval = 0.4) {
-        guard let blurView = self.blurView else { return }
-
-        // Start with no effect
-        blurView.effect = nil
-
-        // Animate the glass effect
-        UIView.animate(withDuration: duration,
-                      delay: 0,
-                      options: [.curveEaseOut],
-                      animations: {
-            blurView.effect = UIBlurEffect(style: .systemMaterial)
-        })
-    }
-} 
+}

@@ -13,7 +13,8 @@
                 "Medical information",
                 "House rules",
                 "Where to find essential items",
-                "Neighborhood information"
+                "Neighborhood information",
+                "DEBUG - Test scenario"
             ],
             "multi_select": true,
             "category": "information",
@@ -49,7 +50,8 @@
                 "Notes section for feedback to parents",
                 "Voice notes option",
                 "Searchable information",
-                "Different categories of information"
+                "Different categories of information",
+                "DEBUG - Feature testing"
             ],
             "multi_select": true,
             "category": "features",

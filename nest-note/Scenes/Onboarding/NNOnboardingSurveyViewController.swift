@@ -256,7 +256,7 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         currentQuestion = question
         setupOnboarding(title: question.title, subtitle: question.subtitle)
         
-        self.options = question.options.map { SurveyOption(title: $0) }
+        self.options = question.filteredOptions.map { SurveyOption(title: $0) }
         self.isMultiSelect = question.isMultiSelect
         collectionView.reloadData()
     }

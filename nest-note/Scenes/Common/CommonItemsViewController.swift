@@ -156,7 +156,7 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     }
 
     private func setupInstructionLabel() {
-        instructionLabel = BlurBackgroundLabel(backgroundColor: NNColors.primaryOpaque, foregroundColor: NNColors.primary)
+        instructionLabel = BlurBackgroundLabel()
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         instructionLabel.text = "These are example items. Tap an item to make it your own."
         instructionLabel.font = .bodyL
