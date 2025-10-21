@@ -699,7 +699,7 @@ final class NestService: EntryRepository {
                     category: place.category,
                     alias: place.alias,
                     address: place.address,
-                    coordinate: place.locationCoordinate,
+                    coordinate: coordinate,
                     thumbnailURLs: newThumbnailURLs,
                     isTemporary: place.isTemporary,
                     createdAt: place.createdAt,
