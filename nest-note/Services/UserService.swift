@@ -272,9 +272,6 @@ final class UserService {
     func login(email: String, password: String) async throws -> AuthDataResult {
         let identifier = email
         
-        // Start capturing logs for this login attempt
-        SignupLogService.shared.startCapturing(identifier: identifier)
-        
         Logger.log(level: .info, category: .userService, message: "Attempting login for email: \(email)")
         Tracker.shared.track(.regularLoginAttempted)
         do {
@@ -293,17 +290,11 @@ final class UserService {
             
             Tracker.shared.track(.regularLoginSucceeded)
 
-            // Note: For login (not signup), we stop capture here since there's no onboarding
-            await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-
             return result
             
         } catch let error as NSError {
             Logger.log(level: .error, category: .userService, message: "Login failed - Error: \(error.localizedDescription)")
             Tracker.shared.track(.regularLoginAttempted, result: false, error: error.localizedDescription)
-            
-            // Stop log capture and upload (failure) - login failed
-            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
             
             switch error.code {
             case AuthErrorCode.wrongPassword.rawValue,
