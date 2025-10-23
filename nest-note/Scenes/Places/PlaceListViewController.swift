@@ -450,14 +450,17 @@ extension PlaceListViewController: UICollectionViewDelegate {
         guard let place = dataSource.itemIdentifier(for: indexPath),
               let cell = collectionView.cellForItem(at: indexPath) as? PlaceCell,
               let image = cell.thumbnailImageView.image else { return }
-        
+
         if let selectionDelegate {
             selectionDelegate.didSelectPlace(place)
             dismiss(animated: true)
             return
         }
-        
-        let detailVC = PlaceDetailViewController(place: place, isReadOnly: isReadOnly)
+
+        // Get the cell's frame in the view's coordinate system for the transition animation
+        let cellFrame = collectionView.convert(cell.frame, to: view)
+
+        let detailVC = PlaceDetailViewController(place: place, isReadOnly: isReadOnly, sourceFrame: cellFrame)
         detailVC.placeListDelegate = self
         present(detailVC, animated: true)
     }

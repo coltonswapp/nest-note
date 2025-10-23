@@ -169,15 +169,15 @@ extension HomeViewControllerType {
                 return section
                 
             case .quickAccess:
-                // Two column grid with fixed height of 180
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(100))
+                // Two column grid matching NestViewController folder size (144px)
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(144))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(100))
+                item.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(144))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
-                group.interItemSpacing = .fixed(8)
                 let section = NSCollectionLayoutSection(group: group)
-                section.interGroupSpacing = 8
-                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
+                section.interGroupSpacing = 16 // Add vertical spacing between rows
+                section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 10, bottom: 20, trailing: 10)
                 section.boundarySupplementaryItems = [header]
                 return section
                 

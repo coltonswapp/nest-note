@@ -81,7 +81,8 @@
                 "Reddit",
                 "Friend / Family",
                 "Sitter / Nanny",
-                "Other"
+                "Other",
+                "DEBUG - Testing"
             ],
             "multi_select": false,
             "category": "discovery",

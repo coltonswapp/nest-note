@@ -6,11 +6,11 @@ struct SurveyQuestion: Codable {
     let subtitle: String?
     let options: [String]
     let isMultiSelect: Bool
-    
+
     // Optional metadata that might be useful
     let category: String?
     let order: Int?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -19,6 +19,15 @@ struct SurveyQuestion: Codable {
         case isMultiSelect = "multi_select"
         case category
         case order
+    }
+
+    // Filter out DEBUG options in release builds
+    var filteredOptions: [String] {
+        #if DEBUG
+        return options
+        #else
+        return options.filter { !$0.hasPrefix("DEBUG") }
+        #endif
     }
 }
 

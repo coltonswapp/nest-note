@@ -32,7 +32,7 @@ class SitterSessionsViewController: NNViewController {
         case empty(Section)
     }
     
-    private var filterView: SessionFilterView!
+    private var filterSegmentedControl: UISegmentedControl!
     internal var loadingIndicator: UIActivityIndicatorView!
     internal var refreshControl: UIRefreshControl!
     
@@ -107,12 +107,12 @@ class SitterSessionsViewController: NNViewController {
         loadSessions()
         
         currentBucket = .inProgress
-        filterView.selectBucket(.inProgress)
+        filterSegmentedControl.selectedSegmentIndex = 1 // inProgress is at index 1
     }
     
     override func setup() {
         title = "My Sessions"
-        setupFilterView()
+        setupFilterSegmentedControl()
         setupCollectionView()
         setupEmptyStateView()
         setupJoinSessionButton()
@@ -126,17 +126,44 @@ class SitterSessionsViewController: NNViewController {
         ])
     }
     
-    private func setupFilterView() {
-        filterView = SessionFilterView(
-            filters: [.past, .inProgress, .upcoming],
-            initialFilter: .inProgress
-        )
-        filterView.delegate = self
-        filterView.frame.size.height = 40
-        addNavigationBarPalette(filterView)
-        
+    private func setupFilterSegmentedControl() {
+        filterSegmentedControl = UISegmentedControl(items: ["Past", "In Progress", "Upcoming"])
+        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
+        filterSegmentedControl.addTarget(self, action: #selector(segmentedControlValueChanged), for: .valueChanged)
+
+        // Create a container view for the segmented control with proper sizing
+        let containerView = UIView()
+        containerView.addSubview(filterSegmentedControl)
+        filterSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            filterSegmentedControl.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            filterSegmentedControl.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            filterSegmentedControl.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+            filterSegmentedControl.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
+            filterSegmentedControl.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        containerView.frame.size.height = 48
+        addNavigationBarPalette(containerView)
+
         // Set initial filter to inProgress
         currentBucket = .inProgress
+    }
+
+    @objc private func segmentedControlValueChanged() {
+        let selectedIndex = filterSegmentedControl.selectedSegmentIndex
+        let newBucket: SessionService.SessionBucket
+
+        switch selectedIndex {
+        case 0: newBucket = .past
+        case 1: newBucket = .inProgress
+        case 2: newBucket = .upcoming
+        default: newBucket = .inProgress
+        }
+
+        currentBucket = newBucket
+        updateDisplayedSessions()
     }
     
     private func setupCollectionView() {
@@ -314,7 +341,7 @@ class SitterSessionsViewController: NNViewController {
     private func fetchSitterSessions() {
         Task {
             do {
-                filterView.isEnabled = false
+                filterSegmentedControl.isEnabled = false
                 emptyStateView.hideImmediately()
                 loadingSpinner.startAnimating()
                 guard let userID = UserService.shared.currentUser?.id else { return }
@@ -326,7 +353,7 @@ class SitterSessionsViewController: NNViewController {
                 let (collection, archivedSessions) = try await (regularSessionsTask, archivedSessionsTask)
                 
                 await MainActor.run {
-                    filterView.isEnabled = true
+                    filterSegmentedControl.isEnabled = true
                     var allSessionItems: [Any] = []
                     allSessionItems.append(contentsOf: collection.upcoming)
                     allSessionItems.append(contentsOf: collection.inProgress)
@@ -340,7 +367,7 @@ class SitterSessionsViewController: NNViewController {
             } catch {
                 print("Error loading sitter sessions: \(error)")
                 await MainActor.run {
-                    filterView.isEnabled = false
+                    filterSegmentedControl.isEnabled = false
                     self.loadingSpinner.stopAnimating()
                 }
             }
@@ -458,12 +485,6 @@ extension SitterSessionsViewController: UICollectionViewDelegate {
     
 }
 
-extension SitterSessionsViewController: SessionFilterViewDelegate {
-    func sessionFilterView(_ filterView: SessionFilterView, didSelectFilter filter: SessionService.SessionBucket) {
-        currentBucket = filter
-        updateDisplayedSessions()
-    }
-}
 
 extension SitterSessionsViewController: CollectionViewLoadable {
     func handleLoadedData() {

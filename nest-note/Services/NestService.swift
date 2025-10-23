@@ -10,6 +10,7 @@ import FirebaseStorage
 import UIKit
 import CoreImage
 import CoreLocation
+import MapKit
 
 final class NestService: EntryRepository {
     
@@ -666,6 +667,65 @@ final class NestService: EntryRepository {
         try await updateItem(place)
         // Cache already updated by updateItem() - no need to invalidate
     }
+
+    /// Update a place with optional thumbnail regeneration for location changes
+    func updatePlace(_ place: PlaceItem, shouldRegenerateThumbnails: Bool = false, newCoordinate: CLLocationCoordinate2D? = nil) async throws -> PlaceItem {
+        Logger.log(level: .info, category: .nestService, message: "updatePlace() called with thumbnail regeneration: \(shouldRegenerateThumbnails)")
+
+        var updatedPlace = place
+
+        if shouldRegenerateThumbnails, let coordinate = newCoordinate {
+            // Delete old thumbnails first if they exist
+            if place.thumbnailURLs != nil {
+                do {
+                    try await deleteThumbnails(for: place)
+                    Logger.log(level: .info, category: .nestService, message: "Old thumbnails deleted for place: \(place.id)")
+                } catch {
+                    Logger.log(level: .error, category: .nestService, message: "Failed to delete old thumbnails: \(error.localizedDescription)")
+                    // Continue with update - don't fail the entire operation
+                }
+            }
+
+            // Generate new thumbnails for the updated location
+            do {
+                let newThumbnail = try await generateThumbnailForCoordinate(coordinate)
+                let newThumbnailAsset = createImageAsset(from: newThumbnail)
+                let newThumbnailURLs = try await uploadThumbnails(placeID: place.id, from: newThumbnailAsset)
+
+                // Update place with new thumbnail URLs
+                updatedPlace = PlaceItem(
+                    id: place.id,
+                    nestId: place.nestId,
+                    category: place.category,
+                    alias: place.alias,
+                    address: place.address,
+                    coordinate: coordinate,
+                    thumbnailURLs: newThumbnailURLs,
+                    isTemporary: place.isTemporary,
+                    createdAt: place.createdAt,
+                    updatedAt: Date()
+                )
+
+                Logger.log(level: .info, category: .nestService, message: "New thumbnails generated and uploaded for place: \(place.id)")
+            } catch {
+                Logger.log(level: .error, category: .nestService, message: "Failed to regenerate thumbnails: \(error.localizedDescription)")
+                // Continue without thumbnails rather than failing the update
+                updatedPlace.thumbnailURLs = nil
+            }
+        }
+
+        // Perform the standard update
+        try await updateItem(updatedPlace)
+        Logger.log(level: .info, category: .nestService, message: "Place updated successfully: \(updatedPlace.title)")
+
+        // Clear image cache for this place if thumbnails were regenerated
+        if shouldRegenerateThumbnails {
+            clearImageCache(for: updatedPlace.id)
+            Logger.log(level: .info, category: .nestService, message: "Cleared image cache for place: \(updatedPlace.id)")
+        }
+
+        return updatedPlace
+    }
     
     /// Delete a place by ID
     func deletePlace(id: String) async throws {
@@ -758,6 +818,12 @@ final class NestService: EntryRepository {
     func clearImageCache() {
         Logger.log(level: .info, category: .nestService, message: "Clearing image cache")
         imageAssets.removeAll()
+    }
+
+    /// Clear cached image for a specific place
+    func clearImageCache(for placeId: String) {
+        imageAssets.removeValue(forKey: placeId)
+        Logger.log(level: .debug, category: .nestService, message: "Cleared cached image for place: \(placeId)")
     }
     
     /// Fetch places with basic filtering
@@ -1584,9 +1650,39 @@ extension NestService {
                 category: .nestService,
                 message: "Error during thumbnail deletion: \(error.localizedDescription)"
             )
-            // Continue without throwing - we don't want thumbnail deletion failures 
+            // Continue without throwing - we don't want thumbnail deletion failures
             // to prevent place updates/deletions
         }
+    }
+
+    // MARK: - Helper Methods for Thumbnail Generation
+
+    /// Generate thumbnail for a coordinate
+    private func generateThumbnailForCoordinate(_ coordinate: CLLocationCoordinate2D) async throws -> UIImage {
+        return try await withCheckedThrowingContinuation { continuation in
+            MapThumbnailGenerator.shared.generateDynamicThumbnail(
+                for: coordinate,
+                visibleRegion: MKCoordinateRegion(
+                    center: coordinate,
+                    latitudinalMeters: 300,
+                    longitudinalMeters: 300
+                )
+            ) { thumbnail in
+                if let thumbnail = thumbnail {
+                    continuation.resume(returning: thumbnail)
+                } else {
+                    continuation.resume(throwing: NestError.imageConversionFailed)
+                }
+            }
+        }
+    }
+
+    /// Create image asset from UIImage
+    private func createImageAsset(from image: UIImage) -> UIImageAsset {
+        let asset = UIImageAsset()
+        asset.register(image, with: UITraitCollection(userInterfaceStyle: .light))
+        asset.register(image, with: UITraitCollection(userInterfaceStyle: .dark))
+        return asset
     }
 } 
 

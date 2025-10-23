@@ -159,7 +159,7 @@ class SelectFolderViewController: UIViewController {
     }
     
     private func setupInstructionLabel() {
-        instructionLabel = BlurBackgroundLabel(with: .systemThickMaterial)
+        instructionLabel = BlurBackgroundLabel()
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         let totalItems = selectedEntries.count + selectedPlaces.count
         let itemDescriptor: String

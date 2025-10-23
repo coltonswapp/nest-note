@@ -86,17 +86,17 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     // MARK: - Initialization
-    init(placemark: CLPlacemark, alias: String, category: String = "Places", thumbnail: UIImage? = nil) {
+    init(placemark: CLPlacemark, alias: String, category: String = "Places", thumbnail: UIImage? = nil, sourceFrame: CGRect? = nil) {
         self.placemark = placemark
         self.placeAlias = alias
         self.category = category
         self.thumbnail = thumbnail
         self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = false
-        super.init(sourceFrame: nil)
+        super.init(sourceFrame: sourceFrame)
     }
     
-    init(place: PlaceItem, thumbnail: UIImage? = nil, isReadOnly: Bool = false) {
+    init(place: PlaceItem, thumbnail: UIImage? = nil, isReadOnly: Bool = false, sourceFrame: CGRect? = nil) {
         self.placemark = MKPlacemark(
             coordinate: place.locationCoordinate,
             addressDictionary: [CNPostalAddressStreetKey: place.address]
@@ -108,7 +108,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         self.thumbnailAsset = thumbnail?.imageAsset
         self.isEditingPlace = true
         self.isReadOnly = isReadOnly
-        super.init(sourceFrame: nil)
+        super.init(sourceFrame: sourceFrame)
     }
     
     required init?(coder: NSCoder) {
@@ -239,7 +239,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         createdAt: existingPlace.createdAt,
                         updatedAt: Date()
                     )
-                    
+
                     // Apply pending location update if exists
                     if let locationUpdate = pendingLocationUpdate {
                         updatedPlace = PlaceItem(
@@ -249,15 +249,22 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                             alias: placeAlias,
                             address: locationUpdate.address,
                             coordinate: locationUpdate.coordinate,
-                            thumbnailURLs: existingPlace.thumbnailURLs,
+                            thumbnailURLs: existingPlace.thumbnailURLs, // Will be replaced by new method
                             isTemporary: existingPlace.isTemporary,
                             createdAt: existingPlace.createdAt,
                             updatedAt: Date()
                         )
+
+                        // Use enhanced update method with thumbnail regeneration
+                        updatedPlace = try await NestService.shared.updatePlace(
+                            updatedPlace,
+                            shouldRegenerateThumbnails: true,
+                            newCoordinate: locationUpdate.coordinate
+                        )
+                    } else {
+                        // No location change - use standard update
+                        try await NestService.shared.updatePlace(updatedPlace)
                     }
-                    
-                    // Update using new method
-                    try await NestService.shared.updatePlace(updatedPlace)
                     
                     await MainActor.run {
                         self.placeListDelegate?.placeListViewController(didUpdatePlace: updatedPlace)
