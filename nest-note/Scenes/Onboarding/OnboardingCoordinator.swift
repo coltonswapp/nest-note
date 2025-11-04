@@ -197,22 +197,77 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
               validateStep(currentVC) else {
             return
         }
-        
+
         currentStepIndex += 1
-        
+
         if currentStepIndex < allSteps.count {
             let nextStep = allSteps[currentStepIndex]
-            configureStep(nextStep)
-            navigationController.pushViewController(nextStep, animated: true)
-            // Update progress after the push animation completes
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.containerViewController.updateProgress(step: self.currentStepIndex)
+
+            // Check if next step is paywall and user already has subscription
+            if nextStep is OBPaywallViewController {
+                Task { @MainActor in
+                    await self.checkSubscriptionAndProceed(nextStep: nextStep)
+                }
+            } else {
+                // Proceed normally for non-paywall steps
+                configureStep(nextStep)
+                navigationController.pushViewController(nextStep, animated: true)
+                // Update progress after the push animation completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.containerViewController.updateProgress(step: self.currentStepIndex)
+                }
             }
         } else {
             completeOnboarding()
         }
     }
-    
+
+    /// Checks subscription status before showing paywall step
+    @MainActor
+    private func checkSubscriptionAndProceed(nextStep: NNOnboardingViewController) async {
+        Logger.log(level: .info, category: .signup, message: "🔍 PAYWALL CHECK: Checking subscription status before showing paywall step")
+
+        do {
+            let hasSubscription = await SubscriptionService.shared.hasProSubscription()
+
+            if hasSubscription {
+                Logger.log(level: .info, category: .signup, message: "🔍 PAYWALL CHECK: ✅ User already has pro subscription, skipping paywall step")
+
+                // Skip paywall step and move to next
+                currentStepIndex += 1
+
+                if currentStepIndex < allSteps.count {
+                    let followingStep = allSteps[currentStepIndex]
+                    configureStep(followingStep)
+                    navigationController.pushViewController(followingStep, animated: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.containerViewController.updateProgress(step: self.currentStepIndex)
+                    }
+                } else {
+                    completeOnboarding()
+                }
+            } else {
+                Logger.log(level: .info, category: .signup, message: "🔍 PAYWALL CHECK: ❌ User does not have subscription, showing paywall step")
+
+                // Show paywall step normally
+                configureStep(nextStep)
+                navigationController.pushViewController(nextStep, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.containerViewController.updateProgress(step: self.currentStepIndex)
+                }
+            }
+        } catch {
+            Logger.log(level: .error, category: .signup, message: "🔍 PAYWALL CHECK: ⚠️ Error checking subscription status: \(error.localizedDescription), defaulting to showing paywall")
+
+            // On error, default to showing paywall to be safe
+            configureStep(nextStep)
+            navigationController.pushViewController(nextStep, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.containerViewController.updateProgress(step: self.currentStepIndex)
+            }
+        }
+    }
+
     @objc private func handleBackTapped() {
         currentStepIndex -= 1
         navigationController.popViewController(animated: true)
@@ -585,21 +640,22 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBCreateNestViewController }) {
             steps.append(OBCreateNestViewController())
         }
-        
-        // Add paywall step for nest owners only if it doesn't exist
+
+        // Add paywall step for nest owners (subscription check will happen when step is reached)
         if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBPaywallViewController }) {
             steps.append(OBPaywallViewController())
         }
-        
+
         // Add finish step if it doesn't exist
         if !steps.contains(where: { $0 is OBFinishViewController }) {
             steps.append(OBFinishViewController())
         }
-        
+
         // Update container's step count
         containerViewController.updateTotalSteps(steps.count)
     }
-    
+
+
     func validateNest(name: String, address: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
