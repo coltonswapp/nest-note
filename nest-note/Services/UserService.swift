@@ -27,6 +27,7 @@ final class UserService {
     // Flags to prevent duplicate operations
     private var isSettingUp: Bool = false
     private var isFetchingProfile: Bool = false
+    private var isOnboardingInProgress: Bool = false
     
     // MARK: - Initialization
     private init() {
@@ -160,9 +161,21 @@ final class UserService {
                     return
                 }
                 
+                // Skip if onboarding is in progress to prevent interference
+                guard !self.isOnboardingInProgress else {
+                    Logger.log(level: .info, category: .userService, message: "Skipping auth state change - onboarding in progress")
+                    return
+                }
+                
                 await self.handleAuthStateChange(firebaseUser: user)
             }
         }
+    }
+    
+    /// Sets onboarding progress flag to prevent auth state listener interference
+    func setOnboardingInProgress(_ value: Bool) {
+        isOnboardingInProgress = value
+        Logger.log(level: .info, category: .userService, message: "Onboarding in progress flag set to: \(value)")
     }
     
     // MARK: - FCM Token Management
@@ -929,16 +942,23 @@ final class UserService {
         return userProfile
     }
     
-    private func saveUserProfile(_ user: NestUser) async throws {
+    private func saveUserProfile(_ user: NestUser, retryCount: Int = 0) async throws {
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Saving user profile for ID: \(user.id)")
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User name: '\(user.personalInfo.name)'")
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User email: '\(user.personalInfo.email)'")
+        
+        if retryCount > 0 {
+            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Retry attempt \(retryCount)/3")
+        }
 
         do {
             let docRef = db.collection("users").document(user.id)
             try await docRef.setData(try Firestore.Encoder().encode(user))
 
             Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ User profile saved to Firestore successfully!")
+
+            // Verify profile was actually saved
+            try await verifyProfileExists(userId: user.id)
 
             // Track successful user profile creation
             Tracker.shared.track(.userProfileCreated)
@@ -974,11 +994,57 @@ final class UserService {
             Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ Full error: \(error)")
             Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ User ID: \(user.id), Name: '\(user.personalInfo.name)'")
 
+            // Retry with exponential backoff for network errors
+            let maxRetries = 3
+            if retryCount < maxRetries && shouldRetry(error: error) {
+                let delay = min(pow(2.0, Double(retryCount)), 10.0) // Max 10 seconds
+                Logger.log(level: .info, category: .userService, 
+                          message: "💾 SAVE PROFILE: Retrying in \(delay) seconds (attempt \(retryCount + 1)/\(maxRetries))")
+                try await Task.sleep(for: .seconds(delay))
+                try await saveUserProfile(user, retryCount: retryCount + 1)
+                return
+            }
+
             // Track user profile creation failure
             Tracker.shared.track(.userProfileCreated, result: false, error: error.localizedDescription)
 
             throw error
         }
+    }
+    
+    /// Verifies that a profile was actually created in Firestore
+    private func verifyProfileExists(userId: String) async throws {
+        Logger.log(level: .info, category: .userService, message: "💾 VERIFY: Verifying profile exists for user: \(userId)")
+        
+        let verificationRef = db.collection("users").document(userId)
+        let verificationDoc = try await verificationRef.getDocument()
+        
+        guard verificationDoc.exists else {
+            Logger.log(level: .error, category: .userService, 
+                      message: "💾 VERIFY: ❌ Profile verification failed - document doesn't exist")
+            throw AuthError.invalidUserData
+        }
+        
+        Logger.log(level: .info, category: .userService, 
+                  message: "💾 VERIFY: ✅ Profile verified - document exists")
+    }
+    
+    /// Determines if an error should trigger a retry
+    private func shouldRetry(error: Error) -> Bool {
+        // Retry on network errors and temporary Firestore errors
+        if let nsError = error as NSError? {
+            // Network errors
+            if nsError.domain == NSURLErrorDomain {
+                return true
+            }
+            // Firestore unavailable errors
+            if nsError.domain == "FIRFirestoreErrorDomain" {
+                let firestoreErrorCode = nsError.code
+                // Code 14 = UNAVAILABLE (temporary)
+                return firestoreErrorCode == 14
+            }
+        }
+        return false
     }
     
     // MARK: - User Update Methods

@@ -333,6 +333,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var completedSteps: [String] = []
         var criticalFailure: Error?
 
+        // Set onboarding flag to prevent auth state listener interference
+        UserService.shared.setOnboardingInProgress(true)
+        defer { UserService.shared.setOnboardingInProgress(false) }
+        
         do {
             // STEP 1: Critical - User Profile Creation (MUST succeed)
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Starting user signup/profile creation...")

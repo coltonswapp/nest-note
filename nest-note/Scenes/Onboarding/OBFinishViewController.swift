@@ -70,6 +70,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     }
     
     private func beginFinishFlow() {
+        // Reset spinner if this is a retry after failure
+        activityIndicator.reset()
+        
+        // Hide success image if it was shown
+        successImageView.isHidden = true
+        successImageView.alpha = 0
+        
         Task {
             do {
                 // Signal to coordinator we're ready to finish

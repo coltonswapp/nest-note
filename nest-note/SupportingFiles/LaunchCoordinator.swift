@@ -173,10 +173,15 @@ final class LaunchCoordinator {
                 // If already signed in, determine user type and set correct home view controller
                 Task {
                     do {
-                        try await withTimeout(seconds: 5) {
+                        try await withTimeout(seconds: 10) {
                             try await self.configureForCurrentUser()
                         }
                         Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: ✅ User configuration complete")
+                    } catch is TimeoutError {
+                        Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ⏱️ Configuration timeout")
+                        await MainActor.run {
+                            self.handleConfigurationTimeout()
+                        }
                     } catch {
                         Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ❌ User configuration failed: \(error)")
 
@@ -275,23 +280,36 @@ final class LaunchCoordinator {
 
         Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Firebase user exists: \(firebaseUser.uid)")
 
-        // Check if UserService thinks user is signed in
-        guard UserService.shared.isSignedIn else {
-            Logger.log(level: .error, category: .launcher, message: "🔍 AUTH VALIDATION: UserService says not signed in")
-            throw AuthStateError.serviceStateInconsistent
-        }
-
+        // Check onboarding completion flag
+        let hasOnboardingFlag = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        
         // Check if we have a current user profile
         if UserService.shared.currentUser == nil {
             Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: No current user profile - attempting recovery...")
             try await recoverUserProfile(firebaseUserId: firebaseUser.uid)
         }
 
-        // Check onboarding completion
-        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
-        if !hasCompletedOnboarding {
-            Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Onboarding not marked as complete - attempting recovery...")
-            try await recoverOnboardingState()
+        // If profile exists but onboarding flag is not set, check if profile is complete
+        if !hasOnboardingFlag {
+            Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Onboarding flag not set - checking profile completeness...")
+            
+            // If we have a complete profile, mark onboarding as complete
+            if let currentUser = UserService.shared.currentUser,
+               !currentUser.personalInfo.name.isEmpty && !currentUser.personalInfo.email.isEmpty {
+                Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Profile appears complete, marking onboarding as done")
+                UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: ✅ Onboarding flag set")
+            } else {
+                // Profile doesn't exist or is incomplete - user needs to complete onboarding
+                Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: Profile incomplete - user needs to complete setup")
+                throw AuthStateError.profileIncomplete(firebaseUserId: firebaseUser.uid)
+            }
+        }
+
+        // Final check: ensure UserService thinks user is signed in
+        guard UserService.shared.isSignedIn else {
+            Logger.log(level: .error, category: .launcher, message: "🔍 AUTH VALIDATION: UserService says not signed in after recovery")
+            throw AuthStateError.serviceStateInconsistent
         }
 
         Logger.log(level: .info, category: .launcher, message: "🔍 AUTH VALIDATION: ✅ Authentication state is valid")
@@ -307,7 +325,7 @@ final class LaunchCoordinator {
             let userProfile = try await UserService.shared.fetchUserProfile(userId: firebaseUserId)
 
             // Profile exists - update UserService state
-            UserService.shared.setCurrentUserDirectly(userProfile) // We'll need to add this method
+            UserService.shared.setCurrentUserDirectly(userProfile)
 
             Logger.log(level: .info, category: .launcher, message: "🔧 RECOVERY: ✅ Successfully recovered user profile: \(userProfile.personalInfo.name)")
 
@@ -345,6 +363,45 @@ final class LaunchCoordinator {
         // For now, show the regular onboarding flow
         // In the future, we could create a specialized "complete profile" flow
         showAuthenticationFlow()
+    }
+    
+    /// Handles configuration timeout
+    private func handleConfigurationTimeout() {
+        guard let navigationController = self.navigationController else { return }
+        
+        Logger.log(level: .error, category: .launcher, message: "🚀 LAUNCH: ⏱️ Configuration timeout - showing recovery options")
+        
+        let alert = UIAlertController(
+            title: "Setup Taking Too Long",
+            message: "We're having trouble loading your account. Would you like to try again or sign in again?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Try Again", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            Task {
+                do {
+                    try await self.reconfigureAfterAuthentication()
+                } catch {
+                    Logger.log(level: .error, category: .launcher, message: "Retry failed: \(error)")
+                    await MainActor.run {
+                        self.handleConfigurationFailure(error)
+                    }
+                }
+            }
+        })
+        
+        alert.addAction(UIAlertAction(title: "Sign In Again", style: .destructive) { [weak self] _ in
+            guard let self = self else { return }
+            Task {
+                try? await UserService.shared.logout(clearSavedCredentials: false)
+                await MainActor.run {
+                    self.showAuthenticationFlow()
+                }
+            }
+        })
+        
+        navigationController.present(alert, animated: true)
     }
 
     /// Handles different types of configuration failures during launch
