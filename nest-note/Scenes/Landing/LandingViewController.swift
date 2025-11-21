@@ -13,7 +13,12 @@ import SwiftUI
 final class LandingViewController: NNViewController {
     
     // SwiftUI Host
-    lazy var introHost: UIHostingController = UIHostingController(rootView: IntroPage(onGetStarted: { self.getStartedTapped() } ))
+    lazy var introHost: UIHostingController = UIHostingController(rootView: IntroPage(
+        onGetStarted: { self.getStartedTapped() },
+        onAppleSignIn: { self.appleSignInTapped() },
+        onLogin: { self.loginTapped() },
+        onSignUp: { self.signUpTapped() }
+    ))
     
     // Keep delegate and keyboard constraint
     weak var delegate: AuthenticationDelegate?
@@ -45,8 +50,24 @@ final class LandingViewController: NNViewController {
     }
     
     @objc private func getStartedTapped() {
+        // This now just triggers the animation to show auth buttons
+    }
+
+    @objc private func appleSignInTapped() {
+        // Handle Apple Sign In
+        // You can implement Apple Sign In logic here
+        print("Apple Sign In tapped")
+    }
+
+    @objc private func loginTapped() {
         let loginVC = LoginViewController()
         loginVC.delegate = self.delegate
         self.navigationController?.pushViewController(loginVC, animated: true)
+    }
+
+    @objc private func signUpTapped() {
+        // Navigate to sign up flow
+        // You can implement sign up navigation here
+        print("Sign Up tapped")
     }
 }

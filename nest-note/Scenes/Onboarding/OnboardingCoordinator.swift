@@ -41,31 +41,160 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private var containerViewController: OnboardingContainerViewController!
     
     private var currentStepIndex: Int = 0
+    private var onboardingConfig: OnboardingConfiguration?
+
     private lazy var steps: [NNOnboardingViewController] = {
-        // Start with the new image-based onboarding screens
+        // Try to load from JSON configuration first
+        if let config = OnboardingConfiguration.loadLocal() {
+            onboardingConfig = config
+            return buildStepsFromConfig(config)
+        }
+
+        // Fallback to hardcoded steps if JSON loading fails
+        return buildFallbackSteps()
+    }()
+
+    private func buildStepsFromConfig(_ config: OnboardingConfiguration) -> [NNOnboardingViewController] {
+        var viewControllers: [NNOnboardingViewController] = []
+
+        for step in config.flow.steps {
+            switch step.type {
+            case .survey:
+                if case .survey(let surveyConfig) = step.config {
+                    let vc = createSurveyViewController(from: surveyConfig, stepId: step.id)
+                    viewControllers.append(vc)
+                }
+            case .bullet:
+                if case .bullet(let bulletConfig) = step.config {
+                    let vc = createBulletViewController(from: bulletConfig)
+                    viewControllers.append(vc)
+                }
+            case .image:
+                if case .image(let imageConfig) = step.config {
+                    let vc = createImageViewController(from: imageConfig)
+                    viewControllers.append(vc)
+                }
+            case .missingInfo:
+                let vc = OnboardingMissingInfoViewController()
+                viewControllers.append(vc)
+            case .name:
+                viewControllers.append(OBNameViewController())
+            case .email:
+                viewControllers.append(OBEmailViewController())
+            case .password:
+                viewControllers.append(OBPasswordViewController())
+            case .createNest:
+                viewControllers.append(OBCreateNestViewController())
+            case .referral:
+                viewControllers.append(OBReferralViewController())
+            case .paywall:
+                viewControllers.append(OBPaywallViewController())
+            case .finish:
+                viewControllers.append(OBFinishViewController())
+            }
+        }
+
+        return viewControllers
+    }
+
+    private func buildFallbackSteps() -> [NNOnboardingViewController] {
+        // Original hardcoded steps as fallback
         var baseSteps: [NNOnboardingViewController] = [
             NNImageOnboardingViewController(content: .aboutNestNote),
             NNImageOnboardingViewController(content: .createSessions),
             NNImageOnboardingViewController(content: .pickAndChoose),
             NNImageOnboardingViewController(content: .inviteWithEase)
         ]
-        
-        // Add the original onboarding steps
+
         baseSteps.append(contentsOf: [
             OBNameViewController(),
             OBRoleViewController(),
-            OBReferralViewController()  // Add referral step after role selection
+            OBReferralViewController()
         ])
-        
-        // Add remaining steps
+
         baseSteps.append(contentsOf: [
             OBEmailViewController(),
             OBPasswordViewController()
         ])
-        
+
         return baseSteps
-    }()
-    
+    }
+
+    // MARK: - View Controller Factory Methods
+    private func createSurveyViewController(from config: SurveyStepConfig, stepId: String) -> NNOnboardingSurveyViewController {
+        let vc = NNOnboardingSurveyViewController()
+
+        // Try to load from existing survey question if ID is provided
+        if let questionId = config.questionId,
+           let existingQuestion = loadSurveyQuestion(id: questionId) {
+            vc.configure(with: existingQuestion)
+        } else {
+            // Create question from config
+            let options = config.options.map { $0.title }
+            let optionSubtitles = config.options.compactMap { $0.subtitle }
+
+            let question = SurveyQuestion(
+                id: stepId,
+                title: config.title,
+                subtitle: config.subtitle,
+                options: options,
+                optionSubtitles: optionSubtitles.isEmpty ? nil : optionSubtitles,
+                isMultiSelect: config.isMultiSelect,
+                category: nil,
+                order: nil
+            )
+            vc.configure(with: question)
+        }
+
+        return vc
+    }
+
+    private func createBulletViewController(from config: BulletStepConfig) -> NNOnboardingBulletViewController {
+        let vc = NNOnboardingBulletViewController()
+
+        let bulletItems = config.bullets.map { bullet in
+            NNBulletItem(
+                title: bullet.title,
+                description: bullet.description,
+                iconName: bullet.iconName
+            )
+        }
+
+        vc.configure(
+            title: config.title,
+            subtitle: config.subtitle,
+            bullets: bulletItems
+        )
+
+        return vc
+    }
+
+    private func createImageViewController(from config: ImageStepConfig) -> NNImageOnboardingViewController {
+        // For now, use a basic configuration - you may want to extend this
+        // to support custom image configurations
+        let vc = NNImageOnboardingViewController(content: .aboutNestNote) // Default
+        // TODO: Add custom image support based on config.imageName
+        return vc
+    }
+
+    private func loadSurveyQuestion(id: String) -> SurveyQuestion? {
+        // Try to load from parent survey config
+        if let parentConfig = SurveyConfiguration.loadLocal(named: "parent_survey_config") {
+            if let question = parentConfig.questions.first(where: { $0.id == id }) {
+                return question
+            }
+        }
+
+        // Try to load from sitter survey config
+        if let sitterConfig = SurveyConfiguration.loadLocal(named: "sitter_survey_config") {
+            if let question = sitterConfig.questions.first(where: { $0.id == id }) {
+                return question
+            }
+        }
+
+        return nil
+    }
+
     private var allSteps: [NNOnboardingViewController] {
         return steps
     }

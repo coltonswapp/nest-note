@@ -373,28 +373,27 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
-            ("Test Entry Sheet", "note.text.badge.plus"),
-            ("Test Session Sheet", "calendar.badge.plus"),
-            ("Test Calendar Events", "calendar.badge.clock"),
-            ("Test Event Creation", "calendar.badge.plus"),
             ("Test Invite Sitter Screen", "person.badge.plus"),
             ("Glassy Button Playground", "slider.horizontal.3"),
             ("Entry Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
             ("Debug Card Stack", "rectangle.stack"),
-            ("Test Session Bar", "rectangle.bottomthird.inset.filled"),
-            ("Load Debug Sessions", "folder.badge.plus"),
             ("Test Add Place", "mappin.and.ellipse.circle.fill"),
             ("Test Place List", "list.star"),
             ("Test Place Map", "map.fill"),
-            ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
             ("Toast Test", "text.bubble.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
+            ("Test Survey Screen", "list.bullet.rectangle.portrait"),
+            ("Test Bullet Onboarding", "list.bullet.clipboard.fill"),
+            ("Test JSON Onboarding", "doc.text.magnifyingglass"),
+            ("Test Finish Animation", "sparkles.rectangle.stack.fill"),
+            ("Explosions", "burst.fill"),
             ("Referral Admin", "person.badge.plus.fill"),
             ("Referral Analytics", "chart.line.uptrend.xyaxis"),
+            ("Test Missing Info Screen", "exclamationmark.triangle.fill"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -445,25 +444,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Category Sheet":
             let vc = CategoryDetailViewController(sourceFrame: nil)
             present(vc, animated: true)
-        case "Test Entry Sheet":
-            let vc = EntryDetailViewController(category: "Test Category", sourceFrame: nil)
-            vc.entryDelegate = self
-            present(vc, animated: true)
-        case "Test Session Sheet":
-            let vc = SessionDetailViewController(sourceFrame: nil)
-//            vc.sessionDelegate = self
-            present(vc, animated: true)
-        case "Test Calendar Events":
-            let dateRange = DateInterval(
-                start: Date.from(year: 2024, month: 12, day: 9)!,
-                end: Date.from(year: 2024, month: 12, day: 12)!
-            )
-            let vc = SessionCalendarViewController(nestID: "", dateRange: dateRange)
-            let nav = UINavigationController(rootViewController: vc)
-            present(nav, animated: true)
-        case "Test Event Creation":
-            let vc = SessionEventViewController(entryRepository: NestService.shared)
-            present(vc, animated: true)
         case "Glassy Button Playground":
             navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
         case "Entry Review":
@@ -473,16 +453,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Debug Card Stack":
             let reviewVC = DebugCardStackView()
             present(reviewVC, animated: true)
-        case "Test Session Bar":
-            let sessionDebugVC = SessionDebugViewController()
-            navigationController?.pushViewController(sessionDebugVC, animated: true)
-        case "Load Debug Sessions":
-            SessionService.shared.loadDebugSessions()
-            // If the sessions view is visible, refresh it
-            if let sessionsVC = presentedViewController as? UINavigationController,
-               let topVC = sessionsVC.topViewController as? NestSessionsViewController {
-                topVC.refreshSessions()
-            }
         case "Test Add Place":
             let viewController = SelectPlaceViewController()
             let nav = UINavigationController(rootViewController: viewController)
@@ -494,9 +464,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Place Map":
             let viewController = PlacesMapViewController()
             navigationController?.pushViewController(viewController, animated: true)
-        case "Test Invite Card":
-            let vc = InviteCardDebugViewController()
-            navigationController?.pushViewController(vc, animated: true)
         case "Test Invite Card Animation":
             let vc = InviteCardAnimationDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
@@ -529,12 +496,27 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             resetTooltipsDatastore()
         case "Test Subscription Status":
             showSubscriptionStatus()
+        case "Test Survey Screen":
+            showTestSurveyScreen()
+        case "Test Bullet Onboarding":
+            showTestBulletOnboarding()
+        case "Test JSON Onboarding":
+            showTestJSONOnboarding()
+        case "Test Finish Animation":
+            showTestFinishAnimation()
         case "Referral Admin":
             let vc = ReferralAdminViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Explosions":
+            let vc = ExplosionViewController()
             navigationController?.pushViewController(vc, animated: true)
         case "Referral Analytics":
             let vc = ReferralAnalyticsViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Test Missing Info Screen":
+            let vc = OnboardingMissingInfoViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         default:
             break
         }
@@ -768,6 +750,79 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         guard let url = URL(string: "https://www.nestnoteapp.com/contact") else { return }
         let safariVC = SFSafariViewController(url: url)
         present(safariVC, animated: true)
+    }
+
+    private func showTestSurveyScreen() {
+        let surveyVC = NNOnboardingSurveyViewController()
+
+        // Set the title and subtitle manually without using configure(with:)
+        surveyVC.loadViewIfNeeded()
+        surveyVC.setupOnboarding(title: "What's your primary childcare experience?", subtitle: "Select the option that best describes your background")
+
+        // Set test options with subtitles for single-select mode
+        let optionsWithSubtitles = [
+            SurveyOption(title: "Professional nanny", subtitle: "Formal childcare training and experience"),
+            SurveyOption(title: "Family babysitting", subtitle: "Regular sitting for family members"),
+            SurveyOption(title: "Occasional babysitting", subtitle: "Casual sitting for friends or neighbors"),
+            SurveyOption(title: "First time babysitting", subtitle: "New to childcare but eager to learn"),
+            SurveyOption(title: "Other experience", subtitle: "Different background in working with children")
+        ]
+
+        // Test with single-select mode (isMultiSelect: false)
+        surveyVC.setTestOptions(optionsWithSubtitles, isMultiSelect: false)
+
+        let nav = UINavigationController(rootViewController: surveyVC)
+        present(nav, animated: true)
+    }
+
+    private func showTestBulletOnboarding() {
+        let bulletVC = NNOnboardingBulletViewController()
+
+        // Create test bullet items for babysitting onboarding
+        let testBullets = [
+            NNBulletItem(
+                title: "Safety First",
+                description: "Learn essential childcare safety protocols and emergency procedures to keep kids protected",
+                iconName: "shield.fill"
+            ),
+            NNBulletItem(
+                title: "Fun Activities",
+                description: "Discover age-appropriate games, crafts, and activities that engage and entertain children",
+                iconName: "gamecontroller.fill"
+            ),
+            NNBulletItem(
+                title: "Clear Communication",
+                description: "Maintain open communication with parents about routines, preferences, and any concerns",
+                iconName: "message.fill"
+            ),
+            NNBulletItem(
+                title: "Professional Growth",
+                description: "Build your childcare skills and create lasting relationships with families in your community",
+                iconName: "star.fill"
+            )
+        ]
+
+        bulletVC.configure(
+            title: "Welcome to NestNote",
+            subtitle: "Everything you need to become a trusted babysitter",
+            bullets: testBullets
+        )
+
+        let nav = UINavigationController(rootViewController: bulletVC)
+        present(nav, animated: true)
+    }
+
+    private func showTestJSONOnboarding() {
+        let coordinator = OnboardingCoordinator()
+        let onboardingVC = coordinator.start()
+        present(onboardingVC, animated: true)
+    }
+
+    private func showTestFinishAnimation() {
+        let finishVC = OBFinishViewController()
+        finishVC.enableDebugMode()
+        let nav = UINavigationController(rootViewController: finishVC)
+        present(nav, animated: true)
     }
 
     @objc private func handleUserInformationUpdate() {

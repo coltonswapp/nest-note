@@ -469,11 +469,11 @@ final class UserService {
                 // Firebase says existing user, but try to fetch their profile
                 do {
                     let user = try await fetchUserProfile(userId: firebaseUser.uid)
-                    
+
                     // Profile exists - they're truly an existing user
                     self.currentUser = user
                     self.isAuthenticated = true
-                    
+
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
                     Tracker.shared.track(.appleSignInSucceeded)
 
@@ -482,26 +482,60 @@ final class UserService {
 
                     return (user: user, isNewUser: false, isIncompleteSignup: false)
                 } catch {
-                    // Profile doesn't exist - they authenticated before but never completed onboarding
-                    Logger.log(level: .info, category: .userService, message: "Firebase user exists but no profile found - treating as new user for onboarding")
-                    
-                    let tempUser = NestUser(
+                    // Profile doesn't exist - Firebase user exists but profile creation failed previously
+                    // This is the bug fix: instead of sending them to onboarding again, create a minimal profile now
+                    Logger.log(level: .info, category: .userService, message: "Firebase user exists but no profile found - creating minimal profile to fix incomplete signup")
+
+                    // Create a minimal profile for this existing Firebase user
+                    let userWithMinimalProfile = NestUser(
                         id: firebaseUser.uid,
                         personalInfo: .init(
-                            name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                            name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "Apple User",
                             email: credential.email ?? firebaseUser.email ?? ""
                         ),
-                        primaryRole: .nestOwner, // Default, will be updated in onboarding
+                        primaryRole: .nestOwner, // Default
                         roles: .init(ownedNestId: nil, nestAccess: [])
                     )
-                    
-                    Tracker.shared.track(.appleSignInSucceeded)
 
-                    // Note: Don't stop log capture here - incomplete signup will continue to onboarding
-                    // This ensures we capture the completion of the signup process
-                    Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Incomplete Apple signup continuing to onboarding - keeping capture active")
+                    // Save the minimal profile to Firestore
+                    do {
+                        try await saveUserProfile(userWithMinimalProfile)
 
-                    return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
+                        // Set as current user
+                        self.currentUser = userWithMinimalProfile
+                        self.isAuthenticated = true
+
+                        Logger.log(level: .info, category: .userService, message: "Successfully created minimal profile for incomplete Apple signup")
+                        Tracker.shared.track(.appleSignInSucceeded)
+
+                        // Stop log capture and upload (success) - profile creation completed
+                        await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
+
+                        // Return as existing user (profile now exists) but indicate incomplete signup
+                        // This allows the UI to handle any additional setup if needed
+                        return (user: userWithMinimalProfile, isNewUser: false, isIncompleteSignup: true)
+
+                    } catch {
+                        // If we still can't save the profile, fall back to onboarding flow
+                        Logger.log(level: .error, category: .userService, message: "Failed to save minimal profile, falling back to onboarding: \(error.localizedDescription)")
+
+                        let tempUser = NestUser(
+                            id: firebaseUser.uid,
+                            personalInfo: .init(
+                                name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                                email: credential.email ?? firebaseUser.email ?? ""
+                            ),
+                            primaryRole: .nestOwner,
+                            roles: .init(ownedNestId: nil, nestAccess: [])
+                        )
+
+                        Tracker.shared.track(.appleSignInSucceeded)
+
+                        // Note: Don't stop log capture here - onboarding will continue
+                        Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Profile save failed, continuing to onboarding - keeping capture active")
+
+                        return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
+                    }
                 }
             }
             
@@ -1037,11 +1071,23 @@ final class UserService {
             if nsError.domain == NSURLErrorDomain {
                 return true
             }
-            // Firestore unavailable errors
+            // Firestore errors that should be retried
             if nsError.domain == "FIRFirestoreErrorDomain" {
                 let firestoreErrorCode = nsError.code
-                // Code 14 = UNAVAILABLE (temporary)
-                return firestoreErrorCode == 14
+                switch firestoreErrorCode {
+                case 14: // UNAVAILABLE (temporary server issues)
+                    return true
+                case 4: // DEADLINE_EXCEEDED (timeout)
+                    return true
+                case 8: // RESOURCE_EXHAUSTED (quota exceeded temporarily)
+                    return true
+                case 10: // ABORTED (transaction conflicts)
+                    return true
+                case 13: // INTERNAL (internal server error)
+                    return true
+                default:
+                    return false
+                }
             }
         }
         return false
