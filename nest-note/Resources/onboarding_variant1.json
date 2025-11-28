@@ -1,7 +1,7 @@
 {
-  "version": "1.0",
+  "version": "1.2",
   "flow": {
-    "name": "parent_onboarding",
+    "name": "parent_onboarding_value_first",
     "steps": [
       {
         "id": "role_selection",
@@ -27,32 +27,92 @@
         }
       },
       {
-        "id": "sitting_frequency",
+        "id": "families_experience",
+        "type": "bullet",
+        "config": {
+          "type": "bullet",
+          "title": "Families who use NestNote experience the following:",
+          "subtitle": "See what you could gain with organized sitter instructions",
+          "bullets": [
+            {
+              "title": "Fewer Sitter Interruptions",
+              "description": "When things are documented, less things need confirming",
+              "icon_name": "exclamationmark.bubble.fill"
+            },
+            {
+              "title": "Less Sitter Turnover",
+              "description": "Sitters enjoy an environment where instructions & nuances are clearly laid out",
+              "icon_name": "tornado"
+            },
+            {
+              "title": "Less Stress",
+              "description": "Enjoy date night knowing that your sitter has everything covered",
+              "icon_name": "moon.stars.fill"
+            },
+            {
+              "title": "Happier Kids & Pets",
+              "description": "Everyone loves a sitter who knows their needs inside & out",
+              "icon_name": "balloon.2.fill"
+            }
+          ],
+          "cta_text": "I want that too!"
+        }
+      },
+      {
+        "id": "central_hub",
+        "type": "bullet",
+        "config": {
+          "type": "bullet",
+          "title": "Everything in one place",
+          "subtitle": "Share it once, use it forever—with anyone who helps",
+          "bullets": [
+              {
+                  "title": "Write It Down Once",
+                  "description": "Stop explaining bedtime routines every single time",
+                  "icon_name": "square.and.pencil"
+              },
+              {
+                  "title": "Uninterrupted Evenings",
+                  "description": "Enjoy dinner without the 'Where's the bandaids?' texts",
+                  "icon_name": "moon.stars.fill"
+              },
+              {
+                  "title": "Always Up-to-Date",
+                  "description": "Review your nest regularly to make sure everything is current",
+                  "icon_name": "checkmark.arrow.trianglehead.clockwise"
+              },
+              {
+                  "title": "Confident Caregivers",
+                  "description": "Your sitter arrives prepared and knows what to do",
+                  "icon_name": "checkmark.shield.fill"
+              }
+              ],
+          "cta_text": "Let's get started!"
+        }
+      },
+      {
+        "id": "top_priority",
         "type": "survey",
         "config": {
           "type": "survey",
-          "title": "How often do you leave your children with a sitter on a monthly basis?",
-          "subtitle": "This helps us understand your needs better",
+          "title": "What is your top priority when leaving kids with a sitter?",
+          "subtitle": "Different families have different priorities!",
           "options": [
             {
-              "title": "< 1 time per month",
-              "value": "less_than_1"
+              "title": "Everyone gets home safely",
+              "value": "safety"
             },
             {
-              "title": "1-2 times per month",
-              "value": "1_to_2"
+              "title": "Kids & pets follow their routines",
+              "value": "routines"
             },
             {
-              "title": "3-5 times per month",
-              "value": "3_to_5"
+              "title": "Minimal interruptions (while you're gone)",
+              "value": "minimal_interruptions"
             },
             {
-              "title": "> 6 times per month",
-              "value": "more_than_6"
-            },
-            {
-              "title": "Daily",
-              "value": "daily"
+              "title": "Sitter feels confident & prepared",
+              "value": "sitter_confidence"
             }
           ],
           "multi_select": false,
@@ -96,38 +156,6 @@
           "title": "You're not giving your sitters\nwhat they need to succeed.",
           "subtitle": "which means the sitter is potentially\nmissing the following:",
           "cta_text": "Continue"
-        }
-      },
-      {
-        "id": "families_experience",
-        "type": "bullet",
-        "config": {
-          "type": "bullet",
-          "title": "Families who use NestNote experience the following:",
-          "subtitle": null,
-          "bullets": [
-            {
-              "title": "Fewer Sitter Interruptions",
-              "description": "When things are documented, less things need confirming",
-              "icon_name": "exclamationmark.bubble.fill"
-            },
-            {
-              "title": "Less Sitter Turnover",
-              "description": "Sitters enjoy an environment where instructions & nuances are clearly laid out",
-              "icon_name": "tornado"
-            },
-            {
-              "title": "Less Stress",
-              "description": "Enjoy date night knowing that your sitter has everything covered",
-              "icon_name": "moon.stars.fill"
-            },
-            {
-              "title": "Happier Kids & Pets",
-              "description": "Everyone loves a sitter who knows their needs inside & out",
-              "icon_name": "balloon.2.fill"
-            }
-          ],
-          "cta_text": "I want that too!"
         }
       },
       {

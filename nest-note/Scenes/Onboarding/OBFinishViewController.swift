@@ -366,7 +366,7 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         Self.resetFailureCount()
 
         // Configure the card with nest information
-        let nestName = "Your Nest" // Default name - could be retrieved from coordinator
+        let nestName = (coordinator as? OnboardingCoordinator)?.currentNestName ?? "Your Nest"
         nestCreationCardView.configure(nestName: nestName, createdDate: Date())
 
         // Start the beautiful animation sequence

@@ -59,6 +59,7 @@ class Tracker {
         case regularSignUpAttempted = "regularSignUpAttempted"
         case regularSignUpSucceeded = "regularSignUpSucceeded"
         case userLoggedOut = "userLoggedOut"
+        case accountDeleted = "accountDeleted"
         
         // MARK: - App Lifecycle Events
         case appBackgroundReturn = "app_background_return"

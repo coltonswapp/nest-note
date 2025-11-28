@@ -351,15 +351,22 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             snapshot.appendItems(defaultItems, toSection: .myNest)
         }
         
-        let generalItems = [
+        var generalItems = [
             ("Notifications", "bell"),
             ("App Icon", "app"),
             ("Rate App", "star"),
             ("Terms & Privacy", "doc.text"),
             ("Support", "questionmark.circle"),
             ("Reset Setup", "arrow.counterclockwise")
-        ].map { Item.generalItem(title: $0.0, symbolName: $0.1) }
-        snapshot.appendItems(generalItems, toSection: .general)
+        ]
+
+        // Add Delete Account option only for signed-in users
+        if UserService.shared.isSignedIn {
+            generalItems.append(("Delete Account", "trash"))
+        }
+
+        let generalItemsFormatted = generalItems.map { Item.generalItem(title: $0.0, symbolName: $0.1) }
+        snapshot.appendItems(generalItemsFormatted, toSection: .general)
         
         #if DEBUG
         snapshot.appendSections([.debug])
@@ -388,12 +395,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Subscription Status", "creditcard.circle"),
             ("Test Survey Screen", "list.bullet.rectangle.portrait"),
             ("Test Bullet Onboarding", "list.bullet.clipboard.fill"),
-            ("Test JSON Onboarding", "doc.text.magnifyingglass"),
+            ("Onboarding Baseline", "doc.text"),
+            ("Onboarding Variant A", "a.circle"),
+            ("Onboarding Variant B", "b.circle"),
             ("Test Finish Animation", "sparkles.rectangle.stack.fill"),
             ("Explosions", "burst.fill"),
             ("Referral Admin", "person.badge.plus.fill"),
             ("Referral Analytics", "chart.line.uptrend.xyaxis"),
             ("Test Missing Info Screen", "exclamationmark.triangle.fill"),
+            ("Test Preview Cards", "rectangle.stack.badge.play.fill"),
+            ("Test Join Session Animation", "person.crop.circle.badge.plus"),
         ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(debugItems, toSection: .debug)
         #endif
@@ -500,8 +511,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             showTestSurveyScreen()
         case "Test Bullet Onboarding":
             showTestBulletOnboarding()
-        case "Test JSON Onboarding":
-            showTestJSONOnboarding()
+        case "Onboarding Baseline":
+            showOnboardingBaseline()
+        case "Onboarding Variant A":
+            showOnboardingVariantA()
+        case "Onboarding Variant B":
+            showOnboardingVariantB()
         case "Test Finish Animation":
             showTestFinishAnimation()
         case "Referral Admin":
@@ -515,6 +530,15 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             navigationController?.pushViewController(vc, animated: true)
         case "Test Missing Info Screen":
             let vc = OnboardingMissingInfoViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
+        case "Test Preview Cards":
+            let vc = OnboardingPreviewViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
+        case "Test Join Session Animation":
+            let vc = JoinSessionViewController()
+            vc.enableDebugMode()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
         default:
@@ -626,6 +650,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 showPrivacyPolicy()
             case "Support":
                 showContactPage()
+            case "Delete Account":
+                showDeleteAccountConfirmation()
             default:
                 print("Selected General item: \(title)")
             }
@@ -752,6 +778,197 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         present(safariVC, animated: true)
     }
 
+    private func showDeleteAccountConfirmation() {
+        let firstAlert = UIAlertController(
+            title: "Delete Account",
+            message: "Are you sure you want to delete your account? This action cannot be undone and will permanently delete:\n\n• Your nest and all its data\n• All your entries, routines, and places\n• Your saved sitters\n• Your account information",
+            preferredStyle: .alert
+        )
+
+        firstAlert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        firstAlert.addAction(UIAlertAction(title: "Continue", style: .destructive) { [weak self] _ in
+            self?.showFinalDeleteConfirmation()
+        })
+
+        present(firstAlert, animated: true)
+    }
+
+    private func showFinalDeleteConfirmation() {
+        let secondAlert = UIAlertController(
+            title: "Final Confirmation",
+            message: "This is your last chance. Once deleted, your account and all data cannot be recovered.\n\nType 'DELETE' below to confirm:",
+            preferredStyle: .alert
+        )
+
+        secondAlert.addTextField { textField in
+            textField.placeholder = "Type 'DELETE' here"
+            textField.autocapitalizationType = .allCharacters
+            textField.autocorrectionType = .no
+        }
+
+        secondAlert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        secondAlert.addAction(UIAlertAction(title: "Delete Account", style: .destructive) { [weak self] _ in
+            guard let textField = secondAlert.textFields?.first,
+                  let enteredText = textField.text,
+                  enteredText.uppercased() == "DELETE" else {
+
+                // Show error if user didn't type DELETE correctly
+                let errorAlert = UIAlertController(
+                    title: "Invalid Confirmation",
+                    message: "You must type 'DELETE' exactly to confirm account deletion.",
+                    preferredStyle: .alert
+                )
+                errorAlert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                    // Show the confirmation dialog again
+                    self?.showFinalDeleteConfirmation()
+                })
+                self?.present(errorAlert, animated: true)
+                return
+            }
+
+            // User typed DELETE correctly, proceed with deletion
+            self?.performAccountDeletion()
+        })
+
+        present(secondAlert, animated: true)
+    }
+
+    private func performAccountDeletion() {
+        // Show loading indicator
+        let loadingAlert = UIAlertController(
+            title: "Deleting Account",
+            message: "Please wait while we delete your account...",
+            preferredStyle: .alert
+        )
+        present(loadingAlert, animated: true)
+
+        Task {
+            do {
+                try await UserService.shared.deleteAccount()
+
+                await MainActor.run {
+                    loadingAlert.dismiss(animated: true) {
+                        // Show success message and close settings
+                        let successAlert = UIAlertController(
+                            title: "Account Deleted",
+                            message: "Your account has been successfully deleted.",
+                            preferredStyle: .alert
+                        )
+                        successAlert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+                            // Close the settings screen
+                            self?.dismiss(animated: true)
+                        })
+                        self.present(successAlert, animated: true)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    loadingAlert.dismiss(animated: true) {
+                        // Check if this is a reauthentication error
+                        if let reauthError = error as? ReauthenticationError {
+                            switch reauthError {
+                            case .passwordPromptRequired(let email):
+                                self.showPasswordReauthenticationPrompt(email: email)
+                            case .appleSignInRequired:
+                                self.showAppleSignInReauthentication()
+                            }
+                        } else {
+                            // Show generic error message
+                            let errorAlert = UIAlertController(
+                                title: "Deletion Failed",
+                                message: "Failed to delete your account: \(error.localizedDescription). Please try again or contact support.",
+                                preferredStyle: .alert
+                            )
+                            errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                            self.present(errorAlert, animated: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func showPasswordReauthenticationPrompt(email: String) {
+        let alert = UIAlertController(
+            title: "Reauthentication Required",
+            message: "For security reasons, please re-enter your password to delete your account.\n\nEmail: \(email)",
+            preferredStyle: .alert
+        )
+
+        alert.addTextField { textField in
+            textField.placeholder = "Password"
+            textField.isSecureTextEntry = true
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Continue", style: .destructive) { [weak self] _ in
+            guard let password = alert.textFields?.first?.text, !password.isEmpty else {
+                let errorAlert = UIAlertController(
+                    title: "Invalid Password",
+                    message: "Please enter a valid password.",
+                    preferredStyle: .alert
+                )
+                errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(errorAlert, animated: true)
+                return
+            }
+
+            Task {
+                do {
+                    try await UserService.shared.reauthenticateAndDeleteAccount(password: password)
+                    await MainActor.run {
+                        // Show success message
+                        let successAlert = UIAlertController(
+                            title: "Account Deleted",
+                            message: "Your account has been successfully deleted.",
+                            preferredStyle: .alert
+                        )
+                        successAlert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+                            self?.dismiss(animated: true)
+                        })
+                        self?.present(successAlert, animated: true)
+                    }
+                } catch {
+                    await MainActor.run {
+                        let errorAlert = UIAlertController(
+                            title: "Authentication Failed",
+                            message: "Failed to authenticate: \(error.localizedDescription)",
+                            preferredStyle: .alert
+                        )
+                        errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                        self?.present(errorAlert, animated: true)
+                    }
+                }
+            }
+        })
+
+        present(alert, animated: true)
+    }
+
+    private func showAppleSignInReauthentication() {
+        let alert = UIAlertController(
+            title: "Reauthentication Required",
+            message: "For security reasons, please sign in with Apple again to delete your account.",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Sign in with Apple", style: .destructive) { [weak self] _ in
+            // TODO: Implement Apple Sign In reauthentication flow
+            // This would require implementing ASAuthorizationControllerDelegate
+            // and handling the Apple Sign In flow specifically for reauthentication
+            let errorAlert = UIAlertController(
+                title: "Not Implemented",
+                message: "Apple Sign In reauthentication is not yet implemented. Please contact support.",
+                preferredStyle: .alert
+            )
+            errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+            self?.present(errorAlert, animated: true)
+        })
+
+        present(alert, animated: true)
+    }
+
     private func showTestSurveyScreen() {
         let surveyVC = NNOnboardingSurveyViewController()
 
@@ -812,8 +1029,20 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         present(nav, animated: true)
     }
 
-    private func showTestJSONOnboarding() {
-        let coordinator = OnboardingCoordinator()
+    private func showOnboardingBaseline() {
+        let coordinator = OnboardingCoordinator(configFileName: "onboarding_config")
+        let onboardingVC = coordinator.start()
+        present(onboardingVC, animated: true)
+    }
+
+    private func showOnboardingVariantA() {
+        let coordinator = OnboardingCoordinator(configFileName: "onboarding_variant1")
+        let onboardingVC = coordinator.start()
+        present(onboardingVC, animated: true)
+    }
+
+    private func showOnboardingVariantB() {
+        let coordinator = OnboardingCoordinator(configFileName: "onboarding_variant2")
         let onboardingVC = coordinator.start()
         present(onboardingVC, animated: true)
     }

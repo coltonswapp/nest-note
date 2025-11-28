@@ -34,8 +34,14 @@ class ExplosionManager {
 
     private var explosionWindow: PassthroughWindow?
     private var explosionScene: ExplosionScene?
+    private var isWindowReady = false
 
-    private init() {}
+    private init() {
+        // Setup window immediately on init to avoid first-explosion delay
+        DispatchQueue.main.async {
+            self.setupExplosionWindow()
+        }
+    }
 
     private func setupExplosionWindow() {
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
@@ -81,15 +87,19 @@ class ExplosionManager {
         window.rootViewController = rootVC
 
         self.explosionWindow = window
+        self.isWindowReady = true
     }
 
     func triggerExplosion(preset: ExplosionPreset, at point: CGPoint) {
-        // Setup explosion window if not already done
-        if explosionWindow == nil {
-            setupExplosionWindow()
-        }
-
-        guard let scene = explosionScene else {
+        // Ensure window is ready before triggering explosion
+        guard isWindowReady, let scene = explosionScene else {
+            // If not ready, setup immediately and retry with small delay
+            if explosionWindow == nil {
+                setupExplosionWindow()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.triggerExplosion(preset: preset, at: point)
+            }
             return
         }
 
@@ -105,6 +115,11 @@ class ExplosionManager {
     }
 
     // MARK: - Static API
+    static func prepareForExplosions() {
+        // Force initialization of shared instance which will setup window
+        _ = shared
+    }
+
     static func trigger(_ preset: ExplosionPreset, at point: CGPoint) {
         shared.triggerExplosion(preset: preset, at: point)
     }

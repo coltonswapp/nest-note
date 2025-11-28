@@ -128,6 +128,10 @@ class ATFCreateNestViewController: NNOnboardingViewController {
         let field = NNTextField()
         field.translatesAutoresizingMaskIntoConstraints = false
         field.placeholder = "321 Eagle Nest Ct, Birdsville CA"
+        field.textContentType = .fullStreetAddress
+        field.keyboardType = .default
+        field.autocapitalizationType = .words
+        field.autocorrectionType = .no
         return field
     }()
     

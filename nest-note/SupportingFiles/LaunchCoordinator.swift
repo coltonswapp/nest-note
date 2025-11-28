@@ -474,13 +474,12 @@ extension LaunchCoordinator: AuthenticationDelegate {
     func authenticationComplete() {
         Task {
             do {
-                // Get the auth navigation controller and landing view controller
+                // Get the auth navigation controller and dismiss it
                 guard let navigationController = self.navigationController,
-                      let authNavController = navigationController.presentedViewController as? UINavigationController,
-                      let landingVC = authNavController.viewControllers.first as? LandingViewController else {
+                      let authNavController = navigationController.presentedViewController as? UINavigationController else {
                     return
                 }
-                
+
                 // Dismiss and reconfigure
                 await MainActor.run {
                     authNavController.dismiss(animated: true) {
@@ -501,39 +500,34 @@ extension LaunchCoordinator: AuthenticationDelegate {
     }
     
     func signUpTapped() {
-        guard let navigationController = self.navigationController else {
-            return
-        }
-        
-        let onboardingCoordinator = OnboardingCoordinator()
-        self.currentOnboardingCoordinator = onboardingCoordinator
-        let containerVC = onboardingCoordinator.start()
-        onboardingCoordinator.authenticationDelegate = self
-        (containerVC as? OnboardingContainerViewController)?.delegate = self
-        
-        // Present the container view controller modally
-        containerVC.modalPresentationStyle = .fullScreen
-        navigationController.present(containerVC, animated: true)
+        // This will be handled by the LoginViewController presenting onboarding modally
+        // No implementation needed here
     }
     
     func startAppleSignInOnboarding(with credential: ASAuthorizationAppleIDCredential) {
         guard let navigationController = self.navigationController else {
             return
         }
-        
-        let onboardingCoordinator = OnboardingCoordinator()
+
+        // Find the currently presented auth navigation controller
+        guard let authNavController = navigationController.presentedViewController as? UINavigationController else {
+            return
+        }
+
+        let onboardingVariant = FeatureFlagService.shared.getOnboardingVariant()
+        Logger.log(level: .info, category: .launcher, message: "🧪 EXPERIMENT: Creating onboarding coordinator with variant: \(onboardingVariant)")
+        let onboardingCoordinator = OnboardingCoordinator(configFileName: onboardingVariant)
         self.currentOnboardingCoordinator = onboardingCoordinator
-        
+
         // Pre-configure the coordinator with Apple credential
         onboardingCoordinator.handleAppleSignIn(credential: credential)
-        
+
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self
         (containerVC as? OnboardingContainerViewController)?.delegate = self
-        
-        // Present the container view controller modally
-        containerVC.modalPresentationStyle = .fullScreen
-        navigationController.present(containerVC, animated: true)
+
+        // Push the onboarding flow onto the existing auth navigation stack
+        authNavController.pushViewController(containerVC, animated: true)
     }
     
     func signUpComplete() {

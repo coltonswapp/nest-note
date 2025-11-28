@@ -90,6 +90,11 @@ struct IntroPage: View {
                         .foregroundStyle(.white)
                         .textRenderer(TitleTextRenderer(progress: titleProgress))
                         .padding(.bottom, 12)
+                        .onTapGesture {
+                            withAnimation(.smooth(duration: 0.6)) {
+                                showAuthButtons = false
+                            }
+                        }
 
                     Text("Keep your sitter informed, your family safe. \nEverything they need to know, right when they need it.")
                         .font(.callout)
@@ -116,7 +121,7 @@ struct IntroPage: View {
                     }
                     .blurOpacityEffect(initialAnimation)
                     .opacity(showAuthButtons ? 0 : 1)
-                    .animation(.easeOut(duration: 0.3), value: showAuthButtons)
+                    .animation(.snappy(extraBounce: 1.0), value: showAuthButtons)
                     .padding(.bottom)
                 }
 
@@ -168,9 +173,9 @@ struct IntroPage: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom)
                     .opacity(showAuthButtons ? 1 : 0)
-                    .animation(.easeIn(duration: 0.4).delay(0.3), value: showAuthButtons)
+                    .offset(y: showAuthButtons ? 0 : 100)
+                    .animation(.snappy(extraBounce: 1.0), value: showAuthButtons)
                 }
-                
             }
             .safeAreaPadding(15)
         }
@@ -239,12 +244,29 @@ struct IntroPage: View {
     
 }
 
+#Preview {
+    IntroPage(
+        onGetStarted: {
+            print("Get Started tapped")
+        },
+        onAppleSignIn: {
+            print("Apple Sign In tapped")
+        },
+        onLogin: {
+            print("Login tapped")
+        },
+        onSignUp: {
+            print("Sign Up tapped")
+        }
+    )
+}
+
 extension View {
     func blurOpacityEffect(_ show: Bool) -> some View {
         self
             .blur(radius: show ? 0 : 2)
             .opacity(show ? 1 : 0)
             .scaleEffect(show ? 1 : 0.9)
-        
+
     }
 }

@@ -30,6 +30,7 @@ struct OnboardingStep: Codable {
         case survey = "survey"
         case bullet = "bullet"
         case image = "image"
+        case preview = "preview"
         case missingInfo = "missing_info"
         case name = "name"
         case email = "email"
@@ -46,6 +47,7 @@ enum StepConfiguration: Codable {
     case survey(SurveyStepConfig)
     case bullet(BulletStepConfig)
     case image(ImageStepConfig)
+    case preview(PreviewStepConfig)
     case basic(BasicStepConfig)
 
     enum CodingKeys: String, CodingKey {
@@ -66,6 +68,9 @@ enum StepConfiguration: Codable {
         case "image":
             let config = try ImageStepConfig(from: decoder)
             self = .image(config)
+        case "preview":
+            let config = try PreviewStepConfig(from: decoder)
+            self = .preview(config)
         default:
             let config = try BasicStepConfig(from: decoder)
             self = .basic(config)
@@ -84,6 +89,9 @@ enum StepConfiguration: Codable {
             try config.encode(to: encoder)
         case .image(let config):
             try container.encode("image", forKey: .type)
+            try config.encode(to: encoder)
+        case .preview(let config):
+            try container.encode("preview", forKey: .type)
             try config.encode(to: encoder)
         case .basic(let config):
             try container.encode("basic", forKey: .type)
@@ -155,6 +163,19 @@ struct ImageStepConfig: Codable {
         case title
         case subtitle
         case imageName = "image_name"
+        case ctaText = "cta_text"
+    }
+}
+
+// MARK: - Preview Step Configuration
+struct PreviewStepConfig: Codable {
+    let title: String
+    let subtitle: String?
+    let ctaText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case subtitle
         case ctaText = "cta_text"
     }
 }
