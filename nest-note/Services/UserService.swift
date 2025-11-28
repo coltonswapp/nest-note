@@ -27,6 +27,7 @@ final class UserService {
     // Flags to prevent duplicate operations
     private var isSettingUp: Bool = false
     private var isFetchingProfile: Bool = false
+    private var isOnboardingInProgress: Bool = false
     
     // MARK: - Initialization
     private init() {
@@ -160,9 +161,21 @@ final class UserService {
                     return
                 }
                 
+                // Skip if onboarding is in progress to prevent interference
+                guard !self.isOnboardingInProgress else {
+                    Logger.log(level: .info, category: .userService, message: "Skipping auth state change - onboarding in progress")
+                    return
+                }
+                
                 await self.handleAuthStateChange(firebaseUser: user)
             }
         }
+    }
+    
+    /// Sets onboarding progress flag to prevent auth state listener interference
+    func setOnboardingInProgress(_ value: Bool) {
+        isOnboardingInProgress = value
+        Logger.log(level: .info, category: .userService, message: "Onboarding in progress flag set to: \(value)")
     }
     
     // MARK: - FCM Token Management
@@ -399,41 +412,39 @@ final class UserService {
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> (user: NestUser, isNewUser: Bool, isIncompleteSignup: Bool) {
         // Use email from credential or create timestamp-based identifier
         let identifier = credential.email ?? "apple_signin_\(Int(Date().timeIntervalSince1970))"
-        
-        // Start capturing logs for this Apple Sign In attempt
-        SignupLogService.shared.startCapturing(identifier: identifier)
-        
+
         Logger.log(level: .info, category: .userService, message: "Attempting Apple Sign In")
         Tracker.shared.track(.appleSignInAttempted)
-        
+
         do {
             // Create Firebase credential from Apple credential
             guard let nonce = self.currentNonce else {
-                await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "No nonce available")
                 throw AuthError.unknown
             }
-            
+
             guard let appleIDToken = credential.identityToken,
                   let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
-                await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "Invalid Apple ID token")
                 throw AuthError.unknown
             }
-            
+
             let firebaseCredential = OAuthProvider.credential(
                 providerID: AuthProviderID.apple,
                 idToken: idTokenString,
                 rawNonce: nonce
             )
-            
+
             // Sign in with Firebase
             let result = try await auth.signIn(with: firebaseCredential)
             let firebaseUser = result.user
             let isNewUser = result.additionalUserInfo?.isNewUser ?? false
-            
+
             Logger.log(level: .debug, category: .userService, message: "Firebase Apple Sign In successful, isNewUser: \(isNewUser)")
-            
+
             if isNewUser {
                 // This is a new user - they need to complete onboarding
+                // NOW start capturing logs for this Apple signup attempt since we know it's a new user
+                SignupLogService.shared.startCapturing(identifier: identifier)
+
                 // Return minimal user info and let onboarding handle the rest
                 let tempUser = NestUser(
                     id: firebaseUser.uid,
@@ -444,7 +455,7 @@ final class UserService {
                     primaryRole: .nestOwner, // Default, will be updated in onboarding
                     roles: .init(ownedNestId: nil, nestAccess: [])
                 )
-                
+
                 Tracker.shared.track(.appleSignInSucceeded)
 
                 // Note: Don't stop log capture here - new users will continue to onboarding
@@ -456,49 +467,85 @@ final class UserService {
                 // Firebase says existing user, but try to fetch their profile
                 do {
                     let user = try await fetchUserProfile(userId: firebaseUser.uid)
-                    
-                    // Profile exists - they're truly an existing user
+
+                    // Profile exists - they're truly an existing user logging in (not signup)
                     self.currentUser = user
                     self.isAuthenticated = true
-                    
-                    Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
+
+                    Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user - no signup logs needed")
                     Tracker.shared.track(.appleSignInSucceeded)
 
-                    // Stop log capture and upload (success) - existing user logged in, no onboarding needed
-                    await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
-
+                    // No signup logs to upload since this was just a login, not signup
                     return (user: user, isNewUser: false, isIncompleteSignup: false)
                 } catch {
-                    // Profile doesn't exist - they authenticated before but never completed onboarding
-                    Logger.log(level: .info, category: .userService, message: "Firebase user exists but no profile found - treating as new user for onboarding")
-                    
-                    let tempUser = NestUser(
+                    // Profile doesn't exist - Firebase user exists but profile creation failed previously
+                    // Start capturing logs since we need to complete their profile creation (signup process)
+                    SignupLogService.shared.startCapturing(identifier: identifier)
+
+                    Logger.log(level: .info, category: .userService, message: "Firebase user exists but no profile found - creating minimal profile to fix incomplete signup")
+
+                    // Create a minimal profile for this existing Firebase user
+                    let userWithMinimalProfile = NestUser(
                         id: firebaseUser.uid,
                         personalInfo: .init(
-                            name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                            name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "Apple User",
                             email: credential.email ?? firebaseUser.email ?? ""
                         ),
-                        primaryRole: .nestOwner, // Default, will be updated in onboarding
+                        primaryRole: .nestOwner, // Default
                         roles: .init(ownedNestId: nil, nestAccess: [])
                     )
-                    
-                    Tracker.shared.track(.appleSignInSucceeded)
 
-                    // Note: Don't stop log capture here - incomplete signup will continue to onboarding
-                    // This ensures we capture the completion of the signup process
-                    Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Incomplete Apple signup continuing to onboarding - keeping capture active")
+                    // Save the minimal profile to Firestore
+                    do {
+                        try await saveUserProfile(userWithMinimalProfile)
 
-                    return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
+                        // Set as current user
+                        self.currentUser = userWithMinimalProfile
+                        self.isAuthenticated = true
+
+                        Logger.log(level: .info, category: .userService, message: "Successfully created minimal profile for incomplete Apple signup")
+                        Tracker.shared.track(.appleSignInSucceeded)
+
+                        // Stop log capture and upload (success) - profile creation completed
+                        await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
+
+                        // Return as existing user (profile now exists) but indicate incomplete signup
+                        // This allows the UI to handle any additional setup if needed
+                        return (user: userWithMinimalProfile, isNewUser: false, isIncompleteSignup: true)
+
+                    } catch {
+                        // If we still can't save the profile, fall back to onboarding flow
+                        Logger.log(level: .error, category: .userService, message: "Failed to save minimal profile, falling back to onboarding: \(error.localizedDescription)")
+
+                        let tempUser = NestUser(
+                            id: firebaseUser.uid,
+                            personalInfo: .init(
+                                name: credential.fullName?.formatted() ?? firebaseUser.displayName ?? "",
+                                email: credential.email ?? firebaseUser.email ?? ""
+                            ),
+                            primaryRole: .nestOwner,
+                            roles: .init(ownedNestId: nil, nestAccess: [])
+                        )
+
+                        Tracker.shared.track(.appleSignInSucceeded)
+
+                        // Note: Don't stop log capture here - onboarding will continue
+                        Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Profile save failed, continuing to onboarding - keeping capture active")
+
+                        return (user: tempUser, isNewUser: true, isIncompleteSignup: true)
+                    }
                 }
             }
-            
+
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In failed: \(error)")
             Tracker.shared.track(.appleSignInAttempted, result: false, error: error.localizedDescription)
-            
-            // Stop log capture and upload (failure) - Apple Sign In failed
-            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
-            
+
+            // Only stop log capture if it was started (check if we're currently capturing)
+            if SignupLogService.shared.isCurrentlyCapturing {
+                await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
+            }
+
             let authError = error as NSError
             switch authError.code {
             case AuthErrorCode.networkError.rawValue:
@@ -867,6 +914,216 @@ final class UserService {
             throw error
         }
     }
+
+    // MARK: - Delete Account
+    func deleteAccount() async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Starting account deletion for user: \(currentUser.id)")
+
+        do {
+            // Step 1: Delete user's nest if they have one
+            if let ownedNestId = currentUser.roles.nestAccess.first(where: { $0.accessLevel == .owner })?.nestId {
+                Logger.log(level: .info, category: .userService, message: "Deleting owned nest: \(ownedNestId)")
+                try await deleteNest(nestId: ownedNestId)
+                Logger.log(level: .info, category: .userService, message: "Nest deleted successfully")
+            }
+
+            // Step 2: Delete user document from Firestore
+            Logger.log(level: .info, category: .userService, message: "Deleting user document from Firestore")
+            let userDocRef = db.collection("users").document(currentUser.id)
+            try await userDocRef.delete()
+            Logger.log(level: .info, category: .userService, message: "User document deleted successfully")
+
+            // Step 3: Delete Firebase Auth user (with reauthentication handling)
+            Logger.log(level: .info, category: .userService, message: "Deleting Firebase Auth user")
+            try await deleteFirebaseUserWithReauth(firebaseUser)
+            Logger.log(level: .info, category: .userService, message: "Firebase Auth user deleted successfully")
+
+            // Step 4: Clear local state
+            self.currentUser = nil
+            self.isAuthenticated = false
+            clearAuthState()
+
+            // Clear RevenueCat
+            Purchases.shared.logOut { (customerInfo, error) in
+                if let error = error {
+                    Logger.log(level: .error, category: .userService, message: "RevenueCat logout error: \(error.localizedDescription)")
+                }
+            }
+
+            // Clear Tracker context
+            Tracker.shared.clearUserContext()
+
+            Logger.log(level: .info, category: .userService, message: "Account deletion completed successfully")
+            Tracker.shared.track(.accountDeleted)
+
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Account deletion failed: \(error.localizedDescription)")
+            Tracker.shared.track(.accountDeleted, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+
+    private func deleteFirebaseUserWithReauth(_ firebaseUser: User) async throws {
+        do {
+            // First attempt to delete the user directly
+            try await firebaseUser.delete()
+        } catch let error as NSError {
+            // Check if this is a "credential too old" error that requires reauthentication
+            if error.code == AuthErrorCode.requiresRecentLogin.rawValue {
+                Logger.log(level: .info, category: .userService, message: "Credential too old - reauthentication required")
+
+                // Determine the provider and reauthenticate accordingly
+                guard let providerData = firebaseUser.providerData.first else {
+                    Logger.log(level: .error, category: .userService, message: "No provider data found for reauthentication")
+                    throw AuthError.unknown
+                }
+
+                switch providerData.providerID {
+                case "password":
+                    // Email/password authentication - need to prompt user for password
+                    try await reauthenticateWithEmailPassword(firebaseUser)
+                case "apple.com":
+                    // Apple Sign In - need fresh Apple credentials
+                    try await reauthenticateWithApple(firebaseUser)
+                default:
+                    Logger.log(level: .error, category: .userService, message: "Unsupported provider for reauthentication: \(providerData.providerID)")
+                    throw AuthError.unknown
+                }
+
+                // After successful reauthentication, try deleting again
+                try await firebaseUser.delete()
+            } else {
+                // Other error, rethrow
+                throw error
+            }
+        }
+    }
+
+    private func reauthenticateWithEmailPassword(_ firebaseUser: User) async throws {
+        guard let email = firebaseUser.email else {
+            throw AuthError.invalidUserData
+        }
+
+        // This would need to be implemented with UI to prompt user for password
+        // For now, throw an error indicating manual reauthentication is needed
+        Logger.log(level: .error, category: .userService, message: "Email/password reauthentication requires user interaction - not implemented")
+        throw ReauthenticationError.passwordPromptRequired(email: email)
+    }
+
+    private func reauthenticateWithApple(_ firebaseUser: User) async throws {
+        // This would need to trigger Apple Sign In flow again
+        // For now, throw an error indicating manual reauthentication is needed
+        Logger.log(level: .error, category: .userService, message: "Apple Sign In reauthentication requires user interaction - not implemented")
+        throw ReauthenticationError.appleSignInRequired
+    }
+
+    // MARK: - Public Reauthentication Methods
+    /// Reauthenticates the current user with email and password, then attempts account deletion
+    func reauthenticateAndDeleteAccount(password: String) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser, let email = firebaseUser.email else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Reauthenticating user with email/password for account deletion")
+
+        // Create email credential
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+
+        // Reauthenticate
+        try await firebaseUser.reauthenticate(with: credential)
+        Logger.log(level: .info, category: .userService, message: "User reauthenticated successfully")
+
+        // Now attempt account deletion
+        try await deleteAccount()
+    }
+
+    /// Reauthenticates the current user with Apple Sign In, then attempts account deletion
+    func reauthenticateAndDeleteAccount(appleCredential: ASAuthorizationAppleIDCredential) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Reauthenticating user with Apple Sign In for account deletion")
+
+        // Create Firebase credential from Apple credential
+        guard let nonce = self.currentNonce else {
+            throw AuthError.unknown
+        }
+
+        guard let appleIDToken = appleCredential.identityToken,
+              let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+            throw AuthError.unknown
+        }
+
+        let firebaseCredential = OAuthProvider.credential(
+            providerID: AuthProviderID.apple,
+            idToken: idTokenString,
+            rawNonce: nonce
+        )
+
+        // Reauthenticate
+        try await firebaseUser.reauthenticate(with: firebaseCredential)
+        Logger.log(level: .info, category: .userService, message: "User reauthenticated successfully")
+
+        // Now attempt account deletion
+        try await deleteAccount()
+    }
+
+    private func deleteNest(nestId: String) async throws {
+        Logger.log(level: .info, category: .userService, message: "Deleting nest and all associated data: \(nestId)")
+
+        let nestRef = db.collection("nests").document(nestId)
+
+        // Delete all subcollections first
+        let subcollections = ["entries", "nestCategories", "savedSitters", "sessions", "items"]
+
+        for subcollection in subcollections {
+            let collectionRef = nestRef.collection(subcollection)
+            let snapshot = try await collectionRef.getDocuments()
+
+            // Delete documents in batches of 500 (Firestore limit)
+            var batch = db.batch()
+            var batchCount = 0
+
+            for document in snapshot.documents {
+                batch.deleteDocument(document.reference)
+                batchCount += 1
+
+                if batchCount >= 500 {
+                    try await batch.commit()
+                    batch = db.batch() // Create fresh batch after commit
+                    batchCount = 0
+                }
+            }
+
+            // Commit any remaining documents
+            if batchCount > 0 {
+                try await batch.commit()
+            }
+
+            Logger.log(level: .info, category: .userService, message: "Deleted \(snapshot.documents.count) documents from \(subcollection)")
+        }
+
+        // Finally delete the nest document itself
+        try await nestRef.delete()
+        Logger.log(level: .info, category: .userService, message: "Nest document deleted successfully")
+    }
     
     // MARK: - State Management
     private func saveAuthState() {
@@ -929,16 +1186,23 @@ final class UserService {
         return userProfile
     }
     
-    private func saveUserProfile(_ user: NestUser) async throws {
+    private func saveUserProfile(_ user: NestUser, retryCount: Int = 0) async throws {
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Saving user profile for ID: \(user.id)")
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User name: '\(user.personalInfo.name)'")
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: User email: '\(user.personalInfo.email)'")
+        
+        if retryCount > 0 {
+            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Retry attempt \(retryCount)/3")
+        }
 
         do {
             let docRef = db.collection("users").document(user.id)
             try await docRef.setData(try Firestore.Encoder().encode(user))
 
             Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ User profile saved to Firestore successfully!")
+
+            // Verify profile was actually saved
+            try await verifyProfileExists(userId: user.id)
 
             // Track successful user profile creation
             Tracker.shared.track(.userProfileCreated)
@@ -974,11 +1238,69 @@ final class UserService {
             Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ Full error: \(error)")
             Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: ❌ User ID: \(user.id), Name: '\(user.personalInfo.name)'")
 
+            // Retry with exponential backoff for network errors
+            let maxRetries = 3
+            if retryCount < maxRetries && shouldRetry(error: error) {
+                let delay = min(pow(2.0, Double(retryCount)), 10.0) // Max 10 seconds
+                Logger.log(level: .info, category: .userService, 
+                          message: "💾 SAVE PROFILE: Retrying in \(delay) seconds (attempt \(retryCount + 1)/\(maxRetries))")
+                try await Task.sleep(for: .seconds(delay))
+                try await saveUserProfile(user, retryCount: retryCount + 1)
+                return
+            }
+
             // Track user profile creation failure
             Tracker.shared.track(.userProfileCreated, result: false, error: error.localizedDescription)
 
             throw error
         }
+    }
+    
+    /// Verifies that a profile was actually created in Firestore
+    private func verifyProfileExists(userId: String) async throws {
+        Logger.log(level: .info, category: .userService, message: "💾 VERIFY: Verifying profile exists for user: \(userId)")
+        
+        let verificationRef = db.collection("users").document(userId)
+        let verificationDoc = try await verificationRef.getDocument()
+        
+        guard verificationDoc.exists else {
+            Logger.log(level: .error, category: .userService, 
+                      message: "💾 VERIFY: ❌ Profile verification failed - document doesn't exist")
+            throw AuthError.invalidUserData
+        }
+        
+        Logger.log(level: .info, category: .userService, 
+                  message: "💾 VERIFY: ✅ Profile verified - document exists")
+    }
+    
+    /// Determines if an error should trigger a retry
+    private func shouldRetry(error: Error) -> Bool {
+        // Retry on network errors and temporary Firestore errors
+        if let nsError = error as NSError? {
+            // Network errors
+            if nsError.domain == NSURLErrorDomain {
+                return true
+            }
+            // Firestore errors that should be retried
+            if nsError.domain == "FIRFirestoreErrorDomain" {
+                let firestoreErrorCode = nsError.code
+                switch firestoreErrorCode {
+                case 14: // UNAVAILABLE (temporary server issues)
+                    return true
+                case 4: // DEADLINE_EXCEEDED (timeout)
+                    return true
+                case 8: // RESOURCE_EXHAUSTED (quota exceeded temporarily)
+                    return true
+                case 10: // ABORTED (transaction conflicts)
+                    return true
+                case 13: // INTERNAL (internal server error)
+                    return true
+                default:
+                    return false
+                }
+            }
+        }
+        return false
     }
     
     // MARK: - User Update Methods
@@ -1087,6 +1409,20 @@ final class UserService {
 }
 
 // MARK: - Types
+enum ReauthenticationError: LocalizedError {
+    case passwordPromptRequired(email: String)
+    case appleSignInRequired
+
+    var errorDescription: String? {
+        switch self {
+        case .passwordPromptRequired(let email):
+            return "Please re-enter your password to delete your account. Email: \(email)"
+        case .appleSignInRequired:
+            return "Please sign in with Apple again to delete your account."
+        }
+    }
+}
+
 enum AuthError: LocalizedError {
     case invalidCredentials
     case networkError

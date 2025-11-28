@@ -26,7 +26,7 @@ final class FeatureFlagService {
             case .bypassPaywallForTesting, .testFlightBypassEnabled:
                 return false // Default to requiring subscriptions
             case .debugAsProUser:
-                return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
+                return false // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
             case .captureSignupLogs:
                 return false // Default to not capturing logs for privacy
             }
@@ -36,11 +36,14 @@ final class FeatureFlagService {
     // MARK: - Remote Config Keys
     enum RemoteConfigKey: String, CaseIterable {
         case freeUserSelectionLimit = "free_user_selection_limit"
-        
+        case onboardingVariant = "parent_onboarding_flow"
+
         var defaultValue: Any {
             switch self {
             case .freeUserSelectionLimit:
                 return 6 // Default limit for free users
+            case .onboardingVariant:
+                return "onboarding_config" // Default to baseline config
             }
         }
     }
@@ -61,9 +64,9 @@ final class FeatureFlagService {
         // Production: fetch every 12 hours
         settings.minimumFetchInterval = 43200
         #endif
-        
+
         remoteConfig.configSettings = settings
-        
+
         // Set default values
         var defaults: [String: NSObject] = [:]
         for flag in FeatureFlag.allCases {
@@ -73,9 +76,28 @@ final class FeatureFlagService {
             defaults[configKey.rawValue] = configKey.defaultValue as? NSObject
         }
         remoteConfig.setDefaults(defaults)
-        
-        // Fetch initial values
-        fetchAndActivate()
+
+        Logger.log(level: .info, category: .general, message: "🔧 SETUP: Remote Config initialized with defaults")
+
+        // Fetch initial values with more aggressive retry
+        fetchAndActivateWithRetry()
+    }
+
+    private func fetchAndActivateWithRetry() {
+        Logger.log(level: .info, category: .general, message: "🔧 FETCH: Starting Remote Config fetch...")
+
+        remoteConfig.fetchAndActivate { [weak self] status, error in
+            if let error = error {
+                Logger.log(level: .error, category: .general, message: "🔧 FETCH: Failed - \(error.localizedDescription)")
+                // Retry once after a delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self?.fetchAndActivate()
+                }
+            } else {
+                Logger.log(level: .info, category: .general, message: "🔧 FETCH: Success - Status: \(status)")
+                self?.logCurrentFlags()
+            }
+        }
     }
     
     // MARK: - Public Methods
@@ -111,18 +133,80 @@ final class FeatureFlagService {
     /// - Returns: The current value of the remote config key
     func getIntValue(for key: RemoteConfigKey) -> Int {
         let value = Int(remoteConfig.configValue(forKey: key.rawValue).numberValue)
-        
+
         #if DEBUG
         Logger.log(level: .debug, category: .general, message: "Remote config '\(key.rawValue)': \(value)")
         #endif
-        
+
         return value
+    }
+
+    /// Gets the string value for a remote config key
+    /// - Parameter key: The remote config key to fetch
+    /// - Returns: The current value of the remote config key
+    func getStringValue(for key: RemoteConfigKey) -> String {
+        let configValue = remoteConfig.configValue(forKey: key.rawValue)
+        let value = configValue.stringValue ?? ""
+        let source = configValue.source
+
+        #if DEBUG
+        Logger.log(level: .info, category: .general, message: "🔧 Remote config '\(key.rawValue)': '\(value)' (source: \(sourceDescription(source)))")
+        #endif
+
+        return value
+    }
+
+    private func sourceDescription(_ source: RemoteConfigSource) -> String {
+        switch source {
+        case .static:
+            return "DEFAULT"
+        case .default:
+            return "DEFAULT"
+        case .remote:
+            return "REMOTE"
+        @unknown default:
+            return "UNKNOWN"
+        }
     }
     
     /// Gets the free user selection limit from remote config
     /// - Returns: The maximum number of items free users can select
     func getFreeUserSelectionLimit() -> Int {
         return getIntValue(for: .freeUserSelectionLimit)
+    }
+
+    /// Forces an immediate fetch of remote config (for testing)
+    func forceFetchRemoteConfig() {
+        remoteConfig.fetch(withExpirationDuration: 0) { [weak self] status, error in
+            if let error = error {
+                Logger.log(level: .error, category: .general, message: "🧪 FORCE FETCH: Failed - \(error.localizedDescription)")
+            } else {
+                Logger.log(level: .info, category: .general, message: "🧪 FORCE FETCH: Success - \(status)")
+                self?.remoteConfig.activate { _, _ in
+                    Logger.log(level: .info, category: .general, message: "🧪 FORCE FETCH: Activated")
+                    self?.logCurrentFlags()
+                }
+            }
+        }
+    }
+
+    /// Gets the onboarding variant to use from remote config
+    /// - Returns: The config filename to use for onboarding (e.g., "onboarding_config", "onboarding_variant1")
+    func getOnboardingVariant() -> String {
+        // Ensure we have latest config before getting variant
+        Logger.log(level: .info, category: .general, message: "🧪 EXPERIMENT: Checking for latest Remote Config before variant selection...")
+
+        let variant = getStringValue(for: .onboardingVariant)
+
+        // Validate that the variant is a known config file
+        let validVariants = ["onboarding_config", "onboarding_variant1", "onboarding_variant2"]
+        if validVariants.contains(variant) {
+            Logger.log(level: .info, category: .general, message: "🧪 EXPERIMENT: Using onboarding variant '\(variant)'")
+            return variant
+        } else {
+            Logger.log(level: .error, category: .general, message: "🧪 EXPERIMENT: Unknown onboarding variant '\(variant)', defaulting to baseline")
+            return "onboarding_config" // Default to baseline
+        }
     }
     
     /// Checks if paywall bypass is enabled for testing
@@ -175,8 +259,14 @@ final class FeatureFlagService {
             Logger.log(level: .info, category: .general, message: "\(flag.rawValue): \(value)")
         }
         for configKey in RemoteConfigKey.allCases {
-            let value = getIntValue(for: configKey)
-            Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            switch configKey {
+            case .freeUserSelectionLimit:
+                let value = getIntValue(for: configKey)
+                Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            case .onboardingVariant:
+                let value = getStringValue(for: configKey)
+                Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            }
         }
         Logger.log(level: .info, category: .general, message: "TestFlight detected: \(isRunningInTestFlight())")
         Logger.log(level: .info, category: .general, message: "Should bypass paywall: \(shouldBypassPaywall())")

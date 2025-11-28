@@ -88,7 +88,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         super.setup()
         configureCollectionView()
         navigationItem.title = "NestNote"
-        navigationItem.weeTitle = "Welcome to"
+//        navigationItem.weeTitle = "Welcome to"
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = NNColors.primary
         
@@ -192,9 +192,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     func configureCollectionView() {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
         collectionView.refreshControl = refreshControl
+        applyGradientBackground()
         view.addSubview(collectionView)
     }
     

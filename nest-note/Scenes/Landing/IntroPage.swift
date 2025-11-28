@@ -19,11 +19,23 @@ struct IntroPage: View {
     @State private var initialAnimation: Bool = false
     @State private var titleProgress: CGFloat = 0
     @State private var scrollPhase: ScrollPhase = .idle
-    
+    @State private var showAuthButtons: Bool = false
+
     var onGetStarted: () -> Void
+    var onAppleSignIn: () -> Void
+    var onLogin: () -> Void
+    var onSignUp: () -> Void
     
-    init(onGetStarted: @escaping () -> Void) {
+    init(
+        onGetStarted: @escaping () -> Void,
+        onAppleSignIn: @escaping () -> Void = {},
+        onLogin: @escaping () -> Void = {},
+        onSignUp: @escaping () -> Void = {}
+    ) {
         self.onGetStarted = onGetStarted
+        self.onAppleSignIn = onAppleSignIn
+        self.onLogin = onLogin
+        self.onSignUp = onSignUp
     }
     
     var body: some View {
@@ -32,7 +44,6 @@ struct IntroPage: View {
                 .animation(.easeInOut(duration: 1), value: activeCard)
             
             VStack(spacing: 40) {
-                Spacer()
                 
                 InfiniteScrollView {
                     ForEach(cards) { card in
@@ -50,9 +61,11 @@ struct IntroPage: View {
                     $0.contentOffset.x + $0.contentInsets.leading
                 } action: { oldValue, newValue in
                     currentScrollOffset = newValue
-                    
+
                     if scrollPhase != .decelerating || scrollPhase != .animating {
-                        let activeIndex = Int((currentScrollOffset / ((UIScreen.main.bounds.height * IntroPage.cardToScreenRatio) / IntroPage.cardWHRatio)).rounded()) % cards.count
+                        let cardWidth = (UIScreen.main.bounds.height * IntroPage.cardToScreenRatio) / IntroPage.cardWHRatio
+                        let rawIndex = Int((currentScrollOffset / cardWidth).rounded())
+                        let activeIndex = ((rawIndex % cards.count) + cards.count) % cards.count // Safe modulo that handles negatives
                         activeCard = cards[activeIndex]
                     }
                 }
@@ -60,41 +73,109 @@ struct IntroPage: View {
                         content
                         .offset(y: !initialAnimation ? -(proxy.size.height + 200) : 0)
                 }
+                .scaleEffect(showAuthButtons ? 0.75 : 1.0)
+                .animation(.smooth(duration: 0.6), value: showAuthButtons)
+                .padding(.top, showAuthButtons ? -40 : 20)
                 
                 Spacer()
-                
+            
                 VStack(spacing: 4) {
                     Text("Welcome to")
                         .fontWeight(.semibold)
                         .foregroundStyle(.white.secondary)
                         .blurOpacityEffect(initialAnimation)
-                    
+
                     Text("NestNote")
                         .font(.largeTitle.bold())
                         .foregroundStyle(.white)
                         .textRenderer(TitleTextRenderer(progress: titleProgress))
                         .padding(.bottom, 12)
-                    
+                        .onTapGesture {
+                            withAnimation(.smooth(duration: 0.6)) {
+                                showAuthButtons = false
+                            }
+                        }
+
                     Text("Keep your sitter informed, your family safe. \nEverything they need to know, right when they need it.")
                         .font(.callout)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white.secondary)
                         .blurOpacityEffect(initialAnimation)
                 }
+                .animation(.smooth(duration: 0.6), value: showAuthButtons)
                 
-                Button {
-                    onGetStarted()
-                } label: {
-                    Text("Get Started")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 25)
-                        .padding(.vertical, 12)
-                        .background(.white, in: .capsule)
+                if !showAuthButtons {
+
+                    Button {
+                        withAnimation(.smooth(duration: 0.6)) {
+                            showAuthButtons = true
+                        }
+                        onGetStarted()
+                    } label: {
+                        Text("Get Started")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 25)
+                            .padding(.vertical, 12)
+                            .background(.white, in: .capsule)
+                    }
+                    .blurOpacityEffect(initialAnimation)
+                    .opacity(showAuthButtons ? 0 : 1)
+                    .animation(.snappy(extraBounce: 1.0), value: showAuthButtons)
+                    .padding(.bottom)
                 }
-                .blurOpacityEffect(initialAnimation)
-                .padding(.bottom)
-                
+
+                if showAuthButtons {
+                    VStack(spacing: 8) {
+                        Button {
+                            onAppleSignIn()
+                        } label: {
+                            HStack(alignment: .center) {
+                                Image(systemName: "apple.logo")
+                                    .foregroundStyle(.white)
+                                Text("Continue with Apple")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .frame(height: 55)
+                            .background(.black, in: .capsule)
+                        }
+
+                        Button {
+                            onLogin()
+                        } label: {
+                            Text("Log in")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .frame(height: 55)
+                                .background(.white, in: .capsule)
+                        }
+
+                        Button {
+                            onSignUp()
+                        } label: {
+                            Text("Sign up")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .frame(height: 55)
+                                .overlay(
+                                    Capsule()
+                                        .stroke(.white.opacity(0.4), lineWidth: 1.5)
+                                )
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom)
+                    .opacity(showAuthButtons ? 1 : 0)
+                    .offset(y: showAuthButtons ? 0 : 100)
+                    .animation(.snappy(extraBounce: 1.0), value: showAuthButtons)
+                }
             }
             .safeAreaPadding(15)
         }
@@ -163,12 +244,29 @@ struct IntroPage: View {
     
 }
 
+#Preview {
+    IntroPage(
+        onGetStarted: {
+            print("Get Started tapped")
+        },
+        onAppleSignIn: {
+            print("Apple Sign In tapped")
+        },
+        onLogin: {
+            print("Login tapped")
+        },
+        onSignUp: {
+            print("Sign Up tapped")
+        }
+    )
+}
+
 extension View {
     func blurOpacityEffect(_ show: Bool) -> some View {
         self
             .blur(radius: show ? 0 : 2)
             .opacity(show ? 1 : 0)
             .scaleEffect(show ? 1 : 0.9)
-        
+
     }
 }

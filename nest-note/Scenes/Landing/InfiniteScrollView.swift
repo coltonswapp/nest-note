@@ -9,8 +9,9 @@ import SwiftUI
 
 struct InfiniteScrollView<Content: View>: View {
     var spacing: CGFloat = 30
+    var scaleFactor: CGFloat = 1.0
     @ViewBuilder var content: Content
-    
+
     @State private var contentSize: CGSize = .zero
     
     var body: some View {
@@ -31,19 +32,17 @@ struct InfiniteScrollView<Content: View>: View {
                             contentSize = .init(width: newValue.width + spacing, height: newValue.height)
                         }
                         
-                        let averageWidth = contentSize.width / CGFloat(colletion.count)
-                        let repeatingCount = contentSize.width > 0 ? Int((size.width / averageWidth).rounded()) + 1 : 1
-                        
+                        let repeatingCount = colletion.count > 0 ? colletion.count * 4 : 0
+
                         HStack(spacing: spacing) {
                             ForEach(0..<repeatingCount, id: \.self) { index in
-                                let view = Array(colletion)[index % colletion.count]
-                                
+                                let view = Array(colletion)[index % max(colletion.count, 1)]
                                 view
                             }
                         }
                     }
                 }
-                .background(InfiniteScrollHelper(contentSize: $contentSize, declarationRate: .constant(.fast)))
+                .background(InfiniteScrollHelper(contentSize: $contentSize, scaleFactor: scaleFactor, declarationRate: .constant(.fast)))
             }
         }
     }
@@ -51,11 +50,12 @@ struct InfiniteScrollView<Content: View>: View {
 
 fileprivate struct InfiniteScrollHelper: UIViewRepresentable {
     @Binding var contentSize: CGSize
+    var scaleFactor: CGFloat = 1.0
     @Binding var declarationRate: UIScrollView.DecelerationRate
     
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(declarationRate: declarationRate, contentSize: contentSize)
+        Coordinator(declarationRate: declarationRate, contentSize: contentSize, scaleFactor: scaleFactor)
     }
     
     func makeUIView(context: Context) -> UIView {
@@ -76,33 +76,38 @@ fileprivate struct InfiniteScrollHelper: UIViewRepresentable {
     func updateUIView(_ uiView: UIViewType, context: Context) {
         context.coordinator.declarationRate = declarationRate
         context.coordinator.contentSize = contentSize
+        context.coordinator.scaleFactor = scaleFactor
     }
     
     class Coordinator: NSObject, UIScrollViewDelegate {
         var declarationRate: UIScrollView.DecelerationRate
         var contentSize: CGSize
-        
-        init(declarationRate: UIScrollView.DecelerationRate, contentSize: CGSize) {
+        var scaleFactor: CGFloat
+
+        init(declarationRate: UIScrollView.DecelerationRate, contentSize: CGSize, scaleFactor: CGFloat) {
             self.declarationRate = declarationRate
             self.contentSize = contentSize
+            self.scaleFactor = scaleFactor
         }
         
         weak var defaultDelegate: UIScrollViewDelegate?
         
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             scrollView.decelerationRate = declarationRate
-            
+
             let minX = scrollView.contentOffset.x
-            
-            if minX > contentSize.width {
+
+            // Small buffer (half card width) to prevent premature jumping while maintaining infinite scroll
+            let buffer = contentSize.width * 0.15
+
+            if minX > contentSize.width + buffer {
                 scrollView.contentOffset.x -= contentSize.width
             }
-            
-            
-            if minX < 0 {
+
+            if minX < -buffer {
                 scrollView.contentOffset.x += contentSize.width
             }
-            
+
             defaultDelegate?.scrollViewDidScroll?(scrollView)
         }
         

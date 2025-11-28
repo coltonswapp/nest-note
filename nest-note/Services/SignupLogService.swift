@@ -13,7 +13,7 @@ import UIKit
 /**
  * SignupLogService
  * 
- * Captures application logs during signup and login attempts and uploads them to Firebase Storage.
+ * Captures application logs during signup attempts and uploads them to Firebase Storage.
  * This service helps with debugging authentication failures and understanding user onboarding issues.
  * 
  * Features:
@@ -24,8 +24,8 @@ import UIKit
  * - Includes metadata like result, error, log count, and upload timestamp
  * 
  * Usage:
- * 1. Call `startCapturing(identifier:)` at the beginning of signup/login
- * 2. Call `stopCaptureAndUpload(result:identifier:error:)` when complete
+ * 1. Call `startCapturing(identifier:)` at the beginning of signup (NOT login)
+ * 2. Call `stopCaptureAndUpload(result:identifier:error:)` when signup is complete
  * 
  * File naming convention:
  * signup_{result}_{identifier}_{timestamp}.txt
@@ -82,14 +82,12 @@ final class SignupLogService {
         isCapturing = true
         capturedLogs.removeAll()
         
-        // Subscribe to logger updates on main thread, then move to background for processing
+        // Subscribe to logger updates on main thread
         logCancellable = Logger.shared.$lines
             .receive(on: DispatchQueue.main)
             .sink { [weak self] lines in
-                // Process on background queue to avoid blocking UI
-                DispatchQueue.global(qos: .background).async {
-                    self?.capturedLogs = Array(lines) // Create a copy to avoid reference issues
-                }
+                // Since lines is now safely updated on main queue, we can copy directly
+                self?.capturedLogs = Array(lines)
             }
         
         // Add initial log entry
@@ -130,14 +128,19 @@ final class SignupLogService {
     
     // MARK: - Testing & Debug Methods
     
+    /// Gets the current capture status
+    var isCurrentlyCapturing: Bool {
+        return isCapturing
+    }
+
     #if DEBUG
     /// Test method to simulate a signup log capture (Debug only)
     /// - Parameter testIdentifier: Test identifier for the simulation
     func simulateSignupLogCapture(testIdentifier: String = "test_user") async {
         Logger.log(level: .info, category: .signup, message: "🧪 SIMULATION: Starting signup log simulation for: \(testIdentifier)")
-        
+
         startCapturing(identifier: testIdentifier)
-        
+
         // Simulate some signup process logs
         Logger.log(level: .info, category: .signup, message: "🧪 SIMULATION: Starting Firebase authentication...")
         Logger.log(level: .debug, category: .signup, message: "🧪 SIMULATION: Validating email format...")
@@ -147,16 +150,16 @@ final class SignupLogService {
         Logger.log(level: .info, category: .signup, message: "🧪 SIMULATION: Creating default nest...")
         Logger.log(level: .debug, category: .signup, message: "🧪 SIMULATION: Saving user profile...")
         Logger.log(level: .info, category: .signup, message: "🧪 SIMULATION: Signup completed successfully!")
-        
+
         // Wait a moment to let logs accumulate
         try? await Task.sleep(for: .seconds(1))
-        
+
         // Stop and upload
         await stopCaptureAndUpload(result: .success, identifier: testIdentifier)
-        
+
         Logger.log(level: .info, category: .signup, message: "🧪 SIMULATION: Simulation complete!")
     }
-    
+
     /// Gets the current capture status for debugging
     var captureStatus: (isCapturing: Bool, logCount: Int) {
         return (isCapturing: isCapturing, logCount: capturedLogs.count)
