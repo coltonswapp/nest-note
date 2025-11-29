@@ -89,22 +89,10 @@ final class NNImageOnboardingViewController: NNOnboardingViewController {
     }()
     
     private var content: OnboardingScreenContent?
-    private var dynamicTitle: String?
-    private var dynamicSubtitle: String?
-    private var dynamicImageName: String?
-    private var dynamicCTAText: String?
-
+    
     // MARK: - Initialization
     init(content: OnboardingScreenContent) {
         self.content = content
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    init(title: String, subtitle: String, imageName: String, ctaText: String) {
-        self.dynamicTitle = title
-        self.dynamicSubtitle = subtitle
-        self.dynamicImageName = imageName
-        self.dynamicCTAText = ctaText
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -115,39 +103,16 @@ final class NNImageOnboardingViewController: NNOnboardingViewController {
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
-
-        let title: String
-        let subtitle: String
-        let imageName: String
-        let ctaTitle: String
-
-        if let dynamicTitle = dynamicTitle,
-           let dynamicSubtitle = dynamicSubtitle,
-           let dynamicImageName = dynamicImageName,
-           let dynamicCTAText = dynamicCTAText {
-            // Use dynamic configuration
-            title = dynamicTitle
-            subtitle = dynamicSubtitle
-            imageName = dynamicImageName
-            ctaTitle = dynamicCTAText
-        } else if let content = content {
-            // Use enum configuration
-            title = content.title
-            subtitle = content.subtitle
-            imageName = content.imageName
-            ctaTitle = content.ctaTitle
-        } else {
-            // Fallback (should not happen)
-            return
-        }
-
-        setupOnboarding(title: title, subtitle: subtitle)
+        
+        guard let content = content else { return }
+        
+        setupOnboarding(title: content.title, subtitle: content.subtitle)
         setupContent()
-        addCTAButton(title: ctaTitle)
+        addCTAButton(title: content.ctaTitle)
         setupActions()
-
-        imageView.image = UIImage(named: imageName)
-
+        
+        imageView.image = UIImage(named: content.imageName)
+        
         // Initially hide the button
         ctaButton?.alpha = 0
     }

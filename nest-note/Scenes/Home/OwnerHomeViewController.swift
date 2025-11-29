@@ -88,7 +88,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         super.setup()
         configureCollectionView()
         navigationItem.title = "NestNote"
-//        navigationItem.weeTitle = "Welcome to"
+        navigationItem.weeTitle = "Welcome to"
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = NNColors.primary
         
@@ -192,9 +192,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     func configureCollectionView() {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
         collectionView.refreshControl = refreshControl
-        applyGradientBackground()
         view.addSubview(collectionView)
     }
     
@@ -491,15 +491,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self.pinnedCategories = pinnedCategoryNames
                 self.categories = categories
                 
-                await MainActor.run { [weak self] in
+                DispatchQueue.main.async { [weak self] in
                     self?.loadingSpinner.stopAnimating()
                     self?.applySnapshot(animatingDifferences: true)
-                    
-                    // Check for session review prompt after data loads
-                    self?.checkForSessionReviewPrompt()
                 }
             } catch {
-                await MainActor.run { [weak self] in
+                DispatchQueue.main.async { [weak self] in
                     self?.loadingSpinner.stopAnimating()
                     self?.currentSession = nil // Clear on error
                     self?.pinnedCategories = []
@@ -508,19 +505,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     self?.handleError(error)
                 }
             }
-        }
-    }
-    
-    /// Checks if user should be prompted to review a recent session
-    private func checkForSessionReviewPrompt() {
-        // Don't prompt if we're presenting something or not visible
-        guard presentedViewController == nil,
-              view.window != nil else {
-            return
-        }
-        
-        Task {
-            await SessionReviewManager.shared.checkAndPromptForReviewIfNeeded(from: self)
         }
     }
     

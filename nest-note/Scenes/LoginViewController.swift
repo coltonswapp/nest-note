@@ -8,22 +8,6 @@ protocol AuthenticationDelegate: AnyObject {
     func signUpComplete()
 }
 
-// MARK: - Reauthentication Types
-enum LoginViewControllerMode {
-    case login
-    case reauthentication(email: String?, provider: AuthProvider, onReauthentication: (ReauthCredential) -> Void)
-}
-
-enum AuthProvider {
-    case emailPassword
-    case apple
-}
-
-enum ReauthCredential {
-    case password(String)
-    case apple(ASAuthorizationAppleIDCredential)
-}
-
 final class LoginViewController: NNViewController {
     // MARK: - UI Elements
     private let topImageView: UIImageView = {
@@ -174,8 +158,6 @@ final class LoginViewController: NNViewController {
     weak var delegate: AuthenticationDelegate?
     private var loginButtonBottomConstraint: NSLayoutConstraint?
     private var mainStackTopConstraint: NSLayoutConstraint?
-    var shouldShowSignUpFlow: Bool = false
-    var mode: LoginViewControllerMode = .login
     
     private let fieldStack: UIStackView = {
         let stack = UIStackView()
@@ -201,73 +183,8 @@ final class LoginViewController: NNViewController {
         view.backgroundColor = .systemBackground
         setupKeyboardObservers()
         setupNavBar()
-        configureForMode()
         loadSavedCredentials()
         updateLoginButtonState()
-    }
-    
-    private func configureForMode() {
-        switch mode {
-        case .login:
-            // Default login mode - no changes needed
-            break
-            
-        case .reauthentication(let email, let provider, _):
-            // Configure for reauthentication
-            titleLabel.text = "You must login again to delete your account."
-            subtitleLabel.text = "Please sign in again to continue"
-            loginButton.setTitle("Continue")
-            
-            // Hide sign up and forgot password
-            signUpButton.isHidden = true
-            forgotPasswordButton.isHidden = true
-            
-            // Pre-fill email if provided
-            if let email = email {
-                emailField.text = email
-                emailField.isUserInteractionEnabled = false
-                emailField.alpha = 0.7
-            }
-            
-            // Show/hide appropriate auth methods based on provider
-            switch provider {
-            case .emailPassword:
-                signInWithAppleButton.isHidden = true
-                orDividerView.isHidden = true
-            case .apple:
-                // Hide email/password fields, show only Apple
-                emailField.isHidden = true
-                passwordField.isHidden = true
-                forgotPasswordButton.isHidden = true
-                loginButton.isHidden = true
-                orDividerView.isHidden = true
-            }
-            
-            // Add close button for modal presentation
-            setupReauthNavigationBar()
-        }
-    }
-    
-    private func setupReauthNavigationBar() {
-        navigationController?.setNavigationBarHidden(false, animated: false)
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel,
-            target: self,
-            action: #selector(cancelReauthentication)
-        )
-    }
-    
-    @objc private func cancelReauthentication() {
-        dismiss(animated: true)
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-
-        if shouldShowSignUpFlow {
-            shouldShowSignUpFlow = false // Reset flag
-            presentSignUpFlow()
-        }
     }
     
     override func addSubviews() {
@@ -429,14 +346,6 @@ final class LoginViewController: NNViewController {
     }
     
     @objc private func signInWithAppleTapped() {
-        // Provide immediate feedback so the tap doesn't feel like a hang
-        HapticsHelper.lightHaptic()
-        signInWithAppleButton.isEnabled = false
-        UIView.animate(withDuration: 0.15, animations: {
-            self.signInWithAppleButton.alpha = 0.7
-            self.signInWithAppleButton.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
-        })
-        
         let appleIDProvider = ASAuthorizationAppleIDProvider()
         let request = appleIDProvider.createRequest()
         request.requestedScopes = [.fullName, .email]
@@ -449,7 +358,9 @@ final class LoginViewController: NNViewController {
     }
     
     @objc private func signUpTapped() {
-        presentSignUpFlow()
+        self.dismiss(animated: true) {
+            self.delegate?.signUpTapped()
+        }
     }
     
     @objc private func forgotPasswordTapped() {
@@ -543,26 +454,6 @@ final class LoginViewController: NNViewController {
                 }
                 loginButton.startLoading()
                 passwordField.resignFirstResponder()
-                
-                // Check if we're in reauthentication mode
-                if case .reauthentication(_, _, let onReauthentication) = mode {
-                    // For reauthentication, we just need to verify the password works
-                    // The actual reauthentication with Firebase will happen in the caller
-                    _ = try await UserService.shared.login(email: email, password: password)
-                    await MainActor.run {
-                        loginButton.stopLoading(withSuccess: true)
-                        Logger.log(level: .info, category: .general, message: "Reauthentication successful")
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            self.dismiss(animated: true) {
-                                onReauthentication(.password(password))
-                            }
-                        }
-                    }
-                    return
-                }
-                
-                // Normal login flow
                 _ = try await UserService.shared.login(email: email, password: password)
                 try await Launcher.shared.configure()
                 UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
@@ -620,17 +511,6 @@ final class LoginViewController: NNViewController {
         }
     }
     
-    private func presentSignUpFlow() {
-        let onboardingVariant = FeatureFlagService.shared.getOnboardingVariant()
-        Logger.log(level: .info, category: .general, message: "Creating onboarding coordinator with variant: \(onboardingVariant)")
-        let onboardingCoordinator = OnboardingCoordinator(configFileName: onboardingVariant)
-        let containerVC = onboardingCoordinator.start()
-        onboardingCoordinator.authenticationDelegate = self.delegate
-
-        // Push the onboarding flow onto the navigation stack
-        navigationController?.pushViewController(containerVC, animated: true)
-    }
-
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
@@ -668,28 +548,10 @@ extension LoginViewController: UITextFieldDelegate {
 extension LoginViewController: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
-            // Check if we're in reauthentication mode
-            if case .reauthentication(_, _, let onReauthentication) = mode {
-                // For reauthentication, just return the credential
-                Logger.log(level: .info, category: .general, message: "Apple reauthentication successful")
-                dismiss(animated: true) {
-                    onReauthentication(.apple(appleIDCredential))
-                }
-                return
-            }
-            
-            // Normal login/signup flow
             Task {
                 do {
                     let result = try await UserService.shared.signInWithApple(credential: appleIDCredential)
                     await MainActor.run {
-                        // Restore button state once we get a result
-                        self.signInWithAppleButton.isEnabled = true
-                        UIView.animate(withDuration: 0.15) {
-                            self.signInWithAppleButton.alpha = 1.0
-                            self.signInWithAppleButton.transform = .identity
-                        }
-                        
                         if result.isNewUser {
                             if result.isIncompleteSignup {
                                 self.showIncompleteSignupAlert(credential: appleIDCredential)
@@ -702,12 +564,6 @@ extension LoginViewController: ASAuthorizationControllerDelegate {
                     }
                 } catch {
                     await MainActor.run {
-                        self.signInWithAppleButton.isEnabled = true
-                        UIView.animate(withDuration: 0.15) {
-                            self.signInWithAppleButton.alpha = 1.0
-                            self.signInWithAppleButton.transform = .identity
-                        }
-                        
                         let alert = UIAlertController(
                             title: "Sign In Failed",
                             message: error.localizedDescription,
@@ -722,13 +578,6 @@ extension LoginViewController: ASAuthorizationControllerDelegate {
     }
     
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        // User cancelled or an error occurred before we got a credential
-        signInWithAppleButton.isEnabled = true
-        UIView.animate(withDuration: 0.15) {
-            self.signInWithAppleButton.alpha = 1.0
-            self.signInWithAppleButton.transform = .identity
-        }
-        
         let alert = UIAlertController(
             title: "Sign In Failed",
             message: error.localizedDescription,
@@ -767,8 +616,7 @@ extension LoginViewController: ASAuthorizationControllerDelegate {
             await MainActor.run {
                 Logger.log(level: .info, category: .general, message: "Successfully signed in with Apple")
                 self.delegate?.authenticationComplete()
-                // Note: Don't call dismiss here - the delegate (LaunchCoordinator) handles dismissal
-                // Calling dismiss here causes a race condition when LoginVC is pushed (not presented)
+                self.dismiss(animated: true)
             }
         }
     }

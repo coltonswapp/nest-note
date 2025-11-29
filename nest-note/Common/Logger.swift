@@ -62,26 +62,23 @@ public final class Logger {
     private func log(level: Level, category: Category?, message: String) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
-
+        
         let logLine = LogLine(
             timestamp: dateFormatter.string(from: Date()),
             level: level,
             category: category?.rawValue ?? "",
             content: message
         )
-
+        
         appendQueue.async { [weak self] in
             guard let self else { return }
-
-            // Update the published array on main queue to prevent race conditions
-            DispatchQueue.main.async {
-                self.lines.append(logLine)
-
-                if self.lines.count >= self.maxLogLines {
-                    self.lines.removeFirst()
-                }
+            
+            lines.append(logLine)
+            
+            if lines.count >= maxLogLines {
+                lines.removeFirst()
             }
-
+            
             for provider in providers {
                 provider.log(level: level, category: category, message: "## \(logLine.description)")
             }

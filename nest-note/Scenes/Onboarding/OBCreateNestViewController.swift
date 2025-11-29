@@ -65,29 +65,7 @@ class OBCreateNestViewController: NNOnboardingViewController {
         nestNameField.delegate = self
         addressField.delegate = self
         
-        // Prepopulate nest name with inferred name from user's full name
-        prefillNestName()
-        
         ctaButton?.isEnabled = false
-    }
-    
-    private func prefillNestName() {
-        guard let coordinator = coordinator as? OnboardingCoordinator else { return }
-        
-        let fullName = coordinator.currentFullName
-        guard !fullName.isEmpty else { return }
-        
-        // Extract last name from full name
-        let nameComponents = fullName.components(separatedBy: " ")
-        guard nameComponents.count > 1,
-              let lastName = nameComponents.last else { return }
-        
-        // Prepopulate field with "{LastName} Nest"
-        let suggestedNestName = "\(lastName) Nest"
-        nestNameField.text = suggestedNestName
-        
-        // Trigger validation with prepopulated name
-        textFieldDidChange()
     }
     
     private func setupValidation() {

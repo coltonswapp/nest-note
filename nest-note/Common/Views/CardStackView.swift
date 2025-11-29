@@ -310,23 +310,16 @@ class CardStackView: UIView {
             } else {
                 newCard = createCard(from: cardData[currentIndex + 2])
             }
-
-            // Start with higher visibility then fade to final position
-            newCard.alpha = 0.6
-
+            newCard.alpha = 0
+            
             if let lastCard = cards.last {
                 insertSubview(newCard, belowSubview: lastCard)
             } else {
                 addSubview(newCard)
             }
-
+            
             setupConstraints(for: newCard)
             cards.append(newCard)
-
-            // Apply the final back-stack transform immediately but with higher alpha
-            if cards.count > 1 {
-                cardTransforms[cards.count - 1].apply(to: newCard)
-            }
         }
         
         // Animate removal and position updates
@@ -345,6 +338,11 @@ class CardStackView: UIView {
                 self.cardTransforms[index].apply(to: card)
                 card.alpha = 1
                 card.layer.zPosition = CGFloat(self.cards.count - index)
+            }
+            
+            // Show empty state if this is the last card
+            if isLastCard {
+                self.emptyStateView.animateIn()
             }
         }) { _ in
             cardToRemove.removeFromSuperview()
@@ -602,10 +600,7 @@ class CardStackView: UIView {
             } else {
                 newCard = createCard(from: cardData[currentIndex + 2])
             }
-
-            // Start with higher visibility then fade to final position
-            newCard.alpha = 0.6
-
+            newCard.alpha = 0
             if let lastCard = cards.last {
                 insertSubview(newCard, belowSubview: lastCard)
             } else {
@@ -613,11 +608,6 @@ class CardStackView: UIView {
             }
             setupConstraints(for: newCard)
             cards.append(newCard)
-
-            // Apply the final back-stack transform immediately but with higher alpha
-            if cards.count > 1 {
-                cardTransforms[cards.count - 1].apply(to: newCard)
-            }
         }
         
         // Animate both the exit and the stack update simultaneously
@@ -791,12 +781,4 @@ class CardStackView: UIView {
             Logger.log(level: .debug, category: .general, message: "Updated card view at index \(index) (not currently visible)")
         }
     }
-    
-    func setEmptyState(title: String, subtitle: String, imageName: String) {
-        emptyStateView.configure(
-            icon: UIImage(systemName: imageName),
-            title: title,
-            subtitle: subtitle
-        )
-    }
-}
+} 
