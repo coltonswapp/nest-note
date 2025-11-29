@@ -44,7 +44,7 @@ class SessionInviteCardView: UIView {
     
     private let nestNameLabel: UILabel = {
         let label = UILabel()
-        label.font = .h2
+        label.font = .h1
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
         label.text = "Debug Text"
@@ -61,7 +61,7 @@ class SessionInviteCardView: UIView {
     
     private let inviteBadgeLabel: UILabel = {
         let label = UILabel()
-        label.font = .h4
+        label.font = .h3
         label.text = "SESSION INVITE"
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -70,7 +70,7 @@ class SessionInviteCardView: UIView {
     
     private let sessionDateLabel: UILabel = {
         let label = UILabel()
-        label.font = .bodyL
+        label.font = .bodyXL
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
         label.numberOfLines = 0

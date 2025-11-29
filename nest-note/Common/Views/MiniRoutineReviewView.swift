@@ -4,7 +4,6 @@ final class MiniRoutineReviewView: UIView {
     private let container = UIView()
     private let iconImageView = UIImageView()
     private let titleLabel = UILabel()
-    private let divider = UIView()
     private let actionsStack = UIStackView()
     private let timestampLabel = UILabel()
     
@@ -25,57 +24,49 @@ final class MiniRoutineReviewView: UIView {
         layer.shadowOpacity = 0.3
         layer.shadowOffset = CGSize(width: 4, height: 8)
         layer.shadowRadius = 8
-
+        
         container.translatesAutoresizingMaskIntoConstraints = false
         addSubview(container)
-
+        
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         iconImageView.contentMode = .scaleAspectFit
         iconImageView.tintColor = .label
         iconImageView.image = UIImage(systemName: "checklist")
-
+        
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .h3
         titleLabel.textColor = .label
         titleLabel.numberOfLines = 2
-
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.backgroundColor = .quaternaryLabel
-
+        
         actionsStack.translatesAutoresizingMaskIntoConstraints = false
         actionsStack.axis = .vertical
         actionsStack.spacing = 12
-
+        
         timestampLabel.translatesAutoresizingMaskIntoConstraints = false
         timestampLabel.font = .bodyL
         timestampLabel.textColor = .secondaryLabel
-
-        [iconImageView, titleLabel, divider, actionsStack, timestampLabel].forEach { container.addSubview($0) }
+        
+        [iconImageView, titleLabel, actionsStack, timestampLabel].forEach { container.addSubview($0) }
         
         NSLayoutConstraint.activate([
             container.topAnchor.constraint(equalTo: topAnchor, constant: 16),
             container.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             container.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-
+            
             iconImageView.topAnchor.constraint(equalTo: container.topAnchor),
             iconImageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             iconImageView.widthAnchor.constraint(equalToConstant: 24),
             iconImageView.heightAnchor.constraint(equalToConstant: 24),
-
+            
             titleLabel.centerYAnchor.constraint(equalTo: iconImageView.centerYAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            divider.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 12),
-            divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            divider.heightAnchor.constraint(equalToConstant: 1),
-
-            actionsStack.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 12),
+            
+            actionsStack.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 12),
             actionsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             actionsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
+            
             timestampLabel.topAnchor.constraint(greaterThanOrEqualTo: actionsStack.bottomAnchor, constant: 12),
             timestampLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             timestampLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -124,18 +115,18 @@ final class MiniRoutineReviewView: UIView {
                 // Row should stretch horizontally within the stack
                 row.leadingAnchor.constraint(equalTo: actionsStack.leadingAnchor),
                 row.trailingAnchor.constraint(equalTo: actionsStack.trailingAnchor),
-
+                
                 // Bullet size and leading
                 bullet.leadingAnchor.constraint(equalTo: row.leadingAnchor),
                 bullet.widthAnchor.constraint(equalToConstant: bulletSize),
                 bullet.heightAnchor.constraint(equalToConstant: bulletSize),
-
-                // Label placement - fix the row height issue
+                
+                // Label placement
                 label.leadingAnchor.constraint(equalTo: bullet.trailingAnchor, constant: spacing),
                 label.topAnchor.constraint(equalTo: row.topAnchor),
                 label.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                label.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-
+                label.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor),
+                
                 // Align bullet center with the first text line center using cap-height
                 bullet.centerYAnchor.constraint(equalTo: label.firstBaselineAnchor, constant: capOffset)
             ])

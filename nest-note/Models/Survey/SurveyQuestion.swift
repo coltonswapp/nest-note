@@ -5,7 +5,6 @@ struct SurveyQuestion: Codable {
     let title: String
     let subtitle: String?
     let options: [String]
-    let optionSubtitles: [String]?
     let isMultiSelect: Bool
 
     // Optional metadata that might be useful
@@ -17,7 +16,6 @@ struct SurveyQuestion: Codable {
         case title
         case subtitle
         case options
-        case optionSubtitles = "option_subtitles"
         case isMultiSelect = "multi_select"
         case category
         case order
@@ -30,22 +28,6 @@ struct SurveyQuestion: Codable {
         #else
         return options.filter { !$0.hasPrefix("DEBUG") }
         #endif
-    }
-
-    // Create SurveyOption objects with subtitles
-    func createSurveyOptions() -> [SurveyOption] {
-        let filteredOpts = filteredOptions
-        return filteredOpts.enumerated().map { index, option in
-            let subtitle = optionSubtitles?[safe: index]
-            return SurveyOption(title: option, subtitle: subtitle)
-        }
-    }
-}
-
-// Safe array access extension
-extension Array {
-    subscript(safe index: Index) -> Element? {
-        return indices.contains(index) ? self[index] : nil
     }
 }
 

@@ -59,7 +59,7 @@ class NNOnboardingViewController: UIViewController {
     }
     
     // MARK: - Setup Methods
-    func setupBaseUI() {
+    private func setupBaseUI() {
         view.addSubview(labelStack)
         labelStack.addArrangedSubview(titleLabel)
         labelStack.addArrangedSubview(subtitleLabel)

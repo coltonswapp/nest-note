@@ -24,9 +24,6 @@ struct SitterSession: Identifiable, Codable {
     /// Date when the parent session was archived (if applicable)
     let parentSessionArchivedDate: Date?
     
-    /// When the sitter submitted a session review (nil = not reviewed)
-    var reviewedAt: Date?
-    
     /// Creates a new SitterSession
     /// - Parameters:
     ///   - id: The session ID
@@ -36,7 +33,6 @@ struct SitterSession: Identifiable, Codable {
     ///   - readyToArchive: Whether this session is ready to be archived
     ///   - parentSessionCompletedDate: When the parent session was completed
     ///   - parentSessionArchivedDate: When the parent session was archived
-    ///   - reviewedAt: When the sitter submitted a review
     init(
         id: String,
         nestID: String,
@@ -44,8 +40,7 @@ struct SitterSession: Identifiable, Codable {
         inviteAcceptedAt: Date = Date(),
         readyToArchive: Bool? = false,
         parentSessionCompletedDate: Date? = nil,
-        parentSessionArchivedDate: Date? = nil,
-        reviewedAt: Date? = nil
+        parentSessionArchivedDate: Date? = nil
     ) {
         self.id = id
         self.nestID = nestID
@@ -54,6 +49,5 @@ struct SitterSession: Identifiable, Codable {
         self.readyToArchive = readyToArchive
         self.parentSessionCompletedDate = parentSessionCompletedDate
         self.parentSessionArchivedDate = parentSessionArchivedDate
-        self.reviewedAt = reviewedAt
     }
 } 

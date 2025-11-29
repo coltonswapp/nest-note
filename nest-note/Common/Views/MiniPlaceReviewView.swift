@@ -2,7 +2,7 @@ import UIKit
 
 final class MiniPlaceReviewView: UIView {
     private let container = UIView()
-    let thumbnailImageView = UIImageView()
+    private let thumbnailImageView = UIImageView()
     private let aliasLabel = UILabel()
     private let addressLabel = UILabel()
     private let timestampLabel = UILabel()
