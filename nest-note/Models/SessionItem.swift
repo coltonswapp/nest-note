@@ -104,6 +104,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var earlyAccessDuration: EarlyAccessDuration
     var earlyAccessEndDate: Date?
     var entryIds: [String]? // Now stores IDs for all selected items (entries, places, etc.)
+    var ownerReviewedAt: Date? // When the owner submitted a session review (nil = not reviewed)
     
     // Computed property to check if session has an active invite
     var hasActiveInvite: Bool {
@@ -171,7 +172,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         ownerID: String? = NestService.shared.currentNest?.ownerId,
         earlyAccessDuration: EarlyAccessDuration = .halfDay,
         earlyAccessEndDate: Date? = nil,
-        entryIds: [String]? = nil
+        entryIds: [String]? = nil,
+        ownerReviewedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -186,6 +188,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         self.earlyAccessDuration = earlyAccessDuration
         self.earlyAccessEndDate = earlyAccessEndDate
         self.entryIds = entryIds
+        self.ownerReviewedAt = ownerReviewedAt
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -261,6 +264,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case earlyAccessDuration
         case earlyAccessEndDate
         case entryIds
+        case ownerReviewedAt
     }
     
     required init(from decoder: Decoder) throws {
@@ -284,6 +288,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         }
         earlyAccessEndDate = try container.decodeIfPresent(Date.self, forKey: .earlyAccessEndDate)
         entryIds = try container.decodeIfPresent([String].self, forKey: .entryIds)
+        ownerReviewedAt = try container.decodeIfPresent(Date.self, forKey: .ownerReviewedAt)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
@@ -320,7 +325,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             ownerID: self.ownerID,
             earlyAccessDuration: self.earlyAccessDuration,
             earlyAccessEndDate: self.earlyAccessEndDate,
-            entryIds: self.entryIds
+            entryIds: self.entryIds,
+            ownerReviewedAt: self.ownerReviewedAt
         )
         return copiedSession
     }

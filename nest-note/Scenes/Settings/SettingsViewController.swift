@@ -172,11 +172,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
                 return section
                 
-            case .myNest, .mySitting, .general, .debug:
+            case .myNest, .mySitting, .general, .admin, .experimental, .debug:
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-                
+
                 // Standardize header size
                 let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
@@ -215,7 +215,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             var content = cell.defaultContentConfiguration()
             
             switch item {
-            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .debugItem(let title, let symbolName):
+            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .adminItem(let title, let symbolName), .experimentalItem(let title, let symbolName), .debugItem(let title, let symbolName):
                 content.text = title
                 
                 // Create a symbol configuration with semibold weight
@@ -269,7 +269,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 return collectionView.dequeueConfiguredReusableCell(using: accountCellRegistration, for: indexPath, item: item)
             case .currentNest:
                 return collectionView.dequeueConfiguredReusableCell(using: currentNestCellRegistration, for: indexPath, item: item)
-            case .myNest, .mySitting, .general, .debug:
+            case .myNest, .mySitting, .general, .admin, .experimental, .debug:
                 return collectionView.dequeueConfiguredReusableCell(using: listCellRegistration, for: indexPath, item: item)
             }
         }
@@ -369,44 +369,53 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         snapshot.appendItems(generalItemsFormatted, toSection: .general)
         
         #if DEBUG
-        snapshot.appendSections([.debug])
-        let debugItems = [
-            ("Reset App State", "arrow.counterclockwise"),
-            ("View Logs", "text.alignleft"),
-            ("UserDefaults Viewer", "externaldrive.fill"),
+        snapshot.appendSections([.admin, .experimental])
+
+        // Admin section - management and analytics tools
+        let adminItems = [
+            ("Referral Admin", "person.badge.plus.fill"),
+            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
             ("Survey Dashboard", "chart.bar.fill"),
+            ("Session Reviews", "star.bubble.fill"),
+            ("UserDefaults Viewer", "externaldrive.fill"),
+            ("View Logs", "text.alignleft"),
+            ("Reset App State", "arrow.counterclockwise"),
+        ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
+        snapshot.appendItems(adminItems, toSection: .admin)
+
+        // Experimental section - testing and development tools
+        let experimentalItems = [
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
+            ("Glassy Button Playground", "slider.horizontal.3"),
+            ("Toast Test", "text.bubble.fill"),
+            ("Explosions", "burst.fill"),
+            ("Reset Tooltips", "questionmark.circle.fill"),
             ("Onboarding", "sparkles"),
+            ("Onboarding Baseline", "doc.text"),
+            ("Onboarding Variant A", "a.circle"),
+            ("Onboarding Variant B", "b.circle"),
+            ("Test Bullet Onboarding", "list.bullet.clipboard.fill"),
+            ("Test Finish Animation", "sparkles.rectangle.stack.fill"),
+            ("Test Missing Info Screen", "exclamationmark.triangle.fill"),
+            ("Test Preview Cards", "rectangle.stack.badge.play.fill"),
             ("Create Session", "calendar.badge.plus"),
+            ("Test Schedule View", "calendar.day.timeline.left"),
+            ("Test Join Session Animation", "person.crop.circle.badge.plus"),
+            ("Test Session Review", "star.bubble"),
+            ("Test Subscription Status", "creditcard.circle"),
+            ("Test Survey Screen", "list.bullet.rectangle.portrait"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
             ("Test Invite Sitter Screen", "person.badge.plus"),
-            ("Glassy Button Playground", "slider.horizontal.3"),
             ("Entry Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
             ("Debug Card Stack", "rectangle.stack"),
             ("Test Add Place", "mappin.and.ellipse.circle.fill"),
             ("Test Place List", "list.star"),
             ("Test Place Map", "map.fill"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
-            ("Toast Test", "text.bubble.fill"),
-            ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
-            ("Reset Tooltips", "questionmark.circle.fill"),
-            ("Test Subscription Status", "creditcard.circle"),
-            ("Test Survey Screen", "list.bullet.rectangle.portrait"),
-            ("Test Bullet Onboarding", "list.bullet.clipboard.fill"),
-            ("Onboarding Baseline", "doc.text"),
-            ("Onboarding Variant A", "a.circle"),
-            ("Onboarding Variant B", "b.circle"),
-            ("Test Finish Animation", "sparkles.rectangle.stack.fill"),
-            ("Explosions", "burst.fill"),
-            ("Referral Admin", "person.badge.plus.fill"),
-            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
-            ("Test Missing Info Screen", "exclamationmark.triangle.fill"),
-            ("Test Preview Cards", "rectangle.stack.badge.play.fill"),
-            ("Test Join Session Animation", "person.crop.circle.badge.plus"),
-        ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
-        snapshot.appendItems(debugItems, toSection: .debug)
+        ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
+        snapshot.appendItems(experimentalItems, toSection: .experimental)
         #endif
         
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -418,6 +427,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case myNest = "My Nest"
         case mySitting = "My Sitting"
         case general = "General"
+        case admin = "Admin"
+        case experimental = "Experimental"
         case debug = "Debug"
     }
 
@@ -426,6 +437,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case currentNest(name: String, address: String)
         case myNestItem(title: String, symbolName: String)
         case generalItem(title: String, symbolName: String)
+        case adminItem(title: String, symbolName: String)
+        case experimentalItem(title: String, symbolName: String)
         case debugItem(title: String, symbolName: String)
     }
 
@@ -485,6 +498,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let vc = SurveyDashboardViewController()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
+        case "Session Reviews":
+            let vc = SessionReviewListViewController()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         case "Test Schedule View":
             let vc = CalendarViewController()
             let nav = UINavigationController(rootViewController: vc)
@@ -541,6 +558,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             vc.enableDebugMode()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
+        case "Test Session Review":
+            let vc = SessionReviewViewController()
+            vc.enableDebugMode()
+            present(vc, animated: true)
         default:
             break
         }
@@ -657,6 +678,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             }
         
         #if DEBUG
+        case .adminItem(let title, _):
+            handleDebugItemSelection(title)
+        case .experimentalItem(let title, _):
+            handleDebugItemSelection(title)
         case .debugItem(let title, _):
             handleDebugItemSelection(title)
         #endif

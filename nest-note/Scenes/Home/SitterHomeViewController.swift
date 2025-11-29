@@ -463,6 +463,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             applySnapshot(session: session, nest: nest)
             // Fetch events for the current session
             fetchSessionEvents(session: session)
+            // Check for session review prompt after data loads
+            checkForSessionReviewPrompt()
             
         case .noSession:
             loadingSpinner.stopAnimating()
@@ -476,12 +478,29 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             // Ensure it's interactive
             emptyStateView.isUserInteractionEnabled = true
             
+            // Check for session review prompt even when no active session
+            // (sitter may need to review a recently completed session)
+            checkForSessionReviewPrompt()
+            
         case .error(let error):
             loadingSpinner.stopAnimating()
             // Keep collection view visible (but empty) to preserve large title behavior
             applyEmptySnapshot()
             emptyStateView.animateIn()
             handleError(error)
+        }
+    }
+    
+    /// Checks if user should be prompted to review a recent session
+    private func checkForSessionReviewPrompt() {
+        // Don't prompt if we're presenting something or not visible
+        guard presentedViewController == nil,
+              view.window != nil else {
+            return
+        }
+        
+        Task {
+            await SessionReviewManager.shared.checkAndPromptForReviewIfNeeded(from: self)
         }
     }
     

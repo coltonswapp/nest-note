@@ -491,12 +491,15 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self.pinnedCategories = pinnedCategoryNames
                 self.categories = categories
                 
-                DispatchQueue.main.async { [weak self] in
+                await MainActor.run { [weak self] in
                     self?.loadingSpinner.stopAnimating()
                     self?.applySnapshot(animatingDifferences: true)
+                    
+                    // Check for session review prompt after data loads
+                    self?.checkForSessionReviewPrompt()
                 }
             } catch {
-                DispatchQueue.main.async { [weak self] in
+                await MainActor.run { [weak self] in
                     self?.loadingSpinner.stopAnimating()
                     self?.currentSession = nil // Clear on error
                     self?.pinnedCategories = []
@@ -505,6 +508,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     self?.handleError(error)
                 }
             }
+        }
+    }
+    
+    /// Checks if user should be prompted to review a recent session
+    private func checkForSessionReviewPrompt() {
+        // Don't prompt if we're presenting something or not visible
+        guard presentedViewController == nil,
+              view.window != nil else {
+            return
+        }
+        
+        Task {
+            await SessionReviewManager.shared.checkAndPromptForReviewIfNeeded(from: self)
         }
     }
     
