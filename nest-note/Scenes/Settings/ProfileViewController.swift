@@ -258,16 +258,127 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             message: "Are you sure you want to delete your account? This action cannot be undone.",
             preferredStyle: .alert
         )
-        
+
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-            // TODO: Implement account deletion
-            Logger.log(level: .info, category: .auth, message: "User requested account deletion")
+            Task {
+                do {
+                    // Show activity indicator
+                    await MainActor.run {
+                        self?.activityIndicator.startAnimating()
+                        self?.collectionView.isUserInteractionEnabled = false
+                    }
+
+                    // Delete the account
+                    try await UserService.shared.deleteAccount()
+
+                    // Account deletion successful - reset app and show landing
+                    await Launcher.shared.reset()
+
+                    // Dismiss all modals and return to landing
+                    await MainActor.run {
+                        guard let rootVC = self?.view.window?.rootViewController else { return }
+                        rootVC.dismiss(animated: true)
+                    }
+
+                } catch {
+                    // Hide activity indicator and handle error
+                    await MainActor.run {
+                        self?.activityIndicator.stopAnimating()
+                        self?.collectionView.isUserInteractionEnabled = true
+
+                        // Check if this is a reauthentication error
+                        if let reauthError = error as? ReauthenticationError {
+                            switch reauthError {
+                            case .passwordPromptRequired(let email):
+                                self?.showPasswordReauthenticationPrompt(email: email)
+                            case .appleSignInRequired:
+                                self?.showAppleSignInReauthentication()
+                            }
+                        } else {
+                            // Show generic error message
+                            let errorAlert = UIAlertController(
+                                title: "Error",
+                                message: "Failed to delete account: \(error.localizedDescription)",
+                                preferredStyle: .alert
+                            )
+                            errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                            self?.present(errorAlert, animated: true)
+                        }
+                    }
+                }
+            }
         })
-        
+
         present(alert, animated: true)
     }
+
+    private func showPasswordReauthenticationPrompt(email: String) {
+        presentReauthentication(email: email, provider: .emailPassword)
+    }
+
+    private func showAppleSignInReauthentication() {
+        presentReauthentication(email: UserService.shared.currentUser?.personalInfo.email, provider: .apple)
+    }
     
+    private func presentReauthentication(email: String?, provider: AuthProvider) {
+        let loginVC = LoginViewController()
+        loginVC.mode = .reauthentication(
+            email: email,
+            provider: provider,
+            onReauthentication: { [weak self] credential in
+                self?.handleReauthenticationComplete(credential: credential)
+            }
+        )
+        
+        let navController = UINavigationController(rootViewController: loginVC)
+        navController.modalPresentationStyle = .pageSheet
+        present(navController, animated: true)
+    }
+    
+    private func handleReauthenticationComplete(credential: ReauthCredential) {
+        Task {
+            do {
+                // Show activity indicator
+                await MainActor.run {
+                    self.activityIndicator.startAnimating()
+                    self.collectionView.isUserInteractionEnabled = false
+                }
+                
+                switch credential {
+                case .password(let password):
+                    try await UserService.shared.reauthenticateAndDeleteAccount(password: password)
+                case .apple(let appleCredential):
+                    try await UserService.shared.reauthenticateAndDeleteAccount(appleCredential: appleCredential)
+                }
+                
+                // Account deletion successful - reset app and show landing
+                await Launcher.shared.reset()
+                
+                // Dismiss all modals and return to landing
+                await MainActor.run {
+                    guard let rootVC = self.view.window?.rootViewController else { return }
+                    rootVC.dismiss(animated: true)
+                    
+                    showToast(delay: 1.5, text: "Account Deleted", sentiment: .positive)
+                }
+            } catch {
+                await MainActor.run {
+                    self.activityIndicator.stopAnimating()
+                    self.collectionView.isUserInteractionEnabled = true
+                    
+                    let errorAlert = UIAlertController(
+                        title: "Account Deletion Failed",
+                        message: "Failed to delete account: \(error.localizedDescription)",
+                        preferredStyle: .alert
+                    )
+                    errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(errorAlert, animated: true)
+                }
+            }
+        }
+    }
+
     @objc private func handleUserInformationUpdate() {
         applyInitialSnapshots()
     }

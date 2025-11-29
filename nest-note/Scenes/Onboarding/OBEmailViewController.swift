@@ -195,8 +195,35 @@ extension OBEmailViewController: UITextFieldDelegate {
 // MARK: - ASAuthorizationControllerDelegate
 extension OBEmailViewController: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
-        if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
-            (coordinator as? OnboardingCoordinator)?.handleAppleSignInMidFlow(credential: appleIDCredential)
+        guard let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+            return
+        }
+
+        // First, sign in with Apple via Firebase so we have a valid auth.currentUser
+        Task {
+            do {
+                _ = try await UserService.shared.signInWithApple(credential: appleIDCredential)
+
+                await MainActor.run {
+                    // Update the email field with the Apple email if available
+                    if let email = appleIDCredential.email {
+                        self.emailTextField.text = email
+                    }
+
+                    // Now hand off to the onboarding coordinator to update flow state
+                    (self.coordinator as? OnboardingCoordinator)?
+                        .handleAppleSignInMidFlow(credential: appleIDCredential)
+                }
+            } catch {
+                await MainActor.run {
+                    self.showToast(
+                        delay: 0.5,
+                        text: "Sign in failed",
+                        subtitle: error.localizedDescription,
+                        sentiment: .negative
+                    )
+                }
+            }
         }
     }
     

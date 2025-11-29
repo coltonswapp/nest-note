@@ -1138,7 +1138,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
 
             // Add End Session section only for in-progress sessions
-            if isEditingSession && sessionItem.status == .inProgress && !isArchivedSession {
+            if isEditingSession && sessionItem.status.contains([.inProgress, .extended]) && !isArchivedSession {
                 snapshot.appendSections([.endSession])
                 snapshot.appendItems([.endSession], toSection: .endSession)
             }
@@ -1215,11 +1215,54 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             title: "End Session",
             style: .destructive
         ) { [weak self] _ in
-            self?.applyStatusChange(.completed)
-            self?.saveButtonTapped()
+            guard let self = self else { return }
+            self.applyStatusChange(.completed)
+            
+            // Save the session first, then show the review prompt
+            Task {
+                do {
+                    self.saveButton.startLoading()
+                    try await SessionService.shared.updateSession(self.sessionItem)
+                    
+                    // Post notification that session was updated with status change
+                    NotificationCenter.default.post(
+                        name: .sessionStatusDidChange,
+                        object: nil,
+                        userInfo: ["sessionId": self.sessionItem.id, "newStatus": self.sessionItem.status.rawValue]
+                    )
+                    
+                    try await Task.sleep(for: .seconds(0.5))
+                    self.saveButton.stopLoading(withSuccess: true)
+                    
+                    // Call delegate BEFORE showing review
+                    self.delegate?.editSessionViewController(self, didUpdateSession: self.sessionItem)
+                    
+                    await MainActor.run {
+                        // Show session review after ending session
+                        self.presentSessionReview()
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.saveButton.stopLoading(withSuccess: false)
+                        self.showToast(text: "Failed to end session")
+                        Logger.log(level: .error, category: .sessionService, message: "Error ending session: \(error.localizedDescription)")
+                    }
+                }
+            }
         })
 
         present(alert, animated: true)
+    }
+    
+    private func presentSessionReview() {
+        let reviewVC = SessionReviewViewController(sessionId: sessionItem.id, nestId: sessionItem.nestID)
+
+        // When the review is dismissed (either by submitting or closing), dismiss EditSessionViewController too
+        reviewVC.onDismiss = { [weak self] in
+            self?.dismiss(animated: true)
+        }
+
+        present(reviewVC, animated: true)
     }
 
     private func exportPDFButtonTapped() {
@@ -2883,6 +2926,8 @@ class SessionInviteSitterCell: UICollectionViewListCell {
             let formattedCode = String(code.prefix(3)) + "-" + String(code.suffix(3))
             codeLabel.setTitle(formattedCode)
             codeLabel.isUserInteractionEnabled = true
+            codeLabel.titleLabel.addShimmerEffect()
+            codeLabel.titleLabel.startShimmer()
         } else {
             codeLabel.backgroundColor = UIColor.tertiarySystemGroupedBackground
             codeLabel.foregroundColor = .secondaryLabel

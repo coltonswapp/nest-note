@@ -500,10 +500,3 @@ private class RecentReferralCell: UICollectionViewListCell {
         dateLabel.text = dateFormatter.string(from: date)
     }
 }
-
-// MARK: - Array Extension for Safe Access
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        return indices.contains(index) ? self[index] : nil
-    }
-}

@@ -7,7 +7,7 @@ struct NNBulletItem {
 }
 
 final class NNBulletStack: UIView {
-    
+
     // MARK: - Properties
     private let stackView: UIStackView = {
         let stack = UIStackView()
@@ -16,9 +16,13 @@ final class NNBulletStack: UIView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }()
+
+    private let animated: Bool
+    private var iconImageViews: [UIImageView] = []
     
     // MARK: - Initialization
-    init(items: [NNBulletItem]) {
+    init(items: [NNBulletItem], animated: Bool = false) {
+        self.animated = animated
         super.init(frame: .zero)
         setupView(with: items)
     }
@@ -30,21 +34,32 @@ final class NNBulletStack: UIView {
     // MARK: - Setup
     private func setupView(with items: [NNBulletItem]) {
         addSubview(stackView)
-        
+
         NSLayoutConstraint.activate([
             stackView.topAnchor.constraint(equalTo: topAnchor),
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-        
+
         // Add items
-        for item in items {
-            addLevelInfo(title: item.title, description: item.description, iconName: item.iconName)
+        for (_, item) in items.enumerated() {
+            let container = addLevelInfo(title: item.title, description: item.description, iconName: item.iconName)
+
+            if animated {
+                // Set initial state for animation
+                container.alpha = 0
+                container.transform = CGAffineTransform(translationX: 0, y: 30)
+            }
+        }
+
+        if animated {
+            animateItems()
         }
     }
     
-    private func addLevelInfo(title: String, description: String, iconName: String) {
+    @discardableResult
+    private func addLevelInfo(title: String, description: String, iconName: String) -> UIView {
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
         
@@ -60,6 +75,9 @@ final class NNBulletStack: UIView {
         iconImageView.image = UIImage(systemName: iconName, withConfiguration: config)
         iconImageView.tintColor = NNColors.primary
         iconImageView.contentMode = .scaleAspectFit
+
+        // Store reference for animation
+        iconImageViews.append(iconImageView)
         
         let titleLabel = UILabel()
         titleLabel.text = title
@@ -94,5 +112,34 @@ final class NNBulletStack: UIView {
         ])
         
         stackView.addArrangedSubview(container)
+        return container
+    }
+
+    // MARK: - Animation
+    private func animateItems() {
+        let containers = stackView.arrangedSubviews
+
+        for (index, container) in containers.enumerated() {
+            let delay = Double(index) * 0.3 // 300ms delay between each item
+
+            UIView.animate(
+                withDuration: 1.2,
+                delay: delay,
+                usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.3,
+                options: [.curveEaseOut]
+            ) {
+                container.alpha = 1.0
+                container.transform = .identity
+            }
+
+            // Add symbol effect to the corresponding icon
+            if index < iconImageViews.count {
+                let iconImageView = iconImageViews[index]
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.2) {
+                    iconImageView.addSymbolEffect(.appear.up)
+                }
+            }
+        }
     }
 } 

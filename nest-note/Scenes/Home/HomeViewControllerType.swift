@@ -229,4 +229,62 @@ extension HomeViewControllerType {
         }
     }
     
+    /// Configures the collection view with the shared gradient background
+    func applyGradientBackground() {
+        collectionView.backgroundColor = .clear
+        collectionView.backgroundView = HomeGradientBackgroundView()
+    }
+}
+
+// MARK: - Gradient Background View
+/// Shared gradient background view for home view controllers
+/// Creates a subtle mint/sage green glow at the top that fades into the system background
+class HomeGradientBackgroundView: UIView {
+    private let gradientLayer = CAGradientLayer()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupGradient()
+        registerForTraitChanges()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupGradient()
+        registerForTraitChanges()
+    }
+    
+    private func registerForTraitChanges() {
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.updateGradientColors()
+        }
+    }
+    
+    private func setupGradient() {
+        updateGradientColors()
+        gradientLayer.locations = [-0.2, 0.6]
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0.5)
+        
+        layer.insertSublayer(gradientLayer, at: 0)
+        
+        // Fill the rest with system background
+        backgroundColor = .systemGroupedBackground
+    }
+    
+    private func updateGradientColors() {
+        // Subtle mint/sage green glow color
+        let glowColor = NNColors.primary.withAlphaComponent(0.75)
+        let systemBackground = UIColor.systemGroupedBackground
+        
+        gradientLayer.colors = [
+            glowColor.cgColor,
+            systemBackground.cgColor
+        ]
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = bounds
+    }
 }

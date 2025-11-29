@@ -3,7 +3,14 @@ import UIKit
 // MARK: - Survey Option
 struct SurveyOption {
     let title: String
+    let subtitle: String?
     var isSelected: Bool = false
+
+    init(title: String, subtitle: String? = nil, isSelected: Bool = false) {
+        self.title = title
+        self.subtitle = subtitle
+        self.isSelected = isSelected
+    }
 }
 
 // MARK: - Survey Option Cell
@@ -35,6 +42,15 @@ class SurveyOptionCell: UICollectionViewCell {
         label.textAlignment = .center
         return label
     }()
+
+    private let subtitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyS
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.textColor = .secondaryLabel
+        return label
+    }()
     
     // MARK: - Properties
     var isOptionSelected: Bool = false {
@@ -45,7 +61,9 @@ class SurveyOptionCell: UICollectionViewCell {
     
     var isMultiSelect: Bool = true {
         didSet {
-            setupLayout()
+            if oldValue != isMultiSelect {
+                setupLayout()
+            }
         }
     }
     
@@ -62,46 +80,77 @@ class SurveyOptionCell: UICollectionViewCell {
     // MARK: - Setup
     private func setupUI() {
         contentView.addSubview(stackView)
-        
+
         // Setup cell appearance
         contentView.layer.borderWidth = 1.5
         contentView.layer.cornerRadius = 8
         contentView.clipsToBounds = true
-        
+
+        // Initial layout setup - will be updated in configure
         setupLayout()
         updateAppearance()
     }
     
+    private var labelStackConstraints: [NSLayoutConstraint] = []
+
     private func setupLayout() {
-        // Remove all arranged subviews
+        // Remove all arranged subviews and deactivate previous constraints
         stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        
+        NSLayoutConstraint.deactivate(labelStackConstraints)
+        labelStackConstraints.removeAll()
+
         if isMultiSelect {
             stackView.axis = .horizontal
             titleLabel.textAlignment = .left
-            stackView.addArrangedSubview(titleLabel)
+            subtitleLabel.textAlignment = .left
+
+            // Create a vertical stack for title and subtitle
+            let labelStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+            labelStack.axis = .vertical
+            labelStack.spacing = 4
+            labelStack.alignment = .leading
+            labelStack.distribution = .fill
+            labelStack.translatesAutoresizingMaskIntoConstraints = false
+
+            stackView.addArrangedSubview(labelStack)
             stackView.addArrangedSubview(checkboxView)
-            
-            NSLayoutConstraint.activate([
+
+            let constraints = [
                 stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
                 stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
                 stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
                 stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
-                
+
                 checkboxView.widthAnchor.constraint(equalToConstant: 24),
-                checkboxView.heightAnchor.constraint(equalToConstant: 24)
-            ])
+                checkboxView.heightAnchor.constraint(equalToConstant: 24),
+
+                // Minimum height for consistent sizing
+                contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 56)
+            ]
+
+            labelStackConstraints = constraints
+            NSLayoutConstraint.activate(constraints)
         } else {
-            stackView.axis = .horizontal
+            stackView.axis = .vertical
             titleLabel.textAlignment = .center
+            subtitleLabel.textAlignment = .center
+
             stackView.addArrangedSubview(titleLabel)
-            
-            NSLayoutConstraint.activate([
+            stackView.addArrangedSubview(subtitleLabel)
+            stackView.spacing = 4
+
+            let constraints = [
                 stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
                 stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
                 stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-                stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)
-            ])
+                stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+
+                // Minimum height for consistent sizing
+                contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 56)
+            ]
+
+            labelStackConstraints = constraints
+            NSLayoutConstraint.activate(constraints)
         }
     }
     
@@ -139,27 +188,36 @@ class SurveyOptionCell: UICollectionViewCell {
     
     func configure(with option: SurveyOption, isMultiSelect: Bool) {
         titleLabel.text = option.title
+        subtitleLabel.text = option.subtitle
+        subtitleLabel.isHidden = option.subtitle == nil
+        
         self.isMultiSelect = isMultiSelect
         self.isOptionSelected = option.isSelected
+
+        // Force layout update after configuration
+        setupLayout()
     }
 }
 
 // MARK: - Survey View Controller
 class NNOnboardingSurveyViewController: NNOnboardingViewController {
-    
+
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var options: [SurveyOption] = []
     private var isMultiSelect: Bool = true
     private var currentQuestion: SurveyQuestion?
-    
+
+    // Store the last touch location for explosions
+    private var lastTouchLocation: CGPoint = .zero
+
     private lazy var nextButton: NNPrimaryLabeledButton = {
         let button = NNPrimaryLabeledButton(title: "Next")
         button.addTarget(self, action: #selector(nextButtonTapped), for: .touchUpInside)
         button.isEnabled = false
         return button
     }()
-    
+
     // Store pending configuration
     private struct PendingConfiguration {
         let question: SurveyQuestion
@@ -203,13 +261,18 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     // MARK: - Setup
     private func setupCollectionView() {
         let layout = createLayout()
-        
+
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.register(SurveyOptionCell.self, forCellWithReuseIdentifier: SurveyOptionCell.reuseIdentifier)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Add tap gesture to capture touch location
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(collectionViewTapped(_:)))
+        tapGesture.cancelsTouchesInView = false // Allow collection view to still receive touches
+        collectionView.addGestureRecognizer(tapGesture)
         
         view.addSubview(collectionView)
         
@@ -228,20 +291,20 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     private func createLayout() -> UICollectionViewLayout {
         let itemSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1.0),
-            heightDimension: .estimated(50)  // Increased height for better touch targets
+            heightDimension: .estimated(56)  // Minimum height with dynamic sizing for longer content
         )
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        
+
         let groupSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1.0),
-            heightDimension: .estimated(50)  // Match item height
+            heightDimension: .estimated(56)  // Match item height
         )
         let group = NSCollectionLayoutGroup.vertical(layoutSize: groupSize, subitems: [item])
-        
+
         let section = NSCollectionLayoutSection(group: group)
         section.interGroupSpacing = 12  // Increased spacing between cells
         section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 24, bottom: 8, trailing: 24)
-        
+
         return UICollectionViewCompositionalLayout(section: section)
     }
     
@@ -256,7 +319,7 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         currentQuestion = question
         setupOnboarding(title: question.title, subtitle: question.subtitle)
         
-        self.options = question.filteredOptions.map { SurveyOption(title: $0) }
+        self.options = question.createSurveyOptions()
         self.isMultiSelect = question.isMultiSelect
         collectionView.reloadData()
     }
@@ -269,6 +332,19 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         guard let question = currentQuestion else { return nil }
         return (question.id, getSelectedOptions())
     }
+
+    #if DEBUG
+    func setTestOptions(_ testOptions: [SurveyOption], isMultiSelect: Bool = true) {
+        print("🔍 [Survey VC] Setting test options:")
+        for (index, option) in testOptions.enumerated() {
+            print("  [\(index)] '\(option.title)' - subtitle: '\(option.subtitle ?? "nil")'")
+        }
+        self.options = testOptions
+        self.isMultiSelect = isMultiSelect
+        collectionView?.reloadData()
+        print("🔍 [Survey VC] Reloaded collection view")
+    }
+    #endif
     
     // MARK: - Private Methods
     private func updateScrollingBehavior() {
@@ -281,13 +357,24 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         collectionView.isScrollEnabled = contentHeight > (frameHeight - bottomInset)
     }
     
+    @objc private func collectionViewTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: collectionView)
+        // Convert to window coordinates for explosion (matches ExplosionManager's coordinate system)
+        if let window = view.window {
+            lastTouchLocation = collectionView.convert(location, to: window)
+        } else {
+            // Fallback to view coordinates
+            lastTouchLocation = collectionView.convert(location, to: view)
+        }
+    }
+
     @objc private func nextButtonTapped() {
         guard let response = getCurrentQuestionResponse(),
               !response.answers.isEmpty else {
             showToast(text: "Please select an option", sentiment: .negative)
             return
         }
-        
+
         // Save response and continue
         if let coordinator = coordinator as? OnboardingCoordinator {
             coordinator.updateSurveyResponses([response.questionId: response.answers])
@@ -309,28 +396,138 @@ extension NNOnboardingSurveyViewController: UICollectionViewDataSource, UICollec
     }
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        // Use the captured touch location, with fallback to cell center
+        let explosionLocation: CGPoint
+
+        if lastTouchLocation != .zero {
+            explosionLocation = lastTouchLocation
+        } else if let cell = collectionView.cellForItem(at: indexPath), let window = view.window {
+            // Fallback to cell center in window coordinates
+            explosionLocation = collectionView.convert(cell.center, to: window)
+        } else if let window = view.window {
+            // Final fallback to screen center in window coordinates
+            let viewCenter = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+            explosionLocation = view.convert(viewCenter, to: window)
+        } else {
+            // Absolute fallback
+            explosionLocation = CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
+        }
+
         if !isMultiSelect {
             // For single select, deselect all other options
             for i in 0..<options.count {
                 options[i].isSelected = (i == indexPath.item)
             }
             collectionView.reloadData()
+
+            // Trigger explosion for single selection
+            ExplosionManager.trigger(.tiny, at: explosionLocation)
         } else {
             // For multi-select, toggle the selected option
             options[indexPath.item].isSelected.toggle()
             if let cell = collectionView.cellForItem(at: indexPath) as? SurveyOptionCell {
                 cell.isOptionSelected = options[indexPath.item].isSelected
             }
+
+            // Trigger explosion for multi-selection (only when selecting, not deselecting)
+            if options[indexPath.item].isSelected {
+                ExplosionManager.trigger(.tiny, at: explosionLocation)
+            }
         }
-        
+
+        // Reset touch location after use
+        lastTouchLocation = .zero
+
         HapticsHelper.lightHaptic()
-        
+
         // Check the current state of selected options
         let hasSelectedOptions = !getSelectedOptions().isEmpty
-        
+
         // Only update isEnabled if the state is different from current state
         if nextButton.isEnabled != hasSelectedOptions {
             nextButton.isEnabled = hasSelectedOptions
+        }
+    }
+}
+
+// MARK: - Bullet Onboarding View Controller
+class NNOnboardingBulletViewController: NNOnboardingViewController {
+
+    // MARK: - Properties
+    private var bulletStack: NNBulletStack?
+    private var bulletItems: [NNBulletItem] = []
+
+    private lazy var nextButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(title: "Continue")
+        button.addTarget(self, action: #selector(nextButtonTapped), for: .touchUpInside)
+        return button
+    }()
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupBulletStack()
+        ctaButton?.isHidden = true
+
+        // Add Continue button with blur
+        nextButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+    }
+
+    override func setupOnboarding(title: String, subtitle: String? = nil) {
+        super.setupOnboarding(title: title, subtitle: subtitle)
+        // Set subtitle color to secondary for consistency
+        if subtitle != nil {
+            subtitleLabel.textColor = .secondaryLabel
+        }
+    }
+
+    // MARK: - Setup
+    private func setupBulletStack() {
+        guard !bulletItems.isEmpty else { return }
+
+        bulletStack = NNBulletStack(items: bulletItems, animated: true)
+        guard let bulletStack = bulletStack else { return }
+
+        bulletStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bulletStack)
+
+        NSLayoutConstraint.activate([
+            bulletStack.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 32),
+            bulletStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
+            bulletStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
+            bulletStack.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -120)
+        ])
+    }
+
+    // MARK: - Public Methods
+    func configure(title: String, subtitle: String? = nil, bullets: [NNBulletItem]) {
+        self.bulletItems = bullets
+        setupOnboarding(title: title, subtitle: subtitle)
+
+        // If view is already loaded, setup bullet stack
+        if isViewLoaded {
+            setupBulletStack()
+        }
+    }
+
+    #if DEBUG
+    func setTestBullets(_ testBullets: [NNBulletItem]) {
+        self.bulletItems = testBullets
+
+        // Remove existing bullet stack if it exists
+        bulletStack?.removeFromSuperview()
+        bulletStack = nil
+
+        // Setup new bullet stack
+        setupBulletStack()
+    }
+    #endif
+
+    // MARK: - Actions
+    @objc private func nextButtonTapped() {
+        // Handle next button action - could be customized by coordinator
+        if let coordinator = coordinator as? OnboardingCoordinator {
+            coordinator.next()
         }
     }
 } 

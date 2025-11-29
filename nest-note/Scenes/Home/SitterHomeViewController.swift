@@ -48,10 +48,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     }()
     
     // MARK: - Lifecycle
-    override func loadView() {
-        super.loadView()
-    }
-    
     override func viewDidLoad() {
         super.viewDidLoad()
         configureDataSource()
@@ -101,9 +97,9 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         let layout = createLayout()
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.backgroundColor = .systemGroupedBackground
         collectionView.delegate = self
         collectionView.refreshControl = refreshControl
+        applyGradientBackground()
         view.addSubview(collectionView)
     }
     
@@ -456,21 +452,24 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     private func handleViewState(_ state: SitterViewService.ViewState) {
         switch state {
         case .loading:
-            collectionView.isHidden = true
+            // Keep collection view visible (but empty) to preserve large title behavior
             emptyStateView.isHidden = true
             loadingSpinner.startAnimating()
+            applyEmptySnapshot()
             
         case .ready(let session, let nest):
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = false
             emptyStateView.isHidden = true
             applySnapshot(session: session, nest: nest)
             // Fetch events for the current session
             fetchSessionEvents(session: session)
+            // Check for session review prompt after data loads
+            checkForSessionReviewPrompt()
             
         case .noSession:
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = true
+            // Keep collection view visible (but empty) to preserve large title behavior
+            applyEmptySnapshot()
             emptyStateView.isHidden = false
             
             // Animate the empty state into view
@@ -479,16 +478,29 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             // Ensure it's interactive
             emptyStateView.isUserInteractionEnabled = true
             
-            print("Empty state view is now visible and interactive: \(emptyStateView.isUserInteractionEnabled)")
-            print("Empty state view delegate: \(String(describing: emptyStateView.delegate))")
-            print("Empty state view frame: \(emptyStateView.frame)")
-            print("Empty state view is hidden: \(emptyStateView.isHidden)")
+            // Check for session review prompt even when no active session
+            // (sitter may need to review a recently completed session)
+            checkForSessionReviewPrompt()
             
         case .error(let error):
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = true
+            // Keep collection view visible (but empty) to preserve large title behavior
+            applyEmptySnapshot()
             emptyStateView.animateIn()
             handleError(error)
+        }
+    }
+    
+    /// Checks if user should be prompted to review a recent session
+    private func checkForSessionReviewPrompt() {
+        // Don't prompt if we're presenting something or not visible
+        guard presentedViewController == nil,
+              view.window != nil else {
+            return
+        }
+        
+        Task {
+            await SessionReviewManager.shared.checkAndPromptForReviewIfNeeded(from: self)
         }
     }
     
@@ -931,4 +943,5 @@ extension SitterHomeViewController: SessionCalendarViewControllerDelegate {
         // Update events section
         updateEventsSection(with: events)
     }
-} 
+}
+

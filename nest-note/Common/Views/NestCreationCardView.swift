@@ -1,13 +1,7 @@
-//
-//  SessionInviteCardView.swift
-//  nest-note
-//
-//  Created by Colton Swapp on 3/5/25.
-//
 import UIKit
 
-class SessionInviteCardView: UIView {
-    
+class NestCreationCardView: UIView {
+
     // Add content view to manage hierarchy
     private let contentView: UIView = {
         let view = UIView()
@@ -33,6 +27,7 @@ class SessionInviteCardView: UIView {
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
+
     private let perforationLayer: CAShapeLayer = {
         let layer = CAShapeLayer()
         layer.lineWidth = 2
@@ -41,34 +36,34 @@ class SessionInviteCardView: UIView {
         layer.strokeColor = UIColor.systemGray5.cgColor
         return layer
     }()
-    
+
     private let nestNameLabel: UILabel = {
         let label = UILabel()
         label.font = .h2
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
-        label.text = "Debug Text"
+        label.text = "Anderson Nest"
         return label
     }()
-    
+
     // Badge styled like NNCategoryFilterView's enabled chip
-    private let inviteBadgeView: UIView = {
+    private let newNestBadgeView: UIView = {
         let view = UIView()
         view.layer.borderWidth = 2
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
-    
-    private let inviteBadgeLabel: UILabel = {
+
+    private let newNestBadgeLabel: UILabel = {
         let label = UILabel()
         label.font = .h4
-        label.text = "SESSION INVITE"
+        label.text = "NEW NEST"
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
-    
-    private let sessionDateLabel: UILabel = {
+
+    private let creationDateLabel: UILabel = {
         let label = UILabel()
         label.font = .bodyL
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -77,7 +72,7 @@ class SessionInviteCardView: UIView {
         label.textColor = .secondaryLabel
         return label
     }()
-    
+
     // App icon with shadow: use a container for shadow, inner image for rounded mask
     private let appIconContainer: UIView = {
         let view = UIView()
@@ -90,7 +85,7 @@ class SessionInviteCardView: UIView {
         view.layer.masksToBounds = false
         return view
     }()
-    
+
     private let appIconView: UIImageView = {
         let imageView = UIImageView()
         imageView.image = UIImage(named: "icon_pattern-preview")
@@ -100,24 +95,22 @@ class SessionInviteCardView: UIView {
         imageView.layer.cornerRadius = 16
         return imageView
     }()
-    
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupView()
     }
-    
+
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupView()
     }
-    
-    // Pan/tilt gestures removed – card is static and presented using flip animation
-    
+
     func updatePattern(size: CGFloat, spacing: CGFloat, alpha: CGFloat) {
         // Update alpha for the pattern view
         topPatternView.alpha = alpha
     }
-    
+
     private func setupView() {
         backgroundColor = .clear
         layer.cornerRadius = 12
@@ -126,9 +119,7 @@ class SessionInviteCardView: UIView {
         layer.shadowOpacity = 0.3
         layer.shadowOffset = CGSize(width: 4, height: 8)
         layer.shadowRadius = 8
-        
-        // Shadow is applied on container; the image view clips to its rounded corners
-        
+
         // Configure top pattern image using NNAssetType.rectanglePattern
         if let image = UIImage(named: NNAssetType.rectanglePattern.rawValue) {
             topPatternView.image = image
@@ -138,26 +129,30 @@ class SessionInviteCardView: UIView {
 
         // Add content view (clipping container)
         addSubview(contentView)
-        
+
         // Background pattern and perforation inside contentView so they clip
         contentView.addSubview(topPatternView)
         contentView.addSubview(perforationView)
         perforationView.layer.addSublayer(perforationLayer)
-        
+
         // Badge setup
-        inviteBadgeView.addSubview(inviteBadgeLabel)
-        inviteBadgeView.backgroundColor = NNColors.primaryOpaque
-        inviteBadgeView.layer.borderColor = NNColors.primary.cgColor
-        inviteBadgeLabel.textColor = NNColors.primary
-        
+        newNestBadgeView.addSubview(newNestBadgeLabel)
+        newNestBadgeView.backgroundColor = NNColors.primaryOpaque
+        newNestBadgeView.layer.borderColor = NNColors.primary.cgColor
+        newNestBadgeLabel.textColor = NNColors.primary
+
         // Add content elements
-        [inviteBadgeView, appIconContainer, nestNameLabel, sessionDateLabel].forEach { view in
+        [newNestBadgeView, appIconContainer, nestNameLabel, creationDateLabel].forEach { view in
             view.isUserInteractionEnabled = false
             contentView.addSubview(view)
         }
         // Place the icon image inside the shadow container
         appIconContainer.addSubview(appIconView)
-        
+
+        setupConstraints()
+    }
+
+    private func setupConstraints() {
         NSLayoutConstraint.activate([
             // Content view constraints
             contentView.topAnchor.constraint(equalTo: topAnchor),
@@ -178,14 +173,14 @@ class SessionInviteCardView: UIView {
             perforationView.heightAnchor.constraint(equalToConstant: 1),
 
             // Badge over the perforation (centered)
-            inviteBadgeView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            inviteBadgeView.centerYAnchor.constraint(equalTo: perforationView.centerYAnchor),
+            newNestBadgeView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            newNestBadgeView.centerYAnchor.constraint(equalTo: perforationView.centerYAnchor),
 
             // Badge label padding
-            inviteBadgeLabel.topAnchor.constraint(equalTo: inviteBadgeView.topAnchor, constant: 6),
-            inviteBadgeLabel.leadingAnchor.constraint(equalTo: inviteBadgeView.leadingAnchor, constant: 14),
-            inviteBadgeLabel.trailingAnchor.constraint(equalTo: inviteBadgeView.trailingAnchor, constant: -14),
-            inviteBadgeLabel.bottomAnchor.constraint(equalTo: inviteBadgeView.bottomAnchor, constant: -6),
+            newNestBadgeLabel.topAnchor.constraint(equalTo: newNestBadgeView.topAnchor, constant: 6),
+            newNestBadgeLabel.leadingAnchor.constraint(equalTo: newNestBadgeView.leadingAnchor, constant: 14),
+            newNestBadgeLabel.trailingAnchor.constraint(equalTo: newNestBadgeView.trailingAnchor, constant: -14),
+            newNestBadgeLabel.bottomAnchor.constraint(equalTo: newNestBadgeView.bottomAnchor, constant: -6),
 
             // App icon container below perforation
             appIconContainer.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
@@ -204,45 +199,25 @@ class SessionInviteCardView: UIView {
             nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: 8),
-            sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20)
+            creationDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: 8),
+            creationDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            creationDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20)
         ])
     }
-    
-    func configure(with session: SessionItem, invite: Invite) {
-        // Configure nest name with debug print
-        nestNameLabel.text = invite.nestName
-        
+
+    func configure(nestName: String, createdDate: Date) {
+        nestNameLabel.text = nestName
+
+        // Configure creation date with clean format
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .long
+        dateFormatter.timeStyle = .none
+
+        creationDateLabel.text = dateFormatter.string(from: createdDate)
+
         // Force layout update
         setNeedsLayout()
         layoutIfNeeded()
-        
-        // Configure session date with cleaner format
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "MMM d"
-        let yearFormatter = DateFormatter()
-        yearFormatter.dateFormat = ", yyyy"
-        
-        let startDateStr = dateFormatter.string(from: session.startDate)
-        let endDateStr = dateFormatter.string(from: session.endDate)
-        let yearStr = yearFormatter.string(from: session.endDate)
-        
-        // Only show year once at the end
-        if session.isMultiDay {
-            sessionDateLabel.text = "\(startDateStr) - \(endDateStr)\(yearStr)"
-        } else {
-            // For single day, also show time
-            let timeFormatter = DateFormatter()
-            timeFormatter.dateFormat = "h:mm a"
-            let startTimeStr = timeFormatter.string(from: session.startDate)
-            let endTimeStr = timeFormatter.string(from: session.endDate)
-            
-            sessionDateLabel.text = """
-                \(startDateStr)\(yearStr)
-                \(startTimeStr) - \(endTimeStr)
-                """
-        }
     }
 
     override func layoutSubviews() {
@@ -256,29 +231,7 @@ class SessionInviteCardView: UIView {
         perforationLayer.path = path.cgPath
         // Update colors on trait changes dynamically
         perforationLayer.strokeColor = UIColor.systemGray3.withAlphaComponent(0.3).cgColor
-        
-        inviteBadgeView.layer.cornerRadius = inviteBadgeView.frame.size.height / 2
-    }
-}
 
-// Helper extension for duration formatting
-private extension SessionItem {
-    var formattedDuration: String {
-        let duration = endDate.timeIntervalSince(startDate)
-        let hours = Int(duration / 3600)
-        let minutes = Int((duration.truncatingRemainder(dividingBy: 3600)) / 60)
-        
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else {
-            return "\(minutes) minutes"
-        }
-    }
-}
-
-// Add extension for clamping values
-private extension CGFloat {
-    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
-        return Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+        newNestBadgeView.layer.cornerRadius = newNestBadgeView.frame.size.height / 2
     }
 }

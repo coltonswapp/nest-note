@@ -127,6 +127,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // Track when app enters background
         backgroundTime = Date()
+        
+        // Reset session review prompt flag so we can prompt again next foreground
+        SessionReviewManager.shared.resetSessionFlag()
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
