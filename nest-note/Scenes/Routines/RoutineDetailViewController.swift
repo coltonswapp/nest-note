@@ -660,9 +660,6 @@ extension RoutineDetailViewController: UITableViewDelegate {
                 stateManager.setActionCompleted(isCompleted, routineId: routineId, actionIndex: index)
             }
         }
-        
-        // Enable save button to reflect the reordered state
-        updateSaveButtonEnabledState()
     }
     
     func tableView(_ tableView: UITableView, targetIndexPathForMoveFromRowAt sourceIndexPath: IndexPath, toProposedIndexPath proposedDestinationIndexPath: IndexPath) -> IndexPath {
