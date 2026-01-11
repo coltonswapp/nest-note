@@ -55,12 +55,22 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        setupOnboarding(
-            title: "Finishing up...",
-            subtitle: "Gathering twigs, grass, and leaves for your nest..."
-        )
-        
+
+        // Get user role to customize loading text
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        if userRole == .sitter {
+            setupOnboarding(
+                title: "Finishing up...",
+                subtitle: "Preparing your perch..."
+            )
+        } else {
+            setupOnboarding(
+                title: "Finishing up...",
+                subtitle: "Gathering twigs, grass, and leaves for your nest..."
+            )
+        }
+
         setupContent()
     }
     
@@ -235,8 +245,133 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         // Reset failure count on success
         Self.resetFailureCount()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
+        // Get user role to determine which success screen to show
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        // Configure the card based on user role
+        if userRole == .sitter {
+            // For sitters, use the sitter-specific configuration
+            nestCreationCardView.configureForNewSitter()
+        } else {
+            // For nest owners, show their nest name
+            let nestName = (coordinator as? OnboardingCoordinator)?.currentNestName ?? "Your Nest"
+            nestCreationCardView.configure(nestName: nestName, createdDate: Date())
+        }
+
+        // Start the beautiful animation sequence
+        animateSuccessSequence()
+    }
+
+    private func animateSuccessSequence() {
+        // Phase 1: Hide loading indicator (0.3s)
+        UIView.animate(withDuration: 0.3) {
+            self.activityIndicator.alpha = 0
+        }
+    }
+
+    private func animateCardEntrance() {
+        // Guard against double execution
+        guard !hasStartedCardAnimation else {
+            return
+        }
+        hasStartedCardAnimation = true
+
+        // First make it visible and add slight rotation
+        nestCreationCardView.alpha = 1
+        nestCreationCardView.transform = CGAffineTransform(rotationAngle: 2 * .pi / 180)
+        glowView.alpha = 1.0
+        glowView2.alpha = 1.0
+        glowView3.alpha = 1.0
+
+        // Remove current constraint and add new one (copied from JoinSessionViewController)
+        cardBottomConstraint?.isActive = false
+        cardBottomConstraint = nestCreationCardView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 0)
+        cardBottomConstraint?.isActive = true
+
+        // Animate it up from the bottom with spring effect (copied from JoinSessionViewController)
+        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
+            self.view.layoutIfNeeded()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self else { return }
+            ExplosionManager.trigger(.atomic, at: CGPoint(x: view.center.x, y: view.frame.maxY))
+            HapticsHelper.lightHaptic()
+        }
+    }
+
+    private func animateSlideToEnterEntrance() {
+        // Guard against double execution
+        guard !hasStartedSlideAnimation else {
+            return
+        }
+        hasStartedSlideAnimation = true
+
+        // Get user role to customize the text
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        if userRole == .sitter {
+            self.titleLabel.text = "Welcome to NestNote!"
+            self.subtitleLabel.text = "Swipe below to start exploring."
+        } else {
+            self.titleLabel.text = "Your nest has been created!"
+            self.subtitleLabel.text = "Swipe below to enter your nest."
+        }
+
+        // Keep it hidden, only use alpha for fade-in control
+        self.slideToEnterView.isHidden = false
+        self.slideToEnterView.alpha = 0.0
+        
+
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.2) {
+            self.titleLabel.alpha = 1
+            self.subtitleLabel.alpha = 1
+        }
+
+        // Simple fade in for slide-to-enter (no transform animation)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            // Ensure alpha is 0 right before animation (override any internal slider logic)
+            self.slideToEnterView.alpha = 0.0
+
+            UIView.animate(withDuration: 0.4) {
+                self.slideToEnterView.alpha = 1.0
+            }
+        }
+    }
+
+    private func handleSlideComplete() {
+        // Stop all animations
+        glowView.layer.removeAllAnimations()
+        glowView2.layer.removeAllAnimations()
+        glowView3.layer.removeAllAnimations()
+
+        // Fade out all elements
+        UIView.animate(withDuration: 0.5) {
+            self.nestCreationCardView.alpha = 0
+            self.glowView.alpha = 0
+            self.glowView2.alpha = 0
+            self.glowView3.alpha = 0
+            self.slideToEnterView.alpha = 0
+        }
+
+        // Complete onboarding after animation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if self.isDebugMode {
+                // In debug mode, just dismiss
+                self.dismiss(animated: true)
+            } else {
+                // Normal flow - complete onboarding
+                (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
+            }
+        }
+    }
+
+    // Add method to enable debug mode
+    func enableDebugMode() {
+        isDebugMode = true
+        // Start directly with success animation for testing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.playSuccessTransition()
         }
     }
 

@@ -9,7 +9,7 @@ import Foundation
 import FirebaseRemoteConfig
 
 final class FeatureFlagService {
-    
+
     // MARK: - Properties
     static let shared = FeatureFlagService()
     private var remoteConfig: RemoteConfig
