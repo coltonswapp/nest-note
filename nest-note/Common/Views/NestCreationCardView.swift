@@ -219,6 +219,17 @@ class NestCreationCardView: UIView {
         setNeedsLayout()
         layoutIfNeeded()
     }
+    
+    func configureForNewSitter() {
+        nestNameLabel.text = "World's Best Sitter"
+        newNestBadgeLabel.text = "New sitter".uppercased()
+        
+        creationDateLabel.text = "New sitter on the block"
+
+        // Force layout update
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()

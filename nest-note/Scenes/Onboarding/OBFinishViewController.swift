@@ -136,12 +136,22 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        setupOnboarding(
-            title: "Finishing up...",
-            subtitle: "Gathering twigs, grass, and leaves for your nest..."
-        )
-        
+
+        // Get user role to customize loading text
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        if userRole == .sitter {
+            setupOnboarding(
+                title: "Finishing up...",
+                subtitle: "Preparing your perch..."
+            )
+        } else {
+            setupOnboarding(
+                title: "Finishing up...",
+                subtitle: "Gathering twigs, grass, and leaves for your nest..."
+            )
+        }
+
         setupContent()
     }
     
@@ -365,9 +375,18 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         // Reset failure count on success
         Self.resetFailureCount()
 
-        // Configure the card with nest information
-        let nestName = (coordinator as? OnboardingCoordinator)?.currentNestName ?? "Your Nest"
-        nestCreationCardView.configure(nestName: nestName, createdDate: Date())
+        // Get user role to determine which success screen to show
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        // Configure the card based on user role
+        if userRole == .sitter {
+            // For sitters, use the sitter-specific configuration
+            nestCreationCardView.configureForNewSitter()
+        } else {
+            // For nest owners, show their nest name
+            let nestName = (coordinator as? OnboardingCoordinator)?.currentNestName ?? "Your Nest"
+            nestCreationCardView.configure(nestName: nestName, createdDate: Date())
+        }
 
         // Start the beautiful animation sequence
         animateSuccessSequence()
@@ -433,8 +452,16 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         }
         hasStartedSlideAnimation = true
 
-        self.titleLabel.text = "Your nest has been created!"
-        self.subtitleLabel.text = "Swipe below to enter your nest."
+        // Get user role to customize the text
+        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+
+        if userRole == .sitter {
+            self.titleLabel.text = "Welcome to NestNote!"
+            self.subtitleLabel.text = "Swipe below to start exploring."
+        } else {
+            self.titleLabel.text = "Your nest has been created!"
+            self.subtitleLabel.text = "Swipe below to enter your nest."
+        }
 
         // Keep it hidden, only use alpha for fade-in control
         self.slideToEnterView.isHidden = false

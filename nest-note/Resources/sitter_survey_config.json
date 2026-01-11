@@ -2,25 +2,6 @@
     "version": "1.0",
     "questions": [
         {
-            "id": "missing_information",
-            "title": "What information do you most often find missing or unclear when babysitting?",
-            "subtitle": "Missing information can be frustrating!",
-            "options": [
-                "Emergency contacts",
-                "Household systems (alarm, garage, appliances)",
-                "Children's routines or schedules",
-                "Food/dietary restrictions",
-                "Medical information",
-                "House rules",
-                "Where to find essential items",
-                "Neighborhood information",
-                "DEBUG - Test scenario"
-            ],
-            "multi_select": true,
-            "category": "information",
-            "order": 1
-        },
-        {
             "id": "important_information",
             "title": "Which information would be most helpful to have organized in a single place?",
             "subtitle": "Select all that apply.",
@@ -36,7 +17,7 @@
             ],
             "multi_select": true,
             "category": "information",
-            "order": 2
+            "order": 1
         },
         {
             "id": "helpful_features",
@@ -55,7 +36,7 @@
             ],
             "multi_select": true,
             "category": "features",
-            "order": 3
+            "order": 2
         }
     ]
 } 

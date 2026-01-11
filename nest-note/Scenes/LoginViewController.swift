@@ -39,6 +39,7 @@ final class LoginViewController: NNViewController {
         label.text = "Welcome to NestNote"
         label.font = .h1
         label.textAlignment = .center
+        label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()

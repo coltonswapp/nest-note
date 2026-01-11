@@ -27,6 +27,7 @@ final class OnboardingAnalyticsService {
         var currentStep: String = ""
         var stepsCompleted: [String] = []
         var metadata: [String: String] = [:]
+        var userRole: String? = nil // Track user's selected role
     }
 
     private init() {}
@@ -61,6 +62,14 @@ final class OnboardingAnalyticsService {
         sessionData.stepsCompleted.append(stepId)
 
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Step completed - \(stepId)")
+    }
+
+    /// Records the user's selected role
+    func recordRole(_ role: String) {
+        sessionData.userRole = role
+        sessionData.metadata["role"] = role
+
+        Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Role selected - \(role)")
     }
 
     /// Records survey response
@@ -181,10 +190,20 @@ final class OnboardingAnalyticsService {
 
     /// Saves onboarding session as SurveyResponse for viewing in existing UI
     private func saveSurveyResponse() {
+        // Determine survey type based on user's role
+        // Default to parentSurvey if role is not set (for backward compatibility)
+        let surveyType: SurveyResponse.SurveyType
+        if let role = sessionData.userRole {
+            // Role is stored as "nester" for nest owners, "sitter" for sitters
+            surveyType = (role == "sitter") ? .sitterSurvey : .parentSurvey
+        } else {
+            surveyType = .parentSurvey
+        }
+
         let surveyResponse = SurveyResponse(
             id: UUID().uuidString,
             timestamp: sessionData.startTime,
-            surveyType: .parentSurvey, // Integrates with existing parent survey system
+            surveyType: surveyType,
             version: "onboarding_\(sessionData.variant)",
             responses: sessionData.surveyResponses,
             metadata: sessionData.metadata
