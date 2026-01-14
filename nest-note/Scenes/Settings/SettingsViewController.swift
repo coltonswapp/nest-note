@@ -172,7 +172,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
                 return section
                 
-            case .myNest, .mySitting, .general, .admin, .experimental, .debug:
+            case .myNest, .mySitting, .general, .admin, .experimental:
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
@@ -215,7 +215,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             var content = cell.defaultContentConfiguration()
             
             switch item {
-            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .adminItem(let title, let symbolName), .experimentalItem(let title, let symbolName), .debugItem(let title, let symbolName):
+            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
                 content.text = title
                 
                 // Create a symbol configuration with semibold weight
@@ -247,12 +247,92 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 } else {
                     cell.alpha = 1.0
                 }
+                
+                cell.contentConfiguration = content
+                cell.accessories = [.disclosureIndicator()]
+                
+            case .adminItem(let title, let symbolName):
+                // Handle "Debug as" separately with segmented control
+                if title == "Debug as" {
+                    let currentStatus = FeatureFlagService.shared.getDebugUserStatus()
+                    let debugAsItem = Item.adminItem(title: "Debug as", symbolName: "person.crop.circle.badge.checkmark")
+                    
+                    // Configure content
+                    content.text = title
+                    let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
+                    let image = UIImage(systemName: symbolName, withConfiguration: symbolConfiguration)?
+                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                    content.image = image
+                    content.imageProperties.tintColor = NNColors.primary
+                    content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                    content.imageToTextPadding = 16
+                    content.directionalLayoutMargins.top = 16
+                    content.directionalLayoutMargins.bottom = 16
+                    
+                    // Create segmented control
+                    let segmentedControl = UISegmentedControl(items: ["Free", "Pro"])
+                    segmentedControl.selectedSegmentIndex = currentStatus == "pro" ? 1 : 0
+                    segmentedControl.addAction(UIAction { [weak self] _ in
+                        let newStatus = segmentedControl.selectedSegmentIndex == 1 ? "pro" : "free"
+                        Logger.log(level: .info, category: .general, message: "🔧 DEBUG: Setting debug status to \(newStatus)")
+                        FeatureFlagService.shared.setDebugUserStatus(newStatus)
+                        
+                        // Force reconfigure the cell to ensure state is synced
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self else { return }
+                            var snapshot = self.dataSource.snapshot()
+                            if #available(iOS 15.0, *) {
+                                snapshot.reconfigureItems([debugAsItem])
+                            } else {
+                                snapshot.reloadItems([debugAsItem])
+                            }
+                            self.dataSource.apply(snapshot, animatingDifferences: false)
+                        }
+                    }, for: .valueChanged)
+                    
+                    // Create accessory view with proper sizing
+                    let accessoryView = UIView()
+                    accessoryView.addSubview(segmentedControl)
+                    segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+                    
+                    NSLayoutConstraint.activate([
+                        segmentedControl.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
+                        segmentedControl.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
+                        segmentedControl.widthAnchor.constraint(equalToConstant: 100),
+                        segmentedControl.heightAnchor.constraint(equalToConstant: 32)
+                    ])
+                    
+                    // Size the accessory view to fit the segmented control
+                    accessoryView.frame = CGRect(x: 0, y: 0, width: 100, height: 44)
+                    
+                    let accessoryConfig = UICellAccessory.CustomViewConfiguration(
+                        customView: accessoryView,
+                        placement: .trailing(displayed: .always),
+                        reservedLayoutWidth: .custom(100)
+                    )
+                    
+                    cell.contentConfiguration = content
+                    cell.accessories = [.customView(configuration: accessoryConfig)]
+                } else {
+                    // Standard admin items
+                    content.text = title
+                    let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
+                    let image = UIImage(systemName: symbolName, withConfiguration: symbolConfiguration)?
+                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                    content.image = image
+                    content.imageProperties.tintColor = NNColors.primary
+                    content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                    content.imageToTextPadding = 16
+                    content.directionalLayoutMargins.top = 16
+                    content.directionalLayoutMargins.bottom = 16
+                    
+                    cell.contentConfiguration = content
+                    cell.accessories = [.disclosureIndicator()]
+                }
+                
             default:
                 break
             }
-            
-            cell.contentConfiguration = content
-            cell.accessories = [.disclosureIndicator()]
         }
         
         let currentNestCellRegistration = UICollectionView.CellRegistration<CurrentNestCell, Item> { cell, indexPath, item in
@@ -269,7 +349,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 return collectionView.dequeueConfiguredReusableCell(using: accountCellRegistration, for: indexPath, item: item)
             case .currentNest:
                 return collectionView.dequeueConfiguredReusableCell(using: currentNestCellRegistration, for: indexPath, item: item)
-            case .myNest, .mySitting, .general, .admin, .experimental, .debug:
+            case .myNest, .mySitting, .general, .admin, .experimental:
                 return collectionView.dequeueConfiguredReusableCell(using: listCellRegistration, for: indexPath, item: item)
             }
         }
@@ -380,6 +460,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("UserDefaults Viewer", "externaldrive.fill"),
             ("View Logs", "text.alignleft"),
             ("Reset App State", "arrow.counterclockwise"),
+            ("Debug as", "person.crop.circle.badge.checkmark"),
         ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(adminItems, toSection: .admin)
 
@@ -429,7 +510,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case general = "General"
         case admin = "Admin"
         case experimental = "Experimental"
-        case debug = "Debug"
     }
 
     enum Item: Hashable {
@@ -439,7 +519,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case generalItem(title: String, symbolName: String)
         case adminItem(title: String, symbolName: String)
         case experimentalItem(title: String, symbolName: String)
-        case debugItem(title: String, symbolName: String)
     }
 
     #if DEBUG
@@ -573,6 +652,19 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         navigationController?.pushViewController(vc, animated: true)
     }
     
+    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return true }
+        
+        #if DEBUG
+        // Prevent selection for "Debug as" item since it uses a menu button
+        if case .adminItem(let title, _) = item, title == "Debug as" {
+            return false
+        }
+        #endif
+        
+        return true
+    }
+    
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
@@ -612,7 +704,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                         let sessionsVC = NestSessionsViewController()
                         let nav = UINavigationController(rootViewController: sessionsVC)
                         present(nav, animated: true) {
-                            NNTipManager.shared.dismissTip(SettingsTips.sessionsTip)
+//                            NNTipManager.shared.dismissTip(SettingsTips.sessionsTip)
                         }
                     } else {
                         let sessionsVC = SitterSessionsViewController()
@@ -679,10 +771,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         #if DEBUG
         case .adminItem(let title, _):
-            handleDebugItemSelection(title)
+            // Skip selection handling for "Debug as" since it uses a menu button
+            if title != "Debug as" {
+                handleDebugItemSelection(title)
+            } else {
+                // Don't deselect - let the menu button handle interaction
+                return
+            }
         case .experimentalItem(let title, _):
-            handleDebugItemSelection(title)
-        case .debugItem(let title, _):
             handleDebugItemSelection(title)
         #endif
             
@@ -1192,8 +1288,25 @@ extension SettingsViewController: RoutineDetailViewControllerDelegate {
             showToast(text: "Routine saved: \(routine.title)")
         }
     }
-    
+
     func routineDetailViewController(didDeleteRoutine routine: RoutineItem) {
         showToast(text: "Routine deleted: \(routine.title)")
+    }
+}
+
+extension SettingsViewController: JoinSessionViewControllerDelegate {
+    func joinSessionViewController(didAcceptInvite session: SitterSession) {
+        // For nest owners redeeming a sitter-initiated request, this won't be called
+        // since they go through the completion flow instead
+        showToast(text: "Session created successfully")
+    }
+}
+
+extension SettingsViewController: CreateSessionRequestViewControllerDelegate {
+    func createSessionRequestViewController(_ controller: CreateSessionRequestViewController, didCreateRequest inviteCode: String, sessionID: String) {
+        // Use InviteDetailViewController to show the code with copy/share functionality
+        let inviteDetailVC = InviteDetailViewController()
+        inviteDetailVC.configure(with: inviteCode, sessionID: sessionID, sitter: nil, isSitterInitiated: true)
+        controller.navigationController?.pushViewController(inviteDetailVC, animated: true)
     }
 }

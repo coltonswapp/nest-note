@@ -442,18 +442,24 @@ final class SessionEventViewController: NNSheetViewController {
         let startDate = startControl.date
         let endDate = endControl.date
         
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedDescending {
+        // Use unified validation logic (events are always single-day, allowing overnight)
+        let validationResult = SessionDateValidator.validateDateRange(startDate: startDate, endDate: endDate, isMultiDay: false)
+        
+        switch validationResult {
+        case .valid:
+            break // Continue with additional validations
+        case .invalidStartAfterEnd:
+            // Show error alert using unified method
             let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start time cannot be after the end time.",
+                title: validationResult.errorTitle,
+                message: validationResult.errorMessage,
                 preferredStyle: .alert
             )
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
             return false
-        }
-        
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
+        case .invalidSameTime:
+            // For events, auto-adjust end time to be 1 hour after start time
             endControl.date = calendar.date(byAdding: .hour, value: 1, to: startDate) ?? startDate
         }
         

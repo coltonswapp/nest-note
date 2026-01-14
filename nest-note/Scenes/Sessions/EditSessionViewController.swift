@@ -87,14 +87,24 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private var pdfURL: URL?
     private let maxVisibleEvents = 4
     
+    // Add property to track if completing a sitter-initiated request
+    var isCompletingRequest: Bool = false
+
     // Add property for save button
-    private lazy var saveButton: NNLoadingButton = {
-        let buttonTitle = isEditingSession ? "Save Changes" : "Next"
+    lazy var saveButton: NNLoadingButton = {
+        let buttonTitle: String
+        if isCompletingRequest {
+            buttonTitle = "Create Session"
+        } else if isEditingSession {
+            buttonTitle = "Save Changes"
+        } else {
+            buttonTitle = "Next"
+        }
         let button = NNLoadingButton(title: buttonTitle, titleColor: .white, fillStyle: .fill(NNColors.primary))
         button.addTarget(self, action: #selector(saveButtonTapped), for: .touchUpInside)
         return button
     }()
-    
+
     // Add property to track if this is an archived session
     var isArchivedSession: Bool = false {
         didSet {
@@ -106,8 +116,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
         }
     }
-    
-    
+
+
     weak var delegate: EditSessionViewControllerDelegate?
     
     // MARK: - PaywallPresentable
@@ -309,6 +319,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             dataSource.apply(newSnapshot, animatingDifferences: false)
         }
         
+        // If completing a request with multi-day, validate subscription and disable if needed
+        if isCompletingRequest && sessionItem.isMultiDay {
+            Task {
+                let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                if !hasMultiDaySessions {
+                    await MainActor.run {
+                        // Force to single-day: sync end date to same day as start date
+                        let syncedEndDate = Date.syncEndDateToStartDay(startDate: sessionItem.startDate, endDate: sessionItem.endDate) ?? sessionItem.endDate
+                        sessionItem.isMultiDay = false
+                        sessionItem.endDate = syncedEndDate
+                        
+                        // Update the date selection in the UI
+                        if let dateItem = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
+                           case .dateSelection = dateItem {
+                            var newSnapshot = dataSource.snapshot()
+                            newSnapshot.deleteItems([dateItem])
+                            newSnapshot.appendItems([.dateSelection(
+                                startDate: sessionItem.startDate,
+                                endDate: syncedEndDate,
+                                isMultiDay: false
+                            )], toSection: .date)
+                            dataSource.apply(newSnapshot, animatingDifferences: false)
+                            
+                            // Revert the toggle in the DateCell if it exists
+                            self.revertDateCellMultiDayToggle()
+                        }
+                    }
+                }
+            }
+        }
+        
         // Pre-populate other fields if editing
         // Note: visibilityLevel is no longer used, using selectedEntries instead
         
@@ -355,7 +396,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             customNavBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             customNavBar.heightAnchor.constraint(equalToConstant: 66),
             
-            titleTextField.leadingAnchor.constraint(equalTo: customNavBar.leadingAnchor, constant: 16),
+            titleTextField.leadingAnchor.constraint(equalTo: customNavBar.leadingAnchor, constant: 24),
             titleTextField.centerYAnchor.constraint(equalTo: customNavBar.centerYAnchor, constant: 0),
             titleTextField.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -16),
             
@@ -564,27 +605,51 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     @objc override func closeButtonTapped() {
         // Check for unsaved changes before dismissing
         if hasUnsavedChanges {
+            let alertTitle: String
+            let alertMessage: String
+
+            if isCompletingRequest {
+                alertTitle = "Cancel Session Setup?"
+                alertMessage = "The session request won't be accepted if you leave now."
+            } else {
+                alertTitle = "Discard Changes?"
+                alertMessage = "You have unsaved changes. Are you sure you want to discard them?"
+            }
+
             let alert = UIAlertController(
-                title: "Discard Changes?",
-                message: "You have unsaved changes. Are you sure you want to discard them?",
+                title: alertTitle,
+                message: alertMessage,
                 preferredStyle: .alert
             )
-            
+
             alert.addAction(UIAlertAction(
                 title: "Keep Editing",
                 style: .cancel
             ))
-            
+
             alert.addAction(UIAlertAction(
-                title: "Discard Changes",
+                title: isCompletingRequest ? "Cancel" : "Discard Changes",
                 style: .destructive
             ) { [weak self] _ in
-                self?.dismiss(animated: true)
+                guard let self = self else { return }
+                if self.isCompletingRequest && self.navigationController != nil {
+                    // If embedded in a nav controller during request completion, pop
+                    self.navigationController?.popViewController(animated: true)
+                } else {
+                    // Otherwise dismiss normally
+                    self.dismiss(animated: true)
+                }
             })
-            
+
             present(alert, animated: true)
         } else {
-            dismiss(animated: true)
+            if isCompletingRequest && navigationController != nil {
+                // If embedded in a nav controller during request completion, pop
+                navigationController?.popViewController(animated: true)
+            } else {
+                // Otherwise dismiss normally
+                dismiss(animated: true)
+            }
         }
     }
     
@@ -682,8 +747,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 }
                 
                 // Validate date range logic (same as SessionEventViewController)
-                guard validateDateRange(startDate: startDate, endDate: endDate) else {
+                guard validateDateRange(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay) else {
                     return
+                }
+                
+                // Validate multi-day subscription requirement
+                if isMultiDay {
+                    let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                    if !hasMultiDaySessions {
+                        await MainActor.run {
+                            self.showMultiDayUpgradePrompt()
+                        }
+                        return
+                    }
                 }
                 
                 // Update existing sessionItem with new values
@@ -695,13 +771,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 // Note: visibilityLevel is no longer used, replaced by selectedEntries
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
+                // Ensure nestID is set (critical for completing sitter requests)
+                if let currentNest = NestService.shared.currentNest {
+                    sessionItem.nestID = currentNest.id
+                } else if sessionItem.nestID.isEmpty {
+                    // Fallback: use nestID from invite if available
+                    // This should not happen in normal flow, but provides safety
+                    Logger.log(level: .error, category: .sessionService, message: "No current nest available when completing request")
+                }
+                
                 // Store selected item IDs in the session
                 if !selectedItemIds.isEmpty {
                     sessionItem.entryIds = selectedItemIds
                 } else {
                     sessionItem.entryIds = nil // Clear entryIds if no items selected
                 }
-                
+
+                if isCompletingRequest {
+                    // Validate nestID is set before proceeding
+                    guard !sessionItem.nestID.isEmpty else {
+                        showToast(text: "Please select a nest", sentiment: .negative)
+                        return
+                    }
+                    
+                    // Start loading button before notifying delegate
+                    saveButton.startLoading()
+                    
+                    // Just notify delegate - parent VC handles acceptance
+                    delegate?.editSessionViewController(self, didCreateSession: sessionItem)
+                    return
+                }
+
                 if isEditingSession {
                     try await updateSession()
                 } else {
@@ -1753,34 +1853,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         HapticsHelper.lightHaptic()
     }
     
-    private func validateDateRange(startDate: Date, endDate: Date) -> Bool {
-        let calendar = Calendar.current
-        
-        // Check if start date is after end date
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedDescending {
-            let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start time cannot be after the end time.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return false
-        }
-        
-        // Check if start and end times are the same
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
-            let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start and end times cannot be the same.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return false
-        }
-        
-        return true
+    private func validateDateRange(startDate: Date, endDate: Date, isMultiDay: Bool) -> Bool {
+        return SessionDateValidator.validateAndShowAlertIfNeeded(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay, in: self)
     }
     
     private func validateSession() -> Bool {
@@ -1794,7 +1868,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         // Check if dates are valid using the same logic as validateDateRange
-        if !validateDateRange(startDate: sessionItem.startDate, endDate: sessionItem.endDate) {
+        if !validateDateRange(startDate: sessionItem.startDate, endDate: sessionItem.endDate, isMultiDay: sessionItem.isMultiDay) {
             return false
         }
         
@@ -2315,33 +2389,16 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
         guard let snapshot = dataSource.snapshot().itemIdentifiers(inSection: .date).first,
               case let .dateSelection(startDate, endDate, isMultiDay) = snapshot else { return }
         
-        var newStartDate = startDate
-        var newEndDate = endDate
         let currentMultiDayState = isMultiDay
         
-        switch sheet.pickerType {
-        case .startDate, .startTime:
-            newStartDate = date
-            if !isMultiDay {
-                // Sync end date with start date while preserving end time
-                let calendar = Calendar.current
-                let startComponents = calendar.dateComponents([.year, .month, .day], from: date)
-                let endTimeComponents = calendar.dateComponents([.hour, .minute], from: endDate)
-                
-                var newComponents = DateComponents()
-                newComponents.year = startComponents.year
-                newComponents.month = startComponents.month
-                newComponents.day = startComponents.day
-                newComponents.hour = endTimeComponents.hour
-                newComponents.minute = endTimeComponents.minute
-                
-                if let syncedEndDate = calendar.date(from: newComponents) {
-                    newEndDate = syncedEndDate
-                }
-            }
-        case .endDate, .endTime:
-            newEndDate = date
-        }
+        // Use centralized date synchronization utility
+        let result = SessionDateSynchronizer.synchronizeDates(
+            pickerType: sheet.pickerType,
+            newDate: date,
+            previousStartDate: startDate,
+            currentEndDate: endDate,
+            isMultiDay: isMultiDay
+        )
         
         // Update the data source
         let dateItems = dataSource.snapshot().itemIdentifiers(inSection: .date)
@@ -2350,13 +2407,13 @@ extension EditSessionViewController: NNDateTimePickerSheetDelegate {
         newSnapshot.deleteItems(dateItems)
         
         // Add date selection to date section
-        newSnapshot.appendItems([.dateSelection(startDate: newStartDate, endDate: newEndDate, isMultiDay: currentMultiDayState)], toSection: .date)
+        newSnapshot.appendItems([.dateSelection(startDate: result.adjustedStartDate, endDate: result.adjustedEndDate, isMultiDay: currentMultiDayState)], toSection: .date)
         dataSource.apply(newSnapshot, animatingDifferences: false)
         
         // Check if we need to apply a pending status change
         if let pendingStatus = pendingStatusChange {
             // Validate that the new end date is in the future if we're changing to active status
-            if (pendingStatus == .inProgress || pendingStatus == .upcoming) && newEndDate > Date() {
+            if (pendingStatus == .inProgress || pendingStatus == .upcoming) && result.adjustedEndDate > Date() {
                 pendingStatusChange = nil
                 applyStatusChange(pendingStatus)
             }

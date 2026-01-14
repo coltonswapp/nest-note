@@ -28,13 +28,23 @@ class JoinSessionViewController: NNViewController {
     
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.text = "If you've been invited to a session, enter your 6-digit invite code below to be connected to your session."
+        label.text = "Got an invite code? Enter it below to join the session."
         label.font = .bodyL
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
         return label
     }()
+    
+    private func updateMessagingForUserRole() {
+        if ModeManager.shared.isNestOwnerMode {
+            titleLabel.text = "Review Session Request"
+            descriptionLabel.text = "Got an invite code? Enter it below to review the session request."
+        } else {
+            titleLabel.text = "Join a Session"
+            descriptionLabel.text = "Got an invite code? Enter it below to join the session."
+        }
+    }
     
     private let labelStack: UIStackView = {
         let stack = UIStackView()
@@ -165,6 +175,7 @@ class JoinSessionViewController: NNViewController {
         setupInviteCard()
         setupKeyboardObservers()
         setupTextFieldObserver()
+        updateMessagingForUserRole()
     }
     
     override func viewDidLayoutSubviews() {
@@ -350,6 +361,11 @@ class JoinSessionViewController: NNViewController {
             return
         }
         
+        if findSessionButton.titleLabel.text == "Continue Setup" {
+            continueToSetup()
+            return
+        }
+        
         guard let code = codeTextField.textField.text?.replacingOccurrences(of: "-", with: "") else {
             showToast(delay: 0.0, text: "Please enter an invite code", sentiment: .negative)
             return
@@ -371,30 +387,53 @@ class JoinSessionViewController: NNViewController {
 
         Task {
             do {
-                // Only validate the invite, don't accept it yet
-                let (session, invite) = try await SessionService.shared.validateInvite(code: code)
-                self.currentSession = session
-                self.currentInvite = invite
-                
-                try await Task.sleep(for: .seconds(1))
-                await MainActor.run {
-                    // Update UI to show success state
-                    self.titleLabel.text = "Session Found!"
-                    self.descriptionLabel.text = "Review the details of the session below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
-                    
-                    // Configure and show the invite card
-                    self.inviteCardView.configure(with: session, invite: invite)
-                    self.animateInviteCard()
-                    
-                    // Hide the code entry field
-                    UIView.animate(withDuration: 0.3) {
-                        self.codeStack.alpha = 0
+                // First, check if this is a sitter-initiated request
+                // We need to peek at the invite type before deciding which validation to use
+                let inviteID = "invite-\(code)"
+                let inviteRef = SessionService.shared.db.collection("invites").document(inviteID)
+                let inviteDoc = try await inviteRef.getDocument()
+
+                guard inviteDoc.exists,
+                      let invite = try? inviteDoc.data(as: Invite.self) else {
+                    throw SessionError.invalidInviteCode
+                }
+
+                // Route based on invite type
+                if invite.type == .sitterInitiated {
+                    // For sitter-initiated, use the special validation that fetches from sessionRequests
+                    await handleSitterInitiatedInvite(code: code)
+                } else {
+                    // For owner-initiated, use the standard validation
+                    let (session, invite) = try await SessionService.shared.validateInvite(code: code)
+
+                    self.currentSession = session
+                    self.currentInvite = invite
+
+                    try await Task.sleep(for: .seconds(1))
+                    await MainActor.run {
+                        // Update UI to show success state
+                        if ModeManager.shared.isNestOwnerMode {
+                            self.titleLabel.text = "Session Request Found!"
+                            self.descriptionLabel.text = "Review the details of the session request below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
+                        } else {
+                            self.titleLabel.text = "Session Found!"
+                            self.descriptionLabel.text = "Review the details of the session below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
+                        }
+
+                        // Configure and show the invite card
+                        self.inviteCardView.configure(with: session, invite: invite)
+                        self.animateInviteCard()
+
+                        // Hide the code entry field
+                        UIView.animate(withDuration: 0.3) {
+                            self.codeStack.alpha = 0
+                        }
+
+                        // Update button
+                        self.findSessionButton.stopLoading(withSuccess: true)
+                        self.findSessionButton.setTitle("Accept Invite")
+                        self.findSessionButton.isEnabled = true
                     }
-                    
-                    // Update button
-                    self.findSessionButton.stopLoading(withSuccess: true)
-                    self.findSessionButton.setTitle("Accept Invite")
-                    self.findSessionButton.isEnabled = true
                 }
             } catch {
                 showError(error.localizedDescription)
@@ -404,35 +443,84 @@ class JoinSessionViewController: NNViewController {
     
     private func acceptInvite() {
         guard let code = currentInviteCode else { return }
-        
+
         findSessionButton.startLoading()
-        
+
         Task {
             do {
                 let sitterSession = try await SessionService.shared.validateAndAcceptInvite(inviteID: code)
-                
+
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
-                    
+
                     // Show success alert
                     let alert = UIAlertController(
                         title: "Session Joined!",
                         message: "You've successfully joined the session. You can now view all the details in your upcoming sessions.",
                         preferredStyle: .alert
                     )
-                    
+
                     alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
                         // Notify delegate
                         self?.delegate?.joinSessionViewController(didAcceptInvite: sitterSession)
                         self?.dismiss(animated: true)
                     })
-                    
+
                     self.present(alert, animated: true)
                 }
             } catch {
                 showError(error.localizedDescription)
             }
         }
+    }
+
+    private func handleSitterInitiatedInvite(code: String) async {
+        do {
+            let (placeholder, invite) = try await SessionService.shared.validateSitterSessionRequest(code: code)
+
+            self.currentSession = placeholder
+            self.currentInvite = invite
+
+            try await Task.sleep(for: .seconds(1))
+            await MainActor.run {
+                // Update UI to show success state
+                self.titleLabel.text = "Session Request Found!"
+                self.descriptionLabel.text = "Review the details of the session request below; tapping 'Continue Setup' will let you complete the session details."
+
+                // Configure and show the invite card
+                self.inviteCardView.configure(with: placeholder, invite: invite)
+                self.animateInviteCard()
+
+                // Hide the code entry field
+                UIView.animate(withDuration: 0.3) {
+                    self.codeStack.alpha = 0
+                }
+
+                // Update button
+                self.findSessionButton.stopLoading(withSuccess: true)
+                self.findSessionButton.setTitle("Continue Setup")
+                self.findSessionButton.isEnabled = true
+            }
+        } catch {
+            await MainActor.run {
+                self.findSessionButton.stopLoading(withSuccess: false)
+                self.showError(error.localizedDescription)
+            }
+        }
+    }
+    
+    private func continueToSetup() {
+        guard let code = currentInviteCode,
+              let placeholder = currentSession,
+              let invite = currentInvite else { return }
+
+        // Navigate to completion view
+        let completionVC = CompleteSitterSessionRequestViewController(
+            inviteCode: code,
+            placeholderSession: placeholder,
+            invite: invite
+        )
+        navigationController?.pushViewController(completionVC, animated: true)
     }
     
     private func animateInviteCard() {
@@ -446,7 +534,7 @@ class JoinSessionViewController: NNViewController {
         
         // Remove current constraint and add new one
         inviteCardBottomConstraint?.isActive = false
-        inviteCardBottomConstraint = inviteCardView.topAnchor.constraint(equalTo: titleStack.bottomAnchor, constant: 24)
+        inviteCardBottomConstraint = inviteCardView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 0)
         inviteCardBottomConstraint?.isActive = true
         
         // Update glow constraints to follow the card
@@ -480,6 +568,11 @@ class JoinSessionViewController: NNViewController {
     @MainActor
     private func showError(_ message: String) {
         findSessionButton.stopLoading(withSuccess: false)
+        
+        // Reset scan button visibility
+        UIView.animate(withDuration: 0.2) {
+            self.scanButton.isHidden = false
+        }
         
         // Show error alert
         let alert = UIAlertController(
@@ -566,8 +659,13 @@ class JoinSessionViewController: NNViewController {
     
     private func showDebugAnimation() {
         // Update UI to show success state
-        titleLabel.text = "Session Found!"
-        descriptionLabel.text = "Review the details of the session below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
+        if ModeManager.shared.isNestOwnerMode {
+            titleLabel.text = "Session Request Found!"
+            descriptionLabel.text = "Review the details of the session request below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
+        } else {
+            titleLabel.text = "Session Found!"
+            descriptionLabel.text = "Review the details of the session below; tapping 'Accept Invite' will add this to your list of upcoming sessions."
+        }
         
         // Configure the invite card with mock data
         let mockSession = SessionItem(

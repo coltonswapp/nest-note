@@ -32,7 +32,7 @@ class SitterSessionsViewController: NNViewController {
         case empty(Section)
     }
     
-    private var filterSegmentedControl: UISegmentedControl!
+    private var filterSegmentedControl: NNSegmentedFilterView!
     internal var loadingIndicator: UIActivityIndicatorView!
     internal var refreshControl: UIRefreshControl!
     
@@ -59,7 +59,7 @@ class SitterSessionsViewController: NNViewController {
         case .upcoming:
             return allSessions
                 .compactMap { $0 as? SessionItem }
-                .filter { $0.status == .upcoming }
+                .filter { $0.status == .upcoming || $0.status == .pendingOwnerSetup }
                 .sorted { $0.startDate < $1.startDate }
         case .inProgress:
             return allSessions
@@ -104,15 +104,45 @@ class SitterSessionsViewController: NNViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupNotificationObservers()
+        // Ensure navigation bar is configured before adding palette
+        setupNavigationBar()
+        // Create filter view early so it exists when we need to enable/disable it during fetch
+        createFilterSegmentedControl()
         loadSessions()
         
+        // Set initial filter to inProgress
         currentBucket = .inProgress
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Add palette to navigation bar after view is laid out
+        addPaletteToNavigationBar()
         filterSegmentedControl.selectedSegmentIndex = 1 // inProgress is at index 1
+    }
+    
+    private func setupNotificationObservers() {
+        // Listen for session changes to refresh the list
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionDidChange),
+            name: .sessionDidChange,
+            object: nil
+        )
+    }
+    
+    @objc private func handleSessionDidChange() {
+        // Refresh the sessions list when a session changes
+        loadSessions()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     override func setup() {
         title = "My Sessions"
-        setupFilterSegmentedControl()
         setupCollectionView()
         setupEmptyStateView()
         setupJoinSessionButton()
@@ -126,44 +156,39 @@ class SitterSessionsViewController: NNViewController {
         ])
     }
     
-    private func setupFilterSegmentedControl() {
-        filterSegmentedControl = UISegmentedControl(items: ["Past", "In Progress", "Upcoming"])
-        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
-        filterSegmentedControl.addTarget(self, action: #selector(segmentedControlValueChanged), for: .valueChanged)
-
-        // Create a container view for the segmented control with proper sizing
-        let containerView = UIView()
-        containerView.addSubview(filterSegmentedControl)
-        filterSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            filterSegmentedControl.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            filterSegmentedControl.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            filterSegmentedControl.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
-            filterSegmentedControl.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
-            filterSegmentedControl.heightAnchor.constraint(equalToConstant: 32)
-        ])
-
-        containerView.frame.size.height = 48
-        addNavigationBarPalette(containerView)
-
-        // Set initial filter to inProgress
-        currentBucket = .inProgress
+    private func setupNavigationBar() {
+        // Configure navigation bar appearance
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        navigationController?.navigationBar.scrollEdgeAppearance = appearance
+        navigationController?.navigationBar.standardAppearance = appearance
     }
-
-    @objc private func segmentedControlValueChanged() {
-        let selectedIndex = filterSegmentedControl.selectedSegmentIndex
-        let newBucket: SessionService.SessionBucket
-
-        switch selectedIndex {
-        case 0: newBucket = .past
-        case 1: newBucket = .inProgress
-        case 2: newBucket = .upcoming
-        default: newBucket = .inProgress
-        }
-
-        currentBucket = newBucket
-        updateDisplayedSessions()
+    
+    override func setupNavigationBarButtons() {
+        let createButton = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            style: .plain,
+            target: self,
+            action: #selector(createSessionTapped)
+        )
+        createButton.tintColor = .label
+        navigationItem.rightBarButtonItem = createButton
+    }
+    
+    private func createFilterSegmentedControl() {
+        // Only create once
+        guard filterSegmentedControl == nil else { return }
+        
+        filterSegmentedControl = NNSegmentedFilterView(items: ["Past", "In Progress", "Upcoming"])
+        filterSegmentedControl.delegate = self
+        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
+        filterSegmentedControl.frame.size.height = 48
+    }
+    
+    private func addPaletteToNavigationBar() {
+        // Only add once - check if already added by checking if view has a window
+        guard filterSegmentedControl.window == nil else { return }
+        addNavigationBarPalette(filterSegmentedControl)
     }
     
     private func setupCollectionView() {
@@ -175,18 +200,26 @@ class SitterSessionsViewController: NNViewController {
                 return nil
             }
             
+            // Determine if this is a session request or regular session
+            let isSessionRequest = session.status == .pendingOwnerSetup
+            
             let deleteAction = UIContextualAction(
                 style: .destructive,
-                title: "Remove"
+                title: isSessionRequest ? "Cancel" : "Remove"
             ) { [weak self] _, _, completion in
                 guard let self = self else {
                     completion(false)
                     return
                 }
                 
+                let alertTitle = isSessionRequest ? "Cancel Session Request" : "Remove Session"
+                let alertMessage = isSessionRequest 
+                    ? "Are you sure you want to cancel this session request? The invite will be cancelled and the nest owner will no longer be able to accept it."
+                    : "Are you sure you want to remove this session? You may need to be reinvited to see it again."
+                
                 let alert = UIAlertController(
-                    title: "Remove Session",
-                    message: "Are you sure you want to remove this session? You may need to be reinvited to see it again.",
+                    title: alertTitle,
+                    message: alertMessage,
                     preferredStyle: .alert
                 )
                 
@@ -197,11 +230,16 @@ class SitterSessionsViewController: NNViewController {
                     completion(false)
                 })
                 
+                let confirmTitle = isSessionRequest ? "Cancel Request" : "Remove"
                 alert.addAction(UIAlertAction(
-                    title: "Remove",
+                    title: confirmTitle,
                     style: .destructive
                 ) { _ in
-                    self.deleteSessionAction(session, completion: completion)
+                    if isSessionRequest {
+                        self.deleteSessionRequestAction(session, completion: completion)
+                    } else {
+                        self.deleteSessionAction(session, completion: completion)
+                    }
                 })
                 
                 self.present(alert, animated: true)
@@ -247,11 +285,9 @@ class SitterSessionsViewController: NNViewController {
                 cell.configure(with: session, nestName: "")
                 
                 // Then fetch the actual nest name
-                Task {
+                Task { @MainActor in
                     if let sitterSession = try? await self?.sessionService.getSitterSession(sessionID: session.id) {
-                        await MainActor.run {
-                            cell.configure(with: session, nestName: sitterSession.nestName)
-                        }
+                        cell.configure(with: session, nestName: sitterSession.nestName)
                     }
                 }
                 
@@ -341,17 +377,20 @@ class SitterSessionsViewController: NNViewController {
     private func fetchSitterSessions() {
         Task {
             do {
-                filterSegmentedControl.isEnabled = false
-                emptyStateView.hideImmediately()
-                loadingSpinner.startAnimating()
+                await MainActor.run {
+                    filterSegmentedControl.isEnabled = false
+                    emptyStateView.hideImmediately()
+                    loadingSpinner.startAnimating()
+                }
                 guard let userID = UserService.shared.currentUser?.id else { return }
-                
-                // Fetch both active sitter sessions and archived ones
+
+                // Fetch active sitter sessions, archived ones, and pending session requests
                 async let regularSessionsTask = sessionService.fetchSitterSessions(userID: userID)
                 async let archivedSessionsTask = sessionService.fetchArchivedSitterSessions(userID: userID)
-                
-                let (collection, archivedSessions) = try await (regularSessionsTask, archivedSessionsTask)
-                
+                async let sessionRequestsTask = sessionService.fetchSitterSessionRequests(userID: userID)
+
+                let (collection, archivedSessions, sessionRequests) = try await (regularSessionsTask, archivedSessionsTask, sessionRequestsTask)
+
                 await MainActor.run {
                     filterSegmentedControl.isEnabled = true
                     var allSessionItems: [Any] = []
@@ -359,7 +398,8 @@ class SitterSessionsViewController: NNViewController {
                     allSessionItems.append(contentsOf: collection.inProgress)
                     allSessionItems.append(contentsOf: collection.past)
                     allSessionItems.append(contentsOf: archivedSessions)
-                    
+                    allSessionItems.append(contentsOf: sessionRequests)  // Add pending requests
+
                     self.allSessions = allSessionItems
                     updateEmptyState()
                     self.loadingSpinner.stopAnimating()
@@ -391,16 +431,42 @@ class SitterSessionsViewController: NNViewController {
         Task {
             do {
                 try await self.sessionService.deleteSitterSession(sessionID: session.id)
+                // Remove the session from the data source
                 await MainActor.run {
-                    // Remove the session from the data source
                     var snapshot = self.dataSource.snapshot()
                     snapshot.deleteItems([.session(session)])
                     self.dataSource.apply(snapshot, animatingDifferences: true)
+                    // Update allSessions to reflect the deletion
+                    self.allSessions.removeAll { ($0 as? SessionItem)?.id == session.id }
                     completion(true)
                 }
             } catch {
                 print("Error deleting session: \(error)")
-                completion(false)
+                await MainActor.run {
+                    completion(false)
+                }
+            }
+        }
+    }
+    
+    private func deleteSessionRequestAction(_ session: SessionItem, completion: @escaping (Bool) -> Void) {
+        Task {
+            do {
+                try await self.sessionService.cancelSitterSessionRequest(sessionID: session.id)
+                // Remove the session request from the data source
+                await MainActor.run {
+                    var snapshot = self.dataSource.snapshot()
+                    snapshot.deleteItems([.session(session)])
+                    self.dataSource.apply(snapshot, animatingDifferences: true)
+                    // Update allSessions to reflect the deletion
+                    self.allSessions.removeAll { ($0 as? SessionItem)?.id == session.id }
+                    completion(true)
+                }
+            } catch {
+                print("Error cancelling session request: \(error)")
+                await MainActor.run {
+                    completion(false)
+                }
             }
         }
     }
@@ -408,7 +474,17 @@ class SitterSessionsViewController: NNViewController {
     @objc private func joinSessionTapped() {
         let vc = JoinSessionViewController()
         vc.delegate = self
-        present(vc, animated: true)
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+    
+    @objc private func createSessionTapped() {
+        let createVC = CreateSessionRequestViewController()
+        createVC.delegate = self
+        let nav = UINavigationController(rootViewController: createVC)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
     }
     
     private func setupEmptyStateView() {
@@ -442,15 +518,40 @@ class SitterSessionsViewController: NNViewController {
 extension SitterSessionsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        
+
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
-        
+
         switch item {
         case .session(let session):
-            // Get the nest name from the sitter session
-            Task {
-                if let sitterSession = try? await sessionService.getSitterSession(sessionID: session.id) {
-                    await MainActor.run {
+            // Check if this is a pending session request
+            if session.status == .pendingOwnerSetup {
+                // Handle session request tap - show CreateSessionRequestViewController
+                Task {
+                    do {
+                        if let result = try await sessionService.getSessionRequestInviteCode(sessionID: session.id) {
+                            await MainActor.run {
+                                // Show CreateSessionRequestViewController in viewing mode
+                                let requestVC = CreateSessionRequestViewController()
+                                requestVC.configure(with: session, inviteCode: result.code, nestName: result.nestName)
+
+                                let nav = UINavigationController(rootViewController: requestVC)
+                                present(nav, animated: true)
+                            }
+                        } else {
+                            await MainActor.run {
+                                showToast(text: "Could not find invite code", sentiment: .negative)
+                            }
+                        }
+                    } catch {
+                        await MainActor.run {
+                            showToast(text: "Error: \(error.localizedDescription)", sentiment: .negative)
+                        }
+                    }
+                }
+            } else {
+                // Regular session - show detail view
+                Task { @MainActor in
+                    if let sitterSession = try? await sessionService.getSitterSession(sessionID: session.id) {
                         // Present the detail view modally
                         let detailVC = SitterSessionDetailViewController(session: session, nestName: sitterSession.nestName)
                         detailVC.modalPresentationStyle = .pageSheet
@@ -458,7 +559,7 @@ extension SitterSessionsViewController: UICollectionViewDelegate {
                     }
                 }
             }
-            
+
         case .archivedSession(let archivedSession):
             // Use the archived session initializer
             let detailVC = SitterSessionDetailViewController(archivedSession: archivedSession)
@@ -530,10 +631,33 @@ extension SitterSessionsViewController: CollectionViewLoadable {
 extension SitterSessionsViewController: JoinSessionViewControllerDelegate {
     func joinSessionViewController(didAcceptInvite session: SitterSession) {
         // Reload all sessions to include the newly accepted one
-        Task {
-            await MainActor.run {
-                self.fetchSitterSessions()
-            }
+        Task { @MainActor in
+            self.fetchSitterSessions()
         }
+    }
+}
+
+extension SitterSessionsViewController: CreateSessionRequestViewControllerDelegate {
+    func createSessionRequestViewController(_ controller: CreateSessionRequestViewController, didCreateRequest inviteCode: String, sessionID: String) {
+        // Use InviteDetailViewController to show the code with copy/share functionality
+        let inviteDetailVC = InviteDetailViewController()
+        inviteDetailVC.configure(with: inviteCode, sessionID: sessionID, sitter: nil, isSitterInitiated: true)
+        controller.navigationController?.pushViewController(inviteDetailVC, animated: true)
+    }
+}
+
+extension SitterSessionsViewController: NNSegmentedFilterViewDelegate {
+    func segmentedFilterView(_ filterView: NNSegmentedFilterView, didSelectSegmentAtIndex index: Int) {
+        let newBucket: SessionService.SessionBucket
+
+        switch index {
+        case 0: newBucket = .past
+        case 1: newBucket = .inProgress
+        case 2: newBucket = .upcoming
+        default: newBucket = .inProgress
+        }
+
+        currentBucket = newBucket
+        updateDisplayedSessions()
     }
 } 

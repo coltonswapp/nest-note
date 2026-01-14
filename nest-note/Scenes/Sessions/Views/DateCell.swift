@@ -18,9 +18,14 @@ final class DateCell: UICollectionViewListCell {
     private var endDate: Date = Date()
     private var isMultiDay: Bool = false
     private var earlyAccessDuration: EarlyAccessDuration = .halfDay
-    
+
     private var isReadOnly: Bool = false
-    
+    private var showEarlyAccess: Bool = true
+
+    // Constraints that need to be updated based on early access visibility
+    private var earlyAccessBottomConstraint: NSLayoutConstraint?
+    private var multiDayBottomConstraint: NSLayoutConstraint?
+
     // Create labels
     let startLabel: UILabel = {
         let label = UILabel()
@@ -118,14 +123,12 @@ final class DateCell: UICollectionViewListCell {
             self?.endTimeTapped()
         }
         multiDayToggle.addTarget(self, action: #selector(multiDayToggleTapped), for: .valueChanged)
-        
+
         // Add to content view
         contentView.addSubview(startLabel)
         contentView.addSubview(startControl)
         contentView.addSubview(endLabel)
         contentView.addSubview(endControl)
-        contentView.addSubview(earlyAccessLabel)
-        contentView.addSubview(earlyAccessButton)
         contentView.addSubview(multiDayLabel)
         contentView.addSubview(multiDayToggle)
         
@@ -134,68 +137,90 @@ final class DateCell: UICollectionViewListCell {
             // Start label constraints
             startLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             startLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            
+
             // Start control constraints
             startControl.centerYAnchor.constraint(equalTo: startLabel.centerYAnchor),
             startControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             startControl.leadingAnchor.constraint(greaterThanOrEqualTo: startLabel.trailingAnchor, constant: 16),
-            
+
             // End label constraints
             endLabel.topAnchor.constraint(equalTo: startLabel.bottomAnchor, constant: 24),
             endLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             endLabel.widthAnchor.constraint(equalTo: startLabel.widthAnchor),
-            
+
             // End control constraints
             endControl.centerYAnchor.constraint(equalTo: endLabel.centerYAnchor),
             endControl.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             endControl.leadingAnchor.constraint(greaterThanOrEqualTo: endLabel.trailingAnchor, constant: 16),
-            
+
             multiDayLabel.topAnchor.constraint(equalTo: endLabel.bottomAnchor, constant: 24),
             multiDayLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            
+
             // Multi-day toggle constraints
             multiDayToggle.centerYAnchor.constraint(equalTo: multiDayLabel.centerYAnchor),
-            multiDayToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            
-            // Early access label constraints
-            earlyAccessLabel.topAnchor.constraint(equalTo: multiDayLabel.bottomAnchor, constant: 24),
-            earlyAccessLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            earlyAccessLabel.widthAnchor.constraint(equalTo: startLabel.widthAnchor),
-            earlyAccessLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
-            
-            // Early access button constraints
-            earlyAccessButton.centerYAnchor.constraint(equalTo: earlyAccessLabel.centerYAnchor),
-            earlyAccessButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            earlyAccessButton.leadingAnchor.constraint(greaterThanOrEqualTo: earlyAccessLabel.trailingAnchor, constant: 16)
+            multiDayToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16)
         ])
+
+        // Create conditional bottom constraint for multiDay (used when early access is hidden)
+        multiDayBottomConstraint = multiDayLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
     }
     
-    func configure(startDate: Date, endDate: Date, isMultiDay: Bool, isReadOnly: Bool = false) {
+    func configure(startDate: Date, endDate: Date, isMultiDay: Bool, isReadOnly: Bool = false, showEarlyAccess: Bool = false) {
         self.startDate = startDate
         self.endDate = endDate
         self.isMultiDay = isMultiDay
         self.isReadOnly = isReadOnly
-        
+        self.showEarlyAccess = showEarlyAccess
+
         startControl.date = startDate
         endControl.date = endDate
         multiDayToggle.isOn = isMultiDay
         endControl.setStyle(isMultiDay ? .both : .time, animated: false)
-        
+
         startControl.isEnabled = !isReadOnly
         endControl.isEnabled = !isReadOnly
-        earlyAccessButton.isEnabled = !isReadOnly
         multiDayToggle.isEnabled = !isReadOnly
-        
-        // Update early access button appearance for disabled state
-        updateEarlyAccessButtonEnabledState()
-        
+
+        // Setup early access UI if needed
+        if showEarlyAccess {
+            setupEarlyAccessIfNeeded()
+            earlyAccessButton.isEnabled = !isReadOnly
+            updateEarlyAccessButtonEnabledState()
+            updateEarlyAccessButton()
+            multiDayBottomConstraint?.isActive = false
+            earlyAccessBottomConstraint?.isActive = true
+        } else {
+            // No early access - multiDay is the bottom element
+            multiDayBottomConstraint?.isActive = true
+        }
+
         updateDateLabels()
-        updateEarlyAccessButton()
+    }
+
+    private func setupEarlyAccessIfNeeded() {
+        // Only add early access views if not already added
+        guard earlyAccessLabel.superview == nil else { return }
+
+        contentView.addSubview(earlyAccessLabel)
+        contentView.addSubview(earlyAccessButton)
+
+        // Setup early access constraints
+        NSLayoutConstraint.activate([
+            earlyAccessLabel.topAnchor.constraint(equalTo: multiDayLabel.bottomAnchor, constant: 24),
+            earlyAccessLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            earlyAccessLabel.widthAnchor.constraint(equalTo: startLabel.widthAnchor),
+
+            earlyAccessButton.centerYAnchor.constraint(equalTo: earlyAccessLabel.centerYAnchor),
+            earlyAccessButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            earlyAccessButton.leadingAnchor.constraint(greaterThanOrEqualTo: earlyAccessLabel.trailingAnchor, constant: 16)
+        ])
+
+        earlyAccessBottomConstraint = earlyAccessLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
     }
     
     func configure(startDate: Date, endDate: Date, isMultiDay: Bool, earlyAccessDuration: EarlyAccessDuration, isReadOnly: Bool = false) {
         self.earlyAccessDuration = earlyAccessDuration
-        configure(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay, isReadOnly: isReadOnly)
+        configure(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay, isReadOnly: isReadOnly, showEarlyAccess: true)
     }
     
     private func updateDateLabels() {
@@ -241,21 +266,10 @@ final class DateCell: UICollectionViewListCell {
             // Toggling OFF multi-day - allow immediately
             isMultiDay = false
             endControl.setStyle(.time, animated: true)
-            
-            // Sync end date with start date
-            let calendar = Calendar.current
-            let startComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
-            let endTimeComponents = calendar.dateComponents([.hour, .minute], from: endDate)
-            
-            var newComponents = DateComponents()
-            newComponents.year = startComponents.year
-            newComponents.month = startComponents.month
-            newComponents.day = startComponents.day
-            newComponents.hour = endTimeComponents.hour
-            newComponents.minute = endTimeComponents.minute
-            
-            if let newDate = calendar.date(from: newComponents) {
-                updateDates(newEndDate: newDate)
+
+            // Sync end date with start date using centralized utility
+            if let syncedDate = Date.syncEndDateToStartDay(startDate: startDate, endDate: endDate) {
+                updateDates(newEndDate: syncedDate)
             }
         } else {
             // Toggling ON multi-day - let delegate validate first

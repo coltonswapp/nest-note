@@ -193,6 +193,9 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     
     /// Determines if the session can be marked as active based on business rules
     var canBeMarkedActive: Bool {
+        // Can't mark pending sessions as active
+        guard status != .pendingOwnerSetup else { return false }
+
         // Can be marked active if it's upcoming and within 24 hours of start time
         if status == .upcoming {
             return startDate.timeIntervalSinceNow <= 24 * 60 * 60 // 24 hours
@@ -208,11 +211,16 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     
     /// Infers the status based on dates and current status
     func inferredStatus(at currentDate: Date = Date()) -> SessionStatus {
+        // Don't auto-transition from pendingOwnerSetup
+        if status == .pendingOwnerSetup {
+            return .pendingOwnerSetup
+        }
+
         // Don't override manually set completed status
         if status == .completed {
             return .completed
         }
-        
+
         // Handle early access status
         if status == .earlyAccess {
             // Check if early access has expired
@@ -221,7 +229,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             }
             return .earlyAccess
         }
-        
+
         // Don't override manually set active status unless the session is over
         if status == .inProgress {
             if currentDate > endDate {
@@ -229,7 +237,7 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             }
             return .inProgress
         }
-        
+
         // Automatic status inference
         if currentDate < startDate {
             return .upcoming
@@ -337,6 +345,7 @@ protocol Containable {
 }
 
 enum SessionStatus: String, Codable, Containable {
+    case pendingOwnerSetup = "pendingOwnerSetup"
     case upcoming
     case inProgress = "inProgress"
     case extended
@@ -369,6 +378,8 @@ enum SessionStatus: String, Codable, Containable {
     
     var icon: String {
         switch self {
+        case .pendingOwnerSetup:
+            return "clock.badge.questionmark"
         case .upcoming:
             return "calendar.badge.clock"
         case .inProgress:
@@ -386,6 +397,8 @@ enum SessionStatus: String, Codable, Containable {
     
     var displayName: String {
         switch self {
+        case .pendingOwnerSetup:
+            return "Pending Setup"
         case .inProgress:
             return "In Progress"
         case .earlyAccess:

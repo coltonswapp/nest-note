@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 extension Date {
     /// Initialize a Date with specific components
@@ -104,12 +105,230 @@ extension Date {
         return calendar.date(from: components) ?? self
     }
     
+    /// Synchronizes the end date to use the same day as the start date while preserving the end time
+    /// Used when toggling from multi-day to single-day session
+    /// - Parameters:
+    ///   - startDate: The start date to use for the day component
+    ///   - endDate: The end date to extract the time component from
+    /// - Returns: A new date with startDate's day and endDate's time, or nil if unable to create
+    static func syncEndDateToStartDay(startDate: Date, endDate: Date) -> Date? {
+        let calendar = Calendar.current
+        let startComponents = calendar.dateComponents([.year, .month, .day], from: startDate)
+        let endTimeComponents = calendar.dateComponents([.hour, .minute], from: endDate)
+
+        var newComponents = DateComponents()
+        newComponents.year = startComponents.year
+        newComponents.month = startComponents.month
+        newComponents.day = startComponents.day
+        newComponents.hour = endTimeComponents.hour
+        newComponents.minute = endTimeComponents.minute
+
+        return calendar.date(from: newComponents)
+    }
+
     /// Example usage:
     /// ```
     /// let now = Date() // 2:45 PM
     /// let nextHour = now.roundedToNextHour() // 3:00 PM
     /// let next15Min = now.roundedToNext15Minutes() // 3:00 PM
+    ///
+    /// // Sync dates for single-day session
+    /// let start = Date.from(year: 2024, month: 1, day: 15, hour: 9, minute: 0)! // Jan 15, 9:00 AM
+    /// let end = Date.from(year: 2024, month: 1, day: 17, hour: 17, minute: 0)!   // Jan 17, 5:00 PM
+    /// let synced = Date.syncEndDateToStartDay(startDate: start, endDate: end)    // Jan 15, 5:00 PM
     /// ```
+}
+
+// MARK: - Date Synchronization Utility
+
+/// Result of date synchronization operation
+struct DateSynchronizationResult {
+    let adjustedStartDate: Date
+    let adjustedEndDate: Date
+}
+
+/// Result of date validation operation
+enum DateValidationResult {
+    case valid
+    case invalidStartAfterEnd
+    case invalidSameTime
+    
+    var errorTitle: String {
+        switch self {
+        case .valid:
+            return ""
+        case .invalidStartAfterEnd, .invalidSameTime:
+            return "Invalid Time Range"
+        }
+    }
+    
+    var errorMessage: String {
+        switch self {
+        case .valid:
+            return ""
+        case .invalidStartAfterEnd:
+            return "The start time cannot be after the end time."
+        case .invalidSameTime:
+            return "The start and end times cannot be the same."
+        }
+    }
+}
+
+/// Utility for validating session date ranges
+struct SessionDateValidator {
+    /// Validates a date range for sessions
+    /// - Parameters:
+    ///   - startDate: The start date/time
+    ///   - endDate: The end date/time
+    ///   - isMultiDay: Whether this is a multi-day session (affects overnight validation)
+    /// - Returns: Validation result indicating if dates are valid or what error occurred
+    static func validateDateRange(startDate: Date, endDate: Date, isMultiDay: Bool = false) -> DateValidationResult {
+        let calendar = Calendar.current
+        
+        // For single-day sessions, check if this is an overnight session (end time wraps to next day)
+        if !isMultiDay {
+            let startTime = calendar.dateComponents([.hour, .minute], from: startDate)
+            let endTime = calendar.dateComponents([.hour, .minute], from: endDate)
+            
+            // If end time is before start time, it's likely an overnight session
+            // Compare just the time components to detect overnight sessions
+            if let startHour = startTime.hour, let startMin = startTime.minute,
+               let endHour = endTime.hour, let endMin = endTime.minute {
+                let startMinutes = startHour * 60 + startMin
+                let endMinutes = endHour * 60 + endMin
+                
+                // If end time is before start time, it's an overnight session (valid)
+                if endMinutes < startMinutes {
+                    // This is a valid overnight session - end time is on the next day
+                    return .valid
+                }
+            }
+        }
+        
+        // Check if start date is after end date (for multi-day or same-day sessions)
+        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedDescending {
+            return .invalidStartAfterEnd
+        }
+        
+        // Check if start and end times are the same
+        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
+            return .invalidSameTime
+        }
+        
+        return .valid
+    }
+    
+    /// Validates a date range and shows an alert if invalid
+    /// - Parameters:
+    ///   - startDate: The start date/time
+    ///   - endDate: The end date/time
+    ///   - isMultiDay: Whether this is a multi-day session (affects overnight validation)
+    ///   - viewController: The view controller to present the alert from
+    /// - Returns: true if valid, false if invalid (alert is shown automatically)
+    static func validateAndShowAlertIfNeeded(startDate: Date, endDate: Date, isMultiDay: Bool = false, in viewController: UIViewController) -> Bool {
+        let result = validateDateRange(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay)
+        
+        guard result == .valid else {
+            let alert = UIAlertController(
+                title: result.errorTitle,
+                message: result.errorMessage,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            viewController.present(alert, animated: true)
+            return false
+        }
+        
+        return true
+    }
+}
+
+/// Utility for synchronizing session dates when start date/time changes
+struct SessionDateSynchronizer {
+    /// Synchronizes dates based on picker type and session configuration
+    /// - Parameters:
+    ///   - pickerType: The type of date picker that was changed
+    ///   - newDate: The new date selected from the picker
+    ///   - previousStartDate: The previous start date (before change)
+    ///   - currentEndDate: The current end date
+    ///   - isMultiDay: Whether this is a multi-day session
+    /// - Returns: Adjusted start and end dates
+    static func synchronizeDates(
+        pickerType: NNDateTimePickerSheet.PickerType,
+        newDate: Date,
+        previousStartDate: Date,
+        currentEndDate: Date,
+        isMultiDay: Bool
+    ) -> DateSynchronizationResult {
+        let calendar = Calendar.current
+        // Initialize with previous values - only change what's being edited
+        var adjustedStartDate = previousStartDate
+        var adjustedEndDate = currentEndDate
+        
+        switch pickerType {
+        case .startDate:
+            adjustedStartDate = newDate
+            
+            if isMultiDay {
+                // For multi-day stays, if start date is now after end date, adjust end date
+                if adjustedStartDate >= adjustedEndDate {
+                    // Calculate the original duration between start and end dates
+                    let duration = calendar.dateComponents([.day, .hour, .minute], from: previousStartDate, to: currentEndDate)
+                    
+                    // If there was a positive duration, preserve it relative to the new start date
+                    if let days = duration.day, days > 0 {
+                        if let adjustedEnd = calendar.date(byAdding: .day, value: days, to: adjustedStartDate) {
+                            adjustedEndDate = adjustedEnd
+                        } else {
+                            // Fallback: set end date to start date + 1 day
+                            adjustedEndDate = calendar.date(byAdding: .day, value: 1, to: adjustedStartDate) ?? adjustedEndDate
+                        }
+                    } else {
+                        // Default: set end date to start date + 1 day
+                        adjustedEndDate = calendar.date(byAdding: .day, value: 1, to: adjustedStartDate) ?? adjustedEndDate
+                    }
+                }
+            } else {
+                // If single-day session, sync end date to the new start date's day
+                if let syncedEndDate = Date.syncEndDateToStartDay(startDate: adjustedStartDate, endDate: adjustedEndDate) {
+                    // Ensure end time is after start time - if not, adjust end time to be 1 hour after start
+                    if syncedEndDate <= adjustedStartDate {
+                        adjustedEndDate = calendar.date(byAdding: .hour, value: 1, to: adjustedStartDate) ?? syncedEndDate
+                    } else {
+                        adjustedEndDate = syncedEndDate
+                    }
+                }
+            }
+            
+        case .startTime:
+            adjustedStartDate = newDate
+            
+            // If single-day session, sync end date to the new start date's day
+            if !isMultiDay {
+                if let syncedEndDate = Date.syncEndDateToStartDay(startDate: adjustedStartDate, endDate: adjustedEndDate) {
+                    // Ensure end time is after start time - if not, adjust end time to be 1 hour after start
+                    if syncedEndDate <= adjustedStartDate {
+                        adjustedEndDate = calendar.date(byAdding: .hour, value: 1, to: adjustedStartDate) ?? syncedEndDate
+                    } else {
+                        adjustedEndDate = syncedEndDate
+                    }
+                }
+            }
+            
+        case .endDate, .endTime:
+            adjustedEndDate = newDate
+            
+            // If end time is now before or equal to start time, adjust start time to be 1 hour before end time
+            if adjustedEndDate <= adjustedStartDate {
+                adjustedStartDate = calendar.date(byAdding: .hour, value: -1, to: adjustedEndDate) ?? adjustedStartDate
+            }
+        }
+        
+        return DateSynchronizationResult(
+            adjustedStartDate: adjustedStartDate,
+            adjustedEndDate: adjustedEndDate
+        )
+    }
 }
 
 extension Calendar {

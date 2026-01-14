@@ -193,6 +193,9 @@ final class HomeSessionCell: UICollectionViewListCell {
             statusImageView.tintColor = .systemGreen
         case .archived, .earlyAccess:
             break
+        case .pendingOwnerSetup:
+            statusLabel.textColor = .systemYellow
+            statusImageView.tintColor = .systemYellow
         }
         
         // Configure date display

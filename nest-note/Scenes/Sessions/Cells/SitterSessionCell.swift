@@ -36,15 +36,11 @@ class SitterSessionCell: UICollectionViewListCell {
     }
     
     private func setupViews() {
-        var bgConfig = UIBackgroundConfiguration.listCell()
-        bgConfig.backgroundColor = .secondarySystemGroupedBackground
-        backgroundConfiguration = bgConfig
-        
         // Setup empty state stack
         emptyStateStack.addArrangedSubview(emptyStateLabel)
         emptyStateStack.addArrangedSubview(emptyStateIcon)
         contentView.addSubview(emptyStateStack)
-        
+
         NSLayoutConstraint.activate([
             emptyStateStack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             emptyStateStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -53,6 +49,19 @@ class SitterSessionCell: UICollectionViewListCell {
             emptyStateIcon.widthAnchor.constraint(equalToConstant: 12),
             emptyStateIcon.heightAnchor.constraint(equalToConstant: 12)
         ])
+    }
+
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+
+        // Update background configuration to show highlight on tap
+        var newBgConfig = UIBackgroundConfiguration.listCell()
+        if state.isHighlighted || state.isSelected {
+            newBgConfig.backgroundColor = .systemGray4
+        } else {
+            newBgConfig.backgroundColor = .secondarySystemGroupedBackground
+        }
+        backgroundConfiguration = newBgConfig
     }
     
     func configureEmptyState(for section: SitterSessionsViewController.Section) {
@@ -92,19 +101,22 @@ class SitterSessionCell: UICollectionViewListCell {
     func configure(with session: SessionItem, nestName: String) {
         // Hide empty state stack
         emptyStateStack.isHidden = true
-        
+
         var content = defaultContentConfiguration()
-        
+
+        // Check if this is a session request
+        let isSessionRequest = session.status == .pendingOwnerSetup
+
         // Configure text style
         content.text = session.title
         content.textProperties.font = .bodyL
-        
+
         // Configure date and nest name display
         let dateFormatter = DateFormatter()
         let timeFormatter = DateFormatter()
         timeFormatter.timeStyle = .short
         timeFormatter.dateStyle = .none
-        
+
         let dateString: String
         if session.isMultiDay {
             // For multi-day sessions, show date range without times
@@ -119,15 +131,20 @@ class SitterSessionCell: UICollectionViewListCell {
             let timeString = timeFormatter.string(from: session.startDate)
             dateString = "\(dayString), \(timeString)"
         }
-        
-        // Add nest name to secondary text
-        content.secondaryText = "\(nestName) • \(dateString)"
+
+        // Add nest name and session request indicator to secondary text
+        if isSessionRequest {
+            content.secondaryText = "Session Request • \(dateString)"
+            content.secondaryTextProperties.color = .systemOrange
+        } else {
+            content.secondaryText = "\(nestName) • \(dateString)"
+            content.secondaryTextProperties.color = .secondaryLabel
+        }
         content.secondaryTextProperties.font = .bodyM
-        content.secondaryTextProperties.color = .secondaryLabel
-        
+
         // Apply standard system margins
         content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
-        
+
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
     }
@@ -140,33 +157,26 @@ class SitterSessionCell: UICollectionViewListCell {
     func configureArchived(title: String, date: Date, isArchived: Bool = true) {
         // Hide empty state stack
         emptyStateStack.isHidden = true
-        
+
         var content = defaultContentConfiguration()
-        
+
         // Configure text style
         content.text = title
         content.textProperties.font = .bodyL
-        
+
         // Format date
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d, yyyy"
         let dateString = dateFormatter.string(from: date)
-        
+
         // Add archived indicator to secondary text
         content.secondaryText = isArchived ? "Completed • \(dateString)" : dateString
         content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
-        
+
         // Apply standard system margins
         content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
-        
-        // Add a faded appearance for archived items
-        var bgConfig = backgroundConfiguration ?? UIBackgroundConfiguration.listCell()
-        bgConfig.backgroundColor = isArchived ? 
-            .secondarySystemGroupedBackground.withAlphaComponent(0.8) : 
-            .secondarySystemGroupedBackground
-        backgroundConfiguration = bgConfig
-        
+
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
     }
