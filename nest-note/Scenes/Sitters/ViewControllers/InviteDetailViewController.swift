@@ -26,7 +26,8 @@ class InviteDetailViewController: NNViewController {
     }
     private var inviteCode: String?
     private var inviteExists: Bool = false
-    
+    private var isSitterInitiated: Bool = false
+
     // Track original state for change detection
     private var originalSitter: SitterItem?
     
@@ -372,19 +373,20 @@ class InviteDetailViewController: NNViewController {
         }
     }
     
-    func configure(with code: String, sessionID: String, sitter: SitterItem? = nil) {
+    func configure(with code: String, sessionID: String, sitter: SitterItem? = nil, isSitterInitiated: Bool = false) {
         self.inviteCode = code
         self.inviteID = "invite-\(code)"
         self.sessionID = sessionID
         self.selectedSitter = sitter
         self.originalSitter = sitter // Store original state
         self.inviteExists = true
-        
+        self.isSitterInitiated = isSitterInitiated
+
         updateButtonTitle()
         updateButtonState()
         updateActionButtonsVisibility()
-        
-        
+
+
         // Only apply snapshot if view has loaded
         if isViewLoaded {
             applySnapshot()
@@ -455,7 +457,11 @@ class InviteDetailViewController: NNViewController {
             guard let self else { return }
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
             if section == .code {
-                footerView.configure(text: "Share this code. Anyone with it can join this session.")
+                if isSitterInitiated {
+                    footerView.configure(text: "Share this code with the Nest Owner. They'll use it to accept your session request and can adjust the dates if needed.")
+                } else {
+                    footerView.configure(text: "Share this code. Anyone with it can join this session.")
+                }
             }
         }
         
@@ -505,25 +511,27 @@ class InviteDetailViewController: NNViewController {
     private func applySnapshot() {
         // Ensure dataSource is initialized before applying snapshot
         guard dataSource != nil else { return }
-        
+
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
-        
-        // Sitter section
-        snapshot.appendSections([.sitter])
-        if let sitter = selectedSitter {
-            snapshot.appendItems([SitterCellItem(sitter: sitter)], toSection: .sitter)
-        } else {
-            // Show placeholder for "Invite a Sitter"
-            let placeholderSitter = SitterItem(id: "placeholder", name: "Invite a Sitter", email: "")
-            snapshot.appendItems([SitterCellItem(sitter: placeholderSitter)], toSection: .sitter)
+
+        // Sitter section - only show for owner-initiated invites
+        if !isSitterInitiated {
+            snapshot.appendSections([.sitter])
+            if let sitter = selectedSitter {
+                snapshot.appendItems([SitterCellItem(sitter: sitter)], toSection: .sitter)
+            } else {
+                // Show placeholder for "Invite a Sitter"
+                let placeholderSitter = SitterItem(id: "placeholder", name: "Invite a Sitter", email: "")
+                snapshot.appendItems([SitterCellItem(sitter: placeholderSitter)], toSection: .sitter)
+            }
         }
-        
+
         // Code section
         snapshot.appendSections([.code])
         let code = inviteCode ?? "000-000"
         snapshot.appendItems([CodeCellItem(code: code)], toSection: .code)
-        
-        
+
+
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
@@ -720,11 +728,19 @@ extension InviteDetailViewController {
         
         Task {
             do {
-                // Delete the existing invite
-                try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
+                let newInvite: (id: String, code: String)
                 
-                // Create a new invite
-                let newInvite = try await SessionService.shared.createOpenInvite(sessionID: sessionID)
+                if isSitterInitiated {
+                    // For sitter-initiated sessions, use the specialized method
+                    newInvite = try await SessionService.shared.regenerateSitterInitiatedInviteCode(
+                        inviteID: inviteID,
+                        sessionID: sessionID
+                    )
+                } else {
+                    // For owner-initiated sessions, delete and create new invite
+                    try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
+                    newInvite = try await SessionService.shared.createOpenInvite(sessionID: sessionID)
+                }
                 
                 await MainActor.run {
                     // Update the invite properties
@@ -795,25 +811,47 @@ extension InviteDetailViewController {
     }
     
     @objc private func deleteButtonTapped() {
+        let title: String
+        let message: String
+        
+        if isSitterInitiated {
+            title = "Cancel Session Request?"
+            message = "This will delete the invite code and cancel your session request. The nest owner will no longer be able to accept it. This action cannot be undone."
+        } else {
+            title = "Delete Invite?"
+            message = "This will remove the sitter's access to this session. This action cannot be undone."
+        }
+        
         let alert = UIAlertController(
-            title: "Delete Invite?",
-            message: "This will remove the sitter's access to this session. This action cannot be undone.",
+            title: title,
+            message: message,
             preferredStyle: .alert
         )
         
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+        let deleteTitle = isSitterInitiated ? "Cancel Request" : "Delete"
+        alert.addAction(UIAlertAction(title: deleteTitle, style: .destructive) { [weak self] _ in
             guard let self = self,
                   let inviteID = self.inviteID,
                   let sessionID = self.sessionID else { return }
             
             Task {
                 do {
-                    try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
+                    if self.isSitterInitiated {
+                        // For sitter-initiated sessions, use the specialized method
+                        try await SessionService.shared.deleteSitterInitiatedInvite(
+                            inviteID: inviteID,
+                            sessionID: sessionID
+                        )
+                    } else {
+                        // For owner-initiated sessions, use the standard method
+                        try await SessionService.shared.deleteInvite(inviteID: inviteID, sessionID: sessionID)
+                    }
                     
                     await MainActor.run {
-                        self.showToast(text: "Invite deleted")
+                        let message = self.isSitterInitiated ? "Session request cancelled" : "Invite deleted"
+                        self.showToast(text: message)
                         self.delegate?.inviteDetailViewControllerDidDeleteInvite()
                         self.navigationController?.dismiss(animated: true)
                     }

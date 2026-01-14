@@ -1,8 +1,9 @@
 import UIKit
 
-protocol NNEmptyStateViewDelegate: AnyObject {
+@objc protocol NNEmptyStateViewDelegate: AnyObject {
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView)
     func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int)
+    @objc optional func emptyStateViewDidTapSecondaryActionButton(_ emptyStateView: NNEmptyStateView)
 }
 
 class NNEmptyStateView: UIView {
@@ -56,7 +57,7 @@ class NNEmptyStateView: UIView {
     }()
     
     private(set) var actionButtons: [NNSmallPrimaryButton] = []
-    
+
     private lazy var actionButton: NNSmallPrimaryButton = {
         let button = NNSmallPrimaryButton(title: "Test", backgroundColor: NNColors.primary.withAlphaComponent(0.15), foregroundColor: NNColors.primary)
         button.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
@@ -64,6 +65,8 @@ class NNEmptyStateView: UIView {
         button.tag = 0
         return button
     }()
+
+    private var secondaryActionButton: UIButton?
     
     init(icon: UIImage?, title: String, subtitle: String, actionButtonTitle: String? = nil, actionButtonMenu: UIMenu? = nil) {
         super.init(frame: .zero)
@@ -89,7 +92,7 @@ class NNEmptyStateView: UIView {
         stackView.addArrangedSubview(subtitleLabel)
         stackView.addArrangedSubview(buttonStackView)
         buttonStackView.addArrangedSubview(actionButton)
-        
+
         stackView.setCustomSpacing(16, after: subtitleLabel)
         
         // Ensure the view itself is user interaction enabled
@@ -117,7 +120,7 @@ class NNEmptyStateView: UIView {
         )
         titleLabel.text = title
         subtitleLabel.text = subtitle
-        
+
         if let buttonTitle = actionButtonTitle {
             actionButton.setTitle(buttonTitle, for: .normal)
             actionButton.isHidden = false
@@ -126,7 +129,7 @@ class NNEmptyStateView: UIView {
         }
 
         if let icon {
-            iconImageView.isHidden = false  
+            iconImageView.isHidden = false
         } else {
             iconImageView.isHidden = true
         }
@@ -135,7 +138,38 @@ class NNEmptyStateView: UIView {
     @objc private func actionButtonTapped() {
         delegate?.emptyStateViewDidTapActionButton(self)
     }
-    
+
+    @objc private func secondaryActionButtonTapped() {
+        delegate?.emptyStateViewDidTapSecondaryActionButton?(self)
+    }
+
+    /// Adds a secondary action button below the primary action button
+    /// - Parameter title: The title for the secondary button
+    func addSecondaryAction(title: String) {
+        // Only create if it doesn't exist
+        guard secondaryActionButton == nil else {
+            // If it exists, just update the title
+            var config = secondaryActionButton?.configuration
+            config?.title = title
+            secondaryActionButton?.configuration = config
+            secondaryActionButton?.isHidden = false
+            return
+        }
+
+        // Create the secondary action button
+        var config = UIButton.Configuration.plain()
+        config.title = title
+        config.baseForegroundColor = .systemBlue
+        let button = UIButton(configuration: config)
+        button.addTarget(self, action: #selector(secondaryActionButtonTapped), for: .touchUpInside)
+
+        // Add to stack view
+        stackView.addArrangedSubview(button)
+        stackView.setCustomSpacing(8, after: buttonStackView)
+
+        secondaryActionButton = button
+    }
+
     func addMenuToActionButton(menu: UIMenu) {
         actionButton.showsMenuAsPrimaryAction = true
         actionButton.menu = menu

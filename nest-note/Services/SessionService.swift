@@ -229,6 +229,9 @@ class SessionService {
                 result.inProgress.append(session)
             case .earlyAccess, .completed, .archived:
                 result.past.append(session)
+            case .pendingOwnerSetup:
+                // Pending requests are not included in normal session lists
+                break
             }
         }
         
@@ -494,6 +497,9 @@ class SessionService {
             // Extended status should only be inferred, not manually set
             throw ServiceError.invalidStatusTransition
         case .archived:
+            throw ServiceError.invalidStatusTransition
+        case .pendingOwnerSetup:
+            // Can't manually transition to pending status
             throw ServiceError.invalidStatusTransition
         }
         
@@ -1287,7 +1293,486 @@ class SessionService {
         Logger.log(level: .info, category: .sessionService, message: "Invite validation successful ✅")
         return (session, invite)
     }
+
+    // MARK: - Sitter-Initiated Session Requests
+
+    /// Creates a session request from a sitter
+    func createSitterSessionRequest(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        targetNestID: String?,
+        targetNestName: String?
+    ) async throws -> (code: String, sessionID: String) {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Creating sitter session request: \(title)")
+
+        // Generate unique 6-digit invite code
+        let code = try await generateUniqueInviteCode()
+        let inviteID = "invite-\(code)"
+        let sessionID = UUID().uuidString
+
+        // Get current user info for the assigned sitter
+        let currentUser = UserService.shared.currentUser
+        let sitterName = currentUser?.personalInfo.name ?? ""
+        let sitterEmail = currentUser?.personalInfo.email ?? Auth.auth().currentUser?.email ?? ""
+
+        // Create placeholder session item with sitter info pre-populated
+        let calendar = Calendar.current
+        let sessionRequest = SessionItem(
+            id: sessionID,
+            title: title,
+            startDate: startDate,
+            endDate: endDate,
+            isMultiDay: calendar.startOfDay(for: startDate) != calendar.startOfDay(for: endDate),
+            events: [],
+            status: .pendingOwnerSetup,
+            assignedSitter: AssignedSitter(
+                id: currentUserID,
+                name: sitterName,
+                email: sitterEmail,
+                userID: currentUserID,
+                inviteStatus: .invited,  // Use .invited instead of .pending
+                inviteID: inviteID
+            ),
+            nestID: targetNestID ?? "",  // Use empty string if no nest selected
+            ownerID: nil,  // No owner yet
+            earlyAccessDuration: .halfDay,  // Default
+            earlyAccessEndDate: nil,
+            entryIds: nil,
+            ownerReviewedAt: nil
+        )
+
+        // Store in sitter's sessionRequests collection
+        let requestRef = db.collection("users").document(currentUserID)
+            .collection("sessionRequests").document(sessionID)
+
+        let encoder = Firestore.Encoder()
+        let encodedRequest = try encoder.encode(sessionRequest)
+        try await requestRef.setData(encodedRequest)
+
+        // Create invite
+        let invite = Invite(
+            id: inviteID,
+            nestID: targetNestID ?? "",  // Use empty string if no nest selected
+            nestName: targetNestName ?? "Unknown Nest",  // Use placeholder if no nest selected
+            sessionID: sessionID,
+            sitterEmail: nil,  // Open invite
+            status: .pending,
+            expiresAt: endDate,
+            createdBy: currentUserID,
+            inviteType: .sitterInitiated  // Mark as sitter-initiated
+        )
+
+        let inviteRef = db.collection("invites").document(inviteID)
+        let encodedInvite = try encoder.encode(invite)
+        try await inviteRef.setData(encodedInvite)
+
+        Logger.log(level: .info, category: .sessionService, message: "Sitter session request created with code: \(code) ✅")
+
+        return (code: code, sessionID: sessionID)
+    }
+
+    /// Validates a sitter-initiated session request
+    func validateSitterSessionRequest(code: String) async throws -> (SessionItem, Invite) {
+        Logger.log(level: .info, category: .sessionService, message: "Validating sitter session request: \(code)")
+
+        let inviteID = "invite-\(code)"
+        let inviteRef = db.collection("invites").document(inviteID)
+
+        // Get the invite document
+        let inviteDoc = try await inviteRef.getDocument()
+        guard inviteDoc.exists,
+              let invite = try? inviteDoc.data(as: Invite.self) else {
+            throw SessionError.invalidInviteCode
+        }
+
+        // Verify it's a sitter-initiated invite
+        guard invite.type == .sitterInitiated else {
+            throw SessionError.invalidInviteCode
+        }
+
+        // Validate expiration
+        if invite.expiresAt < Date() {
+            throw SessionError.inviteExpired
+        }
+
+        // Validate status
+        guard invite.status == .pending else {
+            throw SessionError.inviteAlreadyUsed
+        }
+
+        // Get the placeholder session from sitter's requests
+        let requestRef = db.collection("users").document(invite.createdBy)
+            .collection("sessionRequests").document(invite.sessionID)
+
+        let requestDoc = try await requestRef.getDocument()
+        guard requestDoc.exists,
+              let placeholder = try? requestDoc.data(as: SessionItem.self) else {
+            throw SessionError.sessionNotFound
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Sitter session request validation successful ✅")
+        return (placeholder, invite)
+    }
     
+    /// Regenerates an invite code for a sitter-initiated session request
+    func regenerateSitterInitiatedInviteCode(inviteID: String, sessionID: String) async throws -> (id: String, code: String) {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Regenerating invite code for sitter-initiated session: \(sessionID)")
+        
+        // Get the current invite to extract nest info
+        let inviteRef = db.collection("invites").document(inviteID)
+        let inviteDoc = try await inviteRef.getDocument()
+        guard inviteDoc.exists,
+              let oldInvite = try? inviteDoc.data(as: Invite.self) else {
+            throw SessionError.invalidInviteCode
+        }
+        
+        // Verify it's a sitter-initiated invite
+        guard oldInvite.type == .sitterInitiated else {
+            throw SessionError.invalidInviteCode
+        }
+        
+        // Get the session request to get expiration time
+        let requestRef = db.collection("users").document(currentUserID)
+            .collection("sessionRequests").document(sessionID)
+        
+        let requestDoc = try await requestRef.getDocument()
+        guard requestDoc.exists,
+              let sessionRequest = try? requestDoc.data(as: SessionItem.self) else {
+            throw SessionError.sessionNotFound
+        }
+        
+        // Generate new unique code
+        let newCode = try await generateUniqueInviteCode()
+        let newInviteID = "invite-\(newCode)"
+        
+        // Create new invite with sitter-initiated type
+        let newInvite = Invite(
+            id: newInviteID,
+            nestID: oldInvite.nestID,
+            nestName: oldInvite.nestName,
+            sessionID: sessionID,
+            sitterEmail: nil,  // Open invite
+            status: .pending,
+            expiresAt: sessionRequest.endDate,
+            createdBy: currentUserID,
+            inviteType: .sitterInitiated
+        )
+        
+        // Update assigned sitter with new invite ID
+        // If assignedSitter doesn't exist, create one (shouldn't happen but handle edge case)
+        var updatedAssignedSitter: AssignedSitter
+        if var existingSitter = sessionRequest.assignedSitter {
+            existingSitter.inviteID = newInviteID
+            updatedAssignedSitter = existingSitter
+        } else {
+            // Create new assigned sitter if one doesn't exist
+            let currentUser = UserService.shared.currentUser
+            updatedAssignedSitter = AssignedSitter(
+                id: currentUserID,
+                name: currentUser?.personalInfo.name ?? "",
+                email: currentUser?.personalInfo.email ?? Auth.auth().currentUser?.email ?? "",
+                userID: currentUserID,
+                inviteStatus: .invited,
+                inviteID: newInviteID
+            )
+        }
+        
+        let encoder = Firestore.Encoder()
+        let encodedInvite = try encoder.encode(newInvite)
+        let encodedSitter = try encoder.encode(updatedAssignedSitter)
+        
+        // Delete old invite and create new one, update sessionRequest atomically
+        try await db.runTransaction { transaction, errorPointer in
+            // Delete old invite
+            transaction.deleteDocument(inviteRef)
+            
+            // Create new invite
+            transaction.setData(encodedInvite, forDocument: self.db.collection("invites").document(newInviteID))
+            
+            // Update sessionRequest with new invite ID
+            transaction.updateData(["assignedSitter": encodedSitter], forDocument: requestRef)
+            
+            return nil
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Sitter-initiated invite code regenerated successfully ✅")
+        return (id: newInviteID, code: newCode)
+    }
+    
+    /// Deletes an invite for a sitter-initiated session request
+    /// Note: This also cancels the session request since without an invite, the request cannot be accepted
+    func deleteSitterInitiatedInvite(inviteID: String, sessionID: String) async throws {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Deleting sitter-initiated invite and cancelling session request: \(inviteID)")
+        
+        // Get the invite to verify it's sitter-initiated
+        let inviteRef = db.collection("invites").document(inviteID)
+        let inviteDoc = try await inviteRef.getDocument()
+        guard inviteDoc.exists,
+              let invite = try? inviteDoc.data(as: Invite.self) else {
+            throw SessionError.invalidInviteCode
+        }
+        
+        // Verify it's a sitter-initiated invite
+        guard invite.type == .sitterInitiated else {
+            throw SessionError.invalidInviteCode
+        }
+        
+        // Get reference to sessionRequest
+        let requestRef = db.collection("users").document(currentUserID)
+            .collection("sessionRequests").document(sessionID)
+        
+        // Verify session request exists
+        let requestDoc = try await requestRef.getDocument()
+        guard requestDoc.exists else {
+            // Session request doesn't exist - just delete the invite
+            try await inviteRef.delete()
+            Logger.log(level: .info, category: .sessionService, message: "Sitter-initiated invite deleted (no session request) ✅")
+            return
+        }
+        
+        // Delete invite, cancel it, and delete session request atomically
+        // This ensures consistency: if the invite is deleted, the request is cancelled
+        try await db.runTransaction { transaction, errorPointer in
+            // Delete the invite document
+            transaction.deleteDocument(inviteRef)
+            
+            // Delete the session request (cancelling it)
+            transaction.deleteDocument(requestRef)
+            
+            return nil
+        }
+        
+        Logger.log(level: .info, category: .sessionService, message: "Sitter-initiated invite deleted and session request cancelled ✅")
+    }
+
+    /// Accepts a sitter-initiated session request and creates the actual session
+    func acceptSitterSessionRequest(
+        inviteCode: String,
+        completedSession: SessionItem,
+        sitterInfo: (name: String, email: String, userID: String)
+    ) async throws {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Accepting sitter session request: \(inviteCode)")
+
+        let inviteID = "invite-\(inviteCode)"
+
+        // Validate the request first
+        let (placeholder, invite) = try await validateSitterSessionRequest(code: inviteCode)
+
+        // Create final session with owner set and status changed to upcoming
+        var finalSession = completedSession
+        finalSession.status = .upcoming
+        finalSession.ownerID = currentUserID
+        
+        // Ensure nestID is set - critical for creating the session document
+        // Priority: 1) session's nestID, 2) invite's nestID, 3) current nest from NestService
+        // Also capture nest name early to avoid extra reads
+        var cachedNestName: String? = nil
+        if finalSession.nestID.isEmpty {
+            if !invite.nestID.isEmpty {
+                finalSession.nestID = invite.nestID
+            } else if let currentNest = NestService.shared.currentNest {
+                finalSession.nestID = currentNest.id
+                cachedNestName = currentNest.name // Capture name when we have it
+            } else {
+                Logger.log(level: .error, category: .sessionService, message: "Cannot accept request: nestID is empty and no current nest available")
+                throw SessionError.noCurrentNest
+            }
+        }
+        
+        // Validate that nestID is not empty before proceeding
+        guard !finalSession.nestID.isEmpty else {
+            Logger.log(level: .error, category: .sessionService, message: "Cannot accept request: nestID is still empty after fallback attempts")
+            throw SessionError.noCurrentNest
+        }
+        
+        // Validate that sitter userID is not empty (required for document path)
+        guard !sitterInfo.userID.isEmpty else {
+            Logger.log(level: .error, category: .sessionService, message: "Cannot accept request: sitter userID is empty")
+            throw SessionError.userNotAuthenticated
+        }
+        
+        // Validate that session ID is not empty
+        guard !finalSession.id.isEmpty else {
+            Logger.log(level: .error, category: .sessionService, message: "Cannot accept request: session ID is empty")
+            throw SessionError.sessionNotFound
+        }
+
+        // Set assigned sitter info
+        finalSession.assignedSitter = AssignedSitter(
+            id: UUID().uuidString,
+            name: sitterInfo.name,
+            email: sitterInfo.email,
+            userID: sitterInfo.userID,
+            inviteStatus: .accepted,
+            inviteID: inviteID
+        )
+
+        // Fetch the actual nest name from the nest document
+        // This ensures we use the correct nest name even if the invite had "Unknown Nest"
+        let actualNestName: String
+        // First, use cached name if we captured it above (most common case)
+        if let cachedName = cachedNestName {
+            actualNestName = cachedName
+            Logger.log(level: .info, category: .sessionService, message: "Using cached nest name: \(cachedName) for nestID: \(finalSession.nestID)")
+        } else if let currentNest = NestService.shared.currentNest, currentNest.id == finalSession.nestID {
+            // Fallback: check NestService cache (in case nestID was set from invite but nest is still cached)
+            actualNestName = currentNest.name
+            Logger.log(level: .info, category: .sessionService, message: "Using current nest name: \(currentNest.name) for nestID: \(finalSession.nestID)")
+        } else {
+            // Last resort: Fetch from Firestore if not in cache
+            do {
+                let nestRef = db.collection("nests").document(finalSession.nestID)
+                let nestDoc = try await nestRef.getDocument()
+                if nestDoc.exists, let nest = try? nestDoc.data(as: NestItem.self) {
+                    actualNestName = nest.name
+                    Logger.log(level: .info, category: .sessionService, message: "Fetched actual nest name: \(nest.name) for nestID: \(finalSession.nestID)")
+                } else {
+                    // Fallback to invite nest name if nest document doesn't exist or can't be decoded
+                    actualNestName = invite.nestName
+                    Logger.log(level: .info, category: .sessionService, message: "Could not fetch nest document, using invite nest name: \(invite.nestName)")
+                }
+            } catch {
+                // Fallback to invite nest name if fetch fails
+                actualNestName = invite.nestName
+                Logger.log(level: .info, category: .sessionService, message: "Error fetching nest name, using invite nest name: \(invite.nestName), error: \(error.localizedDescription)")
+            }
+        }
+
+        // Create SitterSession for the sitter
+        let sitterSession = SitterSession(
+            id: finalSession.id,
+            nestID: finalSession.nestID,
+            nestName: actualNestName,
+            inviteAcceptedAt: Date(),
+            readyToArchive: nil,
+            parentSessionCompletedDate: nil,
+            parentSessionArchivedDate: nil,
+            reviewedAt: nil
+        )
+
+        let encoder = Firestore.Encoder()
+
+        // Use transaction to ensure atomicity
+        try await db.runTransaction { transaction, errorPointer in
+            // 1. Create session in nest
+            let sessionRef = self.db.collection("nests").document(finalSession.nestID)
+                .collection("sessions").document(finalSession.id)
+            let encodedSession = try! encoder.encode(finalSession)
+            transaction.setData(encodedSession, forDocument: sessionRef)
+
+            // 2. Create sitterSession for sitter
+            let sitterSessionRef = self.db.collection("users").document(sitterInfo.userID)
+                .collection("sitterSessions").document(finalSession.id)
+            let encodedSitterSession = try! encoder.encode(sitterSession)
+            transaction.setData(encodedSitterSession, forDocument: sitterSessionRef)
+
+            // 3. Update invite status
+            let inviteRef = self.db.collection("invites").document(inviteID)
+            transaction.updateData(["status": InviteStatus.accepted.rawValue], forDocument: inviteRef)
+
+            // 4. Delete placeholder from sitter's requests
+            let requestRef = self.db.collection("users").document(invite.createdBy)
+                .collection("sessionRequests").document(placeholder.id)
+            transaction.deleteDocument(requestRef)
+
+            return nil
+        }
+
+        // Add to local cache
+        sessions.append(finalSession)
+
+        Logger.log(level: .info, category: .sessionService, message: "Sitter session request accepted successfully ✅")
+
+        // Track event
+        Tracker.shared.track(.sessionCreated)
+    }
+
+    /// Fetches all session requests created by a sitter
+    func fetchSitterSessionRequests(userID: String) async throws -> [SessionItem] {
+        Logger.log(level: .info, category: .sessionService, message: "Fetching session requests for sitter: \(userID)")
+
+        let requestsRef = db.collection("users").document(userID)
+            .collection("sessionRequests")
+
+        let snapshot = try await requestsRef.getDocuments()
+        let requests = try snapshot.documents.compactMap { try $0.data(as: SessionItem.self) }
+
+        Logger.log(level: .info, category: .sessionService, message: "Fetched \(requests.count) session requests ✅")
+        return requests
+    }
+
+    /// Cancels a sitter session request
+    func cancelSitterSessionRequest(sessionID: String) async throws {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Cancelling session request: \(sessionID)")
+
+        // Delete from sessionRequests
+        let requestRef = db.collection("users").document(currentUserID)
+            .collection("sessionRequests").document(sessionID)
+        try await requestRef.delete()
+
+        // Find and cancel associated invite
+        let invitesRef = db.collection("invites")
+            .whereField("sessionID", isEqualTo: sessionID)
+            .whereField("createdBy", isEqualTo: currentUserID)
+            .whereField("inviteType", isEqualTo: InviteType.sitterInitiated.rawValue)
+
+        let inviteSnapshot = try await invitesRef.getDocuments()
+        for doc in inviteSnapshot.documents {
+            try await doc.reference.updateData(["status": InviteStatus.cancelled.rawValue])
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Session request cancelled ✅")
+    }
+
+    /// Gets the invite code and nest name for a sitter-initiated session request
+    func getSessionRequestInviteCode(sessionID: String) async throws -> (code: String, nestName: String)? {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            throw SessionError.userNotAuthenticated
+        }
+
+        Logger.log(level: .info, category: .sessionService, message: "Fetching invite code for session request: \(sessionID)")
+
+        let invitesRef = db.collection("invites")
+            .whereField("sessionID", isEqualTo: sessionID)
+            .whereField("createdBy", isEqualTo: currentUserID)
+            .whereField("inviteType", isEqualTo: InviteType.sitterInitiated.rawValue)
+            .whereField("status", isEqualTo: InviteStatus.pending.rawValue)
+
+        let snapshot = try await invitesRef.getDocuments()
+        guard let inviteDoc = snapshot.documents.first,
+              let invite = try? inviteDoc.data(as: Invite.self) else {
+            Logger.log(level: .info, category: .sessionService, message: "No invite found for session request")
+            return nil
+        }
+
+        // Extract code from invite ID (format: "invite-123456")
+        let code = invite.id.replacingOccurrences(of: "invite-", with: "")
+        Logger.log(level: .info, category: .sessionService, message: "Found invite code: \(code)")
+
+        return (code: code, nestName: invite.nestName)
+    }
+
     // MARK: - Sitter Sessions
     
     /// Fetches a specific sitter session by ID
@@ -1348,6 +1833,24 @@ class SessionService {
         return collection
     }
     
+    /// Fetches pending session requests created by a sitter
+//    func fetchSitterSessionRequests(userID: String) async throws -> [SessionItem] {
+//        Logger.log(level: .info, category: .sessionService, message: "Fetching sitter session requests for user: \(userID)")
+//
+//        let sessionRequestsRef = db.collection("users").document(userID)
+//            .collection("sessionRequests")
+//
+//        let snapshot = try await sessionRequestsRef.getDocuments()
+//        let requests = try snapshot.documents.compactMap { try $0.data(as: SessionItem.self) }
+//
+//        // Filter for only pending requests (shouldn't be any others, but safety check)
+//        let pendingRequests = requests.filter { $0.status == .pendingOwnerSetup }
+//
+//        Logger.log(level: .info, category: .sessionService, message: "Fetched \(pendingRequests.count) session requests ✅")
+//
+//        return pendingRequests.sorted { $0.startDate < $1.startDate }
+//    }
+
     /// Deletes a sitter session from a user's collection
     func deleteSitterSession(sessionID: String) async throws {
         guard let userID = Auth.auth().currentUser?.uid else {
@@ -1557,34 +2060,48 @@ enum InviteStatus: String, Codable {
     case rejected
 }
 
+enum InviteType: String, Codable {
+    case ownerInitiated
+    case sitterInitiated
+}
+
 // MARK: - Invite Model
 struct Invite: Codable, Identifiable {
     let id: String  // Format: "invite-123456"
     let nestID: String
-    let nestName: String  // Add nestName field
+    let nestName: String
     let sessionID: String
     let sitterEmail: String?
     let status: InviteStatus
     let createdAt: Date
     let expiresAt: Date
     let createdBy: String
-    
+
+    // OPTIONAL for backward compatibility - existing documents won't have this field
+    let inviteType: InviteType?
+
+    // Computed property for safe access with fallback to ownerInitiated
+    var type: InviteType {
+        return inviteType ?? .ownerInitiated
+    }
+
     // Helper computed property for getting the raw code
     var rawCode: String {
         let parts = id.split(separator: "-")
         return parts.count > 1 ? String(parts[1]) : ""
     }
-    
+
     init(
         id: String,
         nestID: String,
-        nestName: String,  // Add nestName parameter
+        nestName: String,
         sessionID: String,
         sitterEmail: String?,
         status: InviteStatus,
         createdAt: Date = Date(),
         expiresAt: Date? = nil,
-        createdBy: String
+        createdBy: String,
+        inviteType: InviteType = .ownerInitiated
     ) {
         self.id = id
         self.nestID = nestID
@@ -1595,6 +2112,7 @@ struct Invite: Codable, Identifiable {
         self.createdAt = createdAt
         self.expiresAt = expiresAt ?? createdAt.addingTimeInterval(48 * 60 * 60) // Fallback: 48 hours validity (invites should use session end time)
         self.createdBy = createdBy
+        self.inviteType = inviteType
     }
 }
 

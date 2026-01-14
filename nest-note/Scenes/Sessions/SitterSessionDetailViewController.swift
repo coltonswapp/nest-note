@@ -204,7 +204,7 @@ final class SitterSessionDetailViewController: NNViewController {
             customNavBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             customNavBar.heightAnchor.constraint(equalToConstant: 66),
             
-            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             stackView.centerYAnchor.constraint(equalTo: customNavBar.centerYAnchor),
             stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             

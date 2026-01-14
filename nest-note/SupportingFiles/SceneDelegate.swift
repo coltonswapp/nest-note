@@ -7,6 +7,7 @@
 
 import UIKit
 import FirebaseAuth
+import FirebaseFirestore
 import UserNotifications
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -157,15 +158,58 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             return
         }
         
-        // Check if user is in nest owner mode and needs to switch to sitter mode
-        if ModeManager.shared.isNestOwnerMode {
-            DispatchQueue.main.async {
-                self.showModeSwitchAlert(for: code)
+        // Check invite type to determine if mode switch is needed
+        Task {
+            await checkInviteTypeAndRoute(code: code)
+        }
+    }
+    
+    private func checkInviteTypeAndRoute(code: String) async {
+        do {
+            // Fetch the invite to check its type
+            let inviteID = "invite-\(code)"
+            let inviteRef = SessionService.shared.db.collection("invites").document(inviteID)
+            let inviteDoc = try await inviteRef.getDocument()
+            
+            // If invite doesn't exist, proceed with default behavior (show mode switch for owners)
+            guard inviteDoc.exists,
+                  let invite = try? inviteDoc.data(as: Invite.self) else {
+                await MainActor.run {
+                    // Invite not found - use default behavior
+                    if ModeManager.shared.isNestOwnerMode {
+                        self.showModeSwitchAlert(for: code)
+                    } else {
+                        self.presentJoinSessionViewController(with: code)
+                    }
+                }
+                return
             }
-        } else {
-            // User is already in sitter mode, proceed directly
-            DispatchQueue.main.async {
-                self.presentJoinSessionViewController(with: code)
+            
+            // Route based on invite type and user mode
+            await MainActor.run {
+                if ModeManager.shared.isNestOwnerMode {
+                    // Owner scanning an invite
+                    if invite.type == .sitterInitiated {
+                        // Sitter-initiated invite: owner can accept without switching modes
+                        self.presentJoinSessionViewController(with: code)
+                    } else {
+                        // Owner-initiated invite: owner needs to switch to sitter mode
+                        self.showModeSwitchAlert(for: code)
+                    }
+                } else {
+                    // User is already in sitter mode, proceed directly
+                    self.presentJoinSessionViewController(with: code)
+                }
+            }
+        } catch {
+            Logger.log(level: .error, category: .launcher, message: "Error checking invite type: \(error.localizedDescription)")
+            // On error, fall back to default behavior
+            await MainActor.run {
+                if ModeManager.shared.isNestOwnerMode {
+                    self.showModeSwitchAlert(for: code)
+                } else {
+                    self.presentJoinSessionViewController(with: code)
+                }
             }
         }
     }

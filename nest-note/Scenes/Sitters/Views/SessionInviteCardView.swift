@@ -211,8 +211,24 @@ class SessionInviteCardView: UIView {
     }
     
     func configure(with session: SessionItem, invite: Invite) {
-        // Configure nest name with debug print
-        nestNameLabel.text = invite.nestName
+        // Configure nest name - if owner is viewing a sitter-initiated request with "Unknown Nest",
+        // show the current nest's name instead (since the owner will be accepting it into their nest)
+        if ModeManager.shared.isNestOwnerMode,
+           invite.type == .sitterInitiated,
+           invite.nestName == "Unknown Nest",
+           let currentNestName = NestService.shared.currentNest?.name,
+           !currentNestName.isEmpty {
+            nestNameLabel.text = currentNestName
+        } else {
+            nestNameLabel.text = invite.nestName
+        }
+        
+        // Set badge text based on invite type
+        if invite.type == .sitterInitiated {
+            inviteBadgeLabel.text = "SESSION REQUEST"
+        } else {
+            inviteBadgeLabel.text = "SESSION INVITE"
+        }
         
         // Force layout update
         setNeedsLayout()

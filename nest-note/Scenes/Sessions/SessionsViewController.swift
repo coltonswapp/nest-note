@@ -55,7 +55,7 @@ class NestSessionsViewController: NNViewController {
         }
     }
     
-    private var filterSegmentedControl: UISegmentedControl!
+    private var filterSegmentedControl: NNSegmentedFilterView!
     internal var loadingIndicator: UIActivityIndicatorView!
     internal var refreshControl: UIRefreshControl!
     
@@ -128,10 +128,20 @@ class NestSessionsViewController: NNViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupNotificationObservers()
+        // Ensure navigation bar is configured before adding palette
+        setupNavigationBar()
+        // Create filter view early so it exists when we need to enable/disable it during fetch
+        createFilterSegmentedControl()
         loadSessions()
 
         // Set initial filter to inProgress
         currentBucket = .inProgress
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Add palette to navigation bar after view is laid out
+        addPaletteToNavigationBar()
         filterSegmentedControl.selectedSegmentIndex = 1 // inProgress is at index 1
     }
     
@@ -195,11 +205,11 @@ class NestSessionsViewController: NNViewController {
     
     override func setup() {
         title = "Nest Sessions"
-        setupFilterSegmentedControl()
         setupCollectionView()
         setupEmptyStateView()
         setupNewSessionButton()
         configureDataSource()
+        setupNavigationBar()
 
         // Add loading spinner
         view.addSubview(loadingSpinner)
@@ -209,41 +219,39 @@ class NestSessionsViewController: NNViewController {
         ])
     }
     
-    private func setupFilterSegmentedControl() {
-        filterSegmentedControl = UISegmentedControl(items: ["Past", "In Progress", "Upcoming"])
-        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
-        filterSegmentedControl.addTarget(self, action: #selector(segmentedControlValueChanged), for: .valueChanged)
-
-        // Create a container view for the segmented control with proper sizing
-        let containerView = UIView()
-        containerView.addSubview(filterSegmentedControl)
-        filterSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            filterSegmentedControl.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            filterSegmentedControl.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            filterSegmentedControl.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
-            filterSegmentedControl.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
-            filterSegmentedControl.heightAnchor.constraint(equalToConstant: 32)
-        ])
-
-        containerView.frame.size.height = 48
-        addNavigationBarPalette(containerView)
+    private func setupNavigationBar() {
+        // Configure navigation bar appearance
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        navigationController?.navigationBar.scrollEdgeAppearance = appearance
+        navigationController?.navigationBar.standardAppearance = appearance
     }
-
-    @objc private func segmentedControlValueChanged() {
-        let selectedIndex = filterSegmentedControl.selectedSegmentIndex
-        let newBucket: SessionService.SessionBucket
-
-        switch selectedIndex {
-        case 0: newBucket = .past
-        case 1: newBucket = .inProgress
-        case 2: newBucket = .upcoming
-        default: newBucket = .inProgress
-        }
-
-        currentBucket = newBucket
-        updateDisplayedSessions()
+    
+    override func setupNavigationBarButtons() {
+        let findButton = UIBarButtonItem(
+            title: "Join",
+            style: .plain,
+            target: self,
+            action: #selector(findSessionTapped)
+        )
+        findButton.tintColor = .label
+        navigationItem.rightBarButtonItem = findButton
+    }
+    
+    private func createFilterSegmentedControl() {
+        // Only create once
+        guard filterSegmentedControl == nil else { return }
+        
+        filterSegmentedControl = NNSegmentedFilterView(items: ["Past", "In Progress", "Upcoming"])
+        filterSegmentedControl.delegate = self
+        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
+        filterSegmentedControl.frame.size.height = 48
+    }
+    
+    private func addPaletteToNavigationBar() {
+        // Only add once - check if already added by checking if view has a window
+        guard filterSegmentedControl.window == nil else { return }
+        addNavigationBarPalette(filterSegmentedControl)
     }
     
     private func setupCollectionView() {
@@ -546,6 +554,14 @@ class NestSessionsViewController: NNViewController {
         present(UINavigationController(rootViewController: vc), animated: true)
     }
     
+    @objc private func findSessionTapped() {
+        let findVC = JoinSessionViewController()
+        findVC.delegate = self
+        let nav = UINavigationController(rootViewController: findVC)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+    
     // Helper method to delete a session
     private func deleteSession(_ session: SessionItem, completion: @escaping (Bool) -> Void) {
         Task {
@@ -699,6 +715,10 @@ extension NestSessionsViewController: EditSessionViewControllerDelegate {
         case .completed, .archived:
             currentBucket = .past
             filterSegmentedControl.selectedSegmentIndex = 0
+        case .pendingOwnerSetup:
+            // Pending sessions shouldn't appear in this view
+            currentBucket = .upcoming
+            filterSegmentedControl.selectedSegmentIndex = 2
         }
     }
     
@@ -772,5 +792,29 @@ extension NestSessionsViewController: CollectionViewLoadable {
                 Logger.log(level: .error, category: .sessionService, message: "Error loading sessions: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+extension NestSessionsViewController: JoinSessionViewControllerDelegate {
+    func joinSessionViewController(didAcceptInvite session: SitterSession) {
+        // Refresh sessions list to include the newly accepted one
+        loadSessions()
+        showToast(text: "Session added successfully")
+    }
+}
+
+extension NestSessionsViewController: NNSegmentedFilterViewDelegate {
+    func segmentedFilterView(_ filterView: NNSegmentedFilterView, didSelectSegmentAtIndex index: Int) {
+        let newBucket: SessionService.SessionBucket
+
+        switch index {
+        case 0: newBucket = .past
+        case 1: newBucket = .inProgress
+        case 2: newBucket = .upcoming
+        default: newBucket = .inProgress
+        }
+
+        currentBucket = newBucket
+        updateDisplayedSessions()
     }
 } 

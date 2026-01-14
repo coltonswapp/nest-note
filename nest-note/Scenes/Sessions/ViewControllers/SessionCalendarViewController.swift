@@ -166,6 +166,10 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         // Add subviews in correct order
         view.addSubview(collectionView)
         view.addSubview(compactCalendarView)
+        view.addSubview(emptyStateView)
+        
+        // Set delegate for empty state view
+        emptyStateView.delegate = self
         
         // Configure footnote text
         let dateFormatter = DateFormatter()
@@ -183,6 +187,10 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
         ])
         
         // Initial load
@@ -977,5 +985,16 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
         // Notify delegate of updated events
         delegate?.calendarViewController(self, didUpdateEvents: allEvents)
         showToast(text: "Event Updated", sentiment: .positive)
+    }
+}
+
+// MARK: - NNEmptyStateViewDelegate
+extension SessionCalendarViewController: NNEmptyStateViewDelegate {
+    func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int) {
+        //
+    }
+    
+    func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
+        addEventTapped()
     }
 }

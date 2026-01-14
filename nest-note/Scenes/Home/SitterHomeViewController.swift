@@ -43,7 +43,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         view.isHidden = true
         view.isUserInteractionEnabled = true
         view.delegate = self
-        
+
         return view
     }()
     
@@ -63,7 +63,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         super.setup()
         configureCollectionView()
         navigationItem.title = "NestNote"
-        navigationItem.weeTitle = "Welcome to"
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationBar.tintColor = NNColors.primary
         
@@ -136,10 +135,10 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 return section
                 
             case .nest:
-                // Full width item with fixed height of 220
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
+                // Compact nest cell with reduced height
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(80))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(200))
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(80))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
                 section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing + 4, leading: 18, bottom: 20, trailing: 18)
@@ -865,10 +864,11 @@ extension SitterHomeViewController: UICollectionViewDelegate {
 
 extension SitterHomeViewController: NNEmptyStateViewDelegate {
     func emptyStateView(_ emptyStateView: NNEmptyStateView, didTapActionWithTag tag: Int) {
-        //
+        // Legacy support for tag-based actions (not used anymore)
     }
-    
+
     func emptyStateViewDidTapActionButton(_ emptyStateView: NNEmptyStateView) {
+        // Primary action - Join a Session
         let joinVC = JoinSessionViewController()
         joinVC.delegate = self
         let nav = UINavigationController(rootViewController: joinVC)
@@ -927,8 +927,10 @@ extension SitterHomeViewController: SessionCalendarViewControllerDelegate {
     func calendarViewController(_ controller: SessionCalendarViewController, didUpdateEvents events: [SessionEvent]) {
         // Update local events array
         sessionEvents = events
-        
+
         // Update events section
         updateEventsSection(with: events)
     }
 } 
+
+
