@@ -269,6 +269,17 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         guard let question = currentQuestion else { return nil }
         return (question.id, getSelectedOptions())
     }
+
+    func setTestOptions(_ testOptions: [SurveyOption], isMultiSelect: Bool = true) {
+        print("🔍 [Survey VC] Setting test options:")
+        for (index, option) in testOptions.enumerated() {
+            print("  [\(index)] '\(option.title)' - subtitle: '\(option.subtitle ?? "nil")'")
+        }
+        self.options = testOptions
+        self.isMultiSelect = isMultiSelect
+        collectionView?.reloadData()
+        print("🔍 [Survey VC] Reloaded collection view")
+    }
     
     // MARK: - Private Methods
     private func updateScrollingBehavior() {
