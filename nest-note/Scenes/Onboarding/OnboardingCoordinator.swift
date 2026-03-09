@@ -39,8 +39,14 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private weak var delegate: OnboardingCoordinatorDelegate?
     weak var authenticationDelegate: AuthenticationDelegate?
     private var containerViewController: OnboardingContainerViewController!
-    
+
     private var currentStepIndex: Int = 0
+    private var onboardingConfig: OnboardingConfiguration?
+    private var isNavigating: Bool = false
+    private var hasProcessedRoleSelection: Bool = false
+
+    private let configFileName: String
+
     private lazy var steps: [NNOnboardingViewController] = {
         // Start with the new image-based onboarding screens
         var baseSteps: [NNOnboardingViewController] = [
@@ -94,6 +100,21 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     // Public accessor for role
     var currentRole: NestUser.UserType {
         return userInfo.role
+    }
+
+    // Public accessor for paywall offering based on referral code
+    var paywallOfferingId: String? {
+        // If user has a referral code, show the partner offering
+        if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
+            return "partner"
+        }
+        // Otherwise, use default offering (nil = default)
+        return nil
+    }
+
+    // Public accessor for nest name
+    var currentNestName: String? {
+        return userInfo.nestInfo?.name
     }
     
     // MARK: - Validation Publishers
@@ -197,7 +218,59 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
               validateStep(currentVC) else {
             return
         }
-        
+
+        // Set navigation flag
+        isNavigating = true
+
+        // Track step completion
+        if let stepId = getStepId(for: currentStepIndex) {
+            OnboardingAnalyticsService.shared.recordStepCompleted(stepId)
+        }
+
+        // SPECIAL CASE: Check if we just completed the role_selection survey
+        // If so, update the role and rebuild steps BEFORE navigating
+        if let roleAnswer = userInfo.surveyResponses["role_selection"]?.first,
+           !hasProcessedRoleSelection {
+            Logger.log(level: .info, category: .signup, message: "🎯 NEXT: Processing role_selection in next() method")
+
+            let role: NestUser.UserType
+            if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
+                role = .nestOwner
+            } else {
+                role = .sitter
+            }
+
+            // Mark that we've processed this
+            hasProcessedRoleSelection = true
+
+            // Update the role which will rebuild the steps array
+            updateRole(role)
+
+            // After updateRole, the steps array has been rebuilt
+            // currentStepIndex should still point to the role selection step
+            // So we can proceed with incrementing it
+        }
+
+        currentStepIndex += 1
+
+            let role: NestUser.UserType
+            if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
+                role = .nestOwner
+            } else {
+                role = .sitter
+            }
+
+            // Mark that we've processed this
+            hasProcessedRoleSelection = true
+
+            // Update the role which will rebuild the steps array
+            updateRole(role)
+
+            // After updateRole, the steps array has been rebuilt
+            // currentStepIndex should still point to the role selection step
+            // So we can proceed with incrementing it
+        }
+
         currentStepIndex += 1
         
         if currentStepIndex < allSteps.count {
@@ -486,25 +559,68 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     func updateRole(_ role: NestUser.UserType) {
         userInfo.role = role
-        
-        // Remove any existing survey steps
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Selected role: \(role.rawValue)")
+        Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps before removal: \(steps.count)")
+
+        // Find the role selection step index (could be OBRoleViewController or a survey VC)
+        var roleSelectionIndex = steps.firstIndex(where: { $0 is OBRoleViewController })
+
+        // If we didn't find OBRoleViewController, look for the first survey step (which is likely role selection from JSON)
+        if roleSelectionIndex == nil {
+            roleSelectionIndex = steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
+            Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Role selection is a survey VC at index: \(roleSelectionIndex ?? -1)")
+        }
+
+        // Remove ALL survey steps (including role selection if it's a survey)
         steps.removeAll { $0 is NNOnboardingSurveyViewController }
-        
-        // Add survey questions based on role
+
+        // Remove role-specific steps that shouldn't be in this user's flow
+        if role == .sitter {
+            // Sitters don't need nest creation or paywall
+            steps.removeAll { $0 is OBCreateNestViewController }
+            steps.removeAll { $0 is OBPaywallViewController }
+            Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Removed nest creation and paywall steps for sitter")
+        }
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps after removal: \(steps.count)")
+
+        // Re-add role selection step if it was a survey-based one from JSON config
+        if let onboardingConfig = onboardingConfig,
+           let roleStep = onboardingConfig.flow.steps.first(where: { $0.id == "role_selection" }) {
+            if case .survey(let surveyConfig) = roleStep.config {
+                let roleVC = createSurveyViewController(from: surveyConfig, stepId: roleStep.id)
+                // Insert at the beginning or where it was found
+                let insertIndex = roleSelectionIndex ?? 0
+                steps.insert(roleVC, at: min(insertIndex, steps.count))
+                Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Re-inserted role selection survey at index: \(insertIndex)")
+            }
+        }
+
+        // Add survey questions based on selected role
         if let surveyConfig = loadSurveyConfig(for: role) {
             let surveySteps = surveyConfig.questions.map { question -> NNOnboardingSurveyViewController in
                 let vc = NNOnboardingSurveyViewController()
                 vc.configure(with: question)
                 return vc
             }
-            
+
+            Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Adding \(surveySteps.count) \(role.rawValue)-specific survey questions")
+
             // Insert survey steps after role selection
-            let roleIndex = steps.firstIndex(where: { $0 is OBRoleViewController }) ?? 0
-            steps.insert(contentsOf: surveySteps, at: roleIndex + 1)
+            let insertionIndex = (roleSelectionIndex ?? 0) + 1
+            steps.insert(contentsOf: surveySteps, at: min(insertionIndex, steps.count))
+        } else {
+            Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: No survey config found for role: \(role.rawValue)")
         }
-        
-        // Update container's total steps count based on new role
-        containerViewController.updateTotalSteps(allSteps.count)
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Final step count before ensuring required steps: \(steps.count)")
+
+        // Ensure required steps (like finish) are added based on role
+        // This is critical - without this, sitters won't get the finish step!
+        ensureRequiredStepsExist()
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Final step count after ensuring required steps: \(steps.count)")
     }
     
     func updateNestInfo(name: String, address: String) {
@@ -514,6 +630,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     func updateSurveyResponses(_ responses: [String: [String]]) {
         // Merge new responses with existing ones
         userInfo.surveyResponses.merge(responses) { _, new in new }
+
+        // Note: role_selection is handled in next() method to ensure proper navigation timing
     }
     
     func updateReferralCode(_ referralCode: String?) {
@@ -574,30 +692,39 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     func validateRole(_ role: NestUser.UserType) {
         roleValidationSubject.send(true)
-        updateRole(role)
-        
-        // Add required steps to the flow when role is selected
-        ensureRequiredStepsExist()
+        updateRole(role) // This now calls ensureRequiredStepsExist() internally
+
+        // Record role selection in analytics
+        OnboardingAnalyticsService.shared.recordRole(role.rawValue)
     }
     
     private func ensureRequiredStepsExist() {
-        // Add nest creation step for owners if it doesn't exist
-        if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBCreateNestViewController }) {
-            steps.append(OBCreateNestViewController())
+        // Add role-specific steps
+        if userInfo.role == .nestOwner {
+            // Add nest creation step for owners if it doesn't exist
+            if !steps.contains(where: { $0 is OBCreateNestViewController }) {
+                steps.append(OBCreateNestViewController())
+            }
+
+            // Add paywall step for nest owners (subscription check will happen when step is reached)
+            if !steps.contains(where: { $0 is OBPaywallViewController }) {
+                steps.append(OBPaywallViewController())
+            }
         }
-        
-        // Add paywall step for nest owners only if it doesn't exist
-        if userInfo.role == .nestOwner && !steps.contains(where: { $0 is OBPaywallViewController }) {
-            steps.append(OBPaywallViewController())
-        }
-        
-        // Add finish step if it doesn't exist
+
+        // ALWAYS add finish step for both nest owners AND sitters if it doesn't exist
         if !steps.contains(where: { $0 is OBFinishViewController }) {
             steps.append(OBFinishViewController())
+            Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Added OBFinishViewController to flow for role: \(userInfo.role.rawValue)")
         }
         
         // Update container's step count
         containerViewController.updateTotalSteps(steps.count)
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
+    }
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
     }
     
     func validateNest(name: String, address: String) {
@@ -789,8 +916,15 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 // MARK: - OnboardingContainerDelegate
 extension OnboardingCoordinator {
     func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
-        // Handle abort - go back to login
-        navigationController.dismiss(animated: true)
+        // Handle abort - go back to landing page
+        // Check if we're pushed on a navigation stack or presented modally
+        if let navController = navigationController.navigationController {
+            // We're pushed, so pop all the way back to the root (LandingViewController)
+            navController.popToRootViewController(animated: true)
+        } else {
+            // We're presented modally (e.g., from Settings), so dismiss
+            navigationController.dismiss(animated: true)
+        }
     }
     
     func onboardingContainerDidRequestSkipSurvey(_ container: OnboardingContainerViewController) {

@@ -34,9 +34,9 @@ enum HomeNestType {
     var defaultIcon: String {
         switch self {
         case .sitterAccess:
-            return "house.lodge.fill"
+            return "house.lodge"
         case .ownerPrimary:
-            return "house.lodge.fill"
+            return "house.lodge"
         case .ownerSecondary:
             return "house.lodge"
         }

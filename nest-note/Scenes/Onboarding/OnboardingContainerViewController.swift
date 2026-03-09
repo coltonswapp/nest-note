@@ -95,7 +95,7 @@ final class OnboardingContainerViewController: UIViewController {
     
     private func setupEllipsisMenu() {
         let backToLogin = UIAction(
-            title: "Back to Login",
+            title: "Back to Start",
             image: UIImage(systemName: "arrow.left.circle"),
             attributes: []
         ) { [weak self] _ in

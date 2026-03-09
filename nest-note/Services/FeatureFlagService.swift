@@ -9,7 +9,7 @@ import Foundation
 import FirebaseRemoteConfig
 
 final class FeatureFlagService {
-    
+
     // MARK: - Properties
     static let shared = FeatureFlagService()
     private var remoteConfig: RemoteConfig
@@ -94,9 +94,20 @@ final class FeatureFlagService {
     }
     
     /// Gets the boolean value for a feature flag
+    /// Checks UserDefaults for local debug overrides first (DEBUG builds only)
     /// - Parameter flag: The feature flag to check
     /// - Returns: The current value of the feature flag
     func isEnabled(_ flag: FeatureFlag) -> Bool {
+        #if DEBUG
+        // Check for local debug override first
+        let overrideKey = "debug_override_\(flag.rawValue)"
+        if UserDefaults.standard.object(forKey: overrideKey) != nil {
+            let overrideValue = UserDefaults.standard.bool(forKey: overrideKey)
+            Logger.log(level: .debug, category: .general, message: "Feature flag '\(flag.rawValue)': \(overrideValue) (LOCAL OVERRIDE)")
+            return overrideValue
+        }
+        #endif
+        
         let value = remoteConfig.configValue(forKey: flag.rawValue).boolValue
         
         #if DEBUG
@@ -104,6 +115,41 @@ final class FeatureFlagService {
         #endif
         
         return value
+    }
+    
+    /// Sets a local debug override for a feature flag (DEBUG builds only)
+    /// This allows overriding RemoteConfig values for testing purposes
+    /// - Parameters:
+    ///   - flag: The feature flag to override
+    ///   - value: The override value
+    func setDebugOverride(_ flag: FeatureFlag, value: Bool) {
+        #if DEBUG
+        let overrideKey = "debug_override_\(flag.rawValue)"
+        UserDefaults.standard.set(value, forKey: overrideKey)
+        Logger.log(level: .info, category: .general, message: "🔧 DEBUG OVERRIDE: Set '\(flag.rawValue)' to \(value)")
+        #endif
+    }
+    
+    /// Removes a local debug override for a feature flag (DEBUG builds only)
+    /// - Parameter flag: The feature flag to remove override for
+    func removeDebugOverride(_ flag: FeatureFlag) {
+        #if DEBUG
+        let overrideKey = "debug_override_\(flag.rawValue)"
+        UserDefaults.standard.removeObject(forKey: overrideKey)
+        Logger.log(level: .info, category: .general, message: "🔧 DEBUG OVERRIDE: Removed override for '\(flag.rawValue)'")
+        #endif
+    }
+    
+    /// Checks if a local debug override exists for a feature flag
+    /// - Parameter flag: The feature flag to check
+    /// - Returns: True if a local override exists, false otherwise
+    func hasDebugOverride(_ flag: FeatureFlag) -> Bool {
+        #if DEBUG
+        let overrideKey = "debug_override_\(flag.rawValue)"
+        return UserDefaults.standard.object(forKey: overrideKey) != nil
+        #else
+        return false
+        #endif
     }
     
     /// Gets the integer value for a remote config key
@@ -152,6 +198,28 @@ final class FeatureFlagService {
     /// - Returns: True if signup logs should be captured, false otherwise
     func shouldCaptureSignupLogs() -> Bool {
         return isEnabled(.captureSignupLogs)
+    }
+    
+    // MARK: - Debug User Status
+    
+    /// Gets the current debug user status (free or pro)
+    /// - Returns: "free" or "pro" based on debugAsProUser flag
+    func getDebugUserStatus() -> String {
+        #if DEBUG
+        return isEnabled(.debugAsProUser) ? "pro" : "free"
+        #else
+        return "free"
+        #endif
+    }
+    
+    /// Sets the debug user status (free or pro)
+    /// - Parameter status: "free" or "pro"
+    func setDebugUserStatus(_ status: String) {
+        #if DEBUG
+        let isPro = status.lowercased() == "pro"
+        setDebugOverride(.debugAsProUser, value: isPro)
+        Logger.log(level: .info, category: .general, message: "🔧 DEBUG USER STATUS: Set to \(status)")
+        #endif
     }
     
     // MARK: - Private Methods

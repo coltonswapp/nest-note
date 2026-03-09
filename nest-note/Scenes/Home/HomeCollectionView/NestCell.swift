@@ -11,6 +11,7 @@ class NestCell: UICollectionViewCell {
     let titleLabel = UILabel()
     let subtitleLabel = UILabel()
     let imageView = UIImageView()
+    private let textStackView = UIStackView()
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -24,43 +25,46 @@ class NestCell: UICollectionViewCell {
     
     private func setupViews() {
         // Configure title label
-        titleLabel.font = .h2
+        titleLabel.font = .h3
         
         // Configure subtitle label
         subtitleLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         subtitleLabel.textColor = .secondaryLabel
-        subtitleLabel.numberOfLines = 2
+        subtitleLabel.numberOfLines = 1
         subtitleLabel.lineBreakMode = .byTruncatingTail
         
         // Configure image view
         imageView.contentMode = .scaleAspectFit
         
+        // Configure stack view
+        textStackView.axis = .vertical
+        textStackView.spacing = 2
+        textStackView.alignment = .leading
+        textStackView.distribution = .fill
+        
+        // Add labels to stack view
+        textStackView.addArrangedSubview(titleLabel)
+        textStackView.addArrangedSubview(subtitleLabel)
+        
         // Add subviews
-        contentView.addSubview(titleLabel)
-        contentView.addSubview(subtitleLabel)
+        contentView.addSubview(textStackView)
         contentView.addSubview(imageView)
         
         // Disable autoresizing masks
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        textStackView.translatesAutoresizingMaskIntoConstraints = false
         imageView.translatesAutoresizingMaskIntoConstraints = false
         
         NSLayoutConstraint.activate([
-            // Image view constraints - top right corner
-            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
-            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            imageView.widthAnchor.constraint(equalToConstant: 100),
-            imageView.heightAnchor.constraint(equalToConstant: 100),
+            // Image view constraints - center right
+            imageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            imageView.widthAnchor.constraint(equalToConstant: 72),
+            imageView.heightAnchor.constraint(equalToConstant: 72),
             
-            // Title label constraints - bottom left
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: imageView.leadingAnchor, constant: -20),
-            titleLabel.bottomAnchor.constraint(equalTo: subtitleLabel.topAnchor, constant: -4),
-            
-            // Subtitle label constraints - below title, bottom left
-            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: imageView.leadingAnchor, constant: -20),
-            subtitleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
+            // Stack view constraints - center left, vertically centered
+            textStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            textStackView.trailingAnchor.constraint(lessThanOrEqualTo: imageView.leadingAnchor, constant: -12),
+            textStackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         ])
     }
     

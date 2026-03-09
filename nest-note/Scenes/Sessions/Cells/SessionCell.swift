@@ -72,15 +72,19 @@ class SessionCell: UICollectionViewListCell {
         contentView.backgroundColor = .systemGroupedBackground
     }
     
-//    override func updateConfiguration(using state: UICellConfigurationState) {
-//        super.updateConfiguration(using: state)
-//        
-//        // Update background configuration for current state
-//        var newBgConfig = backgroundConfiguration
-//        newBgConfig?.backgroundColor = state.isSelected ? .systemGray4 : .secondarySystemGroupedBackground
-//        backgroundConfiguration = newBgConfig
-//    }
-    
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+
+        // Update background configuration to show highlight on tap
+        var newBgConfig = UIBackgroundConfiguration.listCell()
+        if state.isHighlighted || state.isSelected {
+            newBgConfig.backgroundColor = .systemGray4
+        } else {
+            newBgConfig.backgroundColor = .secondarySystemGroupedBackground
+        }
+        backgroundConfiguration = newBgConfig
+    }
+
     private func emptyStateConfig(for section: NestSessionsViewController.Section) -> (message: String, iconName: String) {
         switch section {
         case .inProgress:
@@ -95,27 +99,21 @@ class SessionCell: UICollectionViewListCell {
     func configure(with session: SessionItem) {
         // Hide empty state stack
         emptyStateStack.isHidden = true
-        
-        // Configure background
-        var bgConfig = UIBackgroundConfiguration.listCell()
-        bgConfig.backgroundColor = .secondarySystemGroupedBackground
-        
+
         // Set up content configuration
         var content = UIListContentConfiguration.cell()
-        
+
         // Configure text style
         content.text = session.title
         content.textProperties.font = .bodyL
-        
+
         content.secondaryText = formatDate(startDate: session.startDate, endDate: session.endDate)
         content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
-        
+
         // Apply standard system margins
         content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
-        
-        
-        backgroundConfiguration = bgConfig
+
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
     }
@@ -123,37 +121,23 @@ class SessionCell: UICollectionViewListCell {
     func configure(with session: ArchivedSession) {
         // Hide empty state stack
         emptyStateStack.isHidden = true
-        
-        // Configure background
-        var bgConfig = UIBackgroundConfiguration.listCell()
-        bgConfig.backgroundColor = .secondarySystemGroupedBackground
-        
+
         // Set up content configuration
         var content = UIListContentConfiguration.cell()
-        
+
         // Configure text style
         content.text = session.title
         content.textProperties.font = .bodyL
-        
+
         content.secondaryText = formatDate(startDate: session.startDate, endDate: session.endDate)
         content.secondaryTextProperties.font = .bodyM
         content.secondaryTextProperties.color = .secondaryLabel
-        
+
         // Apply standard system margins
         content.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
-        
-        backgroundConfiguration = bgConfig
+
         contentConfiguration = content
         accessories = [.disclosureIndicator()]
-    }
-    
-    override var isSelected: Bool {
-        didSet {
-            // Force refresh of background configuration when selection state changes
-            var newBgConfig = backgroundConfiguration
-            newBgConfig?.backgroundColor = isSelected ? .systemGray4 : .secondarySystemGroupedBackground
-            backgroundConfiguration = newBgConfig
-        }
     }
     
     func formatDate(startDate: Date, endDate: Date) -> String {

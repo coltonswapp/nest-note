@@ -235,26 +235,10 @@ final class SessionDetailViewController: NNSheetViewController {
     @objc func multiDayToggleTapped() {
         endControl.setStyle(multiDayToggle.isOn ? .both : .time, animated: true)
         
-        // If turning off multi-day, sync the end date with start date
+        // If turning off multi-day, sync the end date with start date using centralized utility
         if !multiDayToggle.isOn {
-            let calendar = Calendar.current
-            
-            // Get date components from start date
-            let startComponents = calendar.dateComponents([.year, .month, .day], from: startControl.date)
-            // Get time components from end date (to preserve the end time)
-            let endTimeComponents = calendar.dateComponents([.hour, .minute], from: endControl.date)
-            
-            // Combine the start date with end time
-            var newComponents = DateComponents()
-            newComponents.year = startComponents.year
-            newComponents.month = startComponents.month
-            newComponents.day = startComponents.day
-            newComponents.hour = endTimeComponents.hour
-            newComponents.minute = endTimeComponents.minute
-            
-            // Create new date and update end control
-            if let newDate = calendar.date(from: newComponents) {
-                endControl.date = newDate
+            if let syncedDate = Date.syncEndDateToStartDay(startDate: startControl.date, endDate: endControl.date) {
+                endControl.date = syncedDate
             }
         }
     }
@@ -281,36 +265,7 @@ final class SessionDetailViewController: NNSheetViewController {
     }
     
     private func validateDates() -> Bool {
-        let calendar = Calendar.current
-        let startDate = startControl.date
-        let endDate = endControl.date
-        
-        // Compare dates
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedDescending {
-            // Start date is after end date - show error
-            let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start time cannot be after the end time.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return false
-        }
-        
-        // Optionally, we could also check if they're exactly equal
-        if calendar.compare(startDate, to: endDate, toGranularity: .minute) == .orderedSame {
-            let alert = UIAlertController(
-                title: "Invalid Time Range",
-                message: "The start and end times cannot be the same.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            present(alert, animated: true)
-            return false
-        }
-        
-        return true
+        return SessionDateValidator.validateAndShowAlertIfNeeded(startDate: startControl.date, endDate: endControl.date, isMultiDay: multiDayToggle.isOn, in: self)
     }
     
     @objc private func saveButtonTapped() {

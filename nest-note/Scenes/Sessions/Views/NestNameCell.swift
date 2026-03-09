@@ -73,5 +73,18 @@ final class NestNameCell: UICollectionViewCell {
     
     func configure(with nestName: String) {
         nestNameLabel.text = nestName
+        // Style differently if no nest is selected
+        if nestName == "No nest selected" {
+            nestNameLabel.textColor = .tertiaryLabel
+            // Use italic font descriptor for placeholder text
+            if let descriptor = UIFont.preferredFont(forTextStyle: .body).fontDescriptor.withSymbolicTraits(.traitItalic) {
+                nestNameLabel.font = UIFont(descriptor: descriptor, size: 0)
+            } else {
+                nestNameLabel.font = .preferredFont(forTextStyle: .body)
+            }
+        } else {
+            nestNameLabel.textColor = .secondaryLabel
+            nestNameLabel.font = .preferredFont(forTextStyle: .body)
+        }
     }
 }
