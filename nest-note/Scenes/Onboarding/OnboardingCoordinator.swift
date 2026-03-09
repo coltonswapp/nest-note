@@ -252,6 +252,26 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
 
         currentStepIndex += 1
+
+            let role: NestUser.UserType
+            if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
+                role = .nestOwner
+            } else {
+                role = .sitter
+            }
+
+            // Mark that we've processed this
+            hasProcessedRoleSelection = true
+
+            // Update the role which will rebuild the steps array
+            updateRole(role)
+
+            // After updateRole, the steps array has been rebuilt
+            // currentStepIndex should still point to the role selection step
+            // So we can proceed with incrementing it
+        }
+
+        currentStepIndex += 1
         
         if currentStepIndex < allSteps.count {
             let nextStep = allSteps[currentStepIndex]
@@ -700,6 +720,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         
         // Update container's step count
         containerViewController.updateTotalSteps(steps.count)
+
+        Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
+    }
 
         Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
     }
