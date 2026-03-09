@@ -151,7 +151,7 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     private var collectionView: UICollectionView!
     private var options: [SurveyOption] = []
     private var isMultiSelect: Bool = true
-    private var currentQuestion: SurveyQuestion?
+    private(set) var currentQuestion: SurveyQuestion?
     
     private lazy var nextButton: NNPrimaryLabeledButton = {
         let button = NNPrimaryLabeledButton(title: "Next")
@@ -320,21 +320,45 @@ extension NNOnboardingSurveyViewController: UICollectionViewDataSource, UICollec
     }
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        // Get the cell and its frame BEFORE any reloading happens
+        guard let cell = collectionView.cellForItem(at: indexPath) else { return }
+        
+        // Get the cell's center point in its own coordinate system
+        let cellCenter = CGPoint(x: cell.bounds.midX, y: cell.bounds.midY)
+        // Convert to window coordinates (ExplosionManager uses window coordinates)
+        let explosionPoint: CGPoint
+        if let window = view.window {
+            explosionPoint = cell.convert(cellCenter, to: window)
+        } else {
+            // Fallback: convert to view coordinates if window isn't available yet
+            explosionPoint = cell.convert(cellCenter, to: view)
+        }
+        
         if !isMultiSelect {
             // For single select, deselect all other options
             for i in 0..<options.count {
                 options[i].isSelected = (i == indexPath.item)
             }
+            
+            HapticsHelper.lightHaptic()
+            // Trigger explosion when option is selected (single-select)
+            ExplosionManager.trigger(.tiny, at: explosionPoint)
+            
             collectionView.reloadData()
         } else {
             // For multi-select, toggle the selected option
+            let wasSelected = options[indexPath.item].isSelected
             options[indexPath.item].isSelected.toggle()
-            if let cell = collectionView.cellForItem(at: indexPath) as? SurveyOptionCell {
-                cell.isOptionSelected = options[indexPath.item].isSelected
+            let isNowSelected = options[indexPath.item].isSelected
+            
+            if let cell = cell as? SurveyOptionCell {
+                cell.isOptionSelected = isNowSelected
             }
+            
+            HapticsHelper.lightHaptic()
+            // Trigger explosion for both selecting AND deselecting (multi-select)
+            ExplosionManager.trigger(.tiny, at: explosionPoint)
         }
-        
-        HapticsHelper.lightHaptic()
         
         // Check the current state of selected options
         let hasSelectedOptions = !getSelectedOptions().isEmpty

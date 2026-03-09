@@ -40,11 +40,14 @@ final class OnboardingAnalyticsService {
         sessionData.variant = variant
         sessionData.startTime = Date()
 
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+
         // Initialize metadata with onboarding info
         sessionData.metadata = [
             "onboarding_variant": variant,
             "session_type": "parent_onboarding",
-            "start_time": ISO8601DateFormatter().string(from: Date())
+            "start_time": ISO8601DateFormatter().string(from: Date()),
+            "app_version": appVersion
         ]
 
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Started session - variant: \(variant)")
@@ -62,6 +65,12 @@ final class OnboardingAnalyticsService {
         sessionData.stepsCompleted.append(stepId)
 
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Step completed - \(stepId)")
+
+        Analytics.logEvent("onboarding_step_completed", parameters: [
+            "step_id": stepId,
+            "step_index": sessionData.stepsCompleted.count,
+            "onboarding_variant": sessionData.variant
+        ])
     }
 
     /// Records the user's selected role
@@ -159,9 +168,6 @@ final class OnboardingAnalyticsService {
 
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Session completed - converted: \(sessionData.hasConverted), duration: \(Int(duration))s")
 
-        // Save to existing survey system
-        saveSurveyResponse()
-
         // Track completion with full session summary
         var parameters: [String: Any] = [
             "onboarding_variant": sessionData.variant,
@@ -188,37 +194,6 @@ final class OnboardingAnalyticsService {
         Analytics.logEvent("parent_onboarding_completed", parameters: parameters)
     }
 
-    /// Saves onboarding session as SurveyResponse for viewing in existing UI
-    private func saveSurveyResponse() {
-        // Determine survey type based on user's role
-        // Default to parentSurvey if role is not set (for backward compatibility)
-        let surveyType: SurveyResponse.SurveyType
-        if let role = sessionData.userRole {
-            // Role is stored as "nester" for nest owners, "sitter" for sitters
-            surveyType = (role == "sitter") ? .sitterSurvey : .parentSurvey
-        } else {
-            surveyType = .parentSurvey
-        }
-
-        let surveyResponse = SurveyResponse(
-            id: UUID().uuidString,
-            timestamp: sessionData.startTime,
-            surveyType: surveyType,
-            version: "onboarding_\(sessionData.variant)",
-            responses: sessionData.surveyResponses,
-            metadata: sessionData.metadata
-        )
-
-        Task {
-            do {
-                try await SurveyService.shared.submitSurveyResponse(surveyResponse)
-                Logger.log(level: .info, category: .survey, message: "📊 SURVEY: Saved onboarding session as parent survey response - variant: \(sessionData.variant)")
-            } catch {
-                Logger.log(level: .error, category: .survey, message: "📊 SURVEY: Failed to save onboarding response - \(error.localizedDescription)")
-            }
-        }
-    }
-
     /// Records drop-off (user exits before completion)
     func recordDropOff(reason: String = "unknown") {
         let duration = Date().timeIntervalSince(sessionData.startTime)
@@ -230,9 +205,6 @@ final class OnboardingAnalyticsService {
         sessionData.metadata["total_duration_seconds"] = String(Int(duration))
 
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Drop-off - step: \(sessionData.currentStep), reason: \(reason)")
-
-        // Save partial session to survey system
-        saveSurveyResponse()
 
         Analytics.logEvent("parent_onboarding_dropoff", parameters: [
             "onboarding_variant": sessionData.variant,

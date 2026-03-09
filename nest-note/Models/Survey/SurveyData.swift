@@ -9,6 +9,7 @@ struct SurveyResponse: Codable, Hashable {
     let version: String
     let responses: [QuestionResponse]
     let metadata: [String: String]
+    let duration: TimeInterval? // Optional duration in seconds
     
     struct QuestionResponse: Codable, Hashable {
         let questionId: String
@@ -21,7 +22,7 @@ struct SurveyResponse: Codable, Hashable {
     }
     
     var asDictionary: [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "id": id,
             "timestamp": Timestamp(date: timestamp),
             "surveyType": surveyType.rawValue,
@@ -32,6 +33,10 @@ struct SurveyResponse: Codable, Hashable {
             ] },
             "metadata": metadata
         ]
+        if let duration = duration {
+            dict["duration"] = duration
+        }
+        return dict
     }
 }
 

@@ -180,13 +180,16 @@ final class SurveyService {
                 return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
             }
 
+            let duration = document.data()["duration"] as? TimeInterval
+            
             return SurveyResponse(
                 id: document.documentID,
                 timestamp: timestamp.dateValue(),
                 surveyType: SurveyResponse.SurveyType(rawValue: surveyType) ?? type,
                 version: version,
                 responses: questionResponses,
-                metadata: metadata
+                metadata: metadata,
+                duration: duration
             )
         }
     }
@@ -216,13 +219,16 @@ final class SurveyService {
                 return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
             }
 
+            let duration = document.data()["duration"] as? TimeInterval
+            
             return SurveyResponse(
                 id: document.documentID,
                 timestamp: timestamp.dateValue(),
                 surveyType: SurveyResponse.SurveyType(rawValue: surveyType) ?? .parentSurvey,
                 version: version,
                 responses: questionResponses,
-                metadata: metadata
+                metadata: metadata,
+                duration: duration
             )
         }
     }
