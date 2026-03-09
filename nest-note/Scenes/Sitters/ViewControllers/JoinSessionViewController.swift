@@ -14,8 +14,9 @@ protocol JoinSessionViewControllerDelegate: AnyObject {
 }
 
 class JoinSessionViewController: NNViewController {
-    
+
     weak var delegate: JoinSessionViewControllerDelegate?
+    private var isDebugMode: Bool = false
     
     private let titleLabel: UILabel = {
         let label = UILabel()

@@ -8,6 +8,7 @@
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import FirebaseAnalytics
 
 final class OBPaywallViewController: NNOnboardingViewController, PaywallViewControllerDelegate {
     

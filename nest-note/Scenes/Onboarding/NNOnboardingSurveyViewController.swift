@@ -273,7 +273,7 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     func setTestOptions(_ testOptions: [SurveyOption], isMultiSelect: Bool = true) {
         print("🔍 [Survey VC] Setting test options:")
         for (index, option) in testOptions.enumerated() {
-            print("  [\(index)] '\(option.title)' - subtitle: '\(option.subtitle ?? "nil")'")
+            print("  [\(index)] '\(option.title)'")
         }
         self.options = testOptions
         self.isMultiSelect = isMultiSelect

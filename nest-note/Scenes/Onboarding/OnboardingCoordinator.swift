@@ -41,11 +41,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private var containerViewController: OnboardingContainerViewController!
 
     private var currentStepIndex: Int = 0
-    private var onboardingConfig: OnboardingConfiguration?
     private var isNavigating: Bool = false
     private var hasProcessedRoleSelection: Bool = false
-
-    private let configFileName: String
 
     private lazy var steps: [NNOnboardingViewController] = {
         // Start with the new image-based onboarding screens
@@ -222,36 +219,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Set navigation flag
         isNavigating = true
 
-        // Track step completion
-        if let stepId = getStepId(for: currentStepIndex) {
-            OnboardingAnalyticsService.shared.recordStepCompleted(stepId)
-        }
-
         // SPECIAL CASE: Check if we just completed the role_selection survey
         // If so, update the role and rebuild steps BEFORE navigating
         if let roleAnswer = userInfo.surveyResponses["role_selection"]?.first,
            !hasProcessedRoleSelection {
             Logger.log(level: .info, category: .signup, message: "🎯 NEXT: Processing role_selection in next() method")
-
-            let role: NestUser.UserType
-            if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
-                role = .nestOwner
-            } else {
-                role = .sitter
-            }
-
-            // Mark that we've processed this
-            hasProcessedRoleSelection = true
-
-            // Update the role which will rebuild the steps array
-            updateRole(role)
-
-            // After updateRole, the steps array has been rebuilt
-            // currentStepIndex should still point to the role selection step
-            // So we can proceed with incrementing it
-        }
-
-        currentStepIndex += 1
 
             let role: NestUser.UserType
             if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
@@ -585,18 +557,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps after removal: \(steps.count)")
 
-        // Re-add role selection step if it was a survey-based one from JSON config
-        if let onboardingConfig = onboardingConfig,
-           let roleStep = onboardingConfig.flow.steps.first(where: { $0.id == "role_selection" }) {
-            if case .survey(let surveyConfig) = roleStep.config {
-                let roleVC = createSurveyViewController(from: surveyConfig, stepId: roleStep.id)
-                // Insert at the beginning or where it was found
-                let insertIndex = roleSelectionIndex ?? 0
-                steps.insert(roleVC, at: min(insertIndex, steps.count))
-                Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Re-inserted role selection survey at index: \(insertIndex)")
-            }
-        }
-
         // Add survey questions based on selected role
         if let surveyConfig = loadSurveyConfig(for: role) {
             let surveySteps = surveyConfig.questions.map { question -> NNOnboardingSurveyViewController in
@@ -724,9 +684,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
     }
 
-        Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
-    }
-    
     func validateNest(name: String, address: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
