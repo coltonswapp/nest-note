@@ -442,17 +442,24 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         snapshot.appendItems(generalItems, toSection: .general)
         
         #if DEBUG
-        snapshot.appendSections([.experimental])
+        snapshot.appendSections([.admin])
         let adminItems = [
+            ("Survey Dashboard", "chart.bar.doc.horizontal"),
+            ("Referral Admin", "person.badge.plus.fill"),
+            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
+            ("View Logs", "doc.text.magnifyingglass"),
+            ("UserDefaults Viewer", "list.bullet.rectangle"),
             ("Reset App State", "arrow.counterclockwise"),
             ("Debug as", "person.crop.circle.badge.checkmark"),
         ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
-        snapshot.appendItems(adminItems, toSection: .experimental)
+        snapshot.appendItems(adminItems, toSection: .admin)
 
-        // Experimental section - testing and development tools
+        snapshot.appendSections([.experimental])
         let experimentalItems = [
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
+            ("Explosion Playground", "sparkles.rectangle.stack"),
+            ("Finish Screen", "slider.horizontal.below.rectangle"),
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
@@ -476,8 +483,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
-            ("Referral Admin", "person.badge.plus.fill"),
-            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(experimentalItems, toSection: .experimental)
         #endif
@@ -521,6 +526,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             fatalError("Forced crash from debug menu")
         case "Button Playground":
             navigationController?.pushViewController(ButtonPlayground(), animated: true)
+        case "Explosion Playground":
+            navigationController?.pushViewController(ExplosionViewController(), animated: true)
+        case "Finish Screen":
+            let finishVC = OBFinishViewController()
+            finishVC.enableDebugMode()
+            let nav = UINavigationController(rootViewController: finishVC)
+            present(nav, animated: true)
         case "Onboarding":
             present(OnboardingCoordinator().start(), animated: true)
         case "Create Session":

@@ -5,6 +5,7 @@ struct SurveyQuestion: Codable {
     let title: String
     let subtitle: String?
     let options: [String]
+    let optionSubtitles: [String]?
     let isMultiSelect: Bool
 
     // Optional metadata that might be useful
@@ -16,6 +17,7 @@ struct SurveyQuestion: Codable {
         case title
         case subtitle
         case options
+        case optionSubtitles = "option_subtitles"
         case isMultiSelect = "multi_select"
         case category
         case order

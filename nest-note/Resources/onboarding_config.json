@@ -1,0 +1,292 @@
+{
+  "version": "1.0",
+  "flow": {
+    "name": "parent_onboarding",
+    "steps": [
+      {
+        "id": "role_selection",
+        "type": "survey",
+        "config": {
+          "type": "survey",
+          "title": "Are you signing up primarily as a parent or a sitter?",
+          "subtitle": null,
+          "options": [
+            {
+              "title": "Parent",
+              "subtitle": "Create a Nest with emergency contacts, house rules, routines, & more",
+              "value": "parent"
+            },
+            {
+              "title": "Sitter",
+              "subtitle": "Receive access to important information regarding families you care for",
+              "value": "sitter"
+            }
+          ],
+          "multi_select": false,
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "sitting_frequency",
+        "type": "survey",
+        "config": {
+          "type": "survey",
+          "title": "How often do you leave your children with a sitter on a monthly basis?",
+          "subtitle": "This helps us understand your needs better",
+          "options": [
+            {
+              "title": "< 1 time per month",
+              "value": "less_than_1"
+            },
+            {
+              "title": "1-2 times per month",
+              "value": "1_to_2"
+            },
+            {
+              "title": "3-5 times per month",
+              "value": "3_to_5"
+            },
+            {
+              "title": "> 6 times per month",
+              "value": "more_than_6"
+            },
+            {
+              "title": "Daily",
+              "value": "daily"
+            }
+          ],
+          "multi_select": false,
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "communication_methods",
+        "type": "survey",
+        "config": {
+          "type": "survey",
+          "title": "When communicating sitting instructions, what methods do you use?",
+          "subtitle": "This can include important information, routines, medications, events, etc.",
+          "options": [
+            {
+              "title": "Sticky note / piece of paper",
+              "value": "sticky_note"
+            },
+            {
+              "title": "Text Message",
+              "value": "text_message"
+            },
+            {
+              "title": "Print-out schedule",
+              "value": "printout"
+            },
+            {
+              "title": "An app",
+              "value": "app"
+            }
+          ],
+          "multi_select": true,
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "missing_info",
+        "type": "missing_info",
+        "config": {
+          "type": "missing_info",
+          "title": "You're not giving your sitters\nwhat they need to succeed.",
+          "subtitle": "which means the sitter is potentially\nmissing the following:",
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "families_experience",
+        "type": "bullet",
+        "config": {
+          "type": "bullet",
+          "title": "Families who use NestNote experience the following:",
+          "subtitle": null,
+          "bullets": [
+            {
+              "title": "Fewer Sitter Interruptions",
+              "description": "When things are documented, less things need confirming",
+              "icon_name": "exclamationmark.bubble.fill"
+            },
+            {
+              "title": "Less Sitter Turnover",
+              "description": "Sitters enjoy an environment where instructions & nuances are clearly laid out",
+              "icon_name": "tornado"
+            },
+            {
+              "title": "Less Stress",
+              "description": "Enjoy date night knowing that your sitter has everything covered",
+              "icon_name": "moon.stars.fill"
+            },
+            {
+              "title": "Happier Kids & Pets",
+              "description": "Everyone loves a sitter who knows their needs inside & out",
+              "icon_name": "balloon.2.fill"
+            }
+          ],
+          "cta_text": "I want that too!"
+        }
+      },
+      {
+        "id": "care_responsibilities",
+        "type": "survey",
+        "config": {
+          "type": "survey",
+          "title": "What do you typically need sitters to help care for?",
+          "subtitle": "Select all that apply - this helps us create the most relevant categories for your nest",
+          "options": [
+            {
+              "title": "Children",
+              "value": "children"
+            },
+            {
+              "title": "Pets",
+              "value": "pets"
+            },
+            {
+              "title": "Plants",
+              "value": "plants"
+            }
+          ],
+          "multi_select": true,
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "nestnote_features",
+        "type": "preview",
+        "config": {
+          "type": "preview",
+          "title": "NestNote offers flexible organization",
+          "subtitle": "Entries, routines, and places—swipe to see how they work",
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "discovery_method",
+        "type": "survey",
+        "config": {
+          "type": "survey",
+          "title": "How did you hear about NestNote?",
+          "subtitle": "This will help guide our marketing efforts.",
+          "options": [
+            {
+              "title": "Instagram",
+              "value": "instagram"
+            },
+            {
+              "title": "TikTok",
+              "value": "tiktok"
+            },
+            {
+              "title": "Facebook",
+              "value": "facebook"
+            },
+            {
+              "title": "Reddit",
+              "value": "reddit"
+            },
+            {
+              "title": "Friend / Family",
+              "value": "friend_family"
+            },
+            {
+              "title": "Sitter / Nanny",
+              "value": "sitter_nanny"
+            },
+            {
+              "title": "Other",
+              "value": "other"
+            }
+          ],
+          "multi_select": false,
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "nest_intro",
+        "type": "image",
+        "config": {
+          "type": "image",
+          "title": "Your Nest is right around the corner",
+          "subtitle": "Your nest is where all of your family & household information will be stored.",
+          "image_name": "OB1",
+          "cta_text": "Create My Nest"
+        }
+      },
+      {
+        "id": "full_name",
+        "type": "name",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "email",
+        "type": "email",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "password",
+        "type": "password",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "create_nest",
+        "type": "create_nest",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "referral",
+        "type": "referral",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "paywall",
+        "type": "paywall",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
+        "id": "finish",
+        "type": "finish",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      }
+    ]
+  }
+}
