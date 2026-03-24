@@ -37,6 +37,24 @@
             "multi_select": true,
             "category": "features",
             "order": 2
+        },
+        {
+            "id": "discovery_method",
+            "title": "How did you hear about NestNote?",
+            "subtitle": "This will help guide our marketing efforts.",
+            "options": [
+                "Instagram",
+                "TikTok",
+                "Facebook",
+                "Reddit",
+                "Friend / Family",
+                "Parent I sit for",
+                "Other",
+                "DEBUG - Testing"
+            ],
+            "multi_select": false,
+            "category": "discovery",
+            "order": 3
         }
     ]
-} 
+}

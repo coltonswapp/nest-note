@@ -140,12 +140,26 @@ class SurveyResponseDetailViewController: NNViewController {
 
         // Basic Info Section
         snapshot.appendSections([.basicInfo])
-        let basicInfoItems: [Item] = [
+        var basicInfoItems: [Item] = [
             .basicInfo(title: "Survey ID", value: survey.id),
             .basicInfo(title: "Survey Type", value: survey.surveyType == .parentSurvey ? "Parent Survey" : "Sitter Survey"),
             .basicInfo(title: "Version", value: survey.version),
             .basicInfo(title: "Timestamp", value: DateFormatter.localizedString(from: survey.timestamp, dateStyle: .full, timeStyle: .medium))
         ]
+        
+        // Add duration if available
+        if let duration = survey.duration {
+            let minutes = Int(duration) / 60
+            let seconds = Int(duration) % 60
+            let durationString: String
+            if minutes > 0 {
+                durationString = String(format: "%d min %d sec", minutes, seconds)
+            } else {
+                durationString = String(format: "%d sec", seconds)
+            }
+            basicInfoItems.append(.basicInfo(title: "Duration", value: durationString))
+        }
+        
         snapshot.appendItems(basicInfoItems, toSection: .basicInfo)
 
         // Metadata Section

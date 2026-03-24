@@ -65,7 +65,25 @@ class OBCreateNestViewController: NNOnboardingViewController {
         nestNameField.delegate = self
         addressField.delegate = self
         
+        prefillNestName()
+        
         ctaButton?.isEnabled = false
+    }
+    
+    private func prefillNestName() {
+        guard let coordinator = coordinator as? OnboardingCoordinator else { return }
+        
+        let fullName = coordinator.currentFullName
+        guard !fullName.isEmpty else { return }
+        
+        let nameComponents = fullName.components(separatedBy: " ")
+        guard nameComponents.count > 1,
+              let lastName = nameComponents.last else { return }
+        
+        let suggestedNestName = "\(lastName) Nest"
+        nestNameField.text = suggestedNestName
+        
+        textFieldDidChange()
     }
     
     private func setupValidation() {
@@ -98,6 +116,14 @@ class OBCreateNestViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
+        // Trigger explosion when nest is created
+        if let button = ctaButton {
+            let buttonFrame = button.frame
+            let centerPoint = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
+            let pointInView = view.convert(centerPoint, to: view)
+            ExplosionManager.trigger(.medium, at: pointInView)
+        }
+        
         (coordinator as? OnboardingCoordinator)?.next()
     }
     

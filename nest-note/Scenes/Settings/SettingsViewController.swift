@@ -442,17 +442,24 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         snapshot.appendItems(generalItems, toSection: .general)
         
         #if DEBUG
-        snapshot.appendSections([.debug])
-        let debugItems = [
+        snapshot.appendSections([.admin])
+        let adminItems = [
+            ("Survey Dashboard", "chart.bar.doc.horizontal"),
+            ("Referral Admin", "person.badge.plus.fill"),
+            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
+            ("View Logs", "doc.text.magnifyingglass"),
+            ("UserDefaults Viewer", "list.bullet.rectangle"),
             ("Reset App State", "arrow.counterclockwise"),
             ("Debug as", "person.crop.circle.badge.checkmark"),
         ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(adminItems, toSection: .admin)
 
-        // Experimental section - testing and development tools
+        snapshot.appendSections([.experimental])
         let experimentalItems = [
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
+            ("Explosion Playground", "sparkles.rectangle.stack"),
+            ("Finish Screen", "slider.horizontal.below.rectangle"),
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
@@ -476,10 +483,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
-            ("Referral Admin", "person.badge.plus.fill"),
-            ("Referral Analytics", "chart.line.uptrend.xyaxis"),
-        ].map { Item.debugItem(title: $0.0, symbolName: $0.1) }
-        snapshot.appendItems(debugItems, toSection: .debug)
+        ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
+        snapshot.appendItems(experimentalItems, toSection: .experimental)
         #endif
         
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -521,6 +526,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             fatalError("Forced crash from debug menu")
         case "Button Playground":
             navigationController?.pushViewController(ButtonPlayground(), animated: true)
+        case "Explosion Playground":
+            navigationController?.pushViewController(ExplosionViewController(), animated: true)
+        case "Finish Screen":
+            let finishVC = OBFinishViewController()
+            finishVC.enableDebugMode()
+            let nav = UINavigationController(rootViewController: finishVC)
+            present(nav, animated: true)
         case "Onboarding":
             present(OnboardingCoordinator().start(), animated: true)
         case "Create Session":
@@ -940,132 +952,17 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         )
         present(loadingAlert, animated: true)
 
-        Task {
-            do {
-                try await UserService.shared.deleteAccount()
-
-                await MainActor.run {
-                    loadingAlert.dismiss(animated: true) {
-                        // Show success message and close settings
-                        let successAlert = UIAlertController(
-                            title: "Account Deleted",
-                            message: "Your account has been successfully deleted.",
-                            preferredStyle: .alert
-                        )
-                        successAlert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-                            // Close the settings screen
-                            self?.dismiss(animated: true)
-                        })
-                        self.present(successAlert, animated: true)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    loadingAlert.dismiss(animated: true) {
-                        // Check if this is a reauthentication error
-                        if let reauthError = error as? ReauthenticationError {
-                            switch reauthError {
-                            case .passwordPromptRequired(let email):
-                                self.showPasswordReauthenticationPrompt(email: email)
-                            case .appleSignInRequired:
-                                self.showAppleSignInReauthentication()
-                            }
-                        } else {
-                            // Show generic error message
-                            let errorAlert = UIAlertController(
-                                title: "Deletion Failed",
-                                message: "Failed to delete your account: \(error.localizedDescription). Please try again or contact support.",
-                                preferredStyle: .alert
-                            )
-                            errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
-                            self.present(errorAlert, animated: true)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func showPasswordReauthenticationPrompt(email: String) {
-        let alert = UIAlertController(
-            title: "Reauthentication Required",
-            message: "For security reasons, please re-enter your password to delete your account.\n\nEmail: \(email)",
-            preferredStyle: .alert
-        )
-
-        alert.addTextField { textField in
-            textField.placeholder = "Password"
-            textField.isSecureTextEntry = true
-        }
-
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Continue", style: .destructive) { [weak self] _ in
-            guard let password = alert.textFields?.first?.text, !password.isEmpty else {
-                let errorAlert = UIAlertController(
-                    title: "Invalid Password",
-                    message: "Please enter a valid password.",
-                    preferredStyle: .alert
-                )
-                errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
-                self?.present(errorAlert, animated: true)
-                return
-            }
-
-            Task {
-                do {
-                    try await UserService.shared.reauthenticateAndDeleteAccount(password: password)
-                    await MainActor.run {
-                        // Show success message
-                        let successAlert = UIAlertController(
-                            title: "Account Deleted",
-                            message: "Your account has been successfully deleted.",
-                            preferredStyle: .alert
-                        )
-                        successAlert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-                            self?.dismiss(animated: true)
-                        })
-                        self?.present(successAlert, animated: true)
-                    }
-                } catch {
-                    await MainActor.run {
-                        let errorAlert = UIAlertController(
-                            title: "Authentication Failed",
-                            message: "Failed to authenticate: \(error.localizedDescription)",
-                            preferredStyle: .alert
-                        )
-                        errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
-                        self?.present(errorAlert, animated: true)
-                    }
-                }
-            }
-        })
-
-        present(alert, animated: true)
-    }
-
-    private func showAppleSignInReauthentication() {
-        let alert = UIAlertController(
-            title: "Reauthentication Required",
-            message: "For security reasons, please sign in with Apple again to delete your account.",
-            preferredStyle: .alert
-        )
-
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Sign in with Apple", style: .destructive) { [weak self] _ in
-            // TODO: Implement Apple Sign In reauthentication flow
-            // This would require implementing ASAuthorizationControllerDelegate
-            // and handling the Apple Sign In flow specifically for reauthentication
+        loadingAlert.dismiss(animated: true) {
             let errorAlert = UIAlertController(
-                title: "Not Implemented",
-                message: "Apple Sign In reauthentication is not yet implemented. Please contact support.",
+                title: "Not Available",
+                message: "Account deletion is not currently available. Please contact support at support@nestnoteapp.com.",
                 preferredStyle: .alert
             )
             errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
-            self?.present(errorAlert, animated: true)
-        })
-
-        present(alert, animated: true)
+            self.present(errorAlert, animated: true)
+        }
     }
+
 
     private func showTestSurveyScreen() {
         let surveyVC = NNOnboardingSurveyViewController()
@@ -1076,11 +973,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
         // Set test options with subtitles for single-select mode
         let optionsWithSubtitles = [
-            SurveyOption(title: "Professional nanny", subtitle: "Formal childcare training and experience"),
-            SurveyOption(title: "Family babysitting", subtitle: "Regular sitting for family members"),
-            SurveyOption(title: "Occasional babysitting", subtitle: "Casual sitting for friends or neighbors"),
-            SurveyOption(title: "First time babysitting", subtitle: "New to childcare but eager to learn"),
-            SurveyOption(title: "Other experience", subtitle: "Different background in working with children")
+            SurveyOption(title: "Professional nanny"),
+            SurveyOption(title: "Family babysitting"),
+            SurveyOption(title: "Occasional babysitting"),
+            SurveyOption(title: "First time babysitting"),
+            SurveyOption(title: "Other experience")
         ]
 
         #if DEBUG
@@ -1092,64 +989,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         present(nav, animated: true)
     }
 
-    private func showTestBulletOnboarding() {
-        let bulletVC = NNOnboardingBulletViewController()
-
-        // Create test bullet items for babysitting onboarding
-        let testBullets = [
-            NNBulletItem(
-                title: "Safety First",
-                description: "Learn essential childcare safety protocols and emergency procedures to keep kids protected",
-                iconName: "shield.fill"
-            ),
-            NNBulletItem(
-                title: "Fun Activities",
-                description: "Discover age-appropriate games, crafts, and activities that engage and entertain children",
-                iconName: "gamecontroller.fill"
-            ),
-            NNBulletItem(
-                title: "Clear Communication",
-                description: "Maintain open communication with parents about routines, preferences, and any concerns",
-                iconName: "message.fill"
-            ),
-            NNBulletItem(
-                title: "Professional Growth",
-                description: "Build your childcare skills and create lasting relationships with families in your community",
-                iconName: "star.fill"
-            )
-        ]
-
-        bulletVC.configure(
-            title: "Welcome to NestNote",
-            subtitle: "Everything you need to become a trusted babysitter",
-            bullets: testBullets
-        )
-
-        let nav = UINavigationController(rootViewController: bulletVC)
-        present(nav, animated: true)
-    }
-
-    private func showOnboardingBaseline() {
-        let coordinator = OnboardingCoordinator(configFileName: "onboarding_config")
-        let onboardingVC = coordinator.start()
-        present(onboardingVC, animated: true)
-    }
-
-    private func showOnboardingVariantA() {
-        let coordinator = OnboardingCoordinator(configFileName: "onboarding_variant1")
-        let onboardingVC = coordinator.start()
-        present(onboardingVC, animated: true)
-    }
-
-    private func showOnboardingVariantB() {
-        let coordinator = OnboardingCoordinator(configFileName: "onboarding_variant2")
-        let onboardingVC = coordinator.start()
-        present(onboardingVC, animated: true)
-    }
-
     private func showTestFinishAnimation() {
         let finishVC = OBFinishViewController()
-        finishVC.enableDebugMode()
         let nav = UINavigationController(rootViewController: finishVC)
         present(nav, animated: true)
     }

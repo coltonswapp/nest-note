@@ -14,8 +14,9 @@ protocol JoinSessionViewControllerDelegate: AnyObject {
 }
 
 class JoinSessionViewController: NNViewController {
-    
+
     weak var delegate: JoinSessionViewControllerDelegate?
+    private var isDebugMode: Bool = false
     
     private let titleLabel: UILabel = {
         let label = UILabel()
@@ -356,6 +357,12 @@ class JoinSessionViewController: NNViewController {
 
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
+
+                    // Trigger explosion when invite is accepted
+                    let buttonFrame = self.findSessionButton.frame
+                    let centerPoint = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
+                    let pointInView = self.view.convert(centerPoint, to: self.view)
+                    ExplosionManager.trigger(.medium, at: pointInView)
 
                     // Show success alert
                     let alert = UIAlertController(
