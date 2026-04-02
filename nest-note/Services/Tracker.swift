@@ -31,6 +31,12 @@ class Tracker {
         case routineUpdated = "routineUpdated"
         case routineDeleted = "routineDeleted"
         
+        // MARK: - Extensible Nest Items
+        case unknownNestItemDecoded = "unknownNestItemDecoded"
+        case pilotCardCreated = "pilotCardCreated"
+        case contactCreated = "contactCreated"
+        case contactImportedFromSystem = "contactImportedFromSystem"
+        
         // MARK: - Session Related Events
         case sessionCreated = "sessionCreated"
         case sessionUpdated = "sessionUpdated"

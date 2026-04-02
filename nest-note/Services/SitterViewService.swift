@@ -76,7 +76,7 @@ final class SitterViewService: EntryRepository {
     private var imageAssets: [String: UIImageAsset] = [:]
     
     func fetchAllItems() async throws -> [BaseItem] {
-        return []
+        try await fetchAllFilteredItems()
     }
     
     /// Unified method to fetch all items with session filtering applied once
@@ -304,19 +304,14 @@ final class SitterViewService: EntryRepository {
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 Cache miss - performing folder traversal for '\(category)'")
         
-        // Get all data in one efficient call - matching NestService pattern
-        let (allGroupedEntries, allPlaces) = try await fetchEntriesAndPlaces()
-        let allRoutines = try await fetchRoutines()
+        let allItems = try await fetchAllFilteredItems()
         let categories = try await fetchCategories()
         
         Logger.log(level: .info, category: .sitterViewService, message: "📁 fetchFolderContents data gathered")
         
-        // Build folder contents using shared utility (SitterViewService now supports routines)
         let folderContents = FolderUtility.buildFolderContents(
             for: category,
-            allGroupedEntries: allGroupedEntries,
-            allPlaces: allPlaces,
-            allRoutines: allRoutines,
+            allItems: allItems,
             categories: categories
         )
         

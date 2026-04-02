@@ -604,19 +604,14 @@ final class NestService: EntryRepository {
     func fetchFolderContents(for category: String) async throws -> FolderContents {
         Logger.log(level: .info, category: .nestService, message: "📁 fetchFolderContents() called for category: '\(category)'")
         
-        // Get all data in one efficient call - use cached data when possible
-        let (allGroupedEntries, allPlaces) = try await fetchEntriesAndPlaces()
-        let allRoutines: [RoutineItem] = try await fetchItems(ofType: .routine)
+        let allItems = try await fetchAllItems()
         let categories = try await fetchCategories()
         
         Logger.log(level: .info, category: .nestService, message: "📁 fetchFolderContents data gathered - using cached data when possible")
         
-        // Build folder contents using shared utility
         let folderContents = FolderUtility.buildFolderContents(
             for: category,
-            allGroupedEntries: allGroupedEntries,
-            allPlaces: allPlaces,
-            allRoutines: allRoutines,
+            allItems: allItems,
             categories: categories
         )
         

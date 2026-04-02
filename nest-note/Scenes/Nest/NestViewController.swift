@@ -92,7 +92,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     // MARK: - Folder Parsing Methods (using shared FolderUtility)
     
     private func getFoldersForCurrentPath() -> [FolderData] {
-        guard let entries = entries else { return [] }
+        guard !allItemsForFolderUtility.isEmpty else { return [] }
         
         Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Getting folders for currentFolderPath='\(currentFolderPath)'")
         
@@ -106,7 +106,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getTopLevelFolders() -> [FolderData] {
-        guard let entries = entries else { return [] }
+        guard !allItemsForFolderUtility.isEmpty else { return [] }
         
         // Get top-level categories (no "/" in name)
         let topLevelCategories = categories.filter { !$0.name.contains("/") }
@@ -115,9 +115,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         // Efficiently get counts for all categories in one pass
         let folderCounts = FolderUtility.buildFolderCounts(
             for: categoryNames,
-            allGroupedEntries: entries,
-            allPlaces: places,
-            allRoutines: routines,
+            allItems: allItemsForFolderUtility,
             categories: categories
         )
         
@@ -143,14 +141,11 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getSubfoldersForCurrentPath() -> [FolderData] {
-        guard let entries = entries else { return [] }
+        guard !allItemsForFolderUtility.isEmpty else { return [] }
         
-        // Use FolderUtility to build subfolders for current path
         let subfolders = FolderUtility.buildSubfolders(
             for: currentFolderPath,
-            allEntries: entries,
-            allPlaces: places,
-            allRoutines: routines,
+            allItems: allItemsForFolderUtility,
             categories: categories
         )
         
@@ -173,6 +168,14 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var entries: [String: [BaseEntry]]?
     private var places: [PlaceItem] = []
     private var routines: [RoutineItem] = []
+    /// Unified list for folder counts (includes any `BaseItem` types).
+    private var allItems: [BaseItem] = []
+
+    private var allItemsForFolderUtility: [BaseItem] {
+        if !allItems.isEmpty { return allItems }
+        let flat = entries?.values.flatMap { $0 } ?? []
+        return flat + places + routines
+    }
     
     private let sectionHeaders = ["", "Folders"]
     
@@ -716,36 +719,36 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             // For NestService, use efficient combined fetch
             if let nestService = entryRepository as? NestService {
                 do {
-                    let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
-                    let routines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
-                    Logger.log(level: .info, category: logCategory, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(places.count) places, \(routines.count) routines")
+                    let items = try await nestService.fetchAllItems()
+                    self.allItems = items
+                    let groupedEntries = Dictionary(grouping: items.compactMap { $0 as? BaseEntry }, by: { $0.category })
                     self.entries = groupedEntries
-                    self.places = places
-                    self.routines = routines
+                    self.places = items.compactMap { $0 as? PlaceItem }
+                    self.routines = items.compactMap { $0 as? RoutineItem }
+                    Logger.log(level: .info, category: logCategory, message: "Unified fetch complete - \(groupedEntries.count) entry groups, \(self.places.count) places, \(self.routines.count) routines, \(items.count) total items")
                 } catch {
-                    Logger.log(level: .error, category: logCategory, message: "Failed to fetch entries and places: \(error)")
-                    // Fallback to separate fetches
+                    Logger.log(level: .error, category: logCategory, message: "Failed to fetch all items: \(error)")
                     let groupedEntries = try await entryRepository.fetchEntries()
                     self.entries = groupedEntries
                     self.places = []
                     self.routines = []
+                    self.allItems = []
                 }
             } else if let sitterService = entryRepository as? SitterViewService {
-                // For SitterViewService, fetch entries, places, and routines (now supported)
-                let groupedEntries = try await entryRepository.fetchEntries()
-                let places = try await sitterService.fetchNestPlaces()
-                let routines = try await sitterService.fetchNestRoutines()
-                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
+                let items = try await sitterService.fetchAllItems()
+                self.allItems = items
+                let groupedEntries = Dictionary(grouping: items.compactMap { $0 as? BaseEntry }, by: { $0.category })
                 self.entries = groupedEntries
-                self.places = places
-                self.routines = routines
+                self.places = items.compactMap { $0 as? PlaceItem }
+                self.routines = items.compactMap { $0 as? RoutineItem }
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups, \(self.places.count) places, and \(self.routines.count) routines")
             } else {
-                // For other repository types, fetch entries only
                 let groupedEntries = try await entryRepository.fetchEntries()
                 Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups")
                 self.entries = groupedEntries
                 self.places = []
                 self.routines = []
+                self.allItems = []
             }
             
             await MainActor.run {

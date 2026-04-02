@@ -232,7 +232,7 @@ class JoinSessionViewController: NNViewController {
         findSessionButton = NNLoadingButton(title: "Find Session", titleColor: .white, fillStyle: .fill(NNColors.primary), transitionStyle: .rightHide)
         findSessionButton.translatesAutoresizingMaskIntoConstraints = false
         findSessionButton.addTarget(self, action: #selector(findSessionButtonTapped), for: .touchUpInside)
-        findSessionButton.isEnabled = false
+        // Disable only after hierarchy attach so NNBaseControl records originalBackgroundColor as primary (not gray).
 
         buttonStack = UIStackView(arrangedSubviews: [findSessionButton, scanButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
@@ -242,6 +242,8 @@ class JoinSessionViewController: NNViewController {
         buttonStack.spacing = 12
 
         view.addSubview(buttonStack)
+
+        findSessionButton.isEnabled = false
 
         buttonBottomConstraint = buttonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
 

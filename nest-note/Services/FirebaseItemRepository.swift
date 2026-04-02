@@ -160,61 +160,14 @@ final class FirebaseItemRepository: ItemRepository {
     // MARK: - Private Methods
     
     private func decodeItem(from document: QueryDocumentSnapshot) throws -> any BaseItem {
-        let data = document.data()
-        return try decodeItemFromData(data, documentID: document.documentID, document: document)
+        try ItemDecoderRegistry.decode(document: document)
     }
     
     private func decodeItem(from document: DocumentSnapshot) throws -> any BaseItem {
-        guard let data = document.data() else {
+        guard document.data() != nil else {
             throw ItemRepositoryError.documentHasNoData(document.documentID)
         }
-        return try decodeItemFromData(data, documentID: document.documentID, document: document)
-    }
-    
-    private func decodeItemFromData(_ data: [String: Any], documentID: String, document: Any) throws -> any BaseItem {
-        // Get type field, defaulting to "entry" for legacy documents (guiding principle #4)
-        let typeString = data["type"] as? String ?? "entry"
-        guard let itemType = ItemType(rawValue: typeString) else {
-            Logger.log(level: .info, category: .firebaseItemRepo, message: "Unknown item type: \(typeString) for document \(documentID), defaulting to entry")
-            
-            // Try to decode as BaseEntry for unknown types
-            if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: BaseEntry.self)
-            } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: BaseEntry.self)
-            } else {
-                throw ItemRepositoryError.unsupportedDocumentType
-            }
-        }
-        
-        Logger.log(level: .debug, category: .firebaseItemRepo, message: "Decoding item \(documentID) as type: \(itemType.rawValue)")
-        
-        switch itemType {
-        case .entry:
-            if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: BaseEntry.self)
-            } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: BaseEntry.self)
-            } else {
-                throw ItemRepositoryError.unsupportedDocumentType
-            }
-        case .place:
-            if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: PlaceItem.self)
-            } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: PlaceItem.self)
-            } else {
-                throw ItemRepositoryError.unsupportedDocumentType
-            }
-        case .routine:
-            if let queryDoc = document as? QueryDocumentSnapshot {
-                return try queryDoc.data(as: RoutineItem.self)
-            } else if let doc = document as? DocumentSnapshot {
-                return try doc.data(as: RoutineItem.self)
-            } else {
-                throw ItemRepositoryError.unsupportedDocumentType
-            }
-        }
+        return try ItemDecoderRegistry.decode(document: document)
     }
 }
 
