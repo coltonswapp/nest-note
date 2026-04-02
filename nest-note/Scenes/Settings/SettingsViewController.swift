@@ -1068,6 +1068,7 @@ extension SettingsViewController: EntryDetailViewControllerDelegate {
 
 extension SettingsViewController: PaywallViewControllerDelegate {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) {
             self.showToast(text: "Subscription activated!")
             Logger.log(level: .info, category: .purchases, message: "Subscription purchase completed")
@@ -1085,6 +1086,7 @@ extension SettingsViewController: PaywallViewControllerDelegate {
     }
     
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) {
             self.showToast(text: "Subscription restored!")
             Logger.log(level: .info, category: .purchases, message: "Subscription restored successfully")

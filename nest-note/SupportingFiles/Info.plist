@@ -40,5 +40,7 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>We need camera access to scan QR codes for session invites.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>We use your data to deliver more relevant ads and measure ad performance.</string>
 </dict>
 </plist>
