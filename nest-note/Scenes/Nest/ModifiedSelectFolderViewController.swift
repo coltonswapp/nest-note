@@ -865,6 +865,7 @@ extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEn
 // MARK: - PaywallViewControllerDelegate
 extension ModifiedSelectFolderViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         // Purchase successful - refresh pro status and update UI
         controller.dismiss(animated: true) { [weak self] in
             Task {
@@ -882,6 +883,7 @@ extension ModifiedSelectFolderViewController {
     }
     
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
             Task {
                 await SubscriptionService.shared.refreshCustomerInfo()

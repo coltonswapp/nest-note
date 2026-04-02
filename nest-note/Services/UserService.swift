@@ -289,6 +289,7 @@ final class UserService {
             }
             
             Tracker.shared.track(.regularLoginSucceeded)
+            TikTokTracker.shared.trackLogin()
 
             return result
             
@@ -364,6 +365,7 @@ final class UserService {
             self.isAuthenticated = true
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
             Tracker.shared.track(.regularSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Save authentication state
             saveAuthState()
@@ -463,6 +465,7 @@ final class UserService {
                     
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
                     Tracker.shared.track(.appleSignInSucceeded)
+                    TikTokTracker.shared.trackLogin()
 
                     // Stop log capture and upload (success) - existing user logged in, no onboarding needed
                     await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
@@ -589,6 +592,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
             // This ensures we capture nest creation and final completion
@@ -668,6 +672,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
             // This ensures we capture nest creation, survey submission, and final completion
@@ -852,6 +857,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
             Tracker.shared.track(.userLoggedOut)
+            TikTokTracker.shared.logout()
         } catch {
             Logger.log(level: .error, category: .userService, message: "Firebase Auth signOut failed: \(error.localizedDescription)")
             throw AuthError.unknown

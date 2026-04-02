@@ -3531,6 +3531,7 @@ extension NestCategoryViewController {
 // MARK: - PaywallViewControllerDelegate
 extension NestCategoryViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         // Purchase successful - user is now Pro, update selection limit
         selectionLimit = nil
         
