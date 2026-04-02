@@ -41,6 +41,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Initialize rating manager to track app launches
         _ = RatingManager.shared
         
+        // Initialize TikTok Business SDK for attribution
+        TikTokTracker.shared.configure()
+        
         return true
     }
     

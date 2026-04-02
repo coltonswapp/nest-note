@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */; };
+		F646715F2F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */; };
+		F64671602F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29232CD077E900B90ABC /* FirebaseAnalytics */; };
 		F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29252CD077E900B90ABC /* FirebaseAuth */; };
 		F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29272CD077E900B90ABC /* FirebaseCore */; };
@@ -33,6 +35,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				F64671602F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 1;
@@ -40,6 +43,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = TikTokBusinessSDK.xcframework; sourceTree = "<group>"; };
 		F64DE3E92CB1C893006D21FC /* nest-note.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nest-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F67037822DFCA686000D897E /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nn-storekit-config.storekit"; sourceTree = "<group>"; };
@@ -80,6 +84,7 @@
 				F6A81B902E56524600D24D95 /* QRCode in Frameworks */,
 				F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */,
 				F66E29302CD077E900B90ABC /* FirebaseRemoteConfig in Frameworks */,
+				F646715F2F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Frameworks */,
 				F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */,
 				F66E29322CD077E900B90ABC /* FirebaseStorage in Frameworks */,
 				F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */,
@@ -97,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				F67037822DFCA686000D897E /* StoreKit.framework */,
+				F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -272,6 +278,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.Swappfunc.nest-note";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -309,6 +319,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.Swappfunc.nest-note";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

@@ -119,6 +119,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     // MARK: - PaywallViewControllerDelegate
 
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
 
         // Track conversion
@@ -152,6 +153,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     }
 
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
 
         // Track restoration

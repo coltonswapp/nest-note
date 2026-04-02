@@ -9,6 +9,7 @@ import UIKit
 import FirebaseAuth
 import FirebaseFirestore
 import UserNotifications
+import AppTrackingTransparency
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
@@ -51,6 +52,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
         
+        TikTokTracker.shared.trackLaunchApp()
+        
         // Store any URLs that were passed to the app on launch for later processing
         if let urlContext = options.urlContexts.first {
             self.pendingURL = urlContext.url
@@ -69,9 +72,17 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // The scene may re-connect later, as its session was not necessarily discarded (see `application:didDiscardSceneSessions` instead).
     }
 
+    private var hasRequestedATT = false
+    
     func sceneDidBecomeActive(_ scene: UIScene) {
-        // Called when the scene has moved from an inactive state to an active state.
-        // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
+        guard !hasRequestedATT else { return }
+        hasRequestedATT = true
+        
+        if #available(iOS 14.5, *) {
+            ATTrackingManager.requestTrackingAuthorization { status in
+                Logger.log(level: .info, category: .general, message: "ATT authorization status: \(status.rawValue)")
+            }
+        }
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
