@@ -29,7 +29,7 @@ final class SelectEntriesCell: UICollectionViewListCell {
     private let titleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Select Items"
+        label.text = "Selected Items"
         label.font = .preferredFont(forTextStyle: .body)
         label.adjustsFontForContentSizeCategory = true
         return label

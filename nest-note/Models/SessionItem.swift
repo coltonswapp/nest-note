@@ -103,7 +103,14 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var ownerID: String?
     var earlyAccessDuration: EarlyAccessDuration
     var earlyAccessEndDate: Date?
-    var entryIds: [String]? // Now stores IDs for all selected items (entries, places, etc.)
+    /// Legacy Firestore key `entryIds`; stores IDs for all selected nest items (any `BaseItem` type).
+    var entryIds: [String]?
+    
+    /// Type-neutral accessor (same underlying storage as `entryIds`).
+    var selectedNestItemIds: [String]? {
+        get { entryIds }
+        set { entryIds = newValue }
+    }
     
     // Computed property to check if session has an active invite
     var hasActiveInvite: Bool {
@@ -269,6 +276,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case earlyAccessDuration
         case earlyAccessEndDate
         case entryIds
+        /// Preferred key for new clients; decodes from `entryIds` when absent.
+        case selectedItemIds = "selectedItemIds"
     }
     
     required init(from decoder: Decoder) throws {
@@ -291,7 +300,8 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             earlyAccessDuration = .halfDay
         }
         earlyAccessEndDate = try container.decodeIfPresent(Date.self, forKey: .earlyAccessEndDate)
-        entryIds = try container.decodeIfPresent([String].self, forKey: .entryIds)
+        entryIds = try container.decodeIfPresent([String].self, forKey: .selectedItemIds)
+            ?? container.decodeIfPresent([String].self, forKey: .entryIds)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
@@ -302,6 +312,24 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             // Infer status based on current date and session dates
             self.status = inferredStatus()
         }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(startDate, forKey: .startDate)
+        try container.encode(endDate, forKey: .endDate)
+        try container.encode(isMultiDay, forKey: .isMultiDay)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(assignedSitter, forKey: .assignedSitter)
+        try container.encode(nestID, forKey: .nestID)
+        try container.encodeIfPresent(ownerID, forKey: .ownerID)
+        try container.encode(earlyAccessDuration, forKey: .earlyAccessDuration)
+        try container.encodeIfPresent(earlyAccessEndDate, forKey: .earlyAccessEndDate)
+        let ids = entryIds
+        try container.encodeIfPresent(ids, forKey: .selectedItemIds)
+        try container.encodeIfPresent(ids, forKey: .entryIds)
     }
     
     // MARK: - Sitter Management

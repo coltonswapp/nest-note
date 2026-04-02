@@ -14,7 +14,7 @@ class PDFExportService {
     }
     
     // Default section order - easily customizable
-    private static let defaultSectionOrder: [PDFSection] = [.events, .entries]
+    private static let defaultSectionOrder: [PDFSection] = [.events, .entries, .contacts]
     
     static func generateSessionPDF(
         session: SessionItem,
@@ -75,6 +75,14 @@ class PDFExportService {
             print("PDFExport: Failed to fetch routines: \(error)")
         }
 
+        var allContacts: [ContactItem] = []
+        do {
+            allContacts = try await NestService.shared.fetchItems(ofType: .contact)
+            print("PDFExport: Fetched \(allContacts.count) contacts from NestService")
+        } catch {
+            print("PDFExport: Failed to fetch contacts: \(error)")
+        }
+
         // Determine selection set: prefer explicit selectedItemIds, else session.entryIds, else empty
         let selectionSet: Set<String> = {
             if let explicit = selectedItemIds, !explicit.isEmpty {
@@ -90,6 +98,7 @@ class PDFExportService {
         let filteredEntriesForEntriesSection: [BaseEntry] = allEntries.filter { selectionSet.contains($0.id) }
         let filteredPlacesForEntriesSection: [PlaceItem] = allPlaces.filter { selectionSet.contains($0.id) }
         let filteredRoutinesForSection: [RoutineItem] = allRoutines.filter { selectionSet.contains($0.id) }
+        let filteredContactsForSection: [ContactItem] = allContacts.filter { selectionSet.contains($0.id) }
         
         let pageSize = CGRect(x: 0, y: 0, width: 612, height: 792) // 8.5 x 11 inches at 72 DPI
         let renderer = UIGraphicsPDFRenderer(bounds: pageSize)
@@ -123,7 +132,7 @@ class PDFExportService {
                 case .entries:
                     return !filteredEntriesForEntriesSection.isEmpty || !filteredPlacesForEntriesSection.isEmpty || !filteredRoutinesForSection.isEmpty
                 case .contacts:
-                    return true // Always show contacts section for now
+                    return !filteredContactsForSection.isEmpty
                 case .places:
                     return !filteredPlacesForEntriesSection.isEmpty
                 case .routines:
@@ -151,6 +160,7 @@ class PDFExportService {
                     eventPlaces: eventPlaces,
                     allPlaces: filteredPlacesForEntriesSection,
                     allRoutines: filteredRoutinesForSection,
+                    allContacts: filteredContactsForSection,
                     placeImages: placeImages,
                     currentY: currentY,
                     leftMargin: leftMargin,
@@ -880,6 +890,7 @@ class PDFExportService {
         eventPlaces: [String: PlaceItem],
         allPlaces: [PlaceItem],
         allRoutines: [RoutineItem],
+        allContacts: [ContactItem],
         placeImages: [String: UIImage],
         currentY: CGFloat,
         leftMargin: CGFloat,
@@ -919,7 +930,7 @@ class PDFExportService {
             return drawContactsSection(
                 context: context,
                 cgContext: cgContext,
-                session: session,
+                contacts: allContacts,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -1270,19 +1281,107 @@ class PDFExportService {
         return y
     }
     
-    // MARK: - Future Section Methods (Placeholder implementations)
+    // MARK: - Contacts Section
     private static func drawContactsSection(
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
-        session: SessionItem,
+        contacts: [ContactItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
         pageSize: CGRect
     ) -> CGFloat {
-        // TODO: Implement contacts section
-        // Could show assigned sitter contact info, emergency contacts, etc.
-        return currentY
+        var y = currentY
+        let bottomMargin: CGFloat = 60
+        guard !contacts.isEmpty else { return y }
+
+        let titleFont = UIFont.systemFont(ofSize: 22, weight: .bold)
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.black
+        ]
+        let titleHeight = "Contacts".size(withAttributes: titleAttributes).height + 20
+        if y + titleHeight > pageSize.height - bottomMargin {
+            context.beginPage()
+            y = 60
+        }
+        "Contacts".draw(at: CGPoint(x: leftMargin, y: y), withAttributes: titleAttributes)
+        y += titleHeight
+
+        let byCategory = Dictionary(grouping: contacts) { $0.category }
+        for categoryName in byCategory.keys.sorted() {
+            let categoryContacts = byCategory[categoryName] ?? []
+            y = drawContactCategory(
+                context: context,
+                cgContext: cgContext,
+                categoryName: categoryName,
+                contacts: categoryContacts,
+                currentY: y,
+                leftMargin: leftMargin,
+                contentWidth: contentWidth,
+                pageSize: pageSize,
+                bottomMargin: bottomMargin
+            )
+            y += 16
+        }
+
+        return y
+    }
+
+    private static func drawContactCategory(
+        context: UIGraphicsPDFRendererContext,
+        cgContext: CGContext,
+        categoryName: String,
+        contacts: [ContactItem],
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
+        var y = currentY
+
+        let categoryFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        let categoryAttributes: [NSAttributedString.Key: Any] = [
+            .font: categoryFont,
+            .foregroundColor: UIColor.black
+        ]
+        let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 12
+        if y + categoryHeight > pageSize.height - bottomMargin {
+            context.beginPage()
+            y = 60
+        }
+        categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
+        y += categoryHeight
+
+        let sortedContacts = contacts.sorted {
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+        let nameLabelFont = UIFont.systemFont(ofSize: 14, weight: .medium)
+        let nameLabelAttrs: [NSAttributedString.Key: Any] = [
+            .font: nameLabelFont,
+            .foregroundColor: UIColor.gray
+        ]
+        let phoneFont = UIFont.systemFont(ofSize: 14, weight: .regular)
+        let phoneAttrs: [NSAttributedString.Key: Any] = [
+            .font: phoneFont,
+            .foregroundColor: UIColor.black
+        ]
+
+        for contact in sortedContacts {
+            let titleLine = contact.title.uppercased()
+            let titleH = titleLine.size(withAttributes: nameLabelAttrs).height
+            if y + titleH + phoneFont.lineHeight > pageSize.height - bottomMargin {
+                context.beginPage()
+                y = 60
+            }
+            titleLine.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: nameLabelAttrs)
+            y += titleH + 4
+            contact.phoneNumber.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: phoneAttrs)
+            y += phoneFont.lineHeight + 10
+        }
+
+        return y
     }
     
     private static func drawPlacesSection(

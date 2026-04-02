@@ -13,6 +13,14 @@ enum AppMode: String {
             return "person.2.fill"
         }
     }
+
+    /// Shown above “NestNote” in the home screen large-title stack.
+    var homeScreenWeeTitle: String {
+        switch self {
+        case .nestOwner: return "Owner Mode"
+        case .sitter: return "Sitter Mode"
+        }
+    }
 }
 
 /// Manages the current operating mode of the app

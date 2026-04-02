@@ -69,6 +69,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var selectedItemIds: [String] = []
     
+    private var selectedItemPreviews: [SelectedItemPreview] = []
+    
     // Properties for select entries flow
     private var currentSelectEntriesNavController: UINavigationController?
     
@@ -522,6 +524,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 let matchingEntries = allItems.compactMap { $0 as? BaseEntry }.filter { entryIds.contains($0.id) }
                 let matchingPlaces = allItems.compactMap { $0 as? PlaceItem }.filter { entryIds.contains($0.id) }
                 let matchingRoutines = allItems.compactMap { $0 as? RoutineItem }.filter { entryIds.contains($0.id) }
+                let matchingPilots = allItems.compactMap { $0 as? PilotCardItem }.filter { entryIds.contains($0.id) }
+                let matchingContacts = allItems.compactMap { $0 as? ContactItem }.filter { entryIds.contains($0.id) }
+                let matchingUnknown = allItems.compactMap { $0 as? UnknownItem }.filter { entryIds.contains($0.id) }
                 
                 Logger.log(level: .info, category: .general, message: "Fetched \(allItems.count) total items")
                 Logger.log(level: .info, category: .general, message: "Looking for item IDs: \(entryIds)")
@@ -534,32 +539,41 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 Logger.log(level: .info, category: .general, message: "Matching routine titles: \(matchingRoutines.map { $0.title })")
                 
                 // If no matching items found, the stored items may have been deleted
-                if matchingEntries.isEmpty && matchingPlaces.isEmpty && matchingRoutines.isEmpty && !entryIds.isEmpty {
+                if matchingEntries.isEmpty && matchingPlaces.isEmpty && matchingRoutines.isEmpty
+                    && matchingPilots.isEmpty && matchingContacts.isEmpty && matchingUnknown.isEmpty && !entryIds.isEmpty {
                     Logger.log(level: .info, category: .general, message: "No matching items found for stored IDs - items may have been deleted. Clearing session entryIds.")
                     
                     await MainActor.run {
-                        // Clear the stored entryIds since they're no longer valid
                         self.sessionItem.entryIds = nil
                         self.selectedItemIds = []
+                        self.selectedItemPreviews = []
                         self.updateSelectEntriesSection()
                         Logger.log(level: .info, category: .general, message: "Cleared invalid entryIds from session")
                     }
                 } else {
+                    // Store only the IDs that were found
+                    var restoredIds: [String] = []
+                    restoredIds.append(contentsOf: matchingEntries.map(\.id))
+                    restoredIds.append(contentsOf: matchingPlaces.map(\.id))
+                    restoredIds.append(contentsOf: matchingRoutines.map(\.id))
+                    restoredIds.append(contentsOf: matchingPilots.map(\.id))
+                    restoredIds.append(contentsOf: matchingContacts.map(\.id))
+                    restoredIds.append(contentsOf: matchingUnknown.map(\.id))
+                    
+                    let idSet = Set(restoredIds)
+                    let previews: [SelectedItemPreview] = allItems
+                        .filter { idSet.contains($0.id) }
+                        .map { SelectedItemPreview(id: $0.id, title: $0.title, type: $0.type) }
+                    
                     await MainActor.run {
-                        // Store only the IDs that were found
-                        let restoredIds = matchingEntries.map { $0.id } + matchingPlaces.map { $0.id } + matchingRoutines.map { $0.id }
                         self.selectedItemIds = restoredIds
+                        self.selectedItemPreviews = previews
                         
                         Logger.log(level: .info, category: .general, message: "Updated selectedItemIds count to: \(self.selectedItemIds.count)")
-                        Logger.log(level: .info, category: .general, message: "Restored entry IDs: \(matchingEntries.map { $0.id }.sorted())")
-                        Logger.log(level: .info, category: .general, message: "Restored place IDs: \(matchingPlaces.map { $0.id }.sorted())")
-                        Logger.log(level: .info, category: .general, message: "Restored routine IDs: \(matchingRoutines.map { $0.id }.sorted())")
                         self.updateSelectEntriesSection()
                         
-                        // Update originalSession.entryIds to match the restored entries to prevent false change detection
                         self.originalSession.entryIds = restoredIds.isEmpty ? nil : restoredIds
                         
-                        // Now check for changes after restoration - should show no changes since we just synced
                         Logger.log(level: .info, category: .general, message: "Calling checkForChanges() after item restoration and originalSession sync")
                         self.checkForChanges()
                     }
@@ -576,10 +590,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func updateDataSourceAfterRefresh() {
         var snapshot = dataSource.snapshot()
         
-        // Update select entries item
-        if let existingSelectEntriesItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
-            snapshot.deleteItems([existingSelectEntriesItem])
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
+        // Update select entries items
+        if snapshot.sectionIdentifiers.contains(.selectEntries) {
+            let existingItems = snapshot.itemIdentifiers(inSection: .selectEntries)
+            snapshot.deleteItems(existingItems)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
         }
         
         // Update date selection items
@@ -786,6 +801,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 } else {
                     sessionItem.entryIds = nil // Clear entryIds if no items selected
                 }
+
+                await resolvePastStartStatusForNewSessionIfNeeded(startDate: startDate)
 
                 if isCompletingRequest {
                     // Validate nestID is set before proceeding
@@ -1125,6 +1142,36 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
         }
         
+        let selectedEntriesSummaryRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            guard case let .selectedEntriesSummary(summary) = item else { return }
+            var content = cell.defaultContentConfiguration()
+            content.text = summary
+            content.textProperties.font = .preferredFont(forTextStyle: .subheadline)
+            content.textProperties.color = .secondaryLabel
+            content.textProperties.numberOfLines = 0
+            
+            cell.contentConfiguration = content
+            
+            let seeAllLabel = UILabel()
+            seeAllLabel.attributedText = NSAttributedString(
+                string: "See All",
+                attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .subheadline),
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .foregroundColor: NNColors.primary
+                ]
+            )
+            seeAllLabel.numberOfLines = 1
+            seeAllLabel.translatesAutoresizingMaskIntoConstraints = true
+            seeAllLabel.sizeToFit()
+            
+            let seeAllAccessory = UICellAccessory.customView(configuration: .init(
+                customView: seeAllLabel,
+                placement: .trailing()
+            ))
+            cell.accessories = [seeAllAccessory]
+        }
+        
         // Register footer
         let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionFooter
@@ -1188,6 +1235,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 return collectionView.dequeueConfiguredReusableCell(using: sessionEventRegistration, for: indexPath, item: item)
             case .moreEvents(let count):
                 return collectionView.dequeueConfiguredReusableCell(using: moreEventsRegistration, for: indexPath, item: item)
+            case .selectedEntriesSummary:
+                return collectionView.dequeueConfiguredReusableCell(using: selectedEntriesSummaryRegistration, for: indexPath, item: item)
             case .endSession:
                 return collectionView.dequeueConfiguredReusableCell(using: endSessionRegistration, for: indexPath, item: item)
             }
@@ -1223,7 +1272,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
+            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -1421,11 +1470,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(nav, animated: true)
     }
     
-    private func presentSelectEntriesFlow() {
+    private func presentSelectEntriesFlow(showSelectedTab: Bool = false) {
         guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
         
         // Create the folder view controller directly
         let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
+        folderVC.showsSelectedTabInitially = showSelectedTab
         folderVC.title = "Select Items"
         folderVC.delegate = self
         
@@ -1473,11 +1523,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
         let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
-            // ONLY NOW do we commit the selections
             self.selectedItemIds = selectedIds
             self.currentSelectEntriesNavController?.dismiss(animated: true)
             self.currentSelectEntriesNavController = nil
-            self.updateSelectEntriesSection()
+            self.fetchSelectedItemPreviews()
             self.checkForChanges()
         }
         
@@ -1487,14 +1536,82 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         currentSelectEntriesNavController?.present(alert, animated: true)
     }
     
+    /// When contacts or entries are selected, those are spelled out and places, routines, and other types roll into "N more".
+    /// Otherwise all non-empty buckets are listed (places, routines, other items).
+    private func selectedEntriesSummaryString() -> String? {
+        guard !selectedItemPreviews.isEmpty else { return nil }
+        
+        var counts: [ItemType: Int] = [:]
+        for preview in selectedItemPreviews {
+            counts[preview.type, default: 0] += 1
+        }
+        
+        let contacts = counts[.contact] ?? 0
+        let entries = counts[.entry] ?? 0
+        let places = counts[.place] ?? 0
+        let routines = counts[.routine] ?? 0
+        let other = (counts[.pilotCard] ?? 0) + (counts[.unknownDocument] ?? 0)
+        
+        var parts: [String] = []
+        func appendCount(_ n: Int, singular: String, plural: String) {
+            guard n > 0 else { return }
+            parts.append(n == 1 ? "1 \(singular)" : "\(n) \(plural)")
+        }
+        
+        let hasContactsOrEntries = contacts > 0 || entries > 0
+        if hasContactsOrEntries {
+            appendCount(contacts, singular: "contact", plural: "contacts")
+            appendCount(entries, singular: "entry", plural: "entries")
+            let rest = places + routines + other
+            if rest > 0 {
+                parts.append(rest == 1 ? "1 more" : "\(rest) more")
+            }
+        } else {
+            appendCount(places, singular: "place", plural: "places")
+            appendCount(routines, singular: "routine", plural: "routines")
+            appendCount(other, singular: "other item", plural: "other items")
+        }
+        
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+    
+    private func selectEntriesAccessoryItems() -> [Item] {
+        guard let summary = selectedEntriesSummaryString() else { return [] }
+        return [.selectedEntriesSummary(summary: summary)]
+    }
+    
     private func updateSelectEntriesSection() {
         var snapshot = dataSource.snapshot()
+        guard snapshot.sectionIdentifiers.contains(.selectEntries) else { return }
         
-        // Update select entries item with count of selected item IDs
-        if let existingItem = snapshot.itemIdentifiers(inSection: .selectEntries).first {
-            snapshot.deleteItems([existingItem])
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)], toSection: .selectEntries)
-            dataSource.apply(snapshot, animatingDifferences: true)
+        let existingItems = snapshot.itemIdentifiers(inSection: .selectEntries)
+        snapshot.deleteItems(existingItems)
+        snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
+    
+    private func fetchSelectedItemPreviews() {
+        guard !selectedItemIds.isEmpty else {
+            selectedItemPreviews = []
+            updateSelectEntriesSection()
+            return
+        }
+        
+        Task {
+            do {
+                let allItems = try await NestService.shared.fetchAllItems()
+                let idSet = Set(selectedItemIds)
+                let previews = allItems
+                    .filter { idSet.contains($0.id) }
+                    .map { SelectedItemPreview(id: $0.id, title: $0.title, type: $0.type) }
+                
+                await MainActor.run {
+                    self.selectedItemPreviews = previews
+                    self.updateSelectEntriesSection()
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to fetch item previews: \(error.localizedDescription)")
+            }
         }
     }
     
@@ -1813,6 +1930,35 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func validateDateRange(startDate: Date, endDate: Date, isMultiDay: Bool) -> Bool {
         return SessionDateValidator.validateAndShowAlertIfNeeded(startDate: startDate, endDate: endDate, isMultiDay: isMultiDay, in: self)
     }
+
+    /// Before saving a brand-new owner session, if the start is already in the past and status is still upcoming, ask whether to save as in progress or keep upcoming.
+    @MainActor
+    private func resolvePastStartStatusForNewSessionIfNeeded(startDate: Date) async {
+        guard !isEditingSession, !isCompletingRequest, startDate < Date(), sessionItem.status == .upcoming else { return }
+
+        let chosen: SessionStatus = await withCheckedContinuation { continuation in
+            let alert = UIAlertController(
+                title: "Start time in the past",
+                message: "This session's start time is already in the past. Would you like to mark it as in progress, or keep it as upcoming?",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Mark as In Progress", style: .default) { _ in
+                continuation.resume(returning: .inProgress)
+            })
+            alert.addAction(UIAlertAction(title: "Keep as Upcoming", style: .default) { _ in
+                continuation.resume(returning: .upcoming)
+            })
+            present(alert, animated: true)
+        }
+        sessionItem.status = chosen
+
+        var snapshot = dataSource.snapshot()
+        let statusItems = snapshot.itemIdentifiers(inSection: .status)
+        snapshot.deleteItems(statusItems)
+        snapshot.appendItems([.sessionStatus(chosen)], toSection: .status)
+        await dataSource.apply(snapshot, animatingDifferences: true)
+        checkForChanges()
+    }
     
     private func validateSession() -> Bool {
         var isValid = true
@@ -2028,6 +2174,12 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
 // MARK: - Types
 extension EditSessionViewController {
+    struct SelectedItemPreview: Hashable {
+        let id: String
+        let title: String
+        let type: ItemType
+    }
+    
     enum Section: Int {
         case overview
         case sitter
@@ -2054,6 +2206,7 @@ extension EditSessionViewController {
         case events
         case sessionEvent(SessionEvent)
         case moreEvents(Int)
+        case selectedEntriesSummary(summary: String)
         case endSession
         
         func hash(into hasher: inout Hasher) {
@@ -2086,8 +2239,11 @@ extension EditSessionViewController {
             case .moreEvents(let count):
                 hasher.combine(10)
                 hasher.combine(count)
+            case .selectedEntriesSummary(let summary):
+                hasher.combine(12)
+                hasher.combine(summary)
             case .endSession:
-                hasher.combine(11)
+                hasher.combine(14)
             }
         }
         
@@ -2111,6 +2267,8 @@ extension EditSessionViewController {
                 return e1 == e2
             case let (.moreEvents(c1), .moreEvents(c2)):
                 return c1 == c2
+            case let (.selectedEntriesSummary(s1), .selectedEntriesSummary(s2)):
+                return s1 == s2
             default:
                 return false
             }
@@ -2128,7 +2286,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .events, .moreEvents:
             // Don't allow highlighting events if they are currently loading
             return !isLoadingEvents
-        case .expenses, .exportPDF, .sessionEvent, .endSession:
+        case .expenses, .exportPDF, .sessionEvent, .endSession, .selectedEntriesSummary:
             return true
         default:
             return false
@@ -2209,6 +2367,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
                     self.present(eventVC, animated: true)
                 }
             }
+        case .selectedEntriesSummary:
+            presentSelectEntriesFlow(showSelectedTab: true)
         case .endSession:
             endSessionButtonTapped()
         }
@@ -2725,9 +2885,7 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
         Task {
             let selectedItems = await controller.getCurrentSelectedItems()
             await MainActor.run {
-                categoryVC.restoreSelectedEntries(selectedItems.entries)
-                categoryVC.restoreSelectedPlaces(selectedItems.places)
-                categoryVC.restoreSelectedRoutines(selectedItems.routines)
+                categoryVC.restoreSelectedItems(selectedItems)
             }
         }
         

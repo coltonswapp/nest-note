@@ -74,6 +74,8 @@ class HalfWidthCell: UICollectionViewCell {
         valueLabel.font = UIFont.systemFont(ofSize: 22, weight: .medium)
         valueLabel.textColor = valueLabelBackgroundColor
         valueLabel.numberOfLines = 1
+        valueLabel.adjustsFontSizeToFitWidth = true
+        valueLabel.minimumScaleFactor = 0.65
         
         // Setup checkmark image view
         checkmarkImageView.contentMode = .scaleAspectFit
@@ -81,10 +83,36 @@ class HalfWidthCell: UICollectionViewCell {
         checkmarkImageView.isHidden = true
     }
     
+    /// Prefers ASCII digits so formatted phone strings shrink from the numeric length, not punctuation.
+    private static func asciiDigitCount(in string: String) -> Int {
+        string.reduce(0) { count, ch in
+            count + (("0"..."9").contains(ch) ? 1 : 0)
+        }
+    }
+    
+    /// Smaller point sizes for longer numbers so half-width cells don’t clip gate codes / phone values.
+    private static func valueFont(forDigitCount digits: Int) -> UIFont {
+        let size: CGFloat
+        switch digits {
+        case ...10:
+            size = 22
+        case 11...12:
+            size = 19
+        case 13...14:
+            size = 17
+        case 15...16:
+            size = 15
+        default:
+            size = 14
+        }
+        return UIFont.systemFont(ofSize: size, weight: .medium)
+    }
+    
     func configure(key: String, value: String, isNestOwner: Bool = false, isEditMode: Bool = false, isSelected: Bool = false, isModalInPresentation: Bool = false) {
         keyLabel.text = key
         
         valueLabel.text = value
+        valueLabel.font = Self.valueFont(forDigitCount: Self.asciiDigitCount(in: value))
         
         self.isInEditMode = isEditMode
         self.isEntrySelected = isSelected

@@ -57,14 +57,15 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         configureDataSource()
         setupObservers()
         refreshData()
+        DispatchQueue.main.async { [weak self] in
+            self?.applyHomeScreenNavigationAppearance(appMode: .sitter)
+        }
     }
     
     override func setup() {
         super.setup()
         configureCollectionView()
-        navigationItem.title = "NestNote"
-        navigationController?.navigationBar.prefersLargeTitles = true
-        navigationController?.navigationBar.tintColor = NNColors.primary
+        applyHomeScreenNavigationAppearance(appMode: .sitter)
         
         // Add loading spinner and empty state view
         view.addSubview(loadingSpinner)
@@ -455,37 +456,36 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     private func handleViewState(_ state: SitterViewService.ViewState) {
         switch state {
         case .loading:
-            collectionView.isHidden = true
             emptyStateView.isHidden = true
-            loadingSpinner.startAnimating()
+            // Pull-to-refresh already shows a spinner; avoid duplicating it in the center.
+            if !refreshControl.isRefreshing {
+                loadingSpinner.startAnimating()
+            }
             
         case .ready(let session, let nest):
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = false
             emptyStateView.isHidden = true
             applySnapshot(session: session, nest: nest)
-            // Fetch events for the current session
             fetchSessionEvents(session: session)
             
         case .noSession:
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = true
             emptyStateView.isHidden = false
             
-            // Animate the empty state into view
+            // Clear the collection view content but keep it visible so the
+            // navigation bar's large-title scroll tracking stays connected.
+            var empty = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
+            dataSource.apply(empty, animatingDifferences: false)
+            
             emptyStateView.animateIn()
-            
-            // Ensure it's interactive
             emptyStateView.isUserInteractionEnabled = true
-            
-            print("Empty state view is now visible and interactive: \(emptyStateView.isUserInteractionEnabled)")
-            print("Empty state view delegate: \(String(describing: emptyStateView.delegate))")
-            print("Empty state view frame: \(emptyStateView.frame)")
-            print("Empty state view is hidden: \(emptyStateView.isHidden)")
             
         case .error(let error):
             loadingSpinner.stopAnimating()
-            collectionView.isHidden = true
+            
+            var empty = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
+            dataSource.apply(empty, animatingDifferences: false)
+            
             emptyStateView.animateIn()
             handleError(error)
         }

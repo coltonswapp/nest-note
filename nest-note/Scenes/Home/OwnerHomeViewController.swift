@@ -81,16 +81,17 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         // Check if nest setup is required (for cases where mode already changed)
         checkNestSetupRequirement()
         
+        DispatchQueue.main.async { [weak self] in
+            self?.applyHomeScreenNavigationAppearance(appMode: .nestOwner)
+        }
+        
 //        setFCMToken()
     }
     
     override func setup() {
         super.setup()
         configureCollectionView()
-        navigationItem.title = "NestNote"
-        navigationItem.weeTitle = "Welcome to"
-        navigationController?.navigationBar.prefersLargeTitles = true
-        navigationController?.navigationBar.tintColor = NNColors.primary
+        applyHomeScreenNavigationAppearance(appMode: .nestOwner)
         
         // Add loading spinner
         view.addSubview(loadingSpinner)
