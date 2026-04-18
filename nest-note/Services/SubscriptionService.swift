@@ -336,6 +336,7 @@ extension PaywallPresentable where Self: PaywallViewControllerDelegate {
 // MARK: - Default PaywallViewControllerDelegate Implementation
 extension PaywallPresentable where Self: PaywallViewControllerDelegate {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
             Task {
                 await SubscriptionService.shared.refreshCustomerInfo()
@@ -349,6 +350,7 @@ extension PaywallPresentable where Self: PaywallViewControllerDelegate {
     }
     
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
             Task {
                 await SubscriptionService.shared.refreshCustomerInfo()

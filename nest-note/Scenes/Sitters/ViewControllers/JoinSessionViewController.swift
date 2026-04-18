@@ -14,8 +14,9 @@ protocol JoinSessionViewControllerDelegate: AnyObject {
 }
 
 class JoinSessionViewController: NNViewController {
-    
+
     weak var delegate: JoinSessionViewControllerDelegate?
+    private var isDebugMode: Bool = false
     
     private let titleLabel: UILabel = {
         let label = UILabel()
@@ -231,7 +232,7 @@ class JoinSessionViewController: NNViewController {
         findSessionButton = NNLoadingButton(title: "Find Session", titleColor: .white, fillStyle: .fill(NNColors.primary), transitionStyle: .rightHide)
         findSessionButton.translatesAutoresizingMaskIntoConstraints = false
         findSessionButton.addTarget(self, action: #selector(findSessionButtonTapped), for: .touchUpInside)
-        findSessionButton.isEnabled = false
+        // Disable only after hierarchy attach so NNBaseControl records originalBackgroundColor as primary (not gray).
 
         buttonStack = UIStackView(arrangedSubviews: [findSessionButton, scanButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
@@ -241,6 +242,8 @@ class JoinSessionViewController: NNViewController {
         buttonStack.spacing = 12
 
         view.addSubview(buttonStack)
+
+        findSessionButton.isEnabled = false
 
         buttonBottomConstraint = buttonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
 
@@ -356,6 +359,12 @@ class JoinSessionViewController: NNViewController {
 
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
+
+                    // Trigger explosion when invite is accepted
+                    let buttonFrame = self.findSessionButton.frame
+                    let centerPoint = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
+                    let pointInView = self.view.convert(centerPoint, to: self.view)
+                    ExplosionManager.trigger(.medium, at: pointInView)
 
                     // Show success alert
                     let alert = UIAlertController(

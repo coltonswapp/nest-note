@@ -19,21 +19,25 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     private var selectionCounterView: SelectItemsCountView!
     private var selectAllBarButtonItem: UIBarButtonItem?
     
+    // Selected items tab
+    private var segmentedControl: UISegmentedControl!
+    private var selectedItemsCollectionView: UICollectionView!
+    private var selectedItemsDataSource: UICollectionViewDiffableDataSource<SelectedSection, SelectedItemInfo>!
+    private var cachedSelectedItems: [SelectedItemInfo] = []
+    
     private var categories: [NestCategory] = []
     private var pendingUpdateNeeded = false
     private var folderItemCounts: [String: Int] = [:]
-    // Optional preloaded items to avoid redundant service calls
     private var preloadedAllItems: [BaseItem]? = nil
     
-    // Callback for continue button - now passes selected IDs
     var onContinueTapped: (([String]) -> Void)?
     
-    // Track all selected IDs locally (not committed until continue)
+    /// When true, the Selected segment is shown on first layout (e.g. opening from "view more" in session editor).
+    var showsSelectedTabInitially = false
+    
     private var currentSelectedIds: [String] = []
-    // Cache of all selectable item IDs (entries + places + routines)
     private var allSelectableItemIds: [String] = []
     
-    // Selection limit properties
     private var selectionLimit: Int? = nil
     private var isProUser: Bool = false
     
@@ -44,6 +48,41 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     enum Section: Int, CaseIterable {
         case folders
+    }
+    
+    enum SelectedSection: Int, CaseIterable {
+        case contacts
+        case entries
+        case places
+        case routines
+        case other
+        
+        /// Uppercase labels, matching `NestCategoryViewController` section headers.
+        var nestStyleHeaderTitle: String {
+            switch self {
+            case .contacts: return "CONTACTS"
+            case .entries:  return "ENTRIES"
+            case .places:   return "PLACES"
+            case .routines: return "ROUTINES"
+            case .other:    return "OTHER"
+            }
+        }
+        
+        init(itemType: ItemType) {
+            switch itemType {
+            case .contact:         self = .contacts
+            case .entry:           self = .entries
+            case .place:           self = .places
+            case .routine:         self = .routines
+            case .pilotCard, .unknownDocument: self = .other
+            }
+        }
+    }
+    
+    struct SelectedItemInfo: Hashable {
+        let id: String
+        let title: String
+        let type: ItemType
     }
     
     struct FolderItem: Hashable {
@@ -77,14 +116,24 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         
+        setupSegmentedControl()
         setupCollectionView()
+        setupSelectedItemsCollectionView()
         configureDataSource()
+        configureSelectedItemsDataSource()
         setupSelectionCounterView()
         setupNavigationItems()
         
         collectionView.delegate = self
+        selectedItemsCollectionView.delegate = self
         
-        // Single consolidated initial load to avoid duplicate fetches
+        updateSelectionCounter()
+        if showsSelectedTabInitially {
+            showsSelectedTabInitially = false
+            segmentedControl.selectedSegmentIndex = 1
+            segmentChanged(segmentedControl)
+        }
+        
         Task { 
             await checkProStatusAndSetLimit()
             await initialLoad() 
@@ -229,14 +278,17 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         updateSelectionCounter()
     }
     
-    // Method to get current selected items organized by type (for restoring in NestCategoryViewController)
-    func getCurrentSelectedItems() async -> (entries: Set<BaseEntry>, places: Set<PlaceItem>, routines: Set<RoutineItem>) {
+    /// Current selected items by type (for restoring in `NestCategoryViewController`).
+    func getCurrentSelectedItems() async -> SelectedNestItems {
         do {
             let allItems = try await entryRepository.fetchAllItems()
             
             var selectedEntries: Set<BaseEntry> = []
             var selectedPlaces: Set<PlaceItem> = []
             var selectedRoutines: Set<RoutineItem> = []
+            var selectedPilotCards: Set<PilotCardItem> = []
+            var selectedContacts: Set<ContactItem> = []
+            var selectedUnknown: Set<UnknownItem> = []
             
             for item in allItems {
                 if currentSelectedIds.contains(item.id) {
@@ -253,14 +305,33 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
                         if let routine = item as? RoutineItem {
                             selectedRoutines.insert(routine)
                         }
+                    case .pilotCard:
+                        if let pilot = item as? PilotCardItem {
+                            selectedPilotCards.insert(pilot)
+                        }
+                    case .contact:
+                        if let contact = item as? ContactItem {
+                            selectedContacts.insert(contact)
+                        }
+                    case .unknownDocument:
+                        if let unknown = item as? UnknownItem {
+                            selectedUnknown.insert(unknown)
+                        }
                     }
                 }
             }
             
-            return (entries: selectedEntries, places: selectedPlaces, routines: selectedRoutines)
+            return SelectedNestItems(
+                entries: selectedEntries,
+                places: selectedPlaces,
+                routines: selectedRoutines,
+                pilotCards: selectedPilotCards,
+                contacts: selectedContacts,
+                unknownItems: selectedUnknown
+            )
         } catch {
             print("[ERROR] Failed to fetch items for restoration: \(error)")
-            return (entries: [], places: [], routines: [])
+            return SelectedNestItems()
         }
     }
     
@@ -300,8 +371,8 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         }
         
         selectionCounterView?.count = currentSelectedIds.count
+        updateSegmentedControlTitle()
         
-        // Ensure counter stays on top
         if let navController = navigationController {
             navController.view.bringSubviewToFront(selectionCounterView)
         }
@@ -310,6 +381,11 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Toggle Select All / Clear All button title based on selection state
     private func updateSelectAllButtonTitle() {
+        if let control = segmentedControl, control.selectedSegmentIndex == 1 {
+            selectAllBarButtonItem?.title = "Clear All"
+            selectAllBarButtonItem?.isEnabled = !currentSelectedIds.isEmpty
+            return
+        }
         let total = allSelectableItemIds.count
         let isAllSelected = total > 0 && currentSelectedIds.count >= total
         selectAllBarButtonItem?.title = isAllSelected ? "Clear All" : "Select All"
@@ -350,24 +426,30 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     }
     
     @objc private func didTapSelectAll() {
+        let isOnSelectedTab = segmentedControl.selectedSegmentIndex == 1
+        
+        if isOnSelectedTab {
+            currentSelectedIds = []
+            cachedSelectedItems = []
+            applySelectedItemsSnapshot()
+            updateSelectionCounter()
+            selectAllBarButtonItem?.isEnabled = false
+            return
+        }
+        
         let total = allSelectableItemIds.count
         let isAllSelected = total > 0 && currentSelectedIds.count >= total
         
         if isAllSelected {
-            // Clear all selections
             currentSelectedIds = []
         } else {
-            // Select all items, respecting the limit
             if let limit = selectionLimit {
                 let itemsToSelect = min(limit, total)
                 currentSelectedIds = Array(allSelectableItemIds.prefix(itemsToSelect))
-                
-                // Show alert if we couldn't select all items due to limit
                 if total > limit {
                     showSelectionLimitAlert()
                 }
             } else {
-                // No limit (pro user)
                 currentSelectedIds = allSelectableItemIds
             }
         }
@@ -409,6 +491,28 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         return selectionLimit
     }
     
+    private func setupSegmentedControl() {
+        segmentedControl = UISegmentedControl(items: ["Folders", "Selected (0)"])
+        segmentedControl.selectedSegmentIndex = 0
+        segmentedControl.addTarget(self, action: #selector(segmentChanged(_:)), for: .valueChanged)
+        navigationItem.titleView = segmentedControl
+    }
+    
+    @objc private func segmentChanged(_ sender: UISegmentedControl) {
+        let showingSelected = sender.selectedSegmentIndex == 1
+        collectionView.isHidden = showingSelected
+        selectedItemsCollectionView.isHidden = !showingSelected
+        
+        if showingSelected {
+            selectAllBarButtonItem?.title = "Clear All"
+            selectAllBarButtonItem?.isEnabled = !currentSelectedIds.isEmpty
+            loadSelectedItems()
+        } else {
+            updateSelectAllButtonTitle()
+            applySnapshot()
+        }
+    }
+    
     private func setupCollectionView() {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -427,6 +531,31 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
         
         collectionView.allowsSelection = true
+    }
+    
+    private func setupSelectedItemsCollectionView() {
+        var listConfig = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        listConfig.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+            guard let self,
+                  let item = self.selectedItemsDataSource?.itemIdentifier(for: indexPath) else {
+                return nil
+            }
+            let deleteAction = UIContextualAction(style: .destructive, title: "Remove") { [weak self] _, _, completion in
+                self?.deselectItem(item)
+                completion(true)
+            }
+            deleteAction.image = UIImage(systemName: "minus.circle.fill")
+            return UISwipeActionsConfiguration(actions: [deleteAction])
+        }
+        listConfig.headerMode = .supplementary
+        let layout = UICollectionViewCompositionalLayout.list(using: listConfig)
+        
+        selectedItemsCollectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+        selectedItemsCollectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        selectedItemsCollectionView.backgroundColor = .systemGroupedBackground
+        selectedItemsCollectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 90, right: 0)
+        selectedItemsCollectionView.isHidden = true
+        view.addSubview(selectedItemsCollectionView)
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -481,7 +610,110 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         }
     }
     
-    // Custom configuration method for select entries flow
+    private func configureSelectedItemsDataSource() {
+        let cellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, SelectedItemInfo> { cell, indexPath, item in
+            var content = cell.defaultContentConfiguration()
+            content.text = item.title
+            
+            let iconName: String
+            switch item.type {
+            case .entry:           iconName = "doc.text"
+            case .place:           iconName = "map"
+            case .routine:         iconName = "arrow.triangle.2.circlepath"
+            case .contact:         iconName = "person.crop.circle"
+            case .pilotCard:       iconName = "creditcard"
+            case .unknownDocument: iconName = "doc.questionmark"
+            }
+            content.image = UIImage(systemName: iconName)
+            content.imageProperties.tintColor = NNColors.primary
+            
+            cell.contentConfiguration = content
+        }
+        
+        selectedItemsDataSource = UICollectionViewDiffableDataSource<SelectedSection, SelectedItemInfo>(
+            collectionView: selectedItemsCollectionView
+        ) { collectionView, indexPath, item in
+            collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: item)
+        }
+        
+        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionReusableView>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] headerView, elementKind, indexPath in
+            guard let self,
+                  let section = self.selectedItemsDataSource.sectionIdentifier(for: indexPath.section) else { return }
+            
+            headerView.subviews.forEach { $0.removeFromSuperview() }
+            
+            let label = UILabel()
+            label.text = section.nestStyleHeaderTitle
+            label.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+            label.textColor = UIColor.secondaryLabel
+            label.translatesAutoresizingMaskIntoConstraints = false
+            
+            headerView.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: headerView.trailingAnchor, constant: -16),
+                label.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 8),
+                label.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -8)
+            ])
+        }
+        
+        selectedItemsDataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+        }
+    }
+    
+    private func loadSelectedItems() {
+        Task {
+            do {
+                let allItems = try await entryRepository.fetchAllItems()
+                let idSet = Set(currentSelectedIds)
+                let infos: [SelectedItemInfo] = allItems
+                    .filter { idSet.contains($0.id) }
+                    .map { SelectedItemInfo(id: $0.id, title: $0.title, type: $0.type) }
+                
+                await MainActor.run {
+                    self.cachedSelectedItems = infos
+                    self.applySelectedItemsSnapshot()
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to load selected items: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func applySelectedItemsSnapshot() {
+        guard selectedItemsDataSource != nil else { return }
+        
+        var snapshot = NSDiffableDataSourceSnapshot<SelectedSection, SelectedItemInfo>()
+        
+        let grouped = Dictionary(grouping: cachedSelectedItems) { SelectedSection(itemType: $0.type) }
+        
+        for section in SelectedSection.allCases {
+            guard let items = grouped[section], !items.isEmpty else { continue }
+            snapshot.appendSections([section])
+            let sorted = items.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            snapshot.appendItems(sorted, toSection: section)
+        }
+        
+        selectedItemsDataSource.apply(snapshot, animatingDifferences: true)
+    }
+    
+    private func deselectItem(_ item: SelectedItemInfo) {
+        currentSelectedIds.removeAll { $0 == item.id }
+        cachedSelectedItems.removeAll { $0.id == item.id }
+        applySelectedItemsSnapshot()
+        updateSelectionCounter()
+        updateSegmentedControlTitle()
+        applySnapshot()
+    }
+    
+    private func updateSegmentedControlTitle() {
+        let count = currentSelectedIds.count
+        segmentedControl?.setTitle("Selected (\(count))", forSegmentAt: 1)
+    }
+    
     private func configureSelectEntriesCell(_ cell: FolderCollectionViewCell, with data: FolderData, selectedCount: Int, totalCount: Int) {
         // Set the basic data
         cell.iconImageView.image = data.image
@@ -559,9 +791,10 @@ extension ModifiedSelectFolderViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
-        
-        delegate?.modifiedSelectFolderViewController(self, didSelectFolder: item.fullPath)
+        if collectionView === self.collectionView {
+            guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+            delegate?.modifiedSelectFolderViewController(self, didSelectFolder: item.fullPath)
+        }
     }
 }
 
@@ -571,24 +804,14 @@ protocol ModifiedSelectFolderViewControllerDelegate: AnyObject {
 }
 
 protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>)
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>)
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>)
-    // Provide current selected items so child folders can restore selection state
-    func getCurrentSelectedItems() async -> (entries: Set<BaseEntry>, places: Set<PlaceItem>, routines: Set<RoutineItem>)
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedItems items: SelectedNestItems)
+    /// Provide current selected items so child folders can restore selection state
+    func getCurrentSelectedItems() async -> SelectedNestItems
 }
 
 // MARK: - NestCategoryViewControllerSelectEntriesDelegate
 extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEntriesDelegate {
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedEntries entries: Set<BaseEntry>) {
-        updateAllSelectedIds(from: controller)
-    }
-    
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedPlaces places: Set<PlaceItem>) {
-        updateAllSelectedIds(from: controller)
-    }
-    
-    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedRoutines routines: Set<RoutineItem>) {
+    func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedItems items: SelectedNestItems) {
         updateAllSelectedIds(from: controller)
     }
     
@@ -642,6 +865,7 @@ extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEn
 // MARK: - PaywallViewControllerDelegate
 extension ModifiedSelectFolderViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         // Purchase successful - refresh pro status and update UI
         controller.dismiss(animated: true) { [weak self] in
             Task {
@@ -659,6 +883,7 @@ extension ModifiedSelectFolderViewController {
     }
     
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
             Task {
                 await SubscriptionService.shared.refreshCustomerInfo()

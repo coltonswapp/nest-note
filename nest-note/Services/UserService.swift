@@ -289,6 +289,7 @@ final class UserService {
             }
             
             Tracker.shared.track(.regularLoginSucceeded)
+            TikTokTracker.shared.trackLogin()
 
             return result
             
@@ -364,6 +365,7 @@ final class UserService {
             self.isAuthenticated = true
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
             Tracker.shared.track(.regularSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Save authentication state
             saveAuthState()
@@ -463,6 +465,7 @@ final class UserService {
                     
                     Logger.log(level: .info, category: .userService, message: "Apple Sign In completed for existing user")
                     Tracker.shared.track(.appleSignInSucceeded)
+                    TikTokTracker.shared.trackLogin()
 
                     // Stop log capture and upload (success) - existing user logged in, no onboarding needed
                     await SignupLogService.shared.stopCaptureAndUpload(result: .success, identifier: identifier)
@@ -589,6 +592,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In signup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
             // This ensures we capture nest creation and final completion
@@ -668,6 +672,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
             Tracker.shared.track(.appleSignUpSucceeded)
+            TikTokTracker.shared.trackRegistration()
 
             // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
             // This ensures we capture nest creation, survey submission, and final completion
@@ -852,6 +857,7 @@ final class UserService {
             
             Logger.log(level: .info, category: .userService, message: "User logged out successfully")
             Tracker.shared.track(.userLoggedOut)
+            TikTokTracker.shared.logout()
         } catch {
             Logger.log(level: .error, category: .userService, message: "Firebase Auth signOut failed: \(error.localizedDescription)")
             throw AuthError.unknown
@@ -866,6 +872,183 @@ final class UserService {
         } catch {
             throw error
         }
+    }
+
+    // MARK: - Delete Account
+    func deleteAccount() async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Starting account deletion for user: \(currentUser.id)")
+
+        do {
+            if let ownedNestId = currentUser.roles.nestAccess.first(where: { $0.accessLevel == .owner })?.nestId {
+                Logger.log(level: .info, category: .userService, message: "Deleting owned nest: \(ownedNestId)")
+                try await deleteNest(nestId: ownedNestId)
+                Logger.log(level: .info, category: .userService, message: "Nest deleted successfully")
+            }
+
+            Logger.log(level: .info, category: .userService, message: "Deleting user document from Firestore")
+            let userDocRef = db.collection("users").document(currentUser.id)
+            try await userDocRef.delete()
+            Logger.log(level: .info, category: .userService, message: "User document deleted successfully")
+
+            Logger.log(level: .info, category: .userService, message: "Deleting Firebase Auth user")
+            try await deleteFirebaseUserWithReauth(firebaseUser)
+            Logger.log(level: .info, category: .userService, message: "Firebase Auth user deleted successfully")
+
+            self.currentUser = nil
+            self.isAuthenticated = false
+            clearAuthState()
+
+            Purchases.shared.logOut { (customerInfo, error) in
+                if let error = error {
+                    Logger.log(level: .error, category: .userService, message: "RevenueCat logout error: \(error.localizedDescription)")
+                }
+            }
+
+            Tracker.shared.clearUserContext()
+
+            Logger.log(level: .info, category: .userService, message: "Account deletion completed successfully")
+            Tracker.shared.track(.accountDeleted)
+
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Account deletion failed: \(error.localizedDescription)")
+            Tracker.shared.track(.accountDeleted, result: false, error: error.localizedDescription)
+            throw error
+        }
+    }
+
+    private func deleteFirebaseUserWithReauth(_ firebaseUser: User) async throws {
+        do {
+            try await firebaseUser.delete()
+        } catch let error as NSError {
+            if error.code == AuthErrorCode.requiresRecentLogin.rawValue {
+                Logger.log(level: .info, category: .userService, message: "Credential too old - reauthentication required")
+
+                guard let providerData = firebaseUser.providerData.first else {
+                    Logger.log(level: .error, category: .userService, message: "No provider data found for reauthentication")
+                    throw AuthError.unknown
+                }
+
+                switch providerData.providerID {
+                case "password":
+                    try await reauthenticateWithEmailPassword(firebaseUser)
+                case "apple.com":
+                    try await reauthenticateWithApple(firebaseUser)
+                default:
+                    Logger.log(level: .error, category: .userService, message: "Unsupported provider for reauthentication: \(providerData.providerID)")
+                    throw AuthError.unknown
+                }
+
+                try await firebaseUser.delete()
+            } else {
+                throw error
+            }
+        }
+    }
+
+    private func reauthenticateWithEmailPassword(_ firebaseUser: User) async throws {
+        guard let email = firebaseUser.email else {
+            throw AuthError.invalidUserData
+        }
+        Logger.log(level: .error, category: .userService, message: "Email/password reauthentication requires user interaction")
+        throw ReauthenticationError.passwordPromptRequired(email: email)
+    }
+
+    private func reauthenticateWithApple(_ firebaseUser: User) async throws {
+        Logger.log(level: .error, category: .userService, message: "Apple Sign In reauthentication requires user interaction")
+        throw ReauthenticationError.appleSignInRequired
+    }
+
+    func reauthenticateAndDeleteAccount(password: String) async throws {
+        guard currentUser != nil else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser, let email = firebaseUser.email else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Reauthenticating user with email/password for account deletion")
+
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        try await firebaseUser.reauthenticate(with: credential)
+        Logger.log(level: .info, category: .userService, message: "User reauthenticated successfully")
+
+        try await deleteAccount()
+    }
+
+    func reauthenticateAndDeleteAccount(appleCredential: ASAuthorizationAppleIDCredential) async throws {
+        guard currentUser != nil else {
+            throw AuthError.invalidUserData
+        }
+
+        guard let firebaseUser = auth.currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        Logger.log(level: .info, category: .userService, message: "Reauthenticating user with Apple Sign In for account deletion")
+
+        guard let nonce = self.currentNonce else {
+            throw AuthError.unknown
+        }
+
+        guard let appleIDToken = appleCredential.identityToken,
+              let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+            throw AuthError.unknown
+        }
+
+        let firebaseCredential = OAuthProvider.credential(
+            providerID: AuthProviderID.apple,
+            idToken: idTokenString,
+            rawNonce: nonce
+        )
+
+        try await firebaseUser.reauthenticate(with: firebaseCredential)
+        Logger.log(level: .info, category: .userService, message: "User reauthenticated successfully")
+
+        try await deleteAccount()
+    }
+
+    private func deleteNest(nestId: String) async throws {
+        Logger.log(level: .info, category: .userService, message: "Deleting nest and all associated data: \(nestId)")
+
+        let nestRef = db.collection("nests").document(nestId)
+        let subcollections = ["entries", "nestCategories", "savedSitters", "sessions", "items"]
+
+        for subcollection in subcollections {
+            let collectionRef = nestRef.collection(subcollection)
+            let snapshot = try await collectionRef.getDocuments()
+
+            var batch = db.batch()
+            var batchCount = 0
+
+            for document in snapshot.documents {
+                batch.deleteDocument(document.reference)
+                batchCount += 1
+
+                if batchCount >= 500 {
+                    try await batch.commit()
+                    batch = db.batch()
+                    batchCount = 0
+                }
+            }
+
+            if batchCount > 0 {
+                try await batch.commit()
+            }
+
+            Logger.log(level: .info, category: .userService, message: "Deleted \(snapshot.documents.count) documents from \(subcollection)")
+        }
+
+        try await nestRef.delete()
+        Logger.log(level: .info, category: .userService, message: "Nest document deleted successfully")
     }
     
     // MARK: - State Management
@@ -1087,6 +1270,20 @@ final class UserService {
 }
 
 // MARK: - Types
+enum ReauthenticationError: LocalizedError {
+    case passwordPromptRequired(email: String)
+    case appleSignInRequired
+
+    var errorDescription: String? {
+        switch self {
+        case .passwordPromptRequired(let email):
+            return "Please re-enter your password to delete your account. Email: \(email)"
+        case .appleSignInRequired:
+            return "Please sign in with Apple again to delete your account."
+        }
+    }
+}
+
 enum AuthError: LocalizedError {
     case invalidCredentials
     case networkError

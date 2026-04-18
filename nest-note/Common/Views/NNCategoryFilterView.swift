@@ -332,6 +332,9 @@ extension NestCategoryViewController.Section: NNCategoryFilterOption {
         case .other: return "Entries"
         case .places: return "Places"
         case .routines: return "Routines"
+        case .pilotCards: return "Pilot"
+        case .contacts: return "Contacts"
+        case .unknownItems: return "Unsupported"
         }
     }
 }

@@ -88,14 +88,27 @@ final class NNImageOnboardingViewController: NNOnboardingViewController {
         return imageView
     }()
     
-    private var content: OnboardingScreenContent?
-    
+    private(set) var content: OnboardingScreenContent?
+
+    private var customTitle: String?
+    private var customSubtitle: String?
+    private var customImageName: String?
+    private var customCtaText: String?
+
     // MARK: - Initialization
     init(content: OnboardingScreenContent) {
         self.content = content
         super.init(nibName: nil, bundle: nil)
     }
-    
+
+    init(title: String, subtitle: String, imageName: String, ctaText: String) {
+        self.customTitle = title
+        self.customSubtitle = subtitle
+        self.customImageName = imageName
+        self.customCtaText = ctaText
+        super.init(nibName: nil, bundle: nil)
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -103,17 +116,33 @@ final class NNImageOnboardingViewController: NNOnboardingViewController {
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        guard let content = content else { return }
-        
-        setupOnboarding(title: content.title, subtitle: content.subtitle)
+
+        let displayTitle: String
+        let displaySubtitle: String
+        let displayImageName: String
+        let displayCtaText: String
+
+        if let content = content {
+            displayTitle = content.title
+            displaySubtitle = content.subtitle
+            displayImageName = content.imageName
+            displayCtaText = content.ctaTitle
+        } else if let customTitle = customTitle {
+            displayTitle = customTitle
+            displaySubtitle = customSubtitle ?? ""
+            displayImageName = customImageName ?? ""
+            displayCtaText = customCtaText ?? "Continue"
+        } else {
+            return
+        }
+
+        setupOnboarding(title: displayTitle, subtitle: displaySubtitle)
         setupContent()
-        addCTAButton(title: content.ctaTitle)
+        addCTAButton(title: displayCtaText)
         setupActions()
-        
-        imageView.image = UIImage(named: content.imageName)
-        
-        // Initially hide the button
+
+        imageView.image = UIImage(named: displayImageName)
+
         ctaButton?.alpha = 0
     }
     

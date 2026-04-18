@@ -8,6 +8,7 @@
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import FirebaseAnalytics
 
 final class OBPaywallViewController: NNOnboardingViewController, PaywallViewControllerDelegate {
     
@@ -15,6 +16,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     private var hasCompletedPaywall: Bool = false
     private var hasPurchased: Bool = false
     private var hasShownExitOffer: Bool = false
+    private var isShowingExitOffer: Bool = false
     private var offeringId: String? // Offering to display (nil = default, "partner" = partner offering)
     private var exitOfferingId: String? // Exit offer to display on dismissal
 
@@ -41,6 +43,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     }
 
     private func setupAndPresentPaywall(isExitOffer: Bool) {
+        isShowingExitOffer = isExitOffer
         Task {
             do {
                 // Fetch offerings from RevenueCat
@@ -89,6 +92,12 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
         guard let paywallViewController = paywallViewController else { return }
         paywallViewController.modalPresentationStyle = .pageSheet
         present(paywallViewController, animated: true)
+
+        let currentOfferingId = isShowingExitOffer ? exitOfferingId : offeringId
+        Analytics.logEvent("paywall_presented", parameters: [
+            "offering_id": currentOfferingId ?? "default",
+            "is_exit_offer": isShowingExitOffer
+        ])
     }
 
     private func completePaywallAndContinue() {
@@ -110,6 +119,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     // MARK: - PaywallViewControllerDelegate
 
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
 
         // Track conversion
@@ -143,6 +153,7 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     }
 
     func paywallViewController(_ controller: PaywallViewController, didFinishRestoringWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
 
         // Track restoration
@@ -175,6 +186,15 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
 
     func paywallViewControllerWasDismissed(_ controller: PaywallViewController) {
         Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Paywall dismissed - purchased: \(hasPurchased), shown exit offer: \(hasShownExitOffer)")
+
+        if !hasPurchased {
+            let declinedOfferingId = isShowingExitOffer ? exitOfferingId : offeringId
+            Analytics.logEvent("paywall_declined", parameters: [
+                "offering_id": declinedOfferingId ?? "default",
+                "is_exit_offer": isShowingExitOffer,
+                "has_seen_exit_offer": hasShownExitOffer
+            ])
+        }
 
         // If user dismissed without purchasing and we haven't shown exit offer yet, show it
         if !hasPurchased && !hasShownExitOffer {

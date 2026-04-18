@@ -8,6 +8,7 @@
 import UIKit
 import Combine
 import AuthenticationServices
+import FirebaseAnalytics
 
 // MARK: - Onboarding Errors
 enum OnboardingError: LocalizedError {
@@ -41,39 +42,38 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private var containerViewController: OnboardingContainerViewController!
 
     private var currentStepIndex: Int = 0
-    private var onboardingConfig: OnboardingConfiguration?
     private var isNavigating: Bool = false
     private var hasProcessedRoleSelection: Bool = false
 
     private let configFileName: String
+    private var onboardingConfig: OnboardingConfiguration?
 
     private lazy var steps: [NNOnboardingViewController] = {
-        // Start with the new image-based onboarding screens
-        var baseSteps: [NNOnboardingViewController] = [
-            NNImageOnboardingViewController(content: .aboutNestNote),
-            NNImageOnboardingViewController(content: .createSessions),
-            NNImageOnboardingViewController(content: .pickAndChoose),
-            NNImageOnboardingViewController(content: .inviteWithEase)
-        ]
-        
-        // Add the original onboarding steps
-        baseSteps.append(contentsOf: [
-            OBNameViewController(),
-            OBRoleViewController(),
-            OBReferralViewController()  // Add referral step after role selection
-        ])
-        
-        // Add remaining steps
-        baseSteps.append(contentsOf: [
-            OBEmailViewController(),
-            OBPasswordViewController()
-        ])
-        
-        return baseSteps
+        if let config = OnboardingConfiguration.loadLocal(named: configFileName) {
+            onboardingConfig = config
+            Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: Loaded config '\(configFileName)' (v\(config.version)) with \(config.flow.steps.count) steps")
+            return buildStepsFromConfig(config)
+        }
+
+        Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: No config found for '\(configFileName)', using fallback steps")
+        return buildFallbackSteps()
     }()
-    
+
     private var allSteps: [NNOnboardingViewController] {
         return steps
+    }
+
+    var onboardingVariant: String {
+        switch configFileName {
+        case "onboarding_variant1":
+            return "variant1"
+        case "onboarding_variant2":
+            return "variant2"
+        case "onboarding_config":
+            return "baseline"
+        default:
+            return "baseline"
+        }
     }
     
     // MARK: - User Information
@@ -88,6 +88,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var role: NestUser.UserType = .nestOwner
         var nestInfo: NestInfo?
         var surveyResponses: [String: [String]] = [:]
+        var surveyStartTime: Date? // Track when survey started for duration calculation
         var isAppleSignIn: Bool = false
         var referralCode: String?
         
@@ -115,6 +116,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     // Public accessor for nest name
     var currentNestName: String? {
         return userInfo.nestInfo?.name
+    }
+
+    var currentFullName: String {
+        return userInfo.fullName
     }
     
     // MARK: - Validation Publishers
@@ -155,9 +160,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     // MARK: - Initialization
-    init(delegate: OnboardingCoordinatorDelegate? = nil) {
+    init(delegate: OnboardingCoordinatorDelegate? = nil, configFileName: String? = nil) {
         self.navigationController = UINavigationController()
         self.delegate = delegate
+        self.configFileName = configFileName ?? FeatureFlagService.shared.getOnboardingFlowConfigName()
         
         // Configure navigation bar appearance
         let appearance = UINavigationBarAppearance()
@@ -184,6 +190,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     // MARK: - Coordination
     func start() -> UIViewController {
+        OnboardingAnalyticsService.shared.startSession(variant: onboardingVariant)
+
+        Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: Starting with variant '\(onboardingVariant)' (config: \(configFileName))")
+
         configureInitialStep()
         #if DEBUG
         setupDebugMode()
@@ -211,7 +221,187 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         let isSurveyStep = viewController is NNOnboardingSurveyViewController
         containerViewController.updateSurveyStatus(isSurveyStep)
     }
-    
+
+    private func analyticsStepId(for viewController: NNOnboardingViewController) -> String {
+        switch viewController {
+        case let imageVC as NNImageOnboardingViewController:
+            if let content = imageVC.content {
+                return "image_\(content)"
+            }
+            return "image_custom"
+        case is OBNameViewController:
+            return "name"
+        case is OBRoleViewController:
+            return "role"
+        case let surveyVC as NNOnboardingSurveyViewController:
+            return "survey_\(surveyVC.currentQuestion?.id ?? "unknown")"
+        case is NNOnboardingBulletViewController:
+            return "bullet"
+        case is OnboardingPreviewViewController:
+            return "preview"
+        case is OnboardingMissingInfoViewController:
+            return "missing_info"
+        case is OBReferralViewController:
+            return "referral"
+        case is OBEmailViewController:
+            return "email"
+        case is OBPasswordViewController:
+            return "password"
+        case is OBCreateNestViewController:
+            return "create_nest"
+        case is OBPaywallViewController:
+            return "paywall"
+        case is OBFinishViewController:
+            return "finish"
+        default:
+            return "unknown_\(type(of: viewController))"
+        }
+    }
+
+    // MARK: - Config-Driven Step Building
+
+    private func buildStepsFromConfig(_ config: OnboardingConfiguration) -> [NNOnboardingViewController] {
+        var viewControllers: [NNOnboardingViewController] = []
+
+        for step in config.flow.steps {
+            switch step.type {
+            case .survey:
+                if case .survey(let surveyConfig) = step.config {
+                    let vc = createSurveyViewController(from: surveyConfig, stepId: step.id)
+                    viewControllers.append(vc)
+                }
+            case .bullet:
+                if case .bullet(let bulletConfig) = step.config {
+                    let vc = createBulletViewController(from: bulletConfig)
+                    viewControllers.append(vc)
+                }
+            case .image:
+                if case .image(let imageConfig) = step.config {
+                    let vc = createImageViewController(from: imageConfig)
+                    viewControllers.append(vc)
+                }
+            case .preview:
+                let vc = OnboardingPreviewViewController()
+                viewControllers.append(vc)
+            case .missingInfo:
+                let vc = OnboardingMissingInfoViewController()
+                viewControllers.append(vc)
+            case .name:
+                viewControllers.append(OBNameViewController())
+            case .email:
+                viewControllers.append(OBEmailViewController())
+            case .password:
+                viewControllers.append(OBPasswordViewController())
+            case .createNest:
+                viewControllers.append(OBCreateNestViewController())
+            case .referral:
+                viewControllers.append(OBReferralViewController())
+            case .paywall:
+                viewControllers.append(OBPaywallViewController())
+            case .finish:
+                viewControllers.append(OBFinishViewController())
+            }
+        }
+
+        return viewControllers
+    }
+
+    private func buildFallbackSteps() -> [NNOnboardingViewController] {
+        var baseSteps: [NNOnboardingViewController] = [
+            NNImageOnboardingViewController(content: .aboutNestNote),
+            NNImageOnboardingViewController(content: .createSessions),
+            NNImageOnboardingViewController(content: .pickAndChoose),
+            NNImageOnboardingViewController(content: .inviteWithEase)
+        ]
+
+        baseSteps.append(contentsOf: [
+            OBNameViewController(),
+            OBRoleViewController(),
+            OBReferralViewController()
+        ])
+
+        baseSteps.append(contentsOf: [
+            OBEmailViewController(),
+            OBPasswordViewController()
+        ])
+
+        return baseSteps
+    }
+
+    // MARK: - View Controller Factory Methods
+
+    private func createSurveyViewController(from config: SurveyStepConfig, stepId: String) -> NNOnboardingSurveyViewController {
+        let vc = NNOnboardingSurveyViewController()
+
+        if let questionId = config.questionId,
+           let existingQuestion = loadSurveyQuestion(id: questionId) {
+            vc.configure(with: existingQuestion)
+        } else {
+            let options = config.options.map { $0.title }
+            let optionSubtitles = config.options.compactMap { $0.subtitle }
+
+            let question = SurveyQuestion(
+                id: stepId,
+                title: config.title,
+                subtitle: config.subtitle,
+                options: options,
+                optionSubtitles: optionSubtitles.isEmpty ? nil : optionSubtitles,
+                isMultiSelect: config.isMultiSelect,
+                category: nil,
+                order: nil
+            )
+            vc.configure(with: question)
+        }
+
+        return vc
+    }
+
+    private func createBulletViewController(from config: BulletStepConfig) -> NNOnboardingBulletViewController {
+        let vc = NNOnboardingBulletViewController()
+
+        let bulletItems = config.bullets.map { bullet in
+            NNBulletItem(
+                title: bullet.title,
+                description: bullet.description,
+                iconName: bullet.iconName
+            )
+        }
+
+        vc.configure(
+            title: config.title,
+            subtitle: config.subtitle,
+            bullets: bulletItems,
+            ctaText: config.ctaText
+        )
+
+        return vc
+    }
+
+    private func createImageViewController(from config: ImageStepConfig) -> NNImageOnboardingViewController {
+        return NNImageOnboardingViewController(
+            title: config.title,
+            subtitle: config.subtitle ?? "",
+            imageName: config.imageName,
+            ctaText: config.ctaText ?? "Continue"
+        )
+    }
+
+    private func loadSurveyQuestion(id: String) -> SurveyQuestion? {
+        if let parentConfig = SurveyConfiguration.loadLocal(named: "parent_survey_config") {
+            if let question = parentConfig.questions.first(where: { $0.id == id }) {
+                return question
+            }
+        }
+
+        if let sitterConfig = SurveyConfiguration.loadLocal(named: "sitter_survey_config") {
+            if let question = sitterConfig.questions.first(where: { $0.id == id }) {
+                return question
+            }
+        }
+
+        return nil
+    }
+
     // MARK: - Navigation
     func next() {
         guard let currentVC = navigationController.topViewController as? NNOnboardingViewController,
@@ -221,11 +411,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         // Set navigation flag
         isNavigating = true
-
-        // Track step completion
-        if let stepId = getStepId(for: currentStepIndex) {
-            OnboardingAnalyticsService.shared.recordStepCompleted(stepId)
-        }
 
         // SPECIAL CASE: Check if we just completed the role_selection survey
         // If so, update the role and rebuild steps BEFORE navigating
@@ -251,25 +436,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             // So we can proceed with incrementing it
         }
 
-        currentStepIndex += 1
-
-            let role: NestUser.UserType
-            if roleAnswer.lowercased() == "parent" || roleAnswer.lowercased() == "nester" {
-                role = .nestOwner
-            } else {
-                role = .sitter
-            }
-
-            // Mark that we've processed this
-            hasProcessedRoleSelection = true
-
-            // Update the role which will rebuild the steps array
-            updateRole(role)
-
-            // After updateRole, the steps array has been rebuilt
-            // currentStepIndex should still point to the role selection step
-            // So we can proceed with incrementing it
-        }
+        // Record the step the user just completed
+        OnboardingAnalyticsService.shared.recordStepCompleted(analyticsStepId(for: currentVC))
 
         currentStepIndex += 1
         
@@ -370,6 +538,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: ✅ Successfully completed signup for user: \(user.personalInfo.name)")
             Tracker.shared.trackOnboardingStep("profile_creation", result: true, additionalInfo: ["user_id": user.id])
+            if userInfo.isAppleSignIn {
+                Tracker.shared.track(.appleSignUpSucceeded)
+            } else {
+                Tracker.shared.track(.regularSignUpSucceeded)
+            }
             completedSteps.append("profile_creation")
 
             // STEP 2: Semi-Critical - Referral Recording (warn but continue on failure)
@@ -407,16 +580,29 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                     "survey_type": userInfo.role == .nestOwner ? "parent" : "sitter"
                 ])
 
+                let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+                
+                // Calculate duration if start time was tracked
+                let duration: TimeInterval?
+                if let startTime = userInfo.surveyStartTime {
+                    duration = Date().timeIntervalSince(startTime)
+                } else {
+                    duration = nil
+                }
+                
                 let response = SurveyResponse(
                     id: UUID().uuidString,
                     timestamp: Date(),
                     surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
-                    version: "1.0", // TODO: Get from config
+                    version: appVersion,
                     responses: userInfo.surveyResponses.map { SurveyResponse.QuestionResponse(questionId: $0.key, answers: $0.value) },
                     metadata: [
                         "userId": user.id,
-                        "role": userInfo.role.rawValue
-                    ]
+                        "role": userInfo.role.rawValue,
+                        "app_version": appVersion,
+                        "onboarding_variant": onboardingVariant
+                    ],
+                    duration: duration
                 )
 
                 do {
@@ -452,6 +638,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
             Logger.log(level: .info, category: .signup, message: "🎯 ✅ FINISH SETUP COMPLETE: All steps completed successfully!")
             Logger.log(level: .info, category: .signup, message: "🎯 ✅ Completed steps: \(completedSteps.joined(separator: ", "))")
+
+            OnboardingAnalyticsService.shared.completeSession()
 
             // SUCCESS: Upload logs with all completed steps info
             await SignupLogService.shared.stopCaptureAndUpload(
@@ -563,39 +751,39 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Selected role: \(role.rawValue)")
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps before removal: \(steps.count)")
 
-        // Find the role selection step index (could be OBRoleViewController or a survey VC)
+        // Find the role selection step index
         var roleSelectionIndex = steps.firstIndex(where: { $0 is OBRoleViewController })
 
-        // If we didn't find OBRoleViewController, look for the first survey step (which is likely role selection from JSON)
         if roleSelectionIndex == nil {
-            roleSelectionIndex = steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
+            // In config-driven flows, role selection is the survey VC with id "role_selection"
+            roleSelectionIndex = steps.firstIndex(where: {
+                ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
+            })
+            // Fall back to first survey VC if we can't find one with that id
+            if roleSelectionIndex == nil {
+                roleSelectionIndex = steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
+            }
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Role selection is a survey VC at index: \(roleSelectionIndex ?? -1)")
         }
 
-        // Remove ALL survey steps (including role selection if it's a survey)
-        steps.removeAll { $0 is NNOnboardingSurveyViewController }
+        // Remove ALL survey steps (but keep the role_selection one if it's a survey, since it's already been answered)
+        // Also remove bullet, preview, and missing_info steps that were from the config
+        // (these are only relevant for the specific variant flow and will be re-added for the sitter flow if needed)
+        steps.removeAll { vc in
+            if vc is NNOnboardingSurveyViewController { return true }
+            if vc is NNOnboardingBulletViewController { return true }
+            if vc is OnboardingPreviewViewController { return true }
+            if vc is OnboardingMissingInfoViewController { return true }
+            return false
+        }
 
-        // Remove role-specific steps that shouldn't be in this user's flow
         if role == .sitter {
-            // Sitters don't need nest creation or paywall
             steps.removeAll { $0 is OBCreateNestViewController }
             steps.removeAll { $0 is OBPaywallViewController }
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Removed nest creation and paywall steps for sitter")
         }
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps after removal: \(steps.count)")
-
-        // Re-add role selection step if it was a survey-based one from JSON config
-        if let onboardingConfig = onboardingConfig,
-           let roleStep = onboardingConfig.flow.steps.first(where: { $0.id == "role_selection" }) {
-            if case .survey(let surveyConfig) = roleStep.config {
-                let roleVC = createSurveyViewController(from: surveyConfig, stepId: roleStep.id)
-                // Insert at the beginning or where it was found
-                let insertIndex = roleSelectionIndex ?? 0
-                steps.insert(roleVC, at: min(insertIndex, steps.count))
-                Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Re-inserted role selection survey at index: \(insertIndex)")
-            }
-        }
 
         // Add survey questions based on selected role
         if let surveyConfig = loadSurveyConfig(for: role) {
@@ -607,7 +795,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Adding \(surveySteps.count) \(role.rawValue)-specific survey questions")
 
-            // Insert survey steps after role selection
             let insertionIndex = (roleSelectionIndex ?? 0) + 1
             steps.insert(contentsOf: surveySteps, at: min(insertionIndex, steps.count))
         } else {
@@ -616,8 +803,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Final step count before ensuring required steps: \(steps.count)")
 
-        // Ensure required steps (like finish) are added based on role
-        // This is critical - without this, sitters won't get the finish step!
         ensureRequiredStepsExist()
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Final step count after ensuring required steps: \(steps.count)")
@@ -628,8 +813,17 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     func updateSurveyResponses(_ responses: [String: [String]]) {
+        // Track start time if this is the first survey response
+        if userInfo.surveyStartTime == nil && !responses.isEmpty {
+            userInfo.surveyStartTime = Date()
+        }
+        
         // Merge new responses with existing ones
         userInfo.surveyResponses.merge(responses) { _, new in new }
+
+        for (questionId, answers) in responses {
+            OnboardingAnalyticsService.shared.recordSurveyResponse(questionId: questionId, answers: answers)
+        }
 
         // Note: role_selection is handled in next() method to ensure proper navigation timing
     }
@@ -724,9 +918,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
     }
 
-        Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
-    }
-    
     func validateNest(name: String, address: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -794,24 +985,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     private func skipToRoleSelection() {
-        // For Apple users, remove the email and password steps from the flow
-        // Keep the referral step since they can still use referral codes
         steps.removeAll { $0 is OBEmailViewController || $0 is OBPasswordViewController }
-        
-        // Update container's total steps count
+
         containerViewController.updateTotalSteps(allSteps.count)
-        
-        // Find the role selection step
-        guard let roleStep = allSteps.first(where: { $0 is OBRoleViewController }),
+
+        // Find the role selection step -- could be OBRoleViewController or a survey VC with role_selection id
+        let roleStep: NNOnboardingViewController? = allSteps.first(where: { $0 is OBRoleViewController })
+            ?? allSteps.first(where: {
+                ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
+            })
+
+        guard let roleStep = roleStep,
               let roleIndex = allSteps.firstIndex(where: { $0 === roleStep }) else {
             return
         }
-        
-        // Clear the navigation stack and set role selection as the root
+
         currentStepIndex = roleIndex
         configureStep(roleStep)
-        
-        // Use a small delay to ensure the container is fully presented
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.navigationController.setViewControllers([roleStep], animated: false)
             self.containerViewController.updateProgress(step: self.currentStepIndex)
@@ -916,6 +1107,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 // MARK: - OnboardingContainerDelegate
 extension OnboardingCoordinator {
     func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
+        OnboardingAnalyticsService.shared.recordDropOff(reason: "user_abort")
+
         // Handle abort - go back to landing page
         // Check if we're pushed on a navigation stack or presented modally
         if let navController = navigationController.navigationController {
@@ -934,9 +1127,20 @@ extension OnboardingCoordinator {
     
     private func skipSurveySteps() {
         Logger.log(level: .info, category: .general, message: "Skipping survey steps for Apple user: \(userInfo.isAppleSignIn), role: \(userInfo.role)")
-        
-        // First, remove all survey steps from the current flow
-        steps.removeAll { $0 is NNOnboardingSurveyViewController }
+
+        Analytics.logEvent("onboarding_survey_skipped", parameters: [
+            "user_role": userInfo.role.rawValue,
+            "is_apple_signin": userInfo.isAppleSignIn,
+            "onboarding_variant": onboardingVariant
+        ])
+
+        // Remove all survey, bullet, preview, and missing_info steps from the flow
+        steps.removeAll { vc in
+            vc is NNOnboardingSurveyViewController ||
+            vc is NNOnboardingBulletViewController ||
+            vc is OnboardingPreviewViewController ||
+            vc is OnboardingMissingInfoViewController
+        }
         
         // Find the next non-survey step that we should navigate to
         // This should be the first step after the role selection that isn't a survey

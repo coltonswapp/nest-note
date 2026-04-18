@@ -34,8 +34,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Initialize feature flags
         _ = FeatureFlagService.shared
         
+        #if DEBUG
+        ItemBucketsSelfTest.run()
+        #endif
+        
         // Initialize rating manager to track app launches
         _ = RatingManager.shared
+        
+        // Initialize TikTok Business SDK for attribution
+        TikTokTracker.shared.configure()
         
         return true
     }

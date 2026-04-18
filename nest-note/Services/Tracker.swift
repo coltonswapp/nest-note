@@ -31,6 +31,12 @@ class Tracker {
         case routineUpdated = "routineUpdated"
         case routineDeleted = "routineDeleted"
         
+        // MARK: - Extensible Nest Items
+        case unknownNestItemDecoded = "unknownNestItemDecoded"
+        case pilotCardCreated = "pilotCardCreated"
+        case contactCreated = "contactCreated"
+        case contactImportedFromSystem = "contactImportedFromSystem"
+        
         // MARK: - Session Related Events
         case sessionCreated = "sessionCreated"
         case sessionUpdated = "sessionUpdated"
@@ -59,6 +65,7 @@ class Tracker {
         case regularSignUpAttempted = "regularSignUpAttempted"
         case regularSignUpSucceeded = "regularSignUpSucceeded"
         case userLoggedOut = "userLoggedOut"
+        case accountDeleted = "accountDeleted"
         
         // MARK: - App Lifecycle Events
         case appBackgroundReturn = "app_background_return"

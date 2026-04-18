@@ -37,6 +37,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private var inScopeEntries: [BaseEntry] = []
     private var inScopePlaces: [PlaceItem] = []
     private var inScopeRoutines: [RoutineItem] = []
+    private var inScopePilotCards: [PilotCardItem] = []
+    private var inScopeContacts: [ContactItem] = []
+    private var inScopeUnknownItems: [UnknownItem] = []
+    
+    private var pilotCardFeatureEnabled: Bool {
+        FeatureFlagService.shared.isEnabled(.pilotCardItemsEnabled)
+    }
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -63,8 +70,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     @available(iOS 18.0, *)
     private var glassDeleteButton: UIButton?
     
+    /// Raw values define default snapshot order (ascending): folders, contacts, entries, …
     enum Section: Int, CaseIterable {
-        case folders, codes, other, places, routines
+        case folders, contacts, codes, other, places, routines, pilotCards, unknownItems
     }
     
     var entries: [BaseEntry] = [] {
@@ -108,6 +116,30 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    private var pilotCards: [PilotCardItem] = [] {
+        didSet {
+            if shouldApplySnapshotAutomatically {
+                applySnapshot()
+            }
+        }
+    }
+
+    private var contacts: [ContactItem] = [] {
+        didSet {
+            if shouldApplySnapshotAutomatically {
+                applySnapshot()
+            }
+        }
+    }
+    
+    private var unknownItems: [UnknownItem] = [] {
+        didSet {
+            if shouldApplySnapshotAutomatically {
+                applySnapshot()
+            }
+        }
+    }
+    
     private var allPlaces: [PlaceItem] = [] // All places (for passing to subfolders)
     
     // Track the order of sections in the current snapshot
@@ -132,6 +164,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private var selectedEntries: Set<BaseEntry> = []
     private var selectedPlaces: Set<PlaceItem> = []
     private var selectedRoutines: Set<RoutineItem> = []
+    private var selectedPilotCards: Set<PilotCardItem> = []
+    private var selectedContacts: Set<ContactItem> = []
+    private var selectedUnknownItems: Set<UnknownItem> = []
     
     // Select entries mode properties
     private var isEditOnlyMode: Bool = false
@@ -207,6 +242,37 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         }
     }
     
+    func restoreSelectedItems(_ items: SelectedNestItems) {
+        selectedEntries = items.entries
+        selectedPlaces = items.places
+        selectedRoutines = items.routines
+        selectedPilotCards = items.pilotCards
+        selectedContacts = items.contacts
+        selectedUnknownItems = items.unknownItems
+        if isViewLoaded {
+            DispatchQueue.main.async {
+                self.collectionView.reloadData()
+                self.restoreCollectionViewSelection()
+            }
+        }
+    }
+    
+    private func currentSelectedNestItems() -> SelectedNestItems {
+        SelectedNestItems(
+            entries: selectedEntries,
+            places: selectedPlaces,
+            routines: selectedRoutines,
+            pilotCards: selectedPilotCards,
+            contacts: selectedContacts,
+            unknownItems: selectedUnknownItems
+        )
+    }
+    
+    private func notifySelectEntriesDelegate() {
+        guard isEditOnlyMode else { return }
+        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedItems: currentSelectedNestItems())
+    }
+    
     // Helper method to restore collection view selection state
     private func restoreCollectionViewSelection() {
         guard isEditingMode, let dataSource = self.dataSource else { return }
@@ -226,9 +292,27 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
                     }
                 }
-                // Check if this item is a PlaceItem and if it's selected
                 else if let place = item as? PlaceItem, selectedPlaces.contains(place) {
-                    // Find the section index
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                } else if let routine = item as? RoutineItem, selectedRoutines.contains(routine) {
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                } else if let pilot = item as? PilotCardItem, selectedPilotCards.contains(pilot) {
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                } else if let contact = item as? ContactItem, selectedContacts.contains(contact) {
+                    if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
+                        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                        collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
+                    }
+                } else if let unknown = item as? UnknownItem, selectedUnknownItems.contains(unknown) {
                     if let sectionIndex = snapshot.sectionIdentifiers.firstIndex(of: sectionIdentifier) {
                         let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
                         collectionView.selectItem(at: indexPath, animated: false, scrollPosition: [])
@@ -367,14 +451,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func loadFolderContents() async {
         do {
-            let folderContents: (entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem], subfolders: [FolderData], allPlaces: [PlaceItem])
+            let folderContents: FolderUtility.FolderContents
             
             if let nestService = entryRepository as? NestService {
-                let contents = try await nestService.fetchFolderContents(for: category)
-                folderContents = (contents.entries, contents.places, contents.routines, contents.subfolders, contents.allPlaces)
+                folderContents = try await nestService.fetchFolderContents(for: category)
             } else if let sitterService = entryRepository as? SitterViewService {
-                let contents = try await sitterService.fetchFolderContents(for: category)
-                folderContents = (contents.entries, contents.places, contents.routines, contents.subfolders, contents.allPlaces) // SitterViewService now supports routines
+                folderContents = try await sitterService.fetchFolderContents(for: category)
             } else {
                 // Fallback for other repository types
                 await loadBasicEntries()
@@ -389,6 +471,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 self.entries = folderContents.entries
                 self.places = folderContents.places
                 self.routines = folderContents.routines
+                self.pilotCards = folderContents.pilotCards
+                self.contacts = folderContents.contacts
+                self.unknownItems = folderContents.unknownItems
                 self.folders = folderContents.subfolders
                 self.allPlaces = folderContents.allPlaces
                 
@@ -464,6 +549,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     func refreshEmptyState() {
         // Show or hide empty state view based on entries, folders, places, and routines count
         let shouldShowEmptyState = entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty
+            && pilotCards.isEmpty && contacts.isEmpty && unknownItems.isEmpty
         
         if shouldShowEmptyState {
             emptyStateView.animateIn()
@@ -563,6 +649,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 return self.createPlacesSection()
             case .routines:
                 return self.createRoutinesSection()
+            case .pilotCards:
+                return self.createRoutinesSection()
+            case .contacts:
+                let hasUnknownSection = self.sectionOrder.contains(.unknownItems)
+                return self.createHalfWidthSectionWithHeader(needsBottomPadding: !hasUnknownSection)
+            case .unknownItems:
+                return self.createFullWidthSectionWithHeader()
             }
         }
         return layout
@@ -789,6 +882,45 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 return cell
             }
             
+            if section == .pilotCards, let pilot = item as? PilotCardItem {
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
+                cell.configure(
+                    key: pilot.title,
+                    value: pilot.body,
+                    isNestOwner: self.entryRepository is NestService,
+                    isEditMode: self.isEditingMode,
+                    isSelected: self.selectedPilotCards.contains(pilot),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
+                )
+                return cell
+            }
+
+            if section == .contacts, let contact = item as? ContactItem {
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: HalfWidthCell.reuseIdentifier, for: indexPath) as! HalfWidthCell
+                cell.configure(
+                    key: contact.title,
+                    value: contact.phoneNumber,
+                    isNestOwner: self.entryRepository is NestService,
+                    isEditMode: self.isEditingMode,
+                    isSelected: self.selectedContacts.contains(contact),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
+                )
+                return cell
+            }
+            
+            if section == .unknownItems, let unknown = item as? UnknownItem {
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
+                cell.configure(
+                    key: unknown.title,
+                    value: "Type: \(unknown.originalTypeString)",
+                    isNestOwner: self.entryRepository is NestService,
+                    isEditMode: self.isEditingMode,
+                    isSelected: self.selectedUnknownItems.contains(unknown),
+                    isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
+                )
+                return cell
+            }
+            
             // Handle entries
             guard let entry = item as? BaseEntry else {
                 // Log unexpected item type for debugging
@@ -887,6 +1019,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 title = "PLACES"
             case .routines:
                 title = "ROUTINES"
+            case .pilotCards:
+                title = "PILOT"
+            case .contacts:
+                title = "CONTACTS"
+            case .unknownItems:
+                title = "UNSUPPORTED"
             }
             
             // Create and configure header label
@@ -951,11 +1089,29 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .places section with \(places.count) places")
         }
         
-        // Add routines section LAST if we have routines and it's enabled
+        // Add routines section if we have routines and it's enabled
         if !routines.isEmpty && enabledSections.contains(.routines) {
             let sortedRoutines = routines.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
             sectionsData[.routines] = sortedRoutines
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .routines section with \(routines.count) routines")
+        }
+        
+        if pilotCardFeatureEnabled && !pilotCards.isEmpty && enabledSections.contains(.pilotCards) {
+            let sorted = pilotCards.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sectionsData[.pilotCards] = sorted
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .pilotCards section")
+        }
+
+        if !contacts.isEmpty && enabledSections.contains(.contacts) {
+            let sorted = contacts.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sectionsData[.contacts] = sorted
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .contacts section")
+        }
+        
+        if !unknownItems.isEmpty && enabledSections.contains(.unknownItems) {
+            let sorted = unknownItems.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sectionsData[.unknownItems] = sorted
+            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .unknownItems section")
         }
         
         // Sort sections by their defined order
@@ -1004,7 +1160,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Snapshot has \(snapshot.numberOfSections) sections, \(snapshot.numberOfItems) total items")
                 
                 // Validate snapshot before applying
-                if snapshot.numberOfSections == 0 && (entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty) {
+                if snapshot.numberOfSections == 0 && (entries.isEmpty && folders.isEmpty && places.isEmpty && routines.isEmpty
+                    && pilotCards.isEmpty && contacts.isEmpty && unknownItems.isEmpty) {
                     Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Empty snapshot - showing empty state")
                     isApplyingSnapshot = false
                     refreshEmptyState()
@@ -1119,6 +1276,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         guard isEditOnlyMode else { return }
         let total = allItemIdsInScope.count
         let selectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+            + selectedPilotCards.count + selectedContacts.count + selectedUnknownItems.count
         let isAllSelected = total > 0 && selectedCount >= total
         selectAllBarButtonItem?.title = isAllSelected ? "Clear All" : "Select All"
         selectAllBarButtonItem?.isEnabled = total > 0
@@ -1130,49 +1288,31 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func prepareSelectableItemsInScope() async {
         do {
-            var entries: [BaseEntry] = []
-            var places: [PlaceItem] = []
-            var routines: [RoutineItem] = []
+            let allItems: [BaseItem]
             if let nestService = entryRepository as? NestService {
-                do {
-                    let (groupedEntries, allPlaces) = try await nestService.fetchEntriesAndPlaces()
-                    let allRoutines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
-                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
-                    places = allPlaces.filter { isInScope($0.category) }
-                    routines = allRoutines.filter { isInScope($0.category) }
-                } catch {
-                    let groupedEntries = try await entryRepository.fetchEntries()
-                    let allPlaces = try await entryRepository.fetchPlaces()
-                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
-                    places = allPlaces.filter { isInScope($0.category) }
-                    routines = []
-                }
+                allItems = try await nestService.fetchAllItems()
             } else if let sitterService = entryRepository as? SitterViewService {
-                do {
-                    let (groupedEntries, allPlaces) = try await sitterService.fetchEntriesAndPlaces()
-                    let allRoutines = try await sitterService.fetchRoutines()
-                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
-                    places = allPlaces.filter { isInScope($0.category) }
-                    routines = allRoutines.filter { isInScope($0.category) }
-                } catch {
-                    let groupedEntries = try await entryRepository.fetchEntries()
-                    let allPlaces = try await entryRepository.fetchPlaces()
-                    entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
-                    places = allPlaces.filter { isInScope($0.category) }
-                    routines = []
-                }
+                allItems = try await sitterService.fetchAllItems()
             } else {
                 let groupedEntries = try await entryRepository.fetchEntries()
                 let allPlaces = try await entryRepository.fetchPlaces()
-                entries = groupedEntries.values.flatMap { $0 }.filter { isInScope($0.category) }
-                places = allPlaces.filter { isInScope($0.category) }
-                routines = []
+                allItems = groupedEntries.values.flatMap { $0 } + allPlaces
             }
-            let ids = Set(entries.map { $0.id } + places.map { $0.id } + routines.map { $0.id })
+            let scoped = allItems.filter { isInScope($0.category) }
+            let entries = scoped.compactMap { $0 as? BaseEntry }
+            let places = scoped.compactMap { $0 as? PlaceItem }
+            let routines = scoped.compactMap { $0 as? RoutineItem }
+            let pilots = scoped.compactMap { $0 as? PilotCardItem }
+            let contactItems = scoped.compactMap { $0 as? ContactItem }
+            let unknowns = scoped.compactMap { $0 as? UnknownItem }
+            let ids = Set(scoped.map { $0.id })
             await MainActor.run {
                 self.inScopeEntries = entries
                 self.inScopePlaces = places
                 self.inScopeRoutines = routines
+                self.inScopePilotCards = pilots
+                self.inScopeContacts = contactItems
+                self.inScopeUnknownItems = unknowns
                 self.allItemIdsInScope = ids
                 self.updateSelectAllButtonTitle()
             }
@@ -1181,6 +1321,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 self.inScopeEntries = []
                 self.inScopePlaces = []
                 self.inScopeRoutines = []
+                self.inScopePilotCards = []
+                self.inScopeContacts = []
+                self.inScopeUnknownItems = []
                 self.allItemIdsInScope = []
                 self.updateSelectAllButtonTitle()
             }
@@ -1191,6 +1334,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         guard isEditOnlyMode else { return }
         let total = allItemIdsInScope.count
         let currentSelectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+            + selectedPilotCards.count + selectedContacts.count + selectedUnknownItems.count
         let isAllSelected = total > 0 && currentSelectedCount >= total
         
         if isAllSelected {
@@ -1198,6 +1342,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             selectedEntries.removeAll()
             selectedPlaces.removeAll()
             selectedRoutines.removeAll()
+            selectedPilotCards.removeAll()
+            selectedContacts.removeAll()
+            selectedUnknownItems.removeAll()
         } else {
             // Select items, respecting the limit
             if let limit = selectionLimit {
@@ -1234,6 +1381,21 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     selectedRoutines.insert(routine)
                     itemsSelected += 1
                 }
+                for pilot in inScopePilotCards {
+                    if itemsSelected >= availableSlots { break }
+                    selectedPilotCards.insert(pilot)
+                    itemsSelected += 1
+                }
+                for contact in inScopeContacts {
+                    if itemsSelected >= availableSlots { break }
+                    selectedContacts.insert(contact)
+                    itemsSelected += 1
+                }
+                for unknown in inScopeUnknownItems {
+                    if itemsSelected >= availableSlots { break }
+                    selectedUnknownItems.insert(unknown)
+                    itemsSelected += 1
+                }
                 
                 // Show alert if we couldn't select all items due to limit
                 if total > availableSlots {
@@ -1244,12 +1406,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 selectedEntries = Set(inScopeEntries)
                 selectedPlaces = Set(inScopePlaces)
                 selectedRoutines = Set(inScopeRoutines)
+                selectedPilotCards = Set(inScopePilotCards)
+                selectedContacts = Set(inScopeContacts)
+                selectedUnknownItems = Set(inScopeUnknownItems)
             }
         }
-        // Notify delegate in edit-only mode
-        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
-        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
-        selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+        notifySelectEntriesDelegate()
         
         // Update UI
         collectionView.reloadData()
@@ -1265,12 +1427,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             selectedEntries.removeAll()
             selectedPlaces.removeAll()
             selectedRoutines.removeAll()
+            selectedPilotCards.removeAll()
+            selectedContacts.removeAll()
+            selectedUnknownItems.removeAll()
 
             // Notify delegate when clearing selections in edit-only mode
             if isEditOnlyMode {
-                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
-                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
-                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                notifySelectEntriesDelegate()
             }
         }
 
@@ -1363,6 +1526,18 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         // Update move button state when selection changes
         updateMoveButtonState()
     }
+
+    private func updateContactCellSelection(for contact: ContactItem) {
+        guard let dataSource = self.dataSource else { return }
+        var snapshot = dataSource.snapshot()
+        if #available(iOS 15.0, *) {
+            snapshot.reconfigureItems([contact])
+        } else {
+            snapshot.reloadItems([contact])
+        }
+        dataSource.apply(snapshot, animatingDifferences: false)
+        updateMoveButtonState()
+    }
     
     private func showItemSuggestions() {
         // Present CommonItemsViewController as a sheet with medium and large detents
@@ -1423,8 +1598,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         let selectedEntriesArray = Array(selectedEntries)
         let selectedPlacesArray = Array(selectedPlaces)
         let selectedRoutinesArray = Array(selectedRoutines)
+        let selectedPilotArray = Array(selectedPilotCards)
+        let selectedContactArray = Array(selectedContacts)
+        let selectedUnknownArray = Array(selectedUnknownItems)
 
         let totalItems = selectedEntriesArray.count + selectedPlacesArray.count + selectedRoutinesArray.count
+            + selectedPilotArray.count + selectedContactArray.count + selectedUnknownArray.count
         guard totalItems > 0 else { return }
 
         // Show confirmation alert
@@ -1440,14 +1619,24 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             self?.performBulkDelete(
                 entries: selectedEntriesArray,
                 places: selectedPlacesArray,
-                routines: selectedRoutinesArray
+                routines: selectedRoutinesArray,
+                pilotCards: selectedPilotArray,
+                contacts: selectedContactArray,
+                unknownItems: selectedUnknownArray
             )
         })
 
         present(alert, animated: true)
     }
 
-    private func performBulkDelete(entries: [BaseEntry], places: [PlaceItem], routines: [RoutineItem]) {
+    private func performBulkDelete(
+        entries: [BaseEntry],
+        places: [PlaceItem],
+        routines: [RoutineItem],
+        pilotCards: [PilotCardItem],
+        contacts: [ContactItem],
+        unknownItems: [UnknownItem]
+    ) {
         guard let nestService = entryRepository as? NestService else { return }
 
         Task {
@@ -1465,6 +1654,16 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 // Delete routines
                 for routine in routines {
                     try await nestService.deleteRoutine(routine)
+                }
+                
+                for pilot in pilotCards {
+                    try await nestService.deleteItem(id: pilot.id)
+                }
+                for contact in contacts {
+                    try await nestService.deleteItem(id: contact.id)
+                }
+                for unknown in unknownItems {
+                    try await nestService.deleteItem(id: unknown.id)
                 }
 
                 // Invalidate cache after bulk operations
@@ -1489,12 +1688,28 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                             self.routines.remove(at: index)
                         }
                     }
+                    
+                    for pilot in pilotCards {
+                        if let index = self.pilotCards.firstIndex(where: { $0.id == pilot.id }) {
+                            self.pilotCards.remove(at: index)
+                        }
+                    }
+                    for contact in contacts {
+                        if let index = self.contacts.firstIndex(where: { $0.id == contact.id }) {
+                            self.contacts.remove(at: index)
+                        }
+                    }
+                    for unknown in unknownItems {
+                        if let index = self.unknownItems.firstIndex(where: { $0.id == unknown.id }) {
+                            self.unknownItems.remove(at: index)
+                        }
+                    }
 
                     // Exit edit mode
                     self.isEditingMode = false
 
                     // Show success message
-                    let totalDeleted = entries.count + places.count + routines.count
+                    let totalDeleted = entries.count + places.count + routines.count + pilotCards.count + contacts.count + unknownItems.count
                     let itemText = totalDeleted == 1 ? "item" : "items"
                     self.showToast(text: "\(totalDeleted) \(itemText) deleted")
 
@@ -1557,6 +1772,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         if !folders.isEmpty {
             sections.append(.folders)
         }
+
+        if !contacts.isEmpty {
+            sections.append(.contacts)
+        }
         
         let codesEntries = entries.filter { $0.shouldUseHalfWidthCell }
         let otherEntries = entries.filter { !$0.shouldUseHalfWidthCell }
@@ -1571,6 +1790,14 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         if !routines.isEmpty {
             sections.append(.routines)
+        }
+        
+        if pilotCardFeatureEnabled && !pilotCards.isEmpty {
+            sections.append(.pilotCards)
+        }
+        
+        if !unknownItems.isEmpty {
+            sections.append(.unknownItems)
         }
         
         return sections
@@ -1692,6 +1919,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
 
     private func createEditActionsMenu() -> UIMenu {
         let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+            || !selectedPilotCards.isEmpty || !selectedContacts.isEmpty || !selectedUnknownItems.isEmpty
 
         let moveAction = UIAction(
             title: "Move",
@@ -1714,6 +1942,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func updateMoveButtonState() {
         let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+            || !selectedPilotCards.isEmpty || !selectedContacts.isEmpty || !selectedUnknownItems.isEmpty
 
         if isUsingToolbar {
             // Update toolbar buttons (both move and delete)
@@ -2038,11 +2267,52 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         present(newRoutineVC, animated: true)
     }
     
+    func addContactTapped() {
+        guard entryRepository is NestService else { return }
+        let vc = ContactDetailViewController(category: category)
+        vc.contactDelegate = self
+        present(vc, animated: true)
+    }
+
+    func addPilotCardTapped() {
+        guard let nestService = entryRepository as? NestService else { return }
+        let alert = UIAlertController(
+            title: "New pilot card",
+            message: "Creates a `pilot_card` item (extensibility pilot).",
+            preferredStyle: .alert
+        )
+        alert.addTextField { $0.placeholder = "Title" }
+        alert.addTextField { $0.placeholder = "Body" }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            guard let self = self,
+                  let title = alert.textFields?[0].text, !title.isEmpty,
+                  let body = alert.textFields?[1].text else { return }
+            Task {
+                do {
+                    let item = PilotCardItem(category: self.category, title: title, body: body)
+                    try await nestService.createItem(item)
+                    Tracker.shared.track(.pilotCardCreated)
+                    await self.loadFolderContents()
+                    await MainActor.run {
+                        self.showToast(text: "Pilot card saved")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.showToast(text: "Could not save pilot card")
+                    }
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+    
     @available(iOS 26.0, *)
     private func setupToolbar() {
         if isEditingMode {
             // Move and Delete buttons in edit mode
             let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+            || !selectedPilotCards.isEmpty || !selectedContacts.isEmpty || !selectedUnknownItems.isEmpty
 
             let deleteBarButtonItem = UIBarButtonItem(
                 title: "Delete",
@@ -2118,10 +2388,27 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         ) { _ in
             self.addRoutineTapped()
         }
+        
+        let addPilotCardAction = UIAction(
+            title: "Add Pilot Card",
+            image: UIImage(systemName: "sparkles.rectangle.stack")
+        ) { _ in
+            self.addPilotCardTapped()
+        }
+
+        let addContactAction = UIAction(
+            title: "Add Contact",
+            image: UIImage(systemName: "person.crop.circle")
+        ) { _ in
+            self.addContactTapped()
+        }
 
         // Mirror the depth restriction used in the top-right nav menu
         let currentDepth = category.components(separatedBy: "/").count
-        var children: [UIMenuElement] = [addEntryAction, addPlaceAction, addRoutineAction]
+        var children: [UIMenuElement] = [addEntryAction, addPlaceAction, addRoutineAction, addContactAction]
+        if pilotCardFeatureEnabled {
+            children.append(addPilotCardAction)
+        }
         if currentDepth < 3 {
             // Prefer showing Add Folder first
             children.insert(addFolderAction, at: 0)
@@ -2222,6 +2509,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     @available(iOS 18.0, *)
     private func updateGlassButtonStates() {
         let hasSelection = !selectedEntries.isEmpty || !selectedPlaces.isEmpty || !selectedRoutines.isEmpty
+            || !selectedPilotCards.isEmpty || !selectedContacts.isEmpty || !selectedUnknownItems.isEmpty
 
         glassMoveButton?.isEnabled = hasSelection
         glassDeleteButton?.isEnabled = hasSelection
@@ -2306,14 +2594,9 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 // Restore selection from flow controller to ensure persistence across navigation
                 Task { @MainActor in
                     if let items = await self.selectEntriesDelegate?.getCurrentSelectedItems() {
-                        subfolderVC.restoreSelectedEntries(items.entries)
-                        subfolderVC.restoreSelectedPlaces(items.places)
-                        subfolderVC.restoreSelectedRoutines(items.routines)
+                        subfolderVC.restoreSelectedItems(items)
                     } else {
-                        // Fallback to current controller's known selections
-                        subfolderVC.restoreSelectedEntries(self.selectedEntries)
-                        subfolderVC.restoreSelectedPlaces(self.selectedPlaces)
-                        subfolderVC.restoreSelectedRoutines(self.selectedRoutines)
+                        subfolderVC.restoreSelectedItems(self.currentSelectedNestItems())
                     }
                 }
                 
@@ -2358,7 +2641,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
-                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                    notifySelectEntriesDelegate()
                     updateSelectAllButtonAfterSelectionChange()
                 }
                 return
@@ -2367,20 +2650,20 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             // Normal place selection (not in edit mode)
             collectionView.deselectItem(at: indexPath, animated: true)
             
-            // Normal place selection (not in edit mode) - navigate to PlaceDetailViewController
             Logger.log(level: .info, category: logCategory, message: "Selected place for viewing: \(selectedPlace.alias ?? "Unnamed")")
             
             let cellFrame = collectionView.convert(cell.frame, to: nil)
-            let isReadOnly = !(entryRepository is NestService)
-            
-            let placeDetailVC = PlaceDetailViewController(
-                place: selectedPlace,
-                thumbnail: nil, // TODO: Get thumbnail from cell if needed
-                isReadOnly: isReadOnly,
-                sourceFrame: cellFrame
+            NestItemDetailRouter.presentDetail(
+                for: selectedPlace,
+                from: self,
+                entryRepository: entryRepository,
+                category: category,
+                sourceFrame: cellFrame,
+                placeListDelegate: self,
+                entryDelegate: self,
+                routineDelegate: self,
+                contactDelegate: self
             )
-            placeDetailVC.placeListDelegate = self
-            present(placeDetailVC, animated: true)
             return
         }
         
@@ -2406,7 +2689,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
-                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                    notifySelectEntriesDelegate()
                     updateSelectAllButtonAfterSelectionChange()
                 }
                 
@@ -2418,20 +2701,129 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             // Normal routine selection (not in edit mode)
             collectionView.deselectItem(at: indexPath, animated: true)
             
-            // Navigate to RoutineDetailViewController
             Logger.log(level: .info, category: logCategory, message: "Selected routine for viewing: \(selectedRoutine.title)")
             
             let cellFrame = collectionView.convert(cell.frame, to: nil)
-            let isReadOnly = !(entryRepository is NestService)
-            
-            let routineDetailVC = RoutineDetailViewController(
+            NestItemDetailRouter.presentDetail(
+                for: selectedRoutine,
+                from: self,
+                entryRepository: entryRepository,
                 category: category,
-                routine: selectedRoutine,
                 sourceFrame: cellFrame,
-                isReadOnly: isReadOnly
+                placeListDelegate: self,
+                entryDelegate: self,
+                routineDelegate: self,
+                contactDelegate: self
             )
-            routineDetailVC.routineDelegate = self
-            present(routineDetailVC, animated: true)
+            return
+        }
+        
+        if let pilot = selectedItem as? PilotCardItem {
+            if isEditingMode {
+                HapticsHelper.superLightHaptic()
+                if selectedPilotCards.contains(pilot) {
+                    selectedPilotCards.remove(pilot)
+                    collectionView.deselectItem(at: indexPath, animated: true)
+                } else {
+                    if !canAddMoreSelections() {
+                        showSelectionLimitAlert()
+                        collectionView.deselectItem(at: indexPath, animated: true)
+                        return
+                    }
+                    selectedPilotCards.insert(pilot)
+                }
+                if isEditOnlyMode {
+                    notifySelectEntriesDelegate()
+                    updateSelectAllButtonAfterSelectionChange()
+                }
+                return
+            }
+            collectionView.deselectItem(at: indexPath, animated: true)
+            let cellFrame = collectionView.convert(cell.frame, to: nil)
+            NestItemDetailRouter.presentDetail(
+                for: pilot,
+                from: self,
+                entryRepository: entryRepository,
+                category: category,
+                sourceFrame: cellFrame,
+                placeListDelegate: self,
+                entryDelegate: self,
+                routineDelegate: self,
+                contactDelegate: self
+            )
+            return
+        }
+
+        if let contactItem = selectedItem as? ContactItem {
+            if isEditingMode {
+                HapticsHelper.superLightHaptic()
+                if selectedContacts.contains(contactItem) {
+                    selectedContacts.remove(contactItem)
+                    collectionView.deselectItem(at: indexPath, animated: true)
+                } else {
+                    if !canAddMoreSelections() {
+                        showSelectionLimitAlert()
+                        collectionView.deselectItem(at: indexPath, animated: true)
+                        return
+                    }
+                    selectedContacts.insert(contactItem)
+                }
+                if isEditOnlyMode {
+                    notifySelectEntriesDelegate()
+                    updateSelectAllButtonAfterSelectionChange()
+                }
+                updateContactCellSelection(for: contactItem)
+                return
+            }
+            collectionView.deselectItem(at: indexPath, animated: true)
+            let cellFrame = collectionView.convert(cell.frame, to: nil)
+            NestItemDetailRouter.presentDetail(
+                for: contactItem,
+                from: self,
+                entryRepository: entryRepository,
+                category: category,
+                sourceFrame: cellFrame,
+                placeListDelegate: self,
+                entryDelegate: self,
+                routineDelegate: self,
+                contactDelegate: self
+            )
+            return
+        }
+        
+        if let unknown = selectedItem as? UnknownItem {
+            if isEditingMode {
+                HapticsHelper.superLightHaptic()
+                if selectedUnknownItems.contains(unknown) {
+                    selectedUnknownItems.remove(unknown)
+                    collectionView.deselectItem(at: indexPath, animated: true)
+                } else {
+                    if !canAddMoreSelections() {
+                        showSelectionLimitAlert()
+                        collectionView.deselectItem(at: indexPath, animated: true)
+                        return
+                    }
+                    selectedUnknownItems.insert(unknown)
+                }
+                if isEditOnlyMode {
+                    notifySelectEntriesDelegate()
+                    updateSelectAllButtonAfterSelectionChange()
+                }
+                return
+            }
+            collectionView.deselectItem(at: indexPath, animated: true)
+            let cellFrame = collectionView.convert(cell.frame, to: nil)
+            NestItemDetailRouter.presentDetail(
+                for: unknown,
+                from: self,
+                entryRepository: entryRepository,
+                category: category,
+                sourceFrame: cellFrame,
+                placeListDelegate: self,
+                entryDelegate: self,
+                routineDelegate: self,
+                contactDelegate: self
+            )
             return
         }
         
@@ -2458,7 +2850,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
             
             // Notify delegate in edit-only mode
             if isEditOnlyMode {
-                selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+                notifySelectEntriesDelegate()
                 refreshFolderSelectionCounts()
                 updateSelectAllButtonAfterSelectionChange()
             }
@@ -2475,16 +2867,17 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         Logger.log(level: .info, category: logCategory, message: "Selected entry for editing: \(selectedEntry.title)")
         
         let cellFrame = collectionView.convert(cell.frame, to: nil)
-        let isReadOnly = !(entryRepository is NestService)
-        
-        let editEntryVC = EntryDetailViewController(
+        NestItemDetailRouter.presentDetail(
+            for: selectedEntry,
+            from: self,
+            entryRepository: entryRepository,
             category: category,
-            entry: selectedEntry,
             sourceFrame: cellFrame,
-            isReadOnly: isReadOnly
+            placeListDelegate: self,
+            entryDelegate: self,
+            routineDelegate: self,
+            contactDelegate: self
         )
-        editEntryVC.entryDelegate = self
-        present(editEntryVC, animated: true)
     }
     
     func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
@@ -2499,7 +2892,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
-                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: selectedPlaces)
+                    notifySelectEntriesDelegate()
                     updateSelectAllButtonAfterSelectionChange()
                 }
                 return
@@ -2511,10 +2904,32 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
-                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedRoutines: selectedRoutines)
+                    notifySelectEntriesDelegate()
                 }
                 
                 updateRoutineCellSelection(for: selectedRoutine)
+                updateSelectAllButtonAfterSelectionChange()
+                return
+            }
+            
+            if let pilot = selectedItem as? PilotCardItem {
+                selectedPilotCards.remove(pilot)
+                if isEditOnlyMode { notifySelectEntriesDelegate() }
+                updateSelectAllButtonAfterSelectionChange()
+                return
+            }
+
+            if let contactItem = selectedItem as? ContactItem {
+                selectedContacts.remove(contactItem)
+                if isEditOnlyMode { notifySelectEntriesDelegate() }
+                updateSelectAllButtonAfterSelectionChange()
+                updateContactCellSelection(for: contactItem)
+                return
+            }
+            
+            if let unknown = selectedItem as? UnknownItem {
+                selectedUnknownItems.remove(unknown)
+                if isEditOnlyMode { notifySelectEntriesDelegate() }
                 updateSelectAllButtonAfterSelectionChange()
                 return
             }
@@ -2525,7 +2940,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 
                 // Notify delegate in edit-only mode
                 if isEditOnlyMode {
-                    selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: selectedEntries)
+                    notifySelectEntriesDelegate()
                     refreshFolderSelectionCounts()
                     updateSelectAllButtonAfterSelectionChange()
                 }
@@ -2693,6 +3108,26 @@ extension NestCategoryViewController: EntryDetailViewControllerDelegate {
     }
 }
 
+extension NestCategoryViewController: ContactDetailViewControllerDelegate {
+    func contactDetailViewController(_ controller: ContactDetailViewController, didSave contact: ContactItem) {
+        Task {
+            await loadFolderContents()
+            await MainActor.run {
+                self.showToast(text: "Contact saved")
+            }
+        }
+    }
+
+    func contactDetailViewController(_ controller: ContactDetailViewController, didDelete contact: ContactItem) {
+        Task {
+            await loadFolderContents()
+            await MainActor.run {
+                self.showToast(text: "Contact deleted")
+            }
+        }
+    }
+}
+
 // Add this extension to help determine cell size
 extension BaseEntry {
     var shouldUseHalfWidthCell: Bool {
@@ -2740,7 +3175,10 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
         let entryIds = selectedEntries.map { $0.id }
         let placeIds = selectedPlaces.map { $0.id }
         let routineIds = selectedRoutines.map { $0.id }
-        return entryIds + placeIds + routineIds
+        let pilotIds = selectedPilotCards.map { $0.id }
+        let contactIds = selectedContacts.map { $0.id }
+        let unknownIds = selectedUnknownItems.map { $0.id }
+        return entryIds + placeIds + routineIds + pilotIds + contactIds + unknownIds
     }
     
     // Set selection limit for this view controller
@@ -2750,7 +3188,8 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
     
     // Helper method to get current total selections across all types
     private func getCurrentTotalSelections() -> Int {
-        return selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+        selectedEntries.count + selectedPlaces.count + selectedRoutines.count
+            + selectedPilotCards.count + selectedContacts.count + selectedUnknownItems.count
     }
     
     // Helper method to check if adding more selections would exceed the limit
@@ -2905,11 +3344,13 @@ extension NestCategoryViewController: SelectFolderViewControllerDelegate {
                     self.isEditingMode = false
                     self.selectedEntries.removeAll()
                     self.selectedPlaces.removeAll()
+                    self.selectedRoutines.removeAll()
+                    self.selectedPilotCards.removeAll()
+                    self.selectedContacts.removeAll()
+                    self.selectedUnknownItems.removeAll()
                     
-                    // Notify delegate when clearing selections after move operation
                     if self.isEditOnlyMode {
-                        self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedEntries: self.selectedEntries)
-                        self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
+                        self.notifySelectEntriesDelegate()
                     }
                     
                     let totalCount = selectedEntriesArray.count + selectedPlacesArray.count
@@ -3031,7 +3472,7 @@ extension NestCategoryViewController {
                 
                 // Notify delegate if place was selected and we're in edit-only mode
                 if self.isEditOnlyMode {
-                    self.selectEntriesDelegate?.nestCategoryViewController(self, didUpdateSelectedPlaces: self.selectedPlaces)
+                    self.notifySelectEntriesDelegate()
                 }
                 
                 // Remove from local array (this will trigger didSet and applySnapshot)
@@ -3090,6 +3531,7 @@ extension NestCategoryViewController {
 // MARK: - PaywallViewControllerDelegate
 extension NestCategoryViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
+        TikTokTracker.shared.trackSubscribe()
         // Purchase successful - user is now Pro, update selection limit
         selectionLimit = nil
         

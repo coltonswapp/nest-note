@@ -8,6 +8,22 @@ protocol AuthenticationDelegate: AnyObject {
     func signUpComplete()
 }
 
+// MARK: - Reauthentication Types
+enum LoginViewControllerMode {
+    case login
+    case reauthentication(email: String?, provider: AuthProvider, onReauthentication: (ReauthCredential) -> Void)
+}
+
+enum AuthProvider {
+    case emailPassword
+    case apple
+}
+
+enum ReauthCredential {
+    case password(String)
+    case apple(ASAuthorizationAppleIDCredential)
+}
+
 final class LoginViewController: NNViewController {
     // MARK: - UI Elements
     private let topImageView: UIImageView = {
@@ -159,6 +175,8 @@ final class LoginViewController: NNViewController {
     weak var delegate: AuthenticationDelegate?
     private var loginButtonBottomConstraint: NSLayoutConstraint?
     private var mainStackTopConstraint: NSLayoutConstraint?
+    var shouldShowSignUpFlow: Bool = false
+    var mode: LoginViewControllerMode = .login
     
     private let fieldStack: UIStackView = {
         let stack = UIStackView()
@@ -184,8 +202,76 @@ final class LoginViewController: NNViewController {
         view.backgroundColor = .systemBackground
         setupKeyboardObservers()
         setupNavBar()
+        configureForMode()
         loadSavedCredentials()
         updateLoginButtonState()
+    }
+    
+    private func configureForMode() {
+        switch mode {
+        case .login:
+            break
+            
+        case .reauthentication(let email, let provider, _):
+            titleLabel.text = "You must login again to delete your account."
+            subtitleLabel.text = "Please sign in again to continue"
+            loginButton.setTitle("Continue")
+            
+            signUpButton.isHidden = true
+            forgotPasswordButton.isHidden = true
+            
+            if let email = email {
+                emailField.text = email
+                emailField.isUserInteractionEnabled = false
+                emailField.alpha = 0.7
+            }
+
+            switch provider {
+            case .emailPassword:
+                signInWithAppleButton.isHidden = true
+                orDividerView.isHidden = true
+            case .apple:
+                emailField.isHidden = true
+                passwordField.isHidden = true
+                forgotPasswordButton.isHidden = true
+                loginButton.isHidden = true
+                orDividerView.isHidden = true
+            }
+            
+            setupReauthNavigationBar()
+        }
+    }
+    
+    private func setupReauthNavigationBar() {
+        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(cancelReauthentication)
+        )
+    }
+    
+    @objc private func cancelReauthentication() {
+        dismiss(animated: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        if shouldShowSignUpFlow {
+            shouldShowSignUpFlow = false
+            presentSignUpFlow()
+        }
+    }
+
+    private func presentSignUpFlow() {
+        let onboardingVariant = FeatureFlagService.shared.getOnboardingFlowConfigName()
+        Logger.log(level: .info, category: .general, message: "Creating onboarding coordinator with variant: \(onboardingVariant)")
+        let onboardingCoordinator = OnboardingCoordinator(configFileName: onboardingVariant)
+        let containerVC = onboardingCoordinator.start()
+        onboardingCoordinator.authenticationDelegate = self.delegate
+
+        navigationController?.pushViewController(containerVC, animated: true)
     }
     
     override func addSubviews() {
@@ -455,6 +541,22 @@ final class LoginViewController: NNViewController {
                 }
                 loginButton.startLoading()
                 passwordField.resignFirstResponder()
+                
+                if case .reauthentication(_, _, let onReauthentication) = mode {
+                    _ = try await UserService.shared.login(email: email, password: password)
+                    await MainActor.run {
+                        loginButton.stopLoading(withSuccess: true)
+                        Logger.log(level: .info, category: .general, message: "Reauthentication successful")
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            self.dismiss(animated: true) {
+                                onReauthentication(.password(password))
+                            }
+                        }
+                    }
+                    return
+                }
+                
                 _ = try await UserService.shared.login(email: email, password: password)
                 try await Launcher.shared.configure()
                 UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
@@ -462,7 +564,6 @@ final class LoginViewController: NNViewController {
                     loginButton.stopLoading(withSuccess: true)
                     Logger.log(level: .info, category: .general, message: "Successfully signed in")
                     
-                    // Save credentials to keychain
                     self.saveCredentialsToKeychain(email: email, password: password)
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -549,6 +650,14 @@ extension LoginViewController: UITextFieldDelegate {
 extension LoginViewController: ASAuthorizationControllerDelegate {
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            if case .reauthentication(_, _, let onReauthentication) = mode {
+                Logger.log(level: .info, category: .general, message: "Apple reauthentication successful")
+                dismiss(animated: true) {
+                    onReauthentication(.apple(appleIDCredential))
+                }
+                return
+            }
+            
             Task {
                 do {
                     let result = try await UserService.shared.signInWithApple(credential: appleIDCredential)

@@ -1342,8 +1342,7 @@ class SessionService {
             ownerID: nil,  // No owner yet
             earlyAccessDuration: .halfDay,  // Default
             earlyAccessEndDate: nil,
-            entryIds: nil,
-            ownerReviewedAt: nil
+            entryIds: nil
         )
 
         // Store in sitter's sessionRequests collection
@@ -1663,8 +1662,7 @@ class SessionService {
             inviteAcceptedAt: Date(),
             readyToArchive: nil,
             parentSessionCompletedDate: nil,
-            parentSessionArchivedDate: nil,
-            reviewedAt: nil
+            parentSessionArchivedDate: nil
         )
 
         let encoder = Firestore.Encoder()

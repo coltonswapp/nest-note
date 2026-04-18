@@ -20,6 +20,8 @@ final class FeatureFlagService {
         case testFlightBypassEnabled = "testflight_bypass_enabled"
         case debugAsProUser = "debug_as_pro_user"
         case captureSignupLogs = "capture_signup_logs"
+        /// When enabled, shows pilot `pilot_card` items in the nest UI (extensibility pipeline).
+        case pilotCardItemsEnabled = "pilot_card_items_enabled"
         
         var defaultValue: Bool {
             switch self {
@@ -29,6 +31,12 @@ final class FeatureFlagService {
                 return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
             case .captureSignupLogs:
                 return false // Default to not capturing logs for privacy
+            case .pilotCardItemsEnabled:
+                #if DEBUG
+                return true
+                #else
+                return false
+                #endif
             }
         }
     }
@@ -36,11 +44,14 @@ final class FeatureFlagService {
     // MARK: - Remote Config Keys
     enum RemoteConfigKey: String, CaseIterable {
         case freeUserSelectionLimit = "free_user_selection_limit"
+        case parentOnboardingFlow = "parent_onboarding_flow"
         
         var defaultValue: Any {
             switch self {
             case .freeUserSelectionLimit:
-                return 6 // Default limit for free users
+                return 6
+            case .parentOnboardingFlow:
+                return "onboarding_config"
             }
         }
     }
@@ -166,9 +177,25 @@ final class FeatureFlagService {
     }
     
     /// Gets the free user selection limit from remote config
-    /// - Returns: The maximum number of items free users can select
     func getFreeUserSelectionLimit() -> Int {
         return getIntValue(for: .freeUserSelectionLimit)
+    }
+
+    /// Gets the string value for a remote config key
+    func getStringValue(for key: RemoteConfigKey) -> String {
+        let rawValue = remoteConfig.configValue(forKey: key.rawValue).stringValue
+        let value = rawValue.isEmpty ? (key.defaultValue as? String ?? "") : rawValue
+
+        #if DEBUG
+        Logger.log(level: .debug, category: .general, message: "Remote config '\(key.rawValue)': \(value)")
+        #endif
+
+        return value
+    }
+
+    /// Gets the onboarding flow config file name from Remote Config (used by A/B test)
+    func getOnboardingFlowConfigName() -> String {
+        return getStringValue(for: .parentOnboardingFlow)
     }
     
     /// Checks if paywall bypass is enabled for testing
@@ -243,8 +270,13 @@ final class FeatureFlagService {
             Logger.log(level: .info, category: .general, message: "\(flag.rawValue): \(value)")
         }
         for configKey in RemoteConfigKey.allCases {
-            let value = getIntValue(for: configKey)
-            Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            if configKey.defaultValue is String {
+                let value = getStringValue(for: configKey)
+                Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            } else {
+                let value = getIntValue(for: configKey)
+                Logger.log(level: .info, category: .general, message: "\(configKey.rawValue): \(value)")
+            }
         }
         Logger.log(level: .info, category: .general, message: "TestFlight detected: \(isRunningInTestFlight())")
         Logger.log(level: .info, category: .general, message: "Should bypass paywall: \(shouldBypassPaywall())")
