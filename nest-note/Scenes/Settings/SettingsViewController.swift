@@ -479,6 +479,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
             ("Toast Test", "text.bubble.fill"),
+            ("Markdown Preview", "doc.richtext"),
+            ("Sitters article (full)", "text.book.closed"),
+            ("Sitters article (brief)", "text.book.closed.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
@@ -599,6 +602,15 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             navigationController?.pushViewController(vc, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Markdown Preview":
+            let vc = MarkdownTestViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Sitters article (full)":
+            let vc = MarkdownTestViewController(markdown: SittersGettingFamiliesArticle.markdownFull)
+            navigationController?.pushViewController(vc, animated: true)
+        case "Sitters article (brief)":
+            let vc = MarkdownTestViewController(markdown: SittersGettingFamiliesArticle.markdownBrief)
             navigationController?.pushViewController(vc, animated: true)
         case "Survey Dashboard":
             let vc = SurveyDashboardViewController()

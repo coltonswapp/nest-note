@@ -25,6 +25,7 @@
 		F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */ = {isa = PBXBuildFile; fileRef = F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */; };
 		F6A81B902E56524600D24D95 /* QRCode in Frameworks */ = {isa = PBXBuildFile; productRef = F6A81B8F2E56524600D24D95 /* QRCode */; };
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
+		F6C1A0B02E50000100D24D95 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = F6C1A0B12E50000100D24D95 /* MarkdownUI */; };
 		F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = F6E9EE522DA596DF009113C6 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
@@ -92,6 +93,7 @@
 				F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */,
 				F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */,
 				F66E292E2CD077E900B90ABC /* FirebaseFirestore in Frameworks */,
+				F6C1A0B02E50000100D24D95 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,6 +164,7 @@
 				F670377E2DFCA5DD000D897E /* RevenueCat */,
 				F67037802DFCA5DD000D897E /* RevenueCatUI */,
 				F6A81B8F2E56524600D24D95 /* QRCode */,
+				F6C1A0B12E50000100D24D95 /* MarkdownUI */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -196,6 +199,7 @@
 				F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */,
 				F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */,
+				F6C1A0B22E50000100D24D95 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F64DE3EA2CB1C893006D21FC /* Products */;
@@ -510,6 +514,14 @@
 				minimumVersion = 2.1.2;
 			};
 		};
+		F6C1A0B22E50000100D24D95 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -577,6 +589,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F6B678282CDDED5700FDCAE4 /* XCRemoteSwiftPackageReference "toast-swift" */;
 			productName = Toast;
+		};
+		F6C1A0B12E50000100D24D95 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F6C1A0B22E50000100D24D95 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 		F6E9EE522DA596DF009113C6 /* FirebaseMessaging */ = {
 			isa = XCSwiftPackageProductDependency;
