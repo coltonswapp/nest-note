@@ -89,6 +89,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var nestInfo: NestInfo?
         var surveyResponses: [String: [String]] = [:]
         var surveyStartTime: Date? // Track when survey started for duration calculation
+        /// Total seconds the user had onboarding paywall sheets open (main + exit offer).
+        var paywallDwellSeconds: TimeInterval = 0
         var isAppleSignIn: Bool = false
         var referralCode: String?
         
@@ -590,18 +592,23 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                     duration = nil
                 }
                 
+                var surveyMetadata: [String: String] = [
+                    "userId": user.id,
+                    "role": userInfo.role.rawValue,
+                    "app_version": appVersion,
+                    "onboarding_variant": onboardingVariant
+                ]
+                if userInfo.paywallDwellSeconds > 0 {
+                    surveyMetadata["paywall_dwell_seconds"] = String(Int(round(userInfo.paywallDwellSeconds)))
+                }
+
                 let response = SurveyResponse(
                     id: UUID().uuidString,
                     timestamp: Date(),
                     surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
                     version: appVersion,
                     responses: userInfo.surveyResponses.map { SurveyResponse.QuestionResponse(questionId: $0.key, answers: $0.value) },
-                    metadata: [
-                        "userId": user.id,
-                        "role": userInfo.role.rawValue,
-                        "app_version": appVersion,
-                        "onboarding_variant": onboardingVariant
-                    ],
+                    metadata: surveyMetadata,
                     duration: duration
                 )
 
@@ -812,6 +819,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         userInfo.nestInfo = UserOnboardingInfo.NestInfo(name: name, address: address)
     }
     
+    func addPaywallDwellTime(_ seconds: TimeInterval) {
+        guard seconds > 0 else { return }
+        userInfo.paywallDwellSeconds += seconds
+    }
+
     func updateSurveyResponses(_ responses: [String: [String]]) {
         // Track start time if this is the first survey response
         if userInfo.surveyStartTime == nil && !responses.isEmpty {

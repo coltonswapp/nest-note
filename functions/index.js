@@ -554,6 +554,26 @@ exports.onNewSurveyResponse = functions.firestore
               );
             });
 
+            // Aggregate paywall dwell time from response metadata (parent onboarding).
+            const meta = response.metadata || {};
+            const rawPaywall = meta.paywall_dwell_seconds;
+            if (rawPaywall !== undefined && rawPaywall !== null && String(rawPaywall).length > 0) {
+              const sec = parseFloat(String(rawPaywall), 10);
+              if (!Number.isNaN(sec) && sec >= 0) {
+                if (!metrics.paywallDwell) {
+                  metrics.paywallDwell = {
+                    count: 0,
+                    totalSeconds: 0,
+                    avgSeconds: 0,
+                  };
+                }
+                const pd = metrics.paywallDwell;
+                pd.count += 1;
+                pd.totalSeconds += sec;
+                pd.avgSeconds = pd.totalSeconds / pd.count;
+              }
+            }
+
             // Save updated metrics
             await metricsRef.set(metrics);
 

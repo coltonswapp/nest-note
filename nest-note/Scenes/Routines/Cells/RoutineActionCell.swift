@@ -119,6 +119,8 @@ class RoutineActionCell: UITableViewCell {
         
         // Enable/disable label tap for editing
         actionLabel.isUserInteractionEnabled = !isReadOnly
+
+        showsReorderControl = !isReadOnly
         
         // Make sure we're in display mode initially
         setEditingMode(false)

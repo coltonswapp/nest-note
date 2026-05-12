@@ -144,18 +144,15 @@ final class SetupService {
             return false
         }
         
-        // Check if user has entries - if they do, they're already familiar with the app
+        // Check if user has nest content (entries, places, or routines) matching onboarding copy
         do {
-            let groupedEntries = try await NestService.shared.fetchEntries()
-            let totalEntries = groupedEntries.values.flatMap { $0 }.count
-            
-            // If user has entries, mark the addFirstEntry step as complete
-            if totalEntries > 0 {
+            let itemCount = try await NestService.shared.countOnboardingFirstItems()
+
+            if itemCount > 0 {
                 markStepComplete(.addFirstEntry)
-                
-                // If they have more than a few entries, they're probably familiar with the app
-                // Mark setup as complete and don't show the flow
-                if totalEntries >= 3 {
+
+                // If they have several items, they're probably familiar with the app — hide the sticky flow entirely
+                if itemCount >= 3 {
                     hasCompletedSetup = true
                     return false
                 }
@@ -164,8 +161,7 @@ final class SetupService {
             // Otherwise, show the setup flow
             return true
         } catch {
-            // If there's an error fetching entries, default to UserDefaults value
-            Logger.log(level: .error, category: .general, message: "Error checking entries for setup flow: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .general, message: "Error checking nest items for setup flow: \(error.localizedDescription)")
             return !hasCompletedSetup
         }
     }
@@ -220,9 +216,7 @@ final class SetupService {
             return NestService.shared.currentNest != nil
             
         case .addFirstEntry:
-            // Check if user has at least one entry
-            // This would need to be implemented based on your data model
-            return checkIfUserHasEntries()
+            return isStepComplete(.addFirstEntry)
             
         case .enableNotifications:
             // Check if user has enabled notifications
@@ -240,11 +234,6 @@ final class SetupService {
     }
     
     // Helper methods for step completion checks
-    private func checkIfUserHasEntries() -> Bool {
-        // Placeholder - implement based on your data model
-        // Example: return EntryService.shared.entriesCount > 0
-        return isStepComplete(.addFirstEntry)
-    }
     
     private func checkIfUserExploredFeedback() -> Bool {
         // Placeholder - implement based on your app behavior
@@ -285,25 +274,39 @@ final class SetupService {
         return isStepComplete(.finalStep)
     }
     
-    // Check and update all steps' completion status
+    /// Re-evaluates setup progress from live app state. “Add first item” is synced from Nest (entries / places / routines).
     func refreshStepCompletionStatus() {
-        let previouslyCompleted = Set(completedStepIndices)
-        
-        for step in SetupStepType.allCases {
-            if checkStepCompletion(step) {
-                let wasAlreadyComplete = previouslyCompleted.contains(step.rawValue)
-                markStepComplete(step)
-                
-                // If this step was newly completed during refresh, post notification
-                if !wasAlreadyComplete && isStepComplete(step) {
-                    let userInfo: [String: Any] = [
-                        "step": step,
-                        "completedSteps": completedStepIndices.count,
-                        "totalSteps": SetupStepType.allCases.count
-                    ]
-                    NotificationCenter.default.post(name: .setupStepDidComplete, object: nil, userInfo: userInfo)
+        Task { @MainActor in
+            await syncAddFirstEntryFromNestIfNeeded()
+
+            let previouslyCompleted = Set(self.completedStepIndices)
+
+            for step in SetupStepType.allCases where step != .addFirstEntry {
+                if self.checkStepCompletion(step) {
+                    let wasAlreadyComplete = previouslyCompleted.contains(step.rawValue)
+                    self.markStepComplete(step)
+
+                    if !wasAlreadyComplete && self.isStepComplete(step) {
+                        let userInfo: [String: Any] = [
+                            "step": step,
+                            "completedSteps": self.completedStepIndices.count,
+                            "totalSteps": SetupStepType.allCases.count
+                        ]
+                        NotificationCenter.default.post(name: .setupStepDidComplete, object: nil, userInfo: userInfo)
+                    }
                 }
             }
+        }
+    }
+
+    private func syncAddFirstEntryFromNestIfNeeded() async {
+        do {
+            let count = try await NestService.shared.countOnboardingFirstItems()
+            if count > 0 {
+                markStepComplete(.addFirstEntry)
+            }
+        } catch {
+            Logger.log(level: .error, category: .general, message: "Failed to sync setup first-item step from nest: \(error.localizedDescription)")
         }
     }
 } 

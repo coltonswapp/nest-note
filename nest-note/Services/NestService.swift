@@ -224,6 +224,20 @@ final class NestService: EntryRepository {
         let groupedEntries = try await fetchEntries()
         return groupedEntries.values.flatMap { $0 }.count
     }
+
+    /// Item kinds that qualify for owner setup “first item” (matches onboarding copy: entries, places, routines).
+    private static let onboardingFirstItemTypes: Set<ItemType> = [.entry, .place, .routine]
+
+    private func notifyOwnerSetupFirstContentItemCreatedIfNeeded(_ type: ItemType) {
+        guard isOwner, Self.onboardingFirstItemTypes.contains(type) else { return }
+        SetupService.shared.markStepComplete(.addFirstEntry)
+    }
+
+    /// Count of nest items that should complete the “Add your first item” setup step.
+    func countOnboardingFirstItems() async throws -> Int {
+        let allItems = try await fetchAllItems()
+        return allItems.filter { Self.onboardingFirstItemTypes.contains($0.type) }.count
+    }
     
     // MARK: - Category Methods
     private var cachedCategories: [NestCategory]?
@@ -301,6 +315,8 @@ final class NestService: EntryRepository {
             
             // Log success event
             Tracker.shared.track(.entryCreated)
+            
+            notifyOwnerSetupFirstContentItemCreatedIfNeeded(.entry)
         } catch {
             // Log failure event
             Tracker.shared.track(.entryCreated, result: false, error: error.localizedDescription)
@@ -389,11 +405,16 @@ final class NestService: EntryRepository {
         do {
             // Use ItemRepository for creation
             try await itemRepository.createItem(routine)
-            
+
+            updateItemInCache(routine)
+            clearEntriesCache()
+
             Logger.log(level: .info, category: .nestService, message: "Routine created successfully: \(routine.title)")
             
             // Log success event
             Tracker.shared.track(.routineCreated)
+            
+            notifyOwnerSetupFirstContentItemCreatedIfNeeded(.routine)
         } catch {
             // Log failure event
             Tracker.shared.track(.routineCreated, result: false, error: error.localizedDescription)
@@ -411,7 +432,10 @@ final class NestService: EntryRepository {
         do {
             // Use ItemRepository for update
             try await itemRepository.updateItem(routine)
-            
+
+            updateItemInCache(routine)
+            clearEntriesCache()
+
             Logger.log(level: .info, category: .nestService, message: "Routine updated successfully: \(routine.title)")
             
             // Log success event
@@ -433,7 +457,10 @@ final class NestService: EntryRepository {
         do {
             // Use ItemRepository for deletion
             try await itemRepository.deleteItem(id: routine.id)
-            
+
+            removeItemFromCache(id: routine.id)
+            clearEntriesCache()
+
             Logger.log(level: .info, category: .nestService, message: "Routine deleted successfully: \(routine.title)")
             
             // Log success event
@@ -462,6 +489,8 @@ final class NestService: EntryRepository {
         // Clear entries cache to ensure fresh data (backward compatibility)
         clearEntriesCache()
         
+        notifyOwnerSetupFirstContentItemCreatedIfNeeded(item.type)
+
         Logger.log(level: .info, category: .nestService, message: "Item created successfully: \(item.title) (\(item.type.rawValue))")
     }
     
