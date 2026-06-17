@@ -133,6 +133,9 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             configureReadOnlyMode()
         } else {
             setupInfoButton()
+            routineTableView.dragDelegate = self
+            routineTableView.dropDelegate = self
+            routineTableView.dragInteractionEnabled = true
         }
         
         itemsHiddenDuringTransition = isReadOnly ? [] : [ctaStack]
@@ -240,6 +243,37 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     }
 
     @objc private func titleFieldChanged() {
+        updateSaveButtonEnabledState()
+    }
+
+    /// Applies an in-memory reorder of `routineActions` and keeps per-action completion aligned when `routine` exists.
+    private func applyRoutineActionReorder(from sourceRow: Int, to destinationRow: Int) {
+        guard sourceRow != destinationRow,
+              sourceRow >= 0, sourceRow < routineActions.count,
+              destinationRow >= 0, destinationRow < routineActions.count else { return }
+
+        let movedAction = routineActions.remove(at: sourceRow)
+        routineActions.insert(movedAction, at: destinationRow)
+
+        if let routineId = routine?.id {
+            var completionStates: [Bool] = []
+            for index in 0..<routineActions.count {
+                completionStates.append(stateManager.isActionCompleted(routineId: routineId, actionIndex: index))
+            }
+
+            for index in 0..<routineActions.count {
+                stateManager.setActionCompleted(false, routineId: routineId, actionIndex: index)
+            }
+
+            let movedCompletion = completionStates[sourceRow]
+            completionStates.remove(at: sourceRow)
+            completionStates.insert(movedCompletion, at: destinationRow)
+
+            for (index, isCompleted) in completionStates.enumerated() {
+                stateManager.setActionCompleted(isCompleted, routineId: routineId, actionIndex: index)
+            }
+        }
+
         updateSaveButtonEnabledState()
     }
 
@@ -574,30 +608,16 @@ extension RoutineDetailViewController: UITableViewDataSource {
         
         return cell
     }
-}
 
-// MARK: - UITableViewDelegate
-extension RoutineDetailViewController: UITableViewDelegate {
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return UITableView.automaticDimension
-    }
-    
-    func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 60
-    }
-    
-    // MARK: - Edit Mode Support
+    // MARK: - Edit / reorder (UITableViewDataSource)
     func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        // Only allow editing routine action rows (not the "Add Action" cell)
         return indexPath.row < routineActions.count
     }
-    
+
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         if editingStyle == .delete {
-            // Remove the action from the array
             routineActions.remove(at: indexPath.row)
-            
-            // Update completion state - shift indices down for actions after the deleted one
+
             if let routineId = routine?.id {
                 for actionIndex in (indexPath.row + 1)..<(routineActions.count + 1) {
                     let wasCompleted = stateManager.isActionCompleted(routineId: routineId, actionIndex: actionIndex)
@@ -607,67 +627,88 @@ extension RoutineDetailViewController: UITableViewDelegate {
                     }
                 }
             }
-            
-            // Delete the row from the table view
+
             tableView.deleteRows(at: [indexPath], with: .fade)
-            
-            // If we were at the limit and now have space, show add cell when exiting edit mode
-            // (The add cell is already hidden in edit mode, so no need to show it here)
-            
-            
+
             HapticsHelper.lightHaptic()
 
-            // Reflect new validity in save button state
             updateSaveButtonEnabledState()
         }
     }
-    
-    // MARK: - Drag and Drop Support
+
     func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
-        // Only allow moving routine action rows (not the "Add Action" cell)
         return indexPath.row < routineActions.count
     }
-    
+
     func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
-        // Don't allow moving to the "Add Action" cell position
         guard sourceIndexPath.row < routineActions.count && destinationIndexPath.row < routineActions.count else {
             return
         }
-        
-        // Move the item in the array
-        let movedAction = routineActions.remove(at: sourceIndexPath.row)
-        routineActions.insert(movedAction, at: destinationIndexPath.row)
-        
-        // Update completion state to match the new order
-        if let routineId = routine?.id {
-            // Store current completion states
-            var completionStates: [Bool] = []
-            for index in 0..<routineActions.count {
-                completionStates.append(stateManager.isActionCompleted(routineId: routineId, actionIndex: index))
-            }
-            
-            // Clear all states
-            for index in 0..<routineActions.count {
-                stateManager.setActionCompleted(false, routineId: routineId, actionIndex: index)
-            }
-            
-            // Reapply states in new order
-            let movedCompletion = completionStates[sourceIndexPath.row]
-            completionStates.remove(at: sourceIndexPath.row)
-            completionStates.insert(movedCompletion, at: destinationIndexPath.row)
-            
-            for (index, isCompleted) in completionStates.enumerated() {
-                stateManager.setActionCompleted(isCompleted, routineId: routineId, actionIndex: index)
-            }
-        }
+        applyRoutineActionReorder(from: sourceIndexPath.row, to: destinationIndexPath.row)
     }
-    
+}
+
+// MARK: - UITableViewDelegate
+extension RoutineDetailViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return UITableView.automaticDimension
+    }
+
+    func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        return 60
+    }
+
     func tableView(_ tableView: UITableView, targetIndexPathForMoveFromRowAt sourceIndexPath: IndexPath, toProposedIndexPath proposedDestinationIndexPath: IndexPath) -> IndexPath {
-        // Prevent moving to the "Add Action" cell position
         if proposedDestinationIndexPath.row >= routineActions.count {
             return IndexPath(row: routineActions.count - 1, section: 0)
         }
         return proposedDestinationIndexPath
+    }
+}
+
+// MARK: - UITableViewDragDelegate & UITableViewDropDelegate (reorder without entering table Edit mode)
+extension RoutineDetailViewController: UITableViewDragDelegate {
+    func tableView(_ tableView: UITableView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
+        guard !isReadOnly,
+              !isTableViewInEditMode,
+              routineActions.count > 1,
+              indexPath.row < routineActions.count else {
+            return []
+        }
+        let itemProvider = NSItemProvider(object: routineActions[indexPath.row] as NSString)
+        let dragItem = UIDragItem(itemProvider: itemProvider)
+        dragItem.localObject = indexPath
+        return [dragItem]
+    }
+}
+
+extension RoutineDetailViewController: UITableViewDropDelegate {
+    func tableView(_ tableView: UITableView, dropSessionDidUpdate session: UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UITableViewDropProposal {
+        guard tableView.hasActiveDrag,
+              session.localDragSession != nil,
+              let destinationIndexPath,
+              destinationIndexPath.row < routineActions.count else {
+            return UITableViewDropProposal(operation: .forbidden)
+        }
+        return UITableViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+    }
+
+    func tableView(_ tableView: UITableView, performDropWith coordinator: UITableViewDropCoordinator) {
+        guard coordinator.proposal.operation == .move,
+              let item = coordinator.items.first,
+              let sourceIndexPath = item.sourceIndexPath,
+              let destinationIndexPath = coordinator.destinationIndexPath,
+              sourceIndexPath != destinationIndexPath,
+              destinationIndexPath.row < routineActions.count else {
+            return
+        }
+
+        tableView.performBatchUpdates({
+            self.applyRoutineActionReorder(from: sourceIndexPath.row, to: destinationIndexPath.row)
+            tableView.moveRow(at: sourceIndexPath, to: destinationIndexPath)
+        })
+
+        coordinator.drop(item.dragItem, toRowAt: destinationIndexPath)
     }
 }
 
@@ -706,11 +747,13 @@ extension RoutineDetailViewController: RoutineActionCellDelegate {
             let addIndexPath = IndexPath(row: routineActions.count, section: 0)
             routineTableView.insertRows(at: [addIndexPath], with: .fade)
         }
-        
+
+        updateSaveButtonEnabledState()
     }
     
     func routineActionCell(_ cell: RoutineActionCell, didUpdateAction newAction: String, at indexPath: IndexPath) {
         routineActions[indexPath.row] = newAction
+        updateSaveButtonEnabledState()
     }
 }
 

@@ -19,6 +19,8 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     private var isShowingExitOffer: Bool = false
     private var offeringId: String? // Offering to display (nil = default, "partner" = partner offering)
     private var exitOfferingId: String? // Exit offer to display on dismissal
+    private var paywallPresentedAt: Date?
+    private var dwellRecordedForCurrentPresentation = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -91,6 +93,8 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     private func presentPaywall() {
         guard let paywallViewController = paywallViewController else { return }
         paywallViewController.modalPresentationStyle = .pageSheet
+        dwellRecordedForCurrentPresentation = false
+        paywallPresentedAt = Date()
         present(paywallViewController, animated: true)
 
         let currentOfferingId = isShowingExitOffer ? exitOfferingId : offeringId
@@ -98,6 +102,20 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
             "offering_id": currentOfferingId ?? "default",
             "is_exit_offer": isShowingExitOffer
         ])
+    }
+
+    private func secondsOnCurrentPaywallPresentation() -> Int {
+        guard let start = paywallPresentedAt else { return 0 }
+        return max(0, Int(Date().timeIntervalSince(start)))
+    }
+
+    private func recordDwellTimeForCurrentPresentationIfNeeded() {
+        guard !dwellRecordedForCurrentPresentation, let start = paywallPresentedAt else { return }
+        dwellRecordedForCurrentPresentation = true
+        paywallPresentedAt = nil
+        let seconds = Date().timeIntervalSince(start)
+        guard seconds > 0 else { return }
+        (coordinator as? OnboardingCoordinator)?.addPaywallDwellTime(seconds)
     }
 
     private func completePaywallAndContinue() {
@@ -114,6 +132,8 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
         hasCompletedPaywall = false
         hasPurchased = false
         hasShownExitOffer = false
+        paywallPresentedAt = nil
+        dwellRecordedForCurrentPresentation = false
     }
 
     // MARK: - PaywallViewControllerDelegate
@@ -121,6 +141,9 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
         TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
+
+        let dwellSeconds = secondsOnCurrentPaywallPresentation()
+        recordDwellTimeForCurrentPresentationIfNeeded()
 
         // Track conversion
         let productId = customerInfo.activeSubscriptions.first ?? "unknown_product"
@@ -134,13 +157,15 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
             Analytics.logEvent("paywall_conversion", parameters: [
                 "offering_id": currentOfferingId,
                 "product_id": productId,
-                "conversion_source": conversionSource
+                "conversion_source": conversionSource,
+                "dwell_seconds": dwellSeconds
             ])
         } else {
             Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Conversion completed (\(conversionSource))")
             Analytics.logEvent("paywall_conversion", parameters: [
                 "product_id": productId,
-                "conversion_source": conversionSource
+                "conversion_source": conversionSource,
+                "dwell_seconds": dwellSeconds
             ])
         }
 
@@ -156,6 +181,9 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
         TikTokTracker.shared.trackSubscribe()
         hasPurchased = true
 
+        let dwellSeconds = secondsOnCurrentPaywallPresentation()
+        recordDwellTimeForCurrentPresentationIfNeeded()
+
         // Track restoration
         let productId = customerInfo.activeSubscriptions.first ?? "restored_product"
         OnboardingAnalyticsService.shared.recordConversion(type: "restore", productId: productId)
@@ -164,7 +192,14 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
             Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Restore completed with \(offeringId) offering")
             Analytics.logEvent("paywall_restore", parameters: [
                 "offering_id": offeringId,
-                "product_id": productId
+                "product_id": productId,
+                "dwell_seconds": dwellSeconds
+            ])
+        } else {
+            Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Restore completed (default offering)")
+            Analytics.logEvent("paywall_restore", parameters: [
+                "product_id": productId,
+                "dwell_seconds": dwellSeconds
             ])
         }
 
@@ -187,12 +222,15 @@ final class OBPaywallViewController: NNOnboardingViewController, PaywallViewCont
     func paywallViewControllerWasDismissed(_ controller: PaywallViewController) {
         Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Paywall dismissed - purchased: \(hasPurchased), shown exit offer: \(hasShownExitOffer)")
 
+        let dwellSeconds = secondsOnCurrentPaywallPresentation()
         if !hasPurchased {
+            recordDwellTimeForCurrentPresentationIfNeeded()
             let declinedOfferingId = isShowingExitOffer ? exitOfferingId : offeringId
             Analytics.logEvent("paywall_declined", parameters: [
                 "offering_id": declinedOfferingId ?? "default",
                 "is_exit_offer": isShowingExitOffer,
-                "has_seen_exit_offer": hasShownExitOffer
+                "has_seen_exit_offer": hasShownExitOffer,
+                "dwell_seconds": dwellSeconds
             ])
         }
 

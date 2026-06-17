@@ -136,7 +136,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         beginFinishFlow()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
     }
     
     private func beginFinishFlow() {

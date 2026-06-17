@@ -374,7 +374,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 // No header for setup progress section
                 headerView.configure(title: "")
                 headerView.isHidden = true
-            case .quickAccess, .upcomingSessions, .events:
+            case .quickAccess, .upcomingSessions, .events, .sitterInfoBanner:
                 return
             }
         }

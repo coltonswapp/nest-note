@@ -37,6 +37,7 @@ enum HomeSection: Int {
     case upcomingSessions
     case events
     case setupProgress
+    case sitterInfoBanner
 }
 
 enum HomeItem: Hashable {
@@ -50,7 +51,8 @@ enum HomeItem: Hashable {
     case sessionEvent(SessionEvent)
     case moreEvents(Int)
     case setupProgress(current: Int, total: Int)
-    
+    case sitterInfoBanner
+
     func hash(into hasher: inout Hasher) {
         switch self {
         case .nest(let name, let address):
@@ -85,6 +87,8 @@ enum HomeItem: Hashable {
             hasher.combine(9)
             hasher.combine(current)
             hasher.combine(total)
+        case .sitterInfoBanner:
+            hasher.combine(10)
         }
     }
     
@@ -110,6 +114,8 @@ enum HomeItem: Hashable {
             return c1 == c2
         case let (.setupProgress(c1, t1), .setupProgress(c2, t2)):
             return c1 == c2 && t1 == t2
+        case (.sitterInfoBanner, .sitterInfoBanner):
+            return true
         default:
             return false
         }
@@ -190,6 +196,15 @@ extension HomeViewControllerType {
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
                 section.contentInsets = NSDirectionalEdgeInsets(top: verticalSpacing, leading: 18, bottom: verticalSpacing, trailing: 16)
                 section.boundarySupplementaryItems = [header]
+                return section
+
+            case .sitterInfoBanner:
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 18, bottom: 8, trailing: 18)
                 return section
             }
         }
