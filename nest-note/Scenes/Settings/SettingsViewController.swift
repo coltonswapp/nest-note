@@ -564,8 +564,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Event Creation":
             let vc = SessionEventViewController(entryRepository: NestService.shared)
             present(vc, animated: true)
-        case "Glassy Button Playground":
-            navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
         case "Entry Review":
             break
 //            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())

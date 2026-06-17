@@ -394,12 +394,17 @@ final class SurveyService {
         let paywallDwell: SurveyMetrics.PaywallDwellAggregate? = {
             guard let pd = data["paywallDwell"] as? [String: Any] else { return nil }
             let count = (pd["count"] as? Int)
-                ?? Int(truncating: (pd["count"] as? NSNumber)?.doubleValue ?? 0)
-            guard count > 0,
-                  let totalSeconds = (pd["totalSeconds"] as? Double)
-                      ?? (pd["totalSeconds"] as? NSNumber)?.doubleValue,
-                  let avgSeconds = (pd["avgSeconds"] as? Double)
-                      ?? (pd["avgSeconds"] as? NSNumber)?.doubleValue else {
+                ?? (pd["count"] as? NSNumber)?.intValue
+                ?? 0
+            guard count > 0 else { return nil }
+            
+            func double(from value: Any?) -> Double? {
+                if let d = value as? Double { return d }
+                if let n = value as? NSNumber { return n.doubleValue }
+                return nil
+            }
+            guard let totalSeconds = double(from: pd["totalSeconds"]),
+                  let avgSeconds = double(from: pd["avgSeconds"]) else {
                 return nil
             }
             return SurveyMetrics.PaywallDwellAggregate(count: count, totalSeconds: totalSeconds, avgSeconds: avgSeconds)
