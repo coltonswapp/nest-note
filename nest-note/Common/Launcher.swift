@@ -83,6 +83,9 @@ final class Launcher {
                     UIApplication.shared.registerForRemoteNotifications()
                     Logger.log(level: .info, category: .launcher, message: "Registered for remote notifications (already authorized)")
                 }
+                Task {
+                    _ = await UserService.shared.ensureNotificationsRegisteredForSessionAlerts()
+                }
             } else {
                 Logger.log(level: .info, category: .launcher, message: "Notification permissions not authorized, skipping registration. Status: \(settings.authorizationStatus.rawValue)")
             }

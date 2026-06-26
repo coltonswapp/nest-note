@@ -1335,6 +1335,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         inviteDetailVC.delegate = self
+        inviteDetailVC.configureSessionPayment(from: sessionItem)
 
         let navController = UINavigationController(rootViewController: inviteDetailVC)
         present(navController, animated: true)
@@ -1476,6 +1477,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Create the folder view controller directly
         let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
         folderVC.showsSelectedTabInitially = showSelectedTab
+        folderVC.allowsEmptySelection = true
         folderVC.title = "Select Items"
         folderVC.delegate = self
         
@@ -1513,17 +1515,27 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private func selectEntriesDidFinish(with selectedIds: [String]) {
         let totalCount = selectedIds.count
-        let itemText = totalCount == 1 ? "item" : "items"
         
-        let alert = UIAlertController(
-            title: "Confirm Selection",
-            message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
-            preferredStyle: .alert
-        )
+        let alert: UIAlertController
+        if totalCount == 0 {
+            alert = UIAlertController(
+                title: "Remove All Items?",
+                message: "No items will be visible to sitters during this session.",
+                preferredStyle: .alert
+            )
+        } else {
+            let itemText = totalCount == 1 ? "item" : "items"
+            alert = UIAlertController(
+                title: "Confirm Selection",
+                message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
+                preferredStyle: .alert
+            )
+        }
         
         let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
         let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
             self.selectedItemIds = selectedIds
+            self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
             self.currentSelectEntriesNavController?.dismiss(animated: true)
             self.currentSelectEntriesNavController = nil
             self.fetchSelectedItemPreviews()
@@ -1909,6 +1921,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let statusItems = snapshot.itemIdentifiers(inSection: .status)
         snapshot.deleteItems(statusItems)
         snapshot.appendItems([.sessionStatus(status)], toSection: .status)
+        
+        if snapshot.sectionIdentifiers.contains(.endSession) {
+            snapshot.deleteSections([.endSession])
+        }
+        if isEditingSession && status == .inProgress && !isArchivedSession {
+            snapshot.appendSections([.endSession])
+            snapshot.appendItems([.endSession], toSection: .endSession)
+        }
+        
         dataSource.apply(snapshot, animatingDifferences: true)
         
         checkForChanges()
@@ -2005,6 +2026,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Update session in Firestore
         try await SessionService.shared.updateSession(sessionItem)
+
+        if sessionItem.status == .completed {
+            RatingManager.shared.trackSessionCompleted()
+        }
         
         // Post notification that session was updated with status change
         NotificationCenter.default.post(

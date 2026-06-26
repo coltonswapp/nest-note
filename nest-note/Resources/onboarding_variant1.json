@@ -256,6 +256,16 @@
         }
       },
       {
+        "id": "phone",
+        "type": "phone",
+        "config": {
+          "type": "basic",
+          "title": null,
+          "subtitle": null,
+          "cta_text": null
+        }
+      },
+      {
         "id": "email",
         "type": "email",
         "config": {
@@ -278,16 +288,6 @@
       {
         "id": "create_nest",
         "type": "create_nest",
-        "config": {
-          "type": "basic",
-          "title": null,
-          "subtitle": null,
-          "cta_text": null
-        }
-      },
-      {
-        "id": "referral",
-        "type": "referral",
         "config": {
           "type": "basic",
           "title": null,

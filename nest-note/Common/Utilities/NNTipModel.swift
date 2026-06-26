@@ -62,13 +62,6 @@ enum EntryDetailTips {
 
 enum OwnerHomeTips {
     
-    static let finishSetupTip = NNTipModel(
-        id: "FinishSetupTip",
-        title: "Complete Your Setup",
-        message: "Tap here to finish setting up your nest and unlock all features.",
-        systemImageName: "checkmark.circle"
-    )
-    
     static let yourNestTip = NNTipModel(
         id: "YourNestTip",
         title: "Tap to view Your Nest",

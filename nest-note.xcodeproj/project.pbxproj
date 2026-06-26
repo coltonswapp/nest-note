@@ -178,7 +178,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					F64DE3E82CB1C893006D21FC = {
 						CreatedOnToolsVersion = 16.0;
@@ -495,7 +495,7 @@
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 5.28.1;
+				minimumVersion = 5.78.0;
 			};
 		};
 		F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */ = {

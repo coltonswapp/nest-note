@@ -16,6 +16,8 @@ final class NNBulletStack: UIView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }()
+
+    private var itemContainers: [UIView] = []
     
     // MARK: - Initialization
     init(items: [NNBulletItem]) {
@@ -94,5 +96,25 @@ final class NNBulletStack: UIView {
         ])
         
         stackView.addArrangedSubview(container)
+        itemContainers.append(container)
+    }
+
+    func prepareItemsForSlideIn(slideDistance: CGFloat = 30) {
+        itemContainers.forEach { $0.prepareForSlideIn(slideDistance: slideDistance) }
+    }
+
+    func animateItemsIn(
+        duration: TimeInterval = 0.55,
+        stagger: TimeInterval = 0.07,
+        initialDelay: TimeInterval = 0,
+        completion: (() -> Void)? = nil
+    ) {
+        UIView.animateSlideIn(
+            itemContainers,
+            duration: duration,
+            stagger: stagger,
+            initialDelay: initialDelay,
+            completion: completion
+        )
     }
 } 

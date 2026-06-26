@@ -16,6 +16,7 @@ final class SubscriptionService {
     static let shared = SubscriptionService()
     
     private var cachedCustomerInfo: CustomerInfo?
+    private var cachedFreeTrialEligible: Bool?
     private var lastFetchTime: Date?
     private let cacheExpirationTime: TimeInterval = 300 // 5 minutes
     
@@ -163,7 +164,102 @@ final class SubscriptionService {
     /// Clears the cached customer info (useful when user logs out)
     func clearCache() {
         cachedCustomerInfo = nil
+        cachedFreeTrialEligible = nil
         lastFetchTime = nil
+    }
+
+    /// Returns whether the current user can start a free trial on the default paywall offering.
+    func isEligibleForFreeTrial() async -> Bool {
+        if let cachedFreeTrialEligible {
+            return cachedFreeTrialEligible
+        }
+
+        do {
+            let offering = try await fetchOffering()
+            let packages = offering.availablePackages.filter {
+                $0.packageType == .monthly || $0.packageType == .annual
+            }
+            let trialPackage = packages.first(where: {
+                $0.packageType == .annual && $0.storeProduct.introductoryDiscount != nil
+            }) ?? packages.first(where: { $0.storeProduct.introductoryDiscount != nil })
+
+            guard let trialPackage else {
+                cachedFreeTrialEligible = false
+                return false
+            }
+
+            let status = await Purchases.shared.checkTrialOrIntroDiscountEligibility(
+                product: trialPackage.storeProduct
+            )
+            let isEligible = status == .eligible
+            cachedFreeTrialEligible = isEligible
+            return isEligible
+        } catch {
+            Logger.log(
+                level: .error,
+                category: .subscription,
+                message: "Failed to determine free trial eligibility: \(error.localizedDescription)"
+            )
+            cachedFreeTrialEligible = false
+            return false
+        }
+    }
+    
+    /// Fetches a RevenueCat offering by identifier, or the current offering when nil.
+    func fetchOffering(identifier: String? = nil) async throws -> Offering {
+        let offerings = try await Purchases.shared.offerings()
+        
+        if let identifier = identifier {
+            guard let offering = offerings.offering(identifier: identifier) else {
+                throw SubscriptionError.offeringNotFound
+            }
+            return offering
+        }
+        
+        guard let offering = offerings.current else {
+            throw SubscriptionError.offeringNotFound
+        }
+        return offering
+    }
+    
+    /// Purchases a RevenueCat package and refreshes cached customer info on success.
+    func purchase(package: Package, referralCode: String? = nil, referralCodeType: ReferralCodeType? = nil) async throws -> CustomerInfo {
+        if let referralCode, !referralCode.isEmpty {
+            await RevenueCatAttributeService.shared.syncReferralCode(
+                referralCode,
+                type: referralCodeType ?? .creator
+            )
+        }
+
+        let result = try await Purchases.shared.purchase(package: package)
+        
+        if result.userCancelled {
+            throw SubscriptionError.purchaseCancelled
+        }
+        
+        cachedCustomerInfo = result.customerInfo
+        lastFetchTime = Date()
+
+        if let user = UserService.shared.currentUser {
+            RevenueCatAttributeService.shared.syncFromUser(user)
+        }
+
+        notifySuccessfulPurchase()
+
+        return result.customerInfo
+    }
+
+    /// Notifies interested services after a successful subscription purchase.
+    func notifySuccessfulPurchase() {
+        RatingManager.shared.trackPremiumPurchase()
+    }
+    
+    /// Restores purchases and refreshes cached customer info on success.
+    func restorePurchases() async throws -> CustomerInfo {
+        let customerInfo = try await Purchases.shared.restorePurchases()
+        cachedCustomerInfo = customerInfo
+        lastFetchTime = Date()
+        return customerInfo
     }
 }
 
@@ -171,6 +267,8 @@ final class SubscriptionService {
 enum SubscriptionError: LocalizedError {
     case noCustomerInfo
     case networkError
+    case offeringNotFound
+    case purchaseCancelled
     case unknown
     
     var errorDescription: String? {
@@ -179,6 +277,10 @@ enum SubscriptionError: LocalizedError {
             return "No customer information available"
         case .networkError:
             return "Network error while fetching subscription status"
+        case .offeringNotFound:
+            return "No subscription offering available"
+        case .purchaseCancelled:
+            return "Purchase was cancelled"
         case .unknown:
             return "Unknown subscription error"
         }
@@ -223,6 +325,26 @@ enum ProFeature {
     case multiDaySessions
     case sessionEvents
     case nestReview
+
+    static let paywallFeatures: [ProFeature] = [
+        .unlimitedEntries,
+        .multiDaySessions,
+        .sessionEvents,
+        .nestReview
+    ]
+
+    var iconName: String {
+        switch self {
+        case .unlimitedEntries:
+            return "infinity"
+        case .multiDaySessions:
+            return "calendar.badge.clock"
+        case .sessionEvents:
+            return "calendar.day.timeline.left"
+        case .nestReview:
+            return "doc.text.magnifyingglass"
+        }
+    }
     
     func isAvailable(for tier: SubscriptionService.SubscriptionTier) -> Bool {
         switch tier {
@@ -312,9 +434,6 @@ extension PaywallPresentable where Self: PaywallViewControllerDelegate {
         let paywallViewController = PaywallViewController()
         paywallViewController.delegate = self
         present(paywallViewController, animated: true)
-        
-        // Mark the final setup step as complete when paywall is viewed
-        SetupService.shared.markStepComplete(.finalStep)
     }
     
     func showUpgradePrompt(for feature: ProFeature) {
@@ -338,6 +457,7 @@ extension PaywallPresentable where Self: PaywallViewControllerDelegate {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
         TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
+            SubscriptionService.shared.notifySuccessfulPurchase()
             Task {
                 await SubscriptionService.shared.refreshCustomerInfo()
                 self?.showToast(text: self?.proFeature.successMessage ?? "Subscription activated!")

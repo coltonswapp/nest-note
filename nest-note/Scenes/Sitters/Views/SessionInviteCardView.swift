@@ -7,7 +7,13 @@
 import UIKit
 
 class SessionInviteCardView: UIView {
-    
+
+    enum DisplayStyle {
+        case standard
+        case compact
+    }
+
+    private let displayStyle: DisplayStyle
     // Add content view to manage hierarchy
     private let contentView: UIView = {
         let view = UIView()
@@ -77,6 +83,8 @@ class SessionInviteCardView: UIView {
         label.textColor = .secondaryLabel
         return label
     }()
+
+    private var sessionDateBottomConstraint: NSLayoutConstraint?
     
     // App icon with shadow: use a container for shadow, inner image for rounded mask
     private let appIconContainer: UIView = {
@@ -102,11 +110,19 @@ class SessionInviteCardView: UIView {
     }()
     
     override init(frame: CGRect) {
+        self.displayStyle = .standard
+        super.init(frame: frame)
+        setupView()
+    }
+
+    init(displayStyle: DisplayStyle, frame: CGRect = .zero) {
+        self.displayStyle = displayStyle
         super.init(frame: frame)
         setupView()
     }
     
     required init?(coder: NSCoder) {
+        self.displayStyle = .standard
         super.init(coder: coder)
         setupView()
     }
@@ -119,6 +135,8 @@ class SessionInviteCardView: UIView {
     }
     
     private func setupView() {
+        applyTypography()
+
         backgroundColor = .clear
         layer.cornerRadius = 12
         layer.masksToBounds = false
@@ -130,11 +148,7 @@ class SessionInviteCardView: UIView {
         // Shadow is applied on container; the image view clips to its rounded corners
         
         // Configure top pattern image using NNAssetType.rectanglePattern
-        if let image = UIImage(named: NNAssetType.rectanglePattern.rawValue) {
-            topPatternView.image = image
-            topPatternView.contentMode = .scaleAspectFill
-            topPatternView.alpha = NNAssetType.rectanglePattern.defaultAlpha
-        }
+        applyBannerTint(NNColors.primary)
 
         // Add content view (clipping container)
         addSubview(contentView)
@@ -146,9 +160,6 @@ class SessionInviteCardView: UIView {
         
         // Badge setup
         inviteBadgeView.addSubview(inviteBadgeLabel)
-        inviteBadgeView.backgroundColor = NNColors.primaryOpaque
-        inviteBadgeView.layer.borderColor = NNColors.primary.cgColor
-        inviteBadgeLabel.textColor = NNColors.primary
         
         // Add content elements
         [inviteBadgeView, appIconContainer, nestNameLabel, sessionDateLabel].forEach { view in
@@ -157,6 +168,8 @@ class SessionInviteCardView: UIView {
         }
         // Place the icon image inside the shadow container
         appIconContainer.addSubview(appIconView)
+
+        let metrics = layoutMetrics(for: displayStyle)
         
         NSLayoutConstraint.activate([
             // Content view constraints
@@ -169,7 +182,7 @@ class SessionInviteCardView: UIView {
             topPatternView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: -12),
             topPatternView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             topPatternView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            topPatternView.heightAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.4),
+            topPatternView.heightAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: metrics.patternHeightMultiplier),
 
             // Perforation directly under the pattern
             perforationView.topAnchor.constraint(equalTo: topPatternView.bottomAnchor),
@@ -182,15 +195,15 @@ class SessionInviteCardView: UIView {
             inviteBadgeView.centerYAnchor.constraint(equalTo: perforationView.centerYAnchor),
 
             // Badge label padding
-            inviteBadgeLabel.topAnchor.constraint(equalTo: inviteBadgeView.topAnchor, constant: 6),
-            inviteBadgeLabel.leadingAnchor.constraint(equalTo: inviteBadgeView.leadingAnchor, constant: 14),
-            inviteBadgeLabel.trailingAnchor.constraint(equalTo: inviteBadgeView.trailingAnchor, constant: -14),
-            inviteBadgeLabel.bottomAnchor.constraint(equalTo: inviteBadgeView.bottomAnchor, constant: -6),
+            inviteBadgeLabel.topAnchor.constraint(equalTo: inviteBadgeView.topAnchor, constant: metrics.badgeVerticalPadding),
+            inviteBadgeLabel.leadingAnchor.constraint(equalTo: inviteBadgeView.leadingAnchor, constant: metrics.badgeHorizontalPadding),
+            inviteBadgeLabel.trailingAnchor.constraint(equalTo: inviteBadgeView.trailingAnchor, constant: -metrics.badgeHorizontalPadding),
+            inviteBadgeLabel.bottomAnchor.constraint(equalTo: inviteBadgeView.bottomAnchor, constant: -metrics.badgeVerticalPadding),
 
             // App icon container below perforation
             appIconContainer.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            appIconContainer.topAnchor.constraint(equalTo: perforationView.bottomAnchor, constant: 48),
-            appIconContainer.widthAnchor.constraint(equalToConstant: 100),
+            appIconContainer.topAnchor.constraint(equalTo: perforationView.bottomAnchor, constant: metrics.iconTopSpacing),
+            appIconContainer.widthAnchor.constraint(equalToConstant: metrics.iconSize),
             appIconContainer.heightAnchor.constraint(equalTo: appIconContainer.widthAnchor),
 
             // Icon fills its container
@@ -200,17 +213,97 @@ class SessionInviteCardView: UIView {
             appIconView.bottomAnchor.constraint(equalTo: appIconContainer.bottomAnchor),
 
             // Title and dates centered under icon
-            nestNameLabel.topAnchor.constraint(equalTo: appIconContainer.bottomAnchor, constant: 24),
-            nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            nestNameLabel.topAnchor.constraint(equalTo: appIconContainer.bottomAnchor, constant: metrics.titleTopSpacing),
+            nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
+            nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding),
 
-            sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: 8),
-            sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20)
+            sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: metrics.dateTopSpacing),
+            sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
+            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding)
         ])
+
+        if let bottomPadding = metrics.bottomPadding {
+            sessionDateBottomConstraint = sessionDateLabel.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor,
+                constant: -bottomPadding
+            )
+            sessionDateBottomConstraint?.isActive = true
+        }
+    }
+
+    private func applyTypography() {
+        switch displayStyle {
+        case .standard:
+            nestNameLabel.font = .h1
+            inviteBadgeLabel.font = .h3
+            sessionDateLabel.font = .bodyXL
+            appIconView.layer.cornerRadius = 16
+        case .compact:
+            // Midway between standard and the previous compact sizes
+            nestNameLabel.font = .h2
+            inviteBadgeLabel.font = .h4
+            sessionDateLabel.font = .bodyM
+            appIconView.layer.cornerRadius = 14
+        }
+    }
+
+    private struct LayoutMetrics {
+        let badgeVerticalPadding: CGFloat
+        let badgeHorizontalPadding: CGFloat
+        let iconTopSpacing: CGFloat
+        let iconSize: CGFloat
+        let titleTopSpacing: CGFloat
+        let dateTopSpacing: CGFloat
+        let horizontalPadding: CGFloat
+        let bottomPadding: CGFloat?
+        let patternHeightMultiplier: CGFloat
+    }
+
+    private func layoutMetrics(for style: DisplayStyle) -> LayoutMetrics {
+        switch style {
+        case .standard:
+            return LayoutMetrics(
+                badgeVerticalPadding: 6,
+                badgeHorizontalPadding: 14,
+                iconTopSpacing: 48,
+                iconSize: 75,
+                titleTopSpacing: 24,
+                dateTopSpacing: 8,
+                horizontalPadding: 20,
+                bottomPadding: nil,
+                patternHeightMultiplier: 0.4
+            )
+        case .compact:
+            return LayoutMetrics(
+                badgeVerticalPadding: 5,
+                badgeHorizontalPadding: 12,
+                iconTopSpacing: 32,
+                iconSize: 63,
+                titleTopSpacing: 14,
+                dateTopSpacing: 6,
+                horizontalPadding: 20,
+                bottomPadding: 20,
+                patternHeightMultiplier: 0.36
+            )
+        }
     }
     
-    func configure(with session: SessionItem, invite: Invite) {
+    func applyBannerTint(_ color: UIColor) {
+        if let image = UIImage(named: NNAssetType.rectanglePattern.rawValue)?.withRenderingMode(.alwaysTemplate) {
+            topPatternView.image = image
+            topPatternView.contentMode = .scaleAspectFill
+            topPatternView.tintColor = color
+            topPatternView.alpha = NNAssetType.rectanglePattern.defaultAlpha
+        }
+
+        inviteBadgeView.backgroundColor = NNColors.primaryOpaque
+        inviteBadgeView.layer.borderColor = NNColors.primary.cgColor
+        inviteBadgeLabel.textColor = NNColors.primary
+    }
+    
+    func configure(with session: SessionItem, invite: Invite, bannerTintColor: UIColor? = nil) {
+        applyBannerTint(bannerTintColor ?? NNColors.primary)
+
         // Configure nest name - if owner is viewing a sitter-initiated request with "Unknown Nest",
         // show the current nest's name instead (since the owner will be accepting it into their nest)
         if ModeManager.shared.isNestOwnerMode,

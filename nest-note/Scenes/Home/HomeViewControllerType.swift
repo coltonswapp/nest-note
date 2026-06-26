@@ -36,8 +36,9 @@ enum HomeSection: Int {
     case currentSession
     case upcomingSessions
     case events
-    case setupProgress
     case sitterInfoBanner
+    case premiumPromo
+    case readinessScore
 }
 
 enum HomeItem: Hashable {
@@ -50,8 +51,9 @@ enum HomeItem: Hashable {
     case events
     case sessionEvent(SessionEvent)
     case moreEvents(Int)
-    case setupProgress(current: Int, total: Int)
     case sitterInfoBanner
+    case premiumPromo
+    case readinessScore(score: Int, tierLabel: String)
 
     func hash(into hasher: inout Hasher) {
         switch self {
@@ -83,12 +85,14 @@ enum HomeItem: Hashable {
         case .moreEvents(let count):
             hasher.combine(8)
             hasher.combine(count)
-        case .setupProgress(let current, let total):
-            hasher.combine(9)
-            hasher.combine(current)
-            hasher.combine(total)
         case .sitterInfoBanner:
             hasher.combine(10)
+        case .premiumPromo:
+            hasher.combine(11)
+        case .readinessScore(let score, let tierLabel):
+            hasher.combine(12)
+            hasher.combine(score)
+            hasher.combine(tierLabel)
         }
     }
     
@@ -112,10 +116,12 @@ enum HomeItem: Hashable {
             return e1 == e2
         case let (.moreEvents(c1), .moreEvents(c2)):
             return c1 == c2
-        case let (.setupProgress(c1, t1), .setupProgress(c2, t2)):
-            return c1 == c2 && t1 == t2
         case (.sitterInfoBanner, .sitterInfoBanner):
             return true
+        case (.premiumPromo, .premiumPromo):
+            return true
+        case let (.readinessScore(s1, t1), .readinessScore(s2, t2)):
+            return s1 == s2 && t1 == t2
         default:
             return false
         }
@@ -153,18 +159,7 @@ extension HomeViewControllerType {
                 section.boundarySupplementaryItems = [header]
                 return section
                 
-            case .setupProgress:
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
-                let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
-                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
-                let section = NSCollectionLayoutSection(group: group)
-                section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
-                // No header for setup progress section
-                return section
-                
             case .nest:
-                // Compact nest cell with reduced height
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(80))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
                 let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(80))
@@ -199,12 +194,33 @@ extension HomeViewControllerType {
                 return section
 
             case .sitterInfoBanner:
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let height = SitterInfoBannerCell.preferredHeight
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
                 section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 18, bottom: 8, trailing: 18)
+                return section
+
+            case .premiumPromo:
+                let height = PremiumPromoVariant.active.preferredHeight
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 18, bottom: 20, trailing: 18)
+                return section
+
+            case .readinessScore:
+                let height = NestReadinessBannerCell.preferredHeight
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
                 return section
             }
         }
@@ -235,8 +251,7 @@ extension HomeViewControllerType {
         
         Task {
             do {
-                let fcmToken = try await Messaging.messaging().token()
-                try await UserService.shared.updateFCMToken(fcmToken)
+                try await UserService.shared.fetchAndPersistFCMToken()
                 Logger.log(level: .info, category: .general, message: "Successfully updated FCM token.")
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to update FCM token: \(error.localizedDescription)")

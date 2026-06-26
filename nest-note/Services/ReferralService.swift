@@ -14,25 +14,43 @@ final class ReferralService {
     private init() {}
     
     // MARK: - Referral Code Validation
+    /// Validates a referral code and returns metadata for paywall branching.
+    func validateReferralCodeInfo(_ referralCode: String) async throws -> ReferralCodeInfo? {
+        let cleanCode = referralCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        guard cleanCode.count >= 2 && cleanCode.count <= 20 else {
+            return nil
+        }
+
+        let validCodeDoc = try await db.collection("valid_referral_codes").document(cleanCode).getDocument()
+
+        guard validCodeDoc.exists,
+              let data = validCodeDoc.data(),
+              let isActive = data["isActive"] as? Bool,
+              isActive else {
+            return nil
+        }
+
+        let type = ReferralCodeType.fromFirestoreValue(data["type"] as? String)
+        let displayName = (data["creatorName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sitterUserId = data["sitterUserId"] as? String
+
+        return ReferralCodeInfo(
+            code: cleanCode,
+            type: type,
+            displayName: displayName?.isEmpty == false ? displayName! : cleanCode,
+            sitterUserId: sitterUserId
+        )
+    }
+
     /// Validates a referral code format and checks if it exists in the database
     /// - Parameter referralCode: The referral code entered by user
     /// - Returns: The clean referral code if valid and exists, nil otherwise
     func validateReferralCode(_ referralCode: String) async throws -> String? {
-        let cleanCode = referralCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        
-        // Basic validation - referral codes should be at least 2 characters
-        guard cleanCode.count >= 2 && cleanCode.count <= 20 else {
+        guard let info = try await validateReferralCodeInfo(referralCode) else {
             return nil
         }
-        
-        // Check if the code exists in the valid codes collection
-        let validCodeDoc = try await db.collection("valid_referral_codes").document(cleanCode).getDocument()
-        
-        guard validCodeDoc.exists else {
-            return nil
-        }
-        
-        return cleanCode
+        return info.code
     }
     
     /// Quick format validation without database lookup (for UI feedback)
@@ -63,28 +81,47 @@ final class ReferralService {
     ///   - userRole: The role selected by the user ("nester" or "sitter")
     /// - Throws: Error if the referral cannot be recorded
     func recordReferral(referralCode: String, for userId: String, email: String, role: String) async throws {
-        guard let validReferralCode = try await validateReferralCode(referralCode) else {
+        guard let codeInfo = try await validateReferralCodeInfo(referralCode) else {
             throw ReferralError.invalidCode
         }
-        
-        // Create referral record
+
+        if codeInfo.type == .sitter {
+            guard role == NestUser.UserType.nestOwner.rawValue else {
+                throw ReferralError.invalidCode
+            }
+            if let sitterUserId = codeInfo.sitterUserId, sitterUserId == userId {
+                throw ReferralError.selfReferral
+            }
+            if try await hasExistingReferral(for: userId) {
+                throw ReferralError.duplicateReferral
+            }
+        }
+
         let referral = Referral(
-            referralCode: validReferralCode,
+            referralCode: codeInfo.code,
             referredUserId: userId,
             referredUserEmail: email,
-            userRole: role
+            userRole: role,
+            referrerUserId: codeInfo.sitterUserId
         )
         
-        // Save to Firestore
         try await saveReferral(referral)
         
         // Update referral summary
-        try await updateReferralSummary(for: validReferralCode)
+        try await updateReferralSummary(for: codeInfo.code)
         
         // Track analytics
         trackReferralEvent(referral)
         
-        Logger.log(level: .info, category: .referral, message: "Recorded referral for code: \(validReferralCode), user: \(userId)")
+        Logger.log(level: .info, category: .referral, message: "Recorded referral for code: \(codeInfo.code), user: \(userId)")
+    }
+
+    private func hasExistingReferral(for userId: String) async throws -> Bool {
+        let snapshot = try await db.collection(referralsCollection)
+            .whereField("referredUserId", isEqualTo: userId)
+            .limit(to: 1)
+            .getDocuments()
+        return !snapshot.documents.isEmpty
     }
     
     // MARK: - Private Methods
@@ -231,6 +268,7 @@ final class ReferralService {
         // Create the referral code document
         let referralCodeData: [String: Any] = [
             "code": cleanCode,
+            "type": ReferralCodeType.creator.rawValue,
             "creatorName": creatorName,
             "creatorEmail": creatorEmail ?? "",
             "notes": notes ?? "",
@@ -365,6 +403,7 @@ struct RecentReferral {
 enum ReferralError: LocalizedError {
     case invalidCode
     case duplicateReferral
+    case selfReferral
     case networkError
     case codeAlreadyExists
     
@@ -374,6 +413,8 @@ enum ReferralError: LocalizedError {
             return "Invalid referral code format or code does not exist"
         case .duplicateReferral:
             return "Referral already recorded for this user"
+        case .selfReferral:
+            return "You cannot use your own referral code"
         case .networkError:
             return "Network error while processing referral"
         case .codeAlreadyExists:

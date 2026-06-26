@@ -140,15 +140,26 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
             
-            let infoItems: [Item] = [
-                .info(title: "Name", detail: user.personalInfo.name),
-                .info(title: "Email", detail: user.personalInfo.email),
-                .info(title: "Primary Role", detail: user.primaryRole.rawValue.capitalized),
-                .info(title: "Member Since", detail: dateFormatter.string(from: creationDate)),
-                .info(title: "Phone", detail: user.personalInfo.phone ?? "--"),
-                .info(title: "User ID", detail: user.id ?? "--"),
-                .modeSwitch
-            ]
+            let infoItems: [Item] = {
+                var items: [Item] = [
+                    .info(title: "Name", detail: user.personalInfo.name),
+                    .info(title: "Email", detail: user.personalInfo.email),
+                    .info(title: "Primary Role", detail: user.primaryRole.rawValue.capitalized),
+                    .info(title: "Member Since", detail: dateFormatter.string(from: creationDate)),
+                    .info(title: "Phone", detail: PhoneNumberFormatter.displayString(for: user.personalInfo.phone) ?? "--"),
+                ]
+                
+                if ModeManager.shared.currentMode == .sitter {
+                    items.append(.info(
+                        title: "Venmo Username",
+                        detail: VenmoPaymentHandler.displayUsername(user.personalInfo.venmoUsername)
+                    ))
+                }
+                
+                items.append(.info(title: "User ID", detail: user.id ?? "--"))
+                items.append(.modeSwitch)
+                return items
+            }()
             snapshot.appendItems(infoItems, toSection: .info)
         }
         
@@ -170,6 +181,14 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
             switch title {
             case "Name":
                 let editVC = EditUserInfoViewController(type: .name)
+                let nav = UINavigationController(rootViewController: editVC)
+                present(nav, animated: true)
+            case "Phone":
+                let editVC = EditUserInfoViewController(type: .phone)
+                let nav = UINavigationController(rootViewController: editVC)
+                present(nav, animated: true)
+            case "Venmo Username":
+                let editVC = EditUserInfoViewController(type: .venmoUsername)
                 let nav = UINavigationController(rootViewController: editVC)
                 present(nav, animated: true)
             default:

@@ -204,4 +204,69 @@ extension UIView {
         
         self.layer.add(rotationAnimation, forKey: "errorShakeAnimation")
     }
-} 
+
+    func prepareForSlideIn(slideDistance: CGFloat = 30) {
+        alpha = 0
+        transform = CGAffineTransform(translationX: 0, y: slideDistance)
+    }
+
+    func animateSlideIn(
+        duration: TimeInterval = 0.55,
+        delay: TimeInterval = 0,
+        allowsOvershoot: Bool = true,
+        completion: (() -> Void)? = nil
+    ) {
+        let animator: UIViewPropertyAnimator
+        if allowsOvershoot {
+            animator = UIViewPropertyAnimator(
+                duration: duration,
+                controlPoint1: CGPoint(x: 0.34, y: 1.56),
+                controlPoint2: CGPoint(x: 0.64, y: 1)
+            ) {
+                self.alpha = 1
+                self.transform = .identity
+            }
+        } else {
+            animator = UIViewPropertyAnimator(duration: duration, curve: .easeOut) {
+                self.alpha = 1
+                self.transform = .identity
+            }
+        }
+
+        if let completion {
+            animator.addCompletion { _ in completion() }
+        }
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                animator.startAnimation()
+            }
+        } else {
+            animator.startAnimation()
+        }
+    }
+
+    static func animateSlideIn(
+        _ views: [UIView],
+        duration: TimeInterval = 0.55,
+        stagger: TimeInterval = 0.07,
+        initialDelay: TimeInterval = 0,
+        allowsOvershoot: Bool = true,
+        completion: (() -> Void)? = nil
+    ) {
+        guard !views.isEmpty else {
+            completion?()
+            return
+        }
+
+        for (index, view) in views.enumerated() {
+            let isLast = index == views.count - 1
+            let delay = initialDelay + (TimeInterval(index) * stagger)
+            view.animateSlideIn(duration: duration, delay: delay, allowsOvershoot: allowsOvershoot) {
+                if isLast {
+                    completion?()
+                }
+            }
+        }
+    }
+}

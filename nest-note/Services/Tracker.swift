@@ -72,8 +72,11 @@ class Tracker {
         
         // MARK: - Referral Related Events
         case referralCodeEntered = "referralCodeEntered"
+        case referralCodeApplied = "referralCodeApplied"
         case referralRecorded = "referralRecorded"
         case referralValidationFailed = "referralValidationFailed"
+        case sitterReferralInviteCopied = "sitterReferralInviteCopied"
+        case sitterReferralConversionPending = "sitterReferralConversionPending"
 
         // MARK: - Onboarding Step-Specific Events
         case onboardingStepStarted = "onboardingStepStarted"
@@ -128,6 +131,27 @@ class Tracker {
         }
 
         Analytics.logEvent(eventName, parameters: parameters)
+    }
+
+    func trackReferralCodeApplied(type: ReferralCodeType, source: String, code: String) {
+        var parameters: [String: Any] = [
+            "referral_code_type": type.rawValue,
+            "source": source,
+            "referral_code": code,
+        ]
+        if let userID = cachedUserID {
+            parameters["user_id"] = userID
+        }
+        Analytics.logEvent(NNEventName.referralCodeApplied.rawValue, parameters: parameters)
+        track(.referralCodeEntered)
+    }
+
+    func trackSitterReferralInviteCopied(hasVenmo: Bool) {
+        var parameters: [String: Any] = ["has_venmo": hasVenmo]
+        if let userID = cachedUserID {
+            parameters["user_id"] = userID
+        }
+        Analytics.logEvent(NNEventName.sitterReferralInviteCopied.rawValue, parameters: parameters)
     }
 
     // MARK: - Onboarding Step Tracking

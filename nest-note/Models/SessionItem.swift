@@ -77,6 +77,7 @@ struct AssignedSitter: Identifiable, Hashable, Codable {
     var name: String
     var email: String
     var userID: String?  // Optional if they have an account
+    var venmoUsername: String? = nil
     var inviteStatus: SessionInviteStatus 
     var inviteID: String?  // Reference to invite if one exists
     

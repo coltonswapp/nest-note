@@ -40,6 +40,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Initialize rating manager to track app launches
         _ = RatingManager.shared
+        PremiumPromoBannerStore.recordAppLaunch()
         
         // Initialize TikTok Business SDK for attribution
         TikTokTracker.shared.configure()
@@ -78,11 +79,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     
     // MARK: - APNs Registration
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        Messaging.messaging().setAPNSToken(deviceToken, type: .unknown)
-        Logger.log(level: .info, category: .general, message: "didRegisterForRemoteNotifications called...")
+        #if DEBUG
+        Messaging.messaging().setAPNSToken(deviceToken, type: .sandbox)
+        #else
+        Messaging.messaging().setAPNSToken(deviceToken, type: .prod)
+        #endif
+        UserService.shared.handleAPNSTokenRegistered()
+        Logger.log(level: .info, category: .general, message: "didRegisterForRemoteNotifications called with APNS token")
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        UserService.shared.handleAPNSRegistrationFailed(error)
         Logger.log(level: .error, category: .general, message: "Failed to register for remote notifications: \(error.localizedDescription)")
     }
     
@@ -94,7 +101,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             Logger.log(level: .error, category: .general, message: "FCM token is nil")
             return
         }
-        
+
+        UserService.shared.handleFCMTokenDelivered(fcmToken)
         Logger.log(level: .info, category: .general, message: "Attempting to update FCM token in Firestore...")
         
         Task {

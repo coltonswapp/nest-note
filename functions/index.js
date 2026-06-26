@@ -2,13 +2,15 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onCall} = require("firebase-functions/v2/https");
+const {onCall, onRequest} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const sgMail = require("@sendgrid/mail");
+const {handleSessionAccepted} = require("./sessionAccepted");
 
 // Define the SendGrid API key secret
 const sendGridApiKey = defineSecret("SENDGRID_API_KEY");
+const revenueCatWebhookAuthKey = defineSecret("REVENUECAT_WEBHOOK_AUTH_KEY");
 admin.initializeApp();
 
 // Initialize SendGrid API key (will be set when first email function is called)
@@ -1113,6 +1115,32 @@ exports.archiveOldSitterSessions = onSchedule("0 6 * * *", async (event) => {
 });
 
 /**
+ * Runs side effects when a sitter accepts a session invite.
+ */
+exports.onSessionAccepted = functions.firestore
+    .onDocumentUpdated("nests/{nestId}/sessions/{sessionId}", async (event) => {
+      const beforeData = event.data.before.data();
+      const afterData = event.data.after.data();
+      const {nestId, sessionId} = event.params;
+
+      try {
+        return await handleSessionAccepted({
+          db: admin.firestore(),
+          nestId,
+          sessionId,
+          before: beforeData,
+          after: afterData,
+        });
+      } catch (error) {
+        logger.error(
+            `[SessionAccepted] Orchestrator failed for session ${sessionId}: ` +
+            `${error.message}`,
+        );
+        return null;
+      }
+    });
+
+/**
  * Function that cleans up invite documents when a session is completed
  */
 exports.cleanupInviteOnComplete = functions.firestore
@@ -1224,3 +1252,172 @@ exports.cleanupOldInvites = onSchedule("0 0 */7 * *", async (event) => {
     throw new Error(`Failed to clean up old invites: ${error.message}`);
   }
 });
+
+/**
+ * RevenueCat webhook — records sitter referral conversions for manual Venmo payout.
+ * Qualifies on paid events (price > 0): INITIAL_PURCHASE and RENEWAL (trial conversion).
+ */
+exports.revenueCatWebhook = onRequest({
+  secrets: [revenueCatWebhookAuthKey],
+  cors: false,
+}, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const authHeader = req.get("Authorization") || "";
+  const expectedAuth = revenueCatWebhookAuthKey.value();
+  if (!expectedAuth || authHeader !== expectedAuth) {
+    logger.warn("RevenueCat webhook rejected: invalid authorization");
+    res.status(401).send("Unauthorized");
+    return;
+  }
+
+  const event = req.body && req.body.event;
+  if (!event) {
+    res.status(400).send("Missing event");
+    return;
+  }
+
+  const eventType = event.type;
+  const qualifyingTypes = ["INITIAL_PURCHASE", "RENEWAL"];
+  if (!qualifyingTypes.includes(eventType)) {
+    res.status(200).send("Ignored event type");
+    return;
+  }
+
+  const price = Number(event.price_in_purchased_currency || 0);
+  if (!(price > 0)) {
+    res.status(200).send("Ignored zero-price event");
+    return;
+  }
+
+  const attributes = event.subscriber_attributes || {};
+  const referralCode = getSubscriberAttribute(attributes, "referral_code");
+  const referralCodeType = getSubscriberAttribute(attributes, "referral_code_type");
+  const referredUserId = getSubscriberAttribute(attributes, "firebase_uid");
+
+  if (!referralCode || referralCodeType !== "sitter") {
+    res.status(200).send("Not a sitter referral");
+    return;
+  }
+
+  const db = admin.firestore();
+  const codeDoc = await db.collection("valid_referral_codes").doc(referralCode).get();
+  if (!codeDoc.exists) {
+    res.status(200).send("Unknown referral code");
+    return;
+  }
+
+  const codeData = codeDoc.data() || {};
+  if (codeData.type !== "sitter") {
+    res.status(200).send("Not a sitter code");
+    return;
+  }
+
+  const sitterUserId = codeData.sitterUserId;
+  if (!sitterUserId) {
+    res.status(200).send("Missing sitter user id");
+    return;
+  }
+
+  if (referredUserId && referredUserId === sitterUserId) {
+    res.status(200).send("Self referral blocked");
+    return;
+  }
+
+  const transactionId = event.transaction_id || event.id || `${referralCode}_${Date.now()}`;
+  const conversionRef = db.collection("referral_conversions").doc(transactionId);
+  const existing = await conversionRef.get();
+  if (existing.exists) {
+    res.status(200).send("Already recorded");
+    return;
+  }
+
+  let sitterName = codeData.creatorName || "Sitter";
+  let sitterEmail = codeData.creatorEmail || "";
+  let sitterVenmo = null;
+  let referredUserEmail = "";
+
+  try {
+    const sitterDoc = await db.collection("users").doc(sitterUserId).get();
+    if (sitterDoc.exists) {
+      const sitterData = sitterDoc.data() || {};
+      const personalInfo = sitterData.personalInfo || {};
+      sitterName = personalInfo.name || sitterName;
+      sitterEmail = personalInfo.email || sitterEmail;
+      sitterVenmo = personalInfo.venmoUsername || null;
+    }
+  } catch (error) {
+    logger.warn(`Failed to load sitter profile: ${error.message}`);
+  }
+
+  if (referredUserId) {
+    try {
+      const referredDoc = await db.collection("users").doc(referredUserId).get();
+      if (referredDoc.exists) {
+        const referredData = referredDoc.data() || {};
+        const referredPersonalInfo = referredData.personalInfo || {};
+        referredUserEmail = referredPersonalInfo.email || "";
+      }
+    } catch (error) {
+      logger.warn(`Failed to load referred user profile: ${error.message}`);
+    }
+  }
+
+  const productId = event.product_id || "";
+  const packageType = derivePackageType(productId);
+  const rewardAmountCents = codeData.rewardAmountCents || 1000;
+
+  const conversionData = {
+    referralCode,
+    referralCodeType: "sitter",
+    sitterUserId,
+    sitterName,
+    sitterEmail,
+    sitterVenmo,
+    referredUserId: referredUserId || "",
+    referredUserEmail,
+    productId,
+    packageType,
+    purchaseDate: admin.firestore.Timestamp.fromMillis(event.purchased_at_ms || Date.now()),
+    revenueUsd: price,
+    rewardAmountCents,
+    status: "pending_payout",
+    rcTransactionId: transactionId,
+    payoutBlockedReason: sitterVenmo ? null : "missing_venmo",
+    paidAt: null,
+    payoutNotes: null,
+  };
+
+  await conversionRef.set(conversionData);
+  logger.info(`Recorded sitter referral conversion for code ${referralCode}, txn ${transactionId}`);
+  res.status(200).send("OK");
+});
+
+/**
+ * Reads a RevenueCat subscriber attribute value.
+ * @param {Object} attributes Subscriber attributes map from webhook payload.
+ * @param {string} key Attribute key.
+ * @return {string|null} Attribute value or null.
+ */
+function getSubscriberAttribute(attributes, key) {
+  const entry = attributes[key];
+  if (!entry) return null;
+  if (typeof entry === "string") return entry;
+  if (entry.value != null) return String(entry.value);
+  return null;
+}
+
+/**
+ * Derives package type label from a RevenueCat / StoreKit product id.
+ * @param {string} productId Product identifier.
+ * @return {string} monthly, annual, or unknown.
+ */
+function derivePackageType(productId) {
+  const lower = (productId || "").toLowerCase();
+  if (lower.includes("month")) return "monthly";
+  if (lower.includes("annual") || lower.includes("year")) return "annual";
+  return "unknown";
+}

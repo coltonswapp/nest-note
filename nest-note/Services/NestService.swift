@@ -26,14 +26,17 @@ final class NestService: EntryRepository {
     @Published private(set) var currentNest: NestItem? {
         didSet {
             Logger.log(level: .info, category: .nestService, message: "Current nest set, id: \(currentNest?.id)")
-            // Update ItemRepository when nest changes
-            if let nestId = currentNest?.id {
-                itemRepository = FirebaseItemRepository(nestId: nestId)
-            } else {
+            guard let nestId = currentNest?.id else {
                 itemRepository = nil
+                clearImageCache()
+                return
             }
-            // Clear image cache when switching nests - following PlacesService pattern
-            clearImageCache()
+
+            // Only reset repository and image cache when switching nests — not when metadata updates
+            if oldValue?.id != nestId {
+                itemRepository = FirebaseItemRepository(nestId: nestId)
+                clearImageCache()
+            }
         }
     }
     @Published private(set) var isOwner: Bool = false
@@ -225,20 +228,6 @@ final class NestService: EntryRepository {
         return groupedEntries.values.flatMap { $0 }.count
     }
 
-    /// Item kinds that qualify for owner setup “first item” (matches onboarding copy: entries, places, routines).
-    private static let onboardingFirstItemTypes: Set<ItemType> = [.entry, .place, .routine]
-
-    private func notifyOwnerSetupFirstContentItemCreatedIfNeeded(_ type: ItemType) {
-        guard isOwner, Self.onboardingFirstItemTypes.contains(type) else { return }
-        SetupService.shared.markStepComplete(.addFirstEntry)
-    }
-
-    /// Count of nest items that should complete the “Add your first item” setup step.
-    func countOnboardingFirstItems() async throws -> Int {
-        let allItems = try await fetchAllItems()
-        return allItems.filter { Self.onboardingFirstItemTypes.contains($0.type) }.count
-    }
-    
     // MARK: - Category Methods
     private var cachedCategories: [NestCategory]?
     
@@ -248,26 +237,35 @@ final class NestService: EntryRepository {
             Logger.log(level: .info, category: .nestService, message: "Using cached categories")
             return cachedCategories
         }
-        
-        guard let nestId = currentNest?.id else {
-            throw NestError.noCurrentNest
+
+        if let inflightFetchCategoriesTask {
+            return try await inflightFetchCategoriesTask.value
         }
-        
-        Logger.log(level: .info, category: .nestService, message: "Fetching categories from Firestore")
-        let snapshot = try await db.collection("nests").document(nestId).collection("nestCategories").getDocuments()
-        let categories = try snapshot.documents.map { try $0.data(as: NestCategory.self) }
-        
-        // Cache the categories
-        self.cachedCategories = categories
-        
-        // Update current nest's categories
-        if var updatedNest = currentNest {
-            updatedNest.categories = categories
-            currentNest = updatedNest
+
+        let task = Task { [self] () throws -> [NestCategory] in
+            guard let nestId = currentNest?.id else {
+                throw NestError.noCurrentNest
+            }
+
+            Logger.log(level: .info, category: .nestService, message: "Fetching categories from Firestore")
+            let snapshot = try await db.collection("nests").document(nestId).collection("nestCategories").getDocuments()
+            let categories = try snapshot.documents.map { try $0.data(as: NestCategory.self) }
+
+            self.cachedCategories = categories
+
+            if var updatedNest = currentNest {
+                updatedNest.categories = categories
+                currentNest = updatedNest
+            }
+
+            Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories")
+            return categories
         }
-        
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories")
-        return categories
+
+        inflightFetchCategoriesTask = task
+        defer { inflightFetchCategoriesTask = nil }
+
+        return try await task.value
     }
     
     func refreshCategories() async throws -> [NestCategory] {
@@ -315,8 +313,6 @@ final class NestService: EntryRepository {
             
             // Log success event
             Tracker.shared.track(.entryCreated)
-            
-            notifyOwnerSetupFirstContentItemCreatedIfNeeded(.entry)
         } catch {
             // Log failure event
             Tracker.shared.track(.entryCreated, result: false, error: error.localizedDescription)
@@ -413,8 +409,6 @@ final class NestService: EntryRepository {
             
             // Log success event
             Tracker.shared.track(.routineCreated)
-            
-            notifyOwnerSetupFirstContentItemCreatedIfNeeded(.routine)
         } catch {
             // Log failure event
             Tracker.shared.track(.routineCreated, result: false, error: error.localizedDescription)
@@ -488,8 +482,6 @@ final class NestService: EntryRepository {
         updateItemInCache(item)
         // Clear entries cache to ensure fresh data (backward compatibility)
         clearEntriesCache()
-        
-        notifyOwnerSetupFirstContentItemCreatedIfNeeded(item.type)
 
         Logger.log(level: .info, category: .nestService, message: "Item created successfully: \(item.title) (\(item.type.rawValue))")
     }
@@ -535,6 +527,8 @@ final class NestService: EntryRepository {
     private var cachedItems: [BaseItem] = []
     private var lastFetchTime: Date?
     private let cacheValidityDuration: TimeInterval = 600 // 10 minutes - more reasonable for navigation
+    private var inflightFetchAllItemsTask: Task<[BaseItem], Error>?
+    private var inflightFetchCategoriesTask: Task<[NestCategory], Error>?
     
     // Computed property that filters places from cached items
     private var cachedPlaces: [PlaceItem]? {
@@ -565,19 +559,29 @@ final class NestService: EntryRepository {
         }
         
         Logger.log(level: .info, category: .nestService, message: "🌐 CACHE MISS: Fetching fresh data from backend")
-        
-        guard let itemRepository = itemRepository else {
-            throw NestError.noCurrentNest
+
+        if let inflightFetchAllItemsTask {
+            return try await inflightFetchAllItemsTask.value
         }
-        
-        let items = try await itemRepository.fetchItems()
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(items.count) total items from repository")
-        
-        // Update cache
-        cachedItems = items
-        lastFetchTime = Date()
-        
-        return items
+
+        let task = Task { [self] () throws -> [BaseItem] in
+            guard let itemRepository = itemRepository else {
+                throw NestError.noCurrentNest
+            }
+
+            let items = try await itemRepository.fetchItems()
+            Logger.log(level: .info, category: .nestService, message: "Fetched \(items.count) total items from repository")
+
+            cachedItems = items
+            lastFetchTime = Date()
+
+            return items
+        }
+
+        inflightFetchAllItemsTask = task
+        defer { inflightFetchAllItemsTask = nil }
+
+        return try await task.value
     }
     
     /// Invalidate the cache (call when items are created/updated/deleted)
