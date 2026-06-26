@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
@@ -23,6 +24,9 @@ final class UserService {
     
     // Store pending FCM token
     private var pendingFCMToken: String?
+    private var lastDeliveredFCMToken: String?
+    private var lastAPNSError: Error?
+    private var fetchFCMTokenTask: Task<Void, Error>?
     
     // Flags to prevent duplicate operations
     private var isSettingUp: Bool = false
@@ -58,19 +62,18 @@ final class UserService {
                 // This handles existing users logging in, while new users get logged in during profile creation
                 if Purchases.shared.appUserID != nestUser.id {
                     Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: RevenueCat user ID differs, logging in...")
-                    Purchases.shared.logIn(nestUser.id) { (customerInfo, created, error) in
-                        if let error = error {
+                    Task {
+                        do {
+                            _ = try await RevenueCatAttributeService.shared.logIn(appUserID: nestUser.id)
+                            await SubscriptionService.shared.refreshCustomerInfo()
+                            RevenueCatAttributeService.shared.syncFromUser(nestUser)
+                        } catch {
                             Logger.log(level: .error, category: .userService, message: "RevenueCat login error: \(error.localizedDescription)")
-                        } else {
-                            Logger.log(level: .info, category: .userService, message: "RevenueCat login successful for user: \(nestUser.id)")
-                            // Refresh subscription info after successful login
-                            Task {
-                                await SubscriptionService.shared.refreshCustomerInfo()
-                            }
                         }
                     }
                 } else {
                     Logger.log(level: .info, category: .userService, message: "🔄 AUTH STATE: RevenueCat already logged in with correct user ID: \(nestUser.id)")
+                    RevenueCatAttributeService.shared.syncFromUser(nestUser)
                 }
 
                 // Try to save any pending FCM token
@@ -166,6 +169,158 @@ final class UserService {
     }
     
     // MARK: - FCM Token Management
+    private static let maxStoredFCMTokens = 5
+    private static let pushRegistrationTimeout: TimeInterval = 15
+
+    enum PushRegistrationError: LocalizedError {
+        case apnsTimeout
+        case apnsRegistrationFailed(String)
+        case fcmUnavailable
+        case simulatorUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .apnsTimeout:
+                return "Timed out waiting for APNS registration"
+            case .apnsRegistrationFailed(let message):
+                return "APNS registration failed: \(message)"
+            case .fcmUnavailable:
+                return "FCM token is unavailable"
+            case .simulatorUnavailable:
+                return "Push token registration is unavailable on the iOS Simulator. Use a physical device to test FCM tokens and live push delivery."
+            }
+        }
+    }
+
+    private enum PushRegistrationWaitResult {
+        case apnsReady
+        case fcmToken(String)
+        case failed(Error)
+        case timeout
+    }
+
+    func handleAPNSTokenRegistered() {
+        lastAPNSError = nil
+        NotificationCenter.default.post(name: .apnsTokenDidRegister, object: nil)
+    }
+
+    func handleAPNSRegistrationFailed(_ error: Error) {
+        lastAPNSError = error
+        Logger.log(level: .error, category: .userService, message: "APNS registration failed: \(error.localizedDescription)")
+        NotificationCenter.default.post(name: .apnsTokenRegistrationFailed, object: error)
+    }
+
+    func handleFCMTokenDelivered(_ token: String) {
+        lastDeliveredFCMToken = token
+        NotificationCenter.default.post(name: .fcmTokenDidUpdate, object: token)
+    }
+
+    /// Ensures APNS registration has completed, fetches the current FCM token, and persists it.
+    func fetchAndPersistFCMToken() async throws {
+        if let existingTask = fetchFCMTokenTask {
+            try await existingTask.value
+            return
+        }
+
+        let task = Task<Void, Error> {
+            try await self.performFetchAndPersistFCMToken()
+        }
+        fetchFCMTokenTask = task
+        defer { fetchFCMTokenTask = nil }
+        try await task.value
+    }
+
+    private func performFetchAndPersistFCMToken() async throws {
+        if let lastDeliveredFCMToken {
+            try await updateFCMToken(lastDeliveredFCMToken)
+            return
+        }
+
+        if Messaging.messaging().apnsToken != nil {
+            let token = try await Messaging.messaging().token()
+            try await updateFCMToken(token)
+            return
+        }
+
+        await MainActor.run {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+
+        switch await waitForPushRegistration() {
+        case .fcmToken(let token):
+            try await updateFCMToken(token)
+        case .apnsReady:
+            let token = try await Messaging.messaging().token()
+            try await updateFCMToken(token)
+        case .failed(let error):
+            throw PushRegistrationError.apnsRegistrationFailed(error.localizedDescription)
+        case .timeout:
+            #if targetEnvironment(simulator)
+            throw PushRegistrationError.simulatorUnavailable
+            #else
+            throw PushRegistrationError.apnsTimeout
+            #endif
+        }
+    }
+
+    private func waitForPushRegistration() async -> PushRegistrationWaitResult {
+        if let lastDeliveredFCMToken {
+            return .fcmToken(lastDeliveredFCMToken)
+        }
+        if Messaging.messaging().apnsToken != nil {
+            return .apnsReady
+        }
+        if let lastAPNSError {
+            return .failed(lastAPNSError)
+        }
+
+        let deadline = Date().addingTimeInterval(Self.pushRegistrationTimeout)
+
+        return await withTaskGroup(of: PushRegistrationWaitResult.self) { group in
+            group.addTask {
+                for await _ in NotificationCenter.default.notifications(named: .apnsTokenDidRegister) {
+                    return .apnsReady
+                }
+                return .timeout
+            }
+            group.addTask {
+                for await notification in NotificationCenter.default.notifications(named: .fcmTokenDidUpdate) {
+                    if let token = notification.object as? String {
+                        return .fcmToken(token)
+                    }
+                }
+                return .timeout
+            }
+            group.addTask {
+                for await notification in NotificationCenter.default.notifications(named: .apnsTokenRegistrationFailed) {
+                    if let error = notification.object as? Error {
+                        return .failed(error)
+                    }
+                }
+                return .timeout
+            }
+            group.addTask {
+                while Date() < deadline {
+                    if let token = self.lastDeliveredFCMToken {
+                        return .fcmToken(token)
+                    }
+                    if Messaging.messaging().apnsToken != nil {
+                        return .apnsReady
+                    }
+                    if let error = self.lastAPNSError {
+                        return .failed(error)
+                    }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                return .timeout
+            }
+
+            let result = await group.next() ?? .timeout
+            group.cancelAll()
+            return result
+        }
+    }
+
     func updateFCMToken(_ token: String?) async throws {
         guard let token = token else {
             Logger.log(level: .error, category: .userService, message: "Received nil FCM token")
@@ -186,10 +341,21 @@ final class UserService {
         do {
             let snapshot = try await docRef.getDocument()
             var fcmTokens = snapshot.data()? ["fcmTokens"] as? [[String: Any]] ?? []
-            
-            // Check if the token already exists
-            if !fcmTokens.contains(where: { $0["token"] as? String == token }) {
-                fcmTokens.append(["token": token, "uploadedDate": Timestamp(date: Date())])
+            let now = Timestamp(date: Date())
+
+            if let existingIndex = fcmTokens.firstIndex(where: { $0["token"] as? String == token }) {
+                fcmTokens[existingIndex]["uploadedDate"] = now
+            } else {
+                fcmTokens.append(["token": token, "uploadedDate": now])
+            }
+
+            if fcmTokens.count > Self.maxStoredFCMTokens {
+                fcmTokens.sort { lhs, rhs in
+                    let lhsDate = (lhs["uploadedDate"] as? Timestamp)?.dateValue() ?? .distantPast
+                    let rhsDate = (rhs["uploadedDate"] as? Timestamp)?.dateValue() ?? .distantPast
+                    return lhsDate > rhsDate
+                }
+                fcmTokens = Array(fcmTokens.prefix(Self.maxStoredFCMTokens))
             }
             
             try await docRef.updateData([
@@ -235,6 +401,27 @@ final class UserService {
     }
     
     // MARK: - Notification Permissions
+    @discardableResult
+    func ensureNotificationsRegisteredForSessionAlerts() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        guard settings.authorizationStatus == .authorized else {
+            return false
+        }
+
+        do {
+            let prefs = currentUser?.personalInfo.notificationPreferences
+            if prefs?.sessionNotifications != true || prefs?.otherNotifications != true {
+                try await updateNotificationPreferences(.default)
+            }
+            try await fetchAndPersistFCMToken()
+            Logger.log(level: .info, category: .userService, message: "Session notification registration refreshed successfully")
+            return true
+        } catch {
+            Logger.log(level: .error, category: .userService, message: "Failed to register session notifications: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func requestNotificationPermissions() async {
         Logger.log(level: .info, category: .userService, message: "Requesting notification permissions")
         
@@ -283,10 +470,8 @@ final class UserService {
 //            await requestNotificationPermissions()
             
             // Try to get a fresh FCM token
-            if let fcmToken = try? await Messaging.messaging().token() {
-                try? await updateFCMToken(fcmToken)
-                Logger.log(level: .info, category: .userService, message: "Updated FCM token after login")
-            }
+            try? await fetchAndPersistFCMToken()
+            Logger.log(level: .info, category: .userService, message: "Updated FCM token after login")
             
             Tracker.shared.track(.regularLoginSucceeded)
             TikTokTracker.shared.trackLogin()
@@ -346,6 +531,8 @@ final class UserService {
                 personalInfo: .init(
                     name: info.fullName,
                     email: info.email,
+                    phone: info.phone.isEmpty ? nil : info.phone,
+                    venmoUsername: info.venmoUsername,
                     notificationPreferences: .default
                 ),
                 primaryRole: info.role,
@@ -567,7 +754,9 @@ final class UserService {
                 id: firebaseUser.uid,
                 personalInfo: .init(
                     name: fullName,
-                    email: email
+                    email: email,
+                    phone: info.phone.isEmpty ? nil : info.phone,
+                    venmoUsername: info.venmoUsername
                 ),
                 primaryRole: info.role,
                 roles: .init(
@@ -650,7 +839,9 @@ final class UserService {
                 id: firebaseUser.uid,
                 personalInfo: .init(
                     name: fullName,
-                    email: email
+                    email: email,
+                    phone: info.phone.isEmpty ? nil : info.phone,
+                    venmoUsername: info.venmoUsername
                 ),
                 primaryRole: info.role,
                 roles: .init(
@@ -848,6 +1039,11 @@ final class UserService {
             try auth.signOut()
             currentUser = nil
             isAuthenticated = false
+            pendingFCMToken = nil
+            lastDeliveredFCMToken = nil
+            lastAPNSError = nil
+            fetchFCMTokenTask?.cancel()
+            fetchFCMTokenTask = nil
             clearAuthState()
             
             // Optionally clear saved credentials from keychain
@@ -1130,25 +1326,13 @@ final class UserService {
             // This ensures any purchases made during onboarding get properly attributed
             Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Logging in to RevenueCat with user ID: \(user.id)")
 
-            await withCheckedContinuation { continuation in
-                Purchases.shared.logIn(user.id) { (customerInfo, created, error) in
-                    if let error = error {
-                        Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: RevenueCat login error: \(error.localizedDescription)")
-                    } else {
-                        Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ RevenueCat login successful for user: \(user.id)")
-                        if created {
-                            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: New RevenueCat customer created")
-                        } else {
-                            Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Existing RevenueCat customer found")
-                        }
-
-                        // Refresh subscription info after successful login
-                        Task {
-                            await SubscriptionService.shared.refreshCustomerInfo()
-                        }
-                    }
-                    continuation.resume()
-                }
+            do {
+                _ = try await RevenueCatAttributeService.shared.logIn(appUserID: user.id)
+                Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ RevenueCat login successful for user: \(user.id)")
+                await SubscriptionService.shared.refreshCustomerInfo()
+                RevenueCatAttributeService.shared.syncFromUser(user)
+            } catch {
+                Logger.log(level: .error, category: .userService, message: "💾 SAVE PROFILE: RevenueCat login error: \(error.localizedDescription)")
             }
 
         } catch {
@@ -1194,6 +1378,99 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "User name updated successfully to: \(newName)")
+    }
+    
+    func updatePhone(_ rawPhone: String) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+        
+        let digits = PhoneNumberFormatter.digits(from: rawPhone)
+        guard PhoneNumberFormatter.isValid(digits) else {
+            throw AuthError.invalidUserData
+        }
+        
+        let docRef = db.collection("users").document(currentUser.id)
+        try await docRef.updateData([
+            "personalInfo.phone": digits,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        self.currentUser?.personalInfo.phone = digits
+        saveAuthState()
+        
+        if let user = self.currentUser {
+            RevenueCatAttributeService.shared.syncFromUser(user)
+        }
+        
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .userService, message: "User phone updated successfully")
+    }
+    
+    func updateVenmoUsername(_ rawUsername: String) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+        
+        let trimmed = rawUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized: String?
+        if trimmed.isEmpty {
+            normalized = nil
+        } else if let value = VenmoPaymentHandler.normalizeUsername(trimmed) {
+            normalized = value
+        } else {
+            throw AuthError.invalidUserData
+        }
+        
+        let docRef = db.collection("users").document(currentUser.id)
+        if let normalized {
+            try await docRef.updateData([
+                "personalInfo.venmoUsername": normalized,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        } else {
+            try await docRef.updateData([
+                "personalInfo.venmoUsername": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        }
+        
+        self.currentUser?.personalInfo.venmoUsername = normalized
+        saveAuthState()
+        
+        try await patchVenmoUsernameOnAssignedSessions(userId: currentUser.id, venmoUsername: normalized)
+        
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+        
+        Logger.log(level: .info, category: .userService, message: "Venmo username updated successfully")
+    }
+    
+    private func patchVenmoUsernameOnAssignedSessions(userId: String, venmoUsername: String?) async throws {
+        let sitterSessionsRef = db.collection("users").document(userId).collection("sitterSessions")
+        let snapshot = try await sitterSessionsRef.getDocuments()
+        
+        for document in snapshot.documents {
+            guard let sitterSession = try? document.data(as: SitterSession.self) else { continue }
+            
+            let sessionRef = db.collection("nests").document(sitterSession.nestID)
+                .collection("sessions").document(sitterSession.id)
+            
+            let sessionSnapshot = try await sessionRef.getDocument()
+            guard sessionSnapshot.exists,
+                  let sessionData = sessionSnapshot.data(),
+                  let assignedSitterData = sessionData["assignedSitter"] as? [String: Any],
+                  let assignedUserID = assignedSitterData["userID"] as? String,
+                  assignedUserID == userId else {
+                continue
+            }
+            
+            if let venmoUsername {
+                try await sessionRef.updateData(["assignedSitter.venmoUsername": venmoUsername])
+            } else {
+                try await sessionRef.updateData(["assignedSitter.venmoUsername": FieldValue.delete()])
+            }
+        }
     }
     
     func updateNotificationPreferences(_ preferences: NestUser.NotificationPreferences) async throws {

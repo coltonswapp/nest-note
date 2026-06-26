@@ -22,6 +22,8 @@ final class FeatureFlagService {
         case captureSignupLogs = "capture_signup_logs"
         /// When enabled, shows pilot `pilot_card` items in the nest UI (extensibility pipeline).
         case pilotCardItemsEnabled = "pilot_card_items_enabled"
+        case nestReadinessScoreEnabled = "nest_readiness_score_enabled"
+        case sitterReferralProgramEnabled = "sitter_referral_program_enabled"
         
         var defaultValue: Bool {
             switch self {
@@ -32,6 +34,18 @@ final class FeatureFlagService {
             case .captureSignupLogs:
                 return false // Default to not capturing logs for privacy
             case .pilotCardItemsEnabled:
+                #if DEBUG
+                return true
+                #else
+                return false
+                #endif
+            case .nestReadinessScoreEnabled:
+                #if DEBUG
+                return true
+                #else
+                return false
+                #endif
+            case .sitterReferralProgramEnabled:
                 #if DEBUG
                 return true
                 #else
@@ -233,9 +247,22 @@ final class FeatureFlagService {
     /// - Returns: "free" or "pro" based on debugAsProUser flag
     func getDebugUserStatus() -> String {
         #if DEBUG
-        return isEnabled(.debugAsProUser) ? "pro" : "free"
+        return debugProUserOverrideValue() ? "pro" : "free"
         #else
         return "free"
+        #endif
+    }
+
+    /// Reads the debug-as-pro flag without emitting feature-flag debug logs (for UI display).
+    func debugProUserOverrideValue() -> Bool {
+        #if DEBUG
+        let overrideKey = "debug_override_\(FeatureFlag.debugAsProUser.rawValue)"
+        if UserDefaults.standard.object(forKey: overrideKey) != nil {
+            return UserDefaults.standard.bool(forKey: overrideKey)
+        }
+        return remoteConfig.configValue(forKey: FeatureFlag.debugAsProUser.rawValue).boolValue
+        #else
+        return false
         #endif
     }
     

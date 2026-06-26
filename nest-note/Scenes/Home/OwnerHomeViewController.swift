@@ -10,16 +10,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     private var cancellables = Set<AnyCancellable>()
     private let nestService = NestService.shared
     private let sessionService = SessionService.shared
-    private let setupService = SetupService.shared
     private var currentSession: SessionItem?
     private var pinnedCategories: [String] = []
     private var categories: [NestCategory] = []
-    
-    // Track whether we've checked if setup should be shown
-    private var hasCheckedSetupStatus = false
-    
-    // Track whether we've already shown the setup tip in this session
-    private var hasShownSetupTip = false
     
     // Track whether we've already shown the your nest tip in this session
     private var hasShownYourNestTip = false
@@ -31,6 +24,20 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
 
     // Track if we're currently switching modes to avoid showing nest setup during transition
     private var isSwitchingModes = false
+
+    // Premium promo — default to subscribed to avoid a flash before the first check completes
+    private var hasProSubscription = true
+    private var isFreeTrialEligible = false
+
+    private var readinessResult: NestReadinessResult?
+    private var previousReadinessScore: Int?
+    private var hasAppearedBefore = false
+    private var isRefreshingData = false
+    private var pendingRefreshForceFlag = false
+
+    private var isNestReadinessEnabled: Bool {
+        FeatureFlagService.shared.isEnabled(.nestReadinessScoreEnabled)
+    }
 
     // Create Session button
     private lazy var createSessionButton: NNPrimaryLabeledButton = {
@@ -44,15 +51,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         button.isHidden = true // Initially hidden
         return button
     }()
-    
-    private var hasCompletedSetup: Bool {
-        return setupService.hasCompletedSetup
-    }
-    
-    private var setupProgress: Int {
-        // Count the number of completed steps
-        return SetupStepType.allCases.filter { setupService.isStepComplete($0) }.count
-    }
     
     private lazy var loadingSpinner: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -73,19 +71,41 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         super.viewDidLoad()
         configureDataSource()
         setupObservers()
-        Logger.log(level: .info, category: .general, message: "Setup completion status: \(hasCompletedSetup ? "Completed" : "Not Completed"), Steps completed: \(setupProgress)/\(SetupStepType.allCases.count)")
         
-        // Check setup status when the view loads
-        checkSetupStatus()
+        checkSubscriptionStatus()
         
         // Check if nest setup is required (for cases where mode already changed)
         checkNestSetupRequirement()
+        
+        refreshData()
         
         DispatchQueue.main.async { [weak self] in
             self?.applyHomeScreenNavigationAppearance(appMode: .nestOwner)
         }
         
-//        setFCMToken()
+        setFCMToken()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        checkSubscriptionStatus()
+        if hasAppearedBefore {
+            reloadReadinessScoreIfNeeded()
+        }
+        hasAppearedBefore = true
+    }
+
+    private func reloadReadinessScoreIfNeeded() {
+        guard isNestReadinessEnabled else { return }
+
+        Task {
+            let result = try? await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.updateReadinessResult(result)
+                self.applySnapshot(animatingDifferences: true)
+            }
+        }
     }
     
     override func setup() {
@@ -116,10 +136,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     }
     
     private func setupObservers() {
-        // Subscribe to nest changes
+        // Only refresh when the active nest changes — not when metadata (categories, pins) updates
         NestService.shared.$currentNest
+            .map { $0?.id }
+            .removeDuplicates()
+            .dropFirst()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] nestID in
+                guard nestID != nil else { return }
                 self?.refreshData()
             }
             .store(in: &cancellables)
@@ -163,15 +187,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             }
             .store(in: &cancellables)
         
-        // Subscribe to setup step completion updates
-        NotificationCenter.default.publisher(for: .setupStepDidComplete)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                // Update the setup progress immediately
-                self?.applySnapshot(animatingDifferences: true)
-            }
-            .store(in: &cancellables)
-            
         // Subscribe to mode changes to check for nest setup requirement
         NotificationCenter.default.publisher(for: .modeDidChange)
             .receive(on: DispatchQueue.main)
@@ -187,6 +202,20 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self?.handleAutoRefresh()
             }
             .store(in: &cancellables)
+
+        #if DEBUG
+        NotificationCenter.default.publisher(for: .premiumPromoVariantDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.collectionView.collectionViewLayout.invalidateLayout()
+                var snapshot = self.dataSource.snapshot()
+                guard snapshot.itemIdentifiers.contains(.premiumPromo) else { return }
+                snapshot.reconfigureItems([.premiumPromo])
+                self.dataSource.apply(snapshot, animatingDifferences: false)
+            }
+            .store(in: &cancellables)
+        #endif
     }
     
     // MARK: - HomeViewControllerType Implementation
@@ -207,7 +236,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 cell.configure(with: name, subtitle: address, image: image)
                 cell.imageView.tintColor = .label
             }
-            
+
             cell.backgroundColor = .secondarySystemGroupedBackground
             cell.layer.cornerRadius = 12
             cell.layer.masksToBounds = true
@@ -244,21 +273,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 var backgroundConfig = UIBackgroundConfiguration.listCell()
                 backgroundConfig.backgroundColor = NNColors.primaryAlt
                 backgroundConfig.cornerRadius = 12
-                cell.backgroundConfiguration = backgroundConfig
-            }
-        }
-        
-        // Setup progress registration
-        let setupProgressCellRegistration = UICollectionView.CellRegistration<SetupProgressCell, HomeItem> { cell, indexPath, item in
-            if case let .setupProgress(current, total) = item {
-                cell.configure(title: "Finish Setting Up", current: current, total: total)
-                
-                // Configure the cell's background
-                var backgroundConfig = UIBackgroundConfiguration.listCell()
-                backgroundConfig.backgroundColor = NNColors.EventColors.blue.border
-                backgroundConfig.cornerRadius = 12
-                cell.subtitleLabel.textColor = NNColors.EventColors.blue.fill
-                cell.progressLabel.textColor = .white
                 cell.backgroundConfiguration = backgroundConfig
             }
         }
@@ -313,6 +327,33 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 cell.subtitleLabel.isHidden = true
             }
         }
+
+        let premiumPromoCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, HomeItem> { [weak self] cell, indexPath, item in
+            if case .premiumPromo = item {
+                cell.configure(
+                    variant: PremiumPromoVariant.active,
+                    ctaTitle: PremiumPromoCopy.ctaTitle(
+                        isFreeTrialEligible: self?.isFreeTrialEligible ?? false
+                    ),
+                    showsDismissButton: true
+                )
+                cell.onUpgradeTapped = { [weak self] in
+                    self?.presentPremiumPaywall()
+                }
+                cell.onDismissTapped = { [weak self] in
+                    self?.dismissPremiumPromoBanner()
+                }
+            }
+        }
+
+        let readinessBannerCellRegistration = UICollectionView.CellRegistration<NestReadinessBannerCell, HomeItem> { [weak self] cell, indexPath, item in
+            if case .readinessScore = item, let result = self?.readinessResult {
+                cell.configure(result: result, animated: true)
+                cell.onDismiss = { [weak self] in
+                    self?.dismissReadinessBanner()
+                }
+            }
+        }
         
         
         // Configure data source
@@ -342,9 +383,15 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     for: indexPath,
                     item: item
                 )
-            case .setupProgress:
+            case .premiumPromo:
                 return collectionView.dequeueConfiguredReusableCell(
-                    using: setupProgressCellRegistration,
+                    using: premiumPromoCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .readinessScore:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: readinessBannerCellRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -370,12 +417,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             case .quickAccess:
                 title = "Pinned Folders"
                 headerView.configure(title: title)
-            case .setupProgress:
-                // No header for setup progress section
+            case .readinessScore, .upcomingSessions, .events, .sitterInfoBanner, .premiumPromo:
                 headerView.configure(title: "")
                 headerView.isHidden = true
-            case .quickAccess, .upcomingSessions, .events, .sitterInfoBanner:
-                return
             }
         }
         
@@ -390,34 +434,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     
     func applySnapshot(animatingDifferences: Bool = true) {
         var snapshot = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
-        
-        // Only check if setup flow should be shown if we've already checked the setup status
-        if hasCheckedSetupStatus && !hasCompletedSetup {
-            Task {
-                // Determine if setup flow should be shown based on entry count
-                let shouldShowSetup = await setupService.shouldShowSetupFlow()
-                
-                await MainActor.run {
-                    if shouldShowSetup {
-                        // Add the setup progress section only if we should show setup
-                        var updatedSnapshot = snapshot
-                        updatedSnapshot.appendSections([.setupProgress])
-                        updatedSnapshot.appendItems([.setupProgress(current: setupProgress, total: 6)], toSection: .setupProgress)
-                        snapshot = updatedSnapshot
-                    }
-                    
-                    // Continue with the rest of the snapshot
-                    continueSnapshot(snapshot: snapshot, animatingDifferences: animatingDifferences)
-                }
-            }
-        } else {
-            // Continue with snapshot without checking setup status
-            continueSnapshot(snapshot: snapshot, animatingDifferences: animatingDifferences)
-        }
+        continueSnapshot(snapshot: snapshot, animatingDifferences: animatingDifferences)
     }
     
     private func continueSnapshot(snapshot: NSDiffableDataSourceSnapshot<HomeSection, HomeItem>, animatingDifferences: Bool) {
         var updatedSnapshot = snapshot
+
+        insertPremiumPromoSection(into: &updatedSnapshot)
+        insertReadinessScoreSection(into: &updatedSnapshot)
         
         // Current session section if available
         if let session = currentSession {
@@ -454,23 +478,31 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         let hasCurrentSession = updatedSnapshot.sectionIdentifiers.contains(.currentSession)
         createSessionButton.isHidden = hasCurrentSession
 
-        // Show tips if current session, setup progress, or nest cell is visible
+        // Show tips if current session or nest cell is visible
         if updatedSnapshot.sectionIdentifiers.contains(.currentSession) ||
-           updatedSnapshot.sectionIdentifiers.contains(.setupProgress) ||
            updatedSnapshot.sectionIdentifiers.contains(.nest) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.showTips()
-                if updatedSnapshot.sectionIdentifiers.contains(.setupProgress) {
-                    self.hasShownSetupTip = true
-                }
             }
         }
     }
     
     func refreshData(forceRefresh: Bool = false) {
+        if isRefreshingData {
+            if forceRefresh {
+                pendingRefreshForceFlag = true
+            }
+            return
+        }
+
+        isRefreshingData = true
+        let shouldForceRefresh = forceRefresh || pendingRefreshForceFlag
+        pendingRefreshForceFlag = false
+
         guard let nestID = nestService.currentNest?.id else {
             // No current nest, clear current session and update UI
             currentSession = nil
+            isRefreshingData = false
             applySnapshot(animatingDifferences: true)
             return
         }
@@ -480,30 +512,45 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 loadingSpinner.startAnimating()
                 
                 // Fetch sessions, pinned categories, and categories concurrently
-                async let sessionsTask = sessionService.fetchSessions(nestID: nestID, forceRefresh: forceRefresh)
+                async let sessionsTask = sessionService.fetchSessions(nestID: nestID, forceRefresh: shouldForceRefresh)
                 async let pinnedCategoriesTask = nestService.fetchPinnedCategories()
                 async let categoriesTask = nestService.fetchCategories()
+                async let readinessTask: NestReadinessResult? = {
+                    guard self.isNestReadinessEnabled else { return nil }
+                    return try? await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
+                }()
                 
-                let (sessions, pinnedCategoryNames, categories) = try await (sessionsTask, pinnedCategoriesTask, categoriesTask)
+                let (sessions, pinnedCategoryNames, categories, readiness) = try await (sessionsTask, pinnedCategoriesTask, categoriesTask, readinessTask)
                 
                 // Update the current session based on freshly fetched data
                 // Only show sessions with inProgress status in the current session section
                 self.currentSession = sessions.inProgress.first
                 self.pinnedCategories = pinnedCategoryNames
                 self.categories = categories
+                self.updateReadinessResult(readiness)
                 
                 DispatchQueue.main.async { [weak self] in
-                    self?.loadingSpinner.stopAnimating()
-                    self?.applySnapshot(animatingDifferences: true)
+                    guard let self else { return }
+                    self.isRefreshingData = false
+                    if self.pendingRefreshForceFlag {
+                        self.refreshData(forceRefresh: true)
+                    }
+                    self.loadingSpinner.stopAnimating()
+                    self.applySnapshot(animatingDifferences: true)
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.loadingSpinner.stopAnimating()
-                    self?.currentSession = nil // Clear on error
-                    self?.pinnedCategories = []
-                    self?.categories = []
-                    self?.applySnapshot(animatingDifferences: true)
-                    self?.handleError(error)
+                    guard let self else { return }
+                    self.isRefreshingData = false
+                    if self.pendingRefreshForceFlag {
+                        self.refreshData(forceRefresh: true)
+                    }
+                    self.loadingSpinner.stopAnimating()
+                    self.currentSession = nil // Clear on error
+                    self.pinnedCategories = []
+                    self.categories = []
+                    self.applySnapshot(animatingDifferences: true)
+                    self.handleError(error)
                 }
             }
         }
@@ -578,14 +625,113 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         present(navController, animated: true)
     }
     
-    private func checkSetupStatus() {
+    private func checkSubscriptionStatus() {
         Task {
-            let shouldShow = await setupService.shouldShowSetupFlow()
+            async let hasPro = SubscriptionService.shared.hasProSubscription()
+            async let trialEligible = SubscriptionService.shared.isEligibleForFreeTrial()
+            let (pro, trial) = await (hasPro, trialEligible)
             await MainActor.run {
-                hasCheckedSetupStatus = true
-                applySnapshot(animatingDifferences: true)
+                let subscriptionChanged = hasProSubscription != pro
+                let trialChanged = isFreeTrialEligible != trial
+                hasProSubscription = pro
+                isFreeTrialEligible = trial
+
+                if subscriptionChanged || trialChanged {
+                    applySnapshot(animatingDifferences: true)
+                }
             }
         }
+    }
+
+    private func insertPremiumPromoSection(into snapshot: inout NSDiffableDataSourceSnapshot<HomeSection, HomeItem>) {
+        guard !hasProSubscription else { return }
+        guard PremiumPromoBannerStore.shouldShowHomeBanner else { return }
+        guard !shouldDeferPremiumPromoForReadiness() else { return }
+
+        if let firstSection = snapshot.sectionIdentifiers.first {
+            snapshot.insertSections([.premiumPromo], beforeSection: firstSection)
+        } else {
+            snapshot.appendSections([.premiumPromo])
+        }
+        snapshot.appendItems([.premiumPromo], toSection: .premiumPromo)
+    }
+
+    private func shouldDeferPremiumPromoForReadiness() -> Bool {
+        guard isNestReadinessEnabled,
+              let nestID = nestService.currentNest?.id,
+              !NestReadinessBannerStore.isHomeBannerDismissed(for: nestID) else {
+            return false
+        }
+        // While readiness is loading, defer promo so the score banner owns first landing.
+        guard let score = readinessResult?.totalScore else { return true }
+        return score < 20
+    }
+
+    private func insertReadinessScoreSection(into snapshot: inout NSDiffableDataSourceSnapshot<HomeSection, HomeItem>) {
+        guard isNestReadinessEnabled, let result = readinessResult else { return }
+        guard let nestID = nestService.currentNest?.id,
+              !NestReadinessBannerStore.isHomeBannerDismissed(for: nestID) else { return }
+
+        let item = HomeItem.readinessScore(score: result.totalScore, tierLabel: result.tierLabel)
+
+        if let sessionIndex = snapshot.sectionIdentifiers.firstIndex(of: .currentSession) {
+            snapshot.insertSections([.readinessScore], beforeSection: snapshot.sectionIdentifiers[sessionIndex])
+        } else if let nestIndex = snapshot.sectionIdentifiers.firstIndex(of: .nest) {
+            snapshot.insertSections([.readinessScore], beforeSection: snapshot.sectionIdentifiers[nestIndex])
+        } else {
+            snapshot.appendSections([.readinessScore])
+        }
+
+        snapshot.appendItems([item], toSection: .readinessScore)
+    }
+
+    private func dismissReadinessBanner() {
+        guard let nestID = nestService.currentNest?.id else { return }
+        NestReadinessBannerStore.dismissHomeBanner(for: nestID)
+        applySnapshot(animatingDifferences: true)
+    }
+
+    private func updateReadinessResult(_ result: NestReadinessResult?) {
+        guard let result else {
+            readinessResult = nil
+            return
+        }
+
+        if let previousReadinessScore, result.totalScore > previousReadinessScore {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                NestReadinessPointsAnimator.showGain(result.totalScore - previousReadinessScore, in: self.view)
+            }
+        }
+
+        previousReadinessScore = result.totalScore
+        readinessResult = result
+    }
+
+    private func presentReadinessDetail() {
+        let detailVC = NestReadinessDetailViewController()
+        detailVC.delegate = self
+        detailVC.modalPresentationStyle = .pageSheet
+        if let sheet = detailVC.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(detailVC, animated: true)
+    }
+
+    private func dismissPremiumPromoBanner() {
+        PremiumPromoBannerStore.dismissHomeBanner()
+        applySnapshot(animatingDifferences: true)
+    }
+
+    private func presentPremiumPaywall() {
+        let paywall = FeatureInfoPaywallViewController()
+        paywall.modalPresentationStyle = .pageSheet
+        if let sheet = paywall.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(paywall, animated: true)
     }
     
     private func iconForCategory(_ categoryName: String) -> String {
@@ -701,31 +847,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     func showTips() {
         trackScreenVisit()
         
-        // Priority 1: Setup tip (highest priority)
-        if let setupSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .setupProgress),
-           let _ = dataSource.snapshot().itemIdentifiers(inSection: .setupProgress).first,
-           NNTipManager.shared.shouldShowTip(OwnerHomeTips.finishSetupTip),
-           !hasShownSetupTip {
-            
-            let setupIndexPath = IndexPath(item: 0, section: setupSection)
-            
-            // Make sure the cell is visible
-            if let setupCell = collectionView.cellForItem(at: setupIndexPath) {
-                hasShownSetupTip = true
-                
-                // Show the tip anchored to the bottom of the setup cell
-                NNTipManager.shared.showTip(
-                    OwnerHomeTips.finishSetupTip,
-                    sourceView: setupCell,
-                    in: self,
-                    pinToEdge: .bottom,
-                    offset: CGPoint(x: 0, y: 8)
-                )
-            }
-            return // Always return after attempting to show this highest priority tip
-        }
-        
-        // Priority 2: Your Nest tip (second priority)
+        // Priority 1: Your Nest tip
         if let nestSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .nest),
            let _ = dataSource.snapshot().itemIdentifiers(inSection: .nest).first,
            NNTipManager.shared.shouldShowTip(OwnerHomeTips.yourNestTip),
@@ -750,7 +872,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             return // Always return after attempting to show this tip, even if cell not visible
         }
         
-        // Priority 3: Current session tip (lowest priority)
+        // Priority 2: Current session tip
         if let currentSessionSection = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .currentSession),
            let _ = dataSource.snapshot().itemIdentifiers(inSection: .currentSession).first,
            NNTipManager.shared.shouldShowTip(HomeTips.happeningNowTip),
@@ -823,10 +945,10 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
             let navController = UINavigationController(rootViewController: vc)
             navController.modalPresentationStyle = .pageSheet
             present(navController, animated: true)
-        case .setupProgress:
-            // Mark the setup tip as dismissed when user taps on it
-            NNTipManager.shared.dismissTip(OwnerHomeTips.finishSetupTip)
-            presentSetupFlow()
+        case .premiumPromo:
+            presentPremiumPaywall()
+        case .readinessScore:
+            presentReadinessDetail()
         default:
             break
         }
@@ -835,52 +957,12 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
     }
 }
 
-// MARK: - Setup Flow
-extension OwnerHomeViewController {
-    private func presentSetupFlow() {
-        Task {
-            // Check if we should show the setup flow based on entries
-            let shouldShowSetup = await setupService.shouldShowSetupFlow()
-            
-            if shouldShowSetup {
-                // Present the setup flow view controller
-                await MainActor.run {
-                    let setupVC = StickyOwnerSetupFlowViewController()
-                    setupVC.delegate = self
-                    let navController = UINavigationController(rootViewController: setupVC)
-                    present(navController, animated: true)
-                }
-            } else {
-                // If the user already has entries, just mark setup as complete
-                setupService.hasCompletedSetup = true
-                refreshData()
-                
-                await MainActor.run {
-                    showToast(text: "Setup already completed")
-                }
-            }
+// MARK: - Nest Readiness Detail
+extension OwnerHomeViewController: NestReadinessDetailViewControllerDelegate {
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didSelectCategory category: String) {
+        controller.dismiss(animated: true) { [weak self] in
+            self?.presentCategoryView(category: category)
         }
-    }
-}
-
-// MARK: - SetupFlowDelegate
-extension OwnerHomeViewController: SetupFlowDelegate {
-    func setupFlowDidComplete() {
-        // Log completion
-        Logger.log(level: .info, category: .general, message: "Setup flow completed by user")
-        
-        // Mark setup as completed
-        setupService.hasCompletedSetup = true
-        refreshData()
-    }
-    
-    func setupFlowDidUpdateStepStatus() {
-        // Log step update
-        let completedSteps = SetupStepType.allCases.filter { setupService.isStepComplete($0) }
-        Logger.log(level: .info, category: .general, message: "Setup step status updated - \(completedSteps.count)/\(SetupStepType.allCases.count) steps completed")
-
-        // Refresh the UI to reflect updated step status
-        refreshData()
     }
 }
 

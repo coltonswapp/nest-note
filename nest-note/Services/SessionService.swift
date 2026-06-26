@@ -37,6 +37,8 @@ class SessionService {
     
     var sessions: [SessionItem] = []
     private var sitterSessionCollection: SessionCollection?
+    private var inflightSessionsFetchTask: Task<[SessionItem], Error>?
+    private var inflightSessionsNestID: String?
     
     // Add these types at the top of the file
     enum SessionBucket: Int {
@@ -135,17 +137,32 @@ class SessionService {
     }
     
     func getAllSessions(nestID: String) async throws -> [SessionItem] {
-        Logger.log(level: .info, category: .sessionService, message: "Fetching all sessions for nest: \(nestID)")
-        
-        let sessionsRef = db.collection("nests")
-            .document(nestID)
-            .collection("sessions")
-        
-        let snapshot = try await sessionsRef.getDocuments()
-        let sessions = try snapshot.documents.compactMap { try $0.data(as: SessionItem.self) }
-        
-        Logger.log(level: .info, category: .sessionService, message: "Fetched \(sessions.count) sessions ✅")
-        return sessions
+        if let inflightSessionsFetchTask, inflightSessionsNestID == nestID {
+            return try await inflightSessionsFetchTask.value
+        }
+
+        let task = Task { [self] () throws -> [SessionItem] in
+            Logger.log(level: .info, category: .sessionService, message: "Fetching all sessions for nest: \(nestID)")
+
+            let sessionsRef = db.collection("nests")
+                .document(nestID)
+                .collection("sessions")
+
+            let snapshot = try await sessionsRef.getDocuments()
+            let sessions = try snapshot.documents.compactMap { try $0.data(as: SessionItem.self) }
+
+            Logger.log(level: .info, category: .sessionService, message: "Fetched \(sessions.count) sessions ✅")
+            return sessions
+        }
+
+        inflightSessionsFetchTask = task
+        inflightSessionsNestID = nestID
+        defer {
+            inflightSessionsFetchTask = nil
+            inflightSessionsNestID = nil
+        }
+
+        return try await task.value
     }
     
     // MARK: - Update
@@ -1179,6 +1196,7 @@ class SessionService {
                     existing.email = currentUser.email ?? existing.email
                 }
                 existing.inviteID = invite.id
+                existing.venmoUsername = UserService.shared.currentUser?.personalInfo.venmoUsername
                 updatedAssignedSitter = existing
             } else {
                 let currentUser = Auth.auth().currentUser
@@ -1191,17 +1209,9 @@ class SessionService {
                     name: joinerName,
                     email: joinerEmail,
                     userID: currentUserID,
+                    venmoUsername: UserService.shared.currentUser?.personalInfo.venmoUsername,
                     inviteStatus: .accepted,
                     inviteID: invite.id
-                )
-            }
-            
-            // Update the saved sitter with the user's ID when we have a target email
-            if let targetEmail = invite.sitterEmail, !targetEmail.isEmpty {
-                try await updateSavedSitterWithUserID(
-                    nestID: invite.nestID,
-                    sitterEmail: targetEmail,
-                    userID: currentUserID
                 )
             }
             
@@ -1244,20 +1254,6 @@ class SessionService {
             // Log failure event
             Tracker.shared.track(.sessionInviteAccepted, result: false, error: error.localizedDescription)
             throw error
-        }
-    }
-    
-    // Helper method to update a saved sitter with a user ID
-    private func updateSavedSitterWithUserID(nestID: String, sitterEmail: String, userID: String) async throws {
-        Logger.log(level: .info, category: .sessionService, message: "Updating saved sitter with user ID: \(userID)")
-        
-        // Find the saved sitter by email
-        if let savedSitter = try await NestService.shared.findSavedSitterByEmail(nestId: nestID, sitterEmail) {
-            // Update the saved sitter with the user ID
-            try await NestService.shared.updateSavedSitterWithUserID(nestId: nestID, savedSitter, userID: userID)
-            Logger.log(level: .info, category: .sessionService, message: "Saved sitter updated with user ID ✅")
-        } else {
-            Logger.log(level: .error, category: .sessionService, message: "No saved sitter found with email: \(sitterEmail)")
         }
     }
     
@@ -1700,6 +1696,9 @@ class SessionService {
 
         // Track event
         Tracker.shared.track(.sessionCreated)
+
+        // Refresh saved sitters so the owner sees the sitter without manual pull-to-refresh
+        _ = try? await NestService.shared.refreshSavedSitters()
     }
 
     /// Fetches all session requests created by a sitter

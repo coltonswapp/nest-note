@@ -22,6 +22,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = (scene as? UIWindowScene) else { return }
         let window = UIWindow(windowScene: windowScene)
         self.window = window
+
+        ExplosionManager.prepare(windowScene: windowScene)
         
         // Create and start coordinator
         let coordinator = LaunchCoordinator(window: window)
@@ -155,8 +157,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme == "nestnote",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
-              components.host == "invite",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            return
+        }
+
+        if components.host == "refer",
+           let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+           !code.isEmpty {
+            ReferralDeepLinkStore.store(code: code, source: "deep_link")
+            Logger.log(level: .info, category: .launcher, message: "Stored sitter referral deep link code: \(code)")
+            return
+        }
+
+        guard components.host == "invite",
               let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
             return
         }

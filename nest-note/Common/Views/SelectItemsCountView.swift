@@ -18,8 +18,15 @@ class SelectItemsCountView: UIVisualEffectView {
 
     var onContinueTapped: (() -> Void)?
     
+    /// When true, the bar stays visible after the user clears a non-empty selection so they can confirm zero items.
+    var allowsEmptySelection: Bool = false
+    
+    /// Highest selection count seen this session; used with `allowsEmptySelection` to keep Continue available after clearing.
+    var peakSelectionCount: Int = 0
+    
     var count: Int = 0 {
         didSet {
+            peakSelectionCount = max(peakSelectionCount, count)
             updateCountLabel()
             updateVisibility()
         }
@@ -156,7 +163,7 @@ class SelectItemsCountView: UIVisualEffectView {
     }
     
     private func updateVisibility() {
-        let shouldShow = count > 0
+        let shouldShow = count > 0 || (allowsEmptySelection && peakSelectionCount > 0)
         let targetTransform = shouldShow ? .identity : CGAffineTransform(translationX: 0, y: 100)
 
         let animator = UIViewPropertyAnimator(duration: 0.4, controlPoint1: CGPoint(x: 0.34, y: 1.56), controlPoint2: CGPoint(x: 0.28, y: 0.94), animations: {

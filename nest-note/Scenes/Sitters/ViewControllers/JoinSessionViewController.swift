@@ -366,20 +366,11 @@ class JoinSessionViewController: NNViewController {
                     let pointInView = self.view.convert(centerPoint, to: self.view)
                     ExplosionManager.trigger(.medium, at: pointInView)
 
-                    // Show success alert
-                    let alert = UIAlertController(
-                        title: "Session Joined!",
-                        message: "You've successfully joined the session. You can now view all the details in your upcoming sessions.",
-                        preferredStyle: .alert
-                    )
-
-                    alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-                        // Notify delegate
-                        self?.delegate?.joinSessionViewController(didAcceptInvite: sitterSession)
-                        self?.dismiss(animated: true)
-                    })
-
-                    self.present(alert, animated: true)
+                    SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
+                        Task { @MainActor in
+                            self?.showSessionJoinedSuccessAlert(sitterSession: sitterSession)
+                        }
+                    }
                 }
             } catch {
                 showError(error.localizedDescription)
@@ -434,6 +425,38 @@ class JoinSessionViewController: NNViewController {
             invite: invite
         )
         navigationController?.pushViewController(completionVC, animated: true)
+    }
+
+    private func showSessionJoinedSuccessAlert(sitterSession: SitterSession) {
+        let alert = UIAlertController(
+            title: "Session Joined!",
+            message: "You've successfully joined the session. You can now view all the details in your upcoming sessions.",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.finishAfterAcceptingInvite(sitterSession: sitterSession)
+        })
+
+        present(alert, animated: true)
+    }
+
+    private func finishAfterAcceptingInvite(sitterSession: SitterSession) {
+        delegate?.joinSessionViewController(didAcceptInvite: sitterSession)
+
+        if let navigationController, navigationController.presentingViewController != nil {
+            navigationController.dismiss(animated: true) { [weak self] in
+                self?.trackSessionJoinedReviewPrompt()
+            }
+        } else {
+            dismiss(animated: true) { [weak self] in
+                self?.trackSessionJoinedReviewPrompt()
+            }
+        }
+    }
+
+    private func trackSessionJoinedReviewPrompt() {
+        RatingManager.shared.trackSessionJoined()
     }
     
     private func animateInviteCard() {

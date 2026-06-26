@@ -12,18 +12,21 @@ class NestUser: Codable {
     var personalInfo: PersonalInfo
     var primaryRole: UserType
     var roles: UserRoles
+    var sitterReferralCode: String?
 
-    init(id: String, personalInfo: PersonalInfo, primaryRole: UserType, roles: UserRoles) {
+    init(id: String, personalInfo: PersonalInfo, primaryRole: UserType, roles: UserRoles, sitterReferralCode: String? = nil) {
         self.id = id
         self.personalInfo = personalInfo
         self.primaryRole = primaryRole
         self.roles = roles
+        self.sitterReferralCode = sitterReferralCode
     }
     
     struct PersonalInfo: Codable {
         var name: String
         var email: String
         var phone: String?
+        var venmoUsername: String?
         var notificationPreferences: NotificationPreferences?
     }
     

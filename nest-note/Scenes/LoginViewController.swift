@@ -802,20 +802,38 @@ class NNTextField: UITextField {
         )
     }
     
+    override func leftViewRect(forBounds bounds: CGRect) -> CGRect {
+        guard let leftView else { return .zero }
+        let size = leftView.frame.size
+        let y = (bounds.height - size.height) / 2
+        return CGRect(x: 10, y: y, width: size.width, height: size.height)
+    }
+    
     @objc private func togglePasswordVisibility() {
         isSecureTextEntry.toggle()
         passwordToggleButton.isSelected = !isSecureTextEntry
         HapticsHelper.lightHaptic()
     }
     
+    private func contentInsets(forBounds bounds: CGRect) -> UIEdgeInsets {
+        var insets = textInsets
+        
+        if let leftView, leftViewMode != .never {
+            let leftRect = leftViewRect(forBounds: bounds)
+            insets.left = leftRect.maxX + 4
+        }
+        
+        return insets
+    }
+    
     override func textRect(forBounds bounds: CGRect) -> CGRect {
-        return bounds.inset(by: textInsets)
+        return bounds.inset(by: contentInsets(forBounds: bounds))
     }
     override func editingRect(forBounds bounds: CGRect) -> CGRect {
-        return bounds.inset(by: textInsets)
+        return bounds.inset(by: contentInsets(forBounds: bounds))
     }
     override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
-        return bounds.inset(by: textInsets)
+        return bounds.inset(by: contentInsets(forBounds: bounds))
     }
     @objc private func clearButtonTapped() {
         text = ""

@@ -80,9 +80,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private var userInfo = UserOnboardingInfo()
     private var appleCredential: ASAuthorizationAppleIDCredential?
     private var isStartingWithApple = false
+    private var hasSyncedRevenueCatBeforePaywall = false
     
     struct UserOnboardingInfo {
         var fullName: String = ""
+        var phone: String = ""
         var email: String = ""
         var password: String = ""
         var role: NestUser.UserType = .nestOwner
@@ -93,6 +95,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var paywallDwellSeconds: TimeInterval = 0
         var isAppleSignIn: Bool = false
         var referralCode: String?
+        var venmoUsername: String?
         
         struct NestInfo {
             var name: String?
@@ -126,14 +129,20 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     // MARK: - Validation Publishers
     private let nameValidationSubject = CurrentValueSubject<Bool, Never>(false)
+    private let phoneValidationSubject = CurrentValueSubject<Bool, Never>(false)
     private let emailValidationSubject = CurrentValueSubject<Bool, Never>(false)
     private let passwordValidationSubject = PassthroughSubject<PasswordValidation, Never>()
     private let roleValidationSubject = CurrentValueSubject<Bool, Never>(false)
     private let nestValidationSubject = CurrentValueSubject<Bool, Never>(false)
+    private let venmoUsernameValidationSubject = CurrentValueSubject<Bool, Never>(true)
     
     // Expose publishers for views to subscribe to
     var nameValidation: AnyPublisher<Bool, Never> {
         nameValidationSubject.eraseToAnyPublisher()
+    }
+
+    var phoneValidation: AnyPublisher<Bool, Never> {
+        phoneValidationSubject.eraseToAnyPublisher()
     }
     
     var emailValidation: AnyPublisher<Bool, Never> {
@@ -159,6 +168,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     var nestValidation: AnyPublisher<Bool, Never> {
         nestValidationSubject.eraseToAnyPublisher()
+    }
+    
+    var venmoUsernameValidation: AnyPublisher<Bool, Never> {
+        venmoUsernameValidationSubject.eraseToAnyPublisher()
     }
     
     // MARK: - Initialization
@@ -222,6 +235,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Update container's survey status based on current step
         let isSurveyStep = viewController is NNOnboardingSurveyViewController
         containerViewController.updateSurveyStatus(isSurveyStep)
+
+        if viewController is OBPaywallViewController {
+            syncRevenueCatAttributesBeforePaywallIfNeeded()
+        }
+    }
+
+    func syncRevenueCatAttributesBeforePaywallIfNeeded() {
+        guard !hasSyncedRevenueCatBeforePaywall else { return }
+        hasSyncedRevenueCatBeforePaywall = true
+
+        RevenueCatAttributeService.shared.syncBeforePaywall(
+            email: userInfo.email,
+            phone: userInfo.phone,
+            displayName: userInfo.fullName,
+            discoveryMethod: userInfo.surveyResponses["discovery_method"]?.first,
+            onboardingVariant: onboardingVariant,
+            referralCode: userInfo.referralCode
+        )
     }
 
     private func analyticsStepId(for viewController: NNOnboardingViewController) -> String {
@@ -233,6 +264,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             return "image_custom"
         case is OBNameViewController:
             return "name"
+        case is OBPhoneViewController:
+            return "phone"
         case is OBRoleViewController:
             return "role"
         case let surveyVC as NNOnboardingSurveyViewController:
@@ -253,6 +286,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             return "create_nest"
         case is OBPaywallViewController:
             return "paywall"
+        case is OBVenmoViewController:
+            return "venmo_username"
         case is OBFinishViewController:
             return "finish"
         default:
@@ -290,6 +325,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 viewControllers.append(vc)
             case .name:
                 viewControllers.append(OBNameViewController())
+            case .phone:
+                viewControllers.append(OBPhoneViewController())
             case .email:
                 viewControllers.append(OBEmailViewController())
             case .password:
@@ -298,6 +335,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 viewControllers.append(OBCreateNestViewController())
             case .referral:
                 viewControllers.append(OBReferralViewController())
+            case .venmoUsername:
+                viewControllers.append(OBVenmoViewController())
             case .paywall:
                 viewControllers.append(OBPaywallViewController())
             case .finish:
@@ -318,8 +357,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         baseSteps.append(contentsOf: [
             OBNameViewController(),
-            OBRoleViewController(),
-            OBReferralViewController()
+            OBPhoneViewController(),
+            OBRoleViewController()
         ])
 
         baseSteps.append(contentsOf: [
@@ -547,6 +586,19 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             }
             completedSteps.append("profile_creation")
 
+            var referralCodeType: ReferralCodeType?
+            if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
+                referralCodeType = try? await ReferralService.shared.validateReferralCodeInfo(referralCode)?.type
+            }
+
+            RevenueCatAttributeService.shared.syncOnboardingContext(
+                for: user,
+                discoveryMethod: userInfo.surveyResponses["discovery_method"]?.first,
+                onboardingVariant: onboardingVariant,
+                referralCode: userInfo.referralCode,
+                referralCodeType: referralCodeType
+            )
+
             // STEP 2: Semi-Critical - Referral Recording (warn but continue on failure)
             if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 2: Recording referral code: \(referralCode)")
@@ -715,33 +767,54 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     func handleErrorNavigation(_ error: Error) {
-        // Handle only the navigation aspect of errors
-        // Convert the error to your custom error type if needed
-        let authError = error as? AuthError // Assuming you have an AuthError type
-        
-        // Determine which step to return to based on the error
-        let targetStep = steps.first(where: { $0 is OBEmailViewController })
-        
-        if let targetStep = targetStep,
-           let targetIndex = steps.firstIndex(where: { $0 === targetStep }) {
-            // Reset subsequent steps
-            for index in (targetIndex + 1)..<steps.count {
-                steps[index].reset()
+        let presentation = OnboardingSetupErrorPresentation.presentation(for: error)
+
+        let targetStep: NNOnboardingViewController? = {
+            switch presentation.targetStep {
+            case .email:
+                return steps.first(where: { $0 is OBEmailViewController })
+            case .password:
+                return steps.first(where: { $0 is OBPasswordViewController })
+                    ?? steps.first(where: { $0 is OBEmailViewController })
+            case .createNest:
+                return steps.first(where: { $0 is OBCreateNestViewController })
+                    ?? steps.first(where: { $0 is OBEmailViewController })
             }
-            
-            currentStepIndex = targetIndex
-            navigationController.popToViewController(targetStep, animated: true)
-            containerViewController.updateProgress(step: currentStepIndex)
-            
-            // Show error message on the target view controller
-            targetStep.reset()
-            targetStep.showToast(delay: 1.5, text: "Whoops!", subtitle: error.localizedDescription, sentiment: .negative)
+        }()
+
+        guard let targetStep,
+              let targetIndex = steps.firstIndex(where: { $0 === targetStep }) else {
+            return
         }
+
+        for index in (targetIndex + 1)..<steps.count {
+            steps[index].reset()
+        }
+
+        currentStepIndex = targetIndex
+        navigationController.popToViewController(targetStep, animated: true)
+        containerViewController.updateProgress(step: currentStepIndex)
+
+        targetStep.reset()
+        targetStep.showToast(
+            delay: 1.5,
+            text: presentation.toastTitle,
+            subtitle: presentation.toastSubtitle,
+            sentiment: .negative
+        )
     }
     
     // MARK: - Update Methods
     func updateUserName(_ name: String) {
         userInfo.fullName = name
+    }
+
+    func updatePhone(_ phone: String) {
+        userInfo.phone = phone.filter(\.isNumber)
+    }
+    
+    func updateVenmoUsername(_ username: String?) {
+        userInfo.venmoUsername = username
     }
     
     func updateEmail(_ email: String) {
@@ -788,6 +861,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             steps.removeAll { $0 is OBCreateNestViewController }
             steps.removeAll { $0 is OBPaywallViewController }
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Removed nest creation and paywall steps for sitter")
+        } else {
+            steps.removeAll { $0 is OBVenmoViewController }
         }
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Steps after removal: \(steps.count)")
@@ -854,6 +929,25 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             userInfo.fullName = trimmedName
         }
     }
+
+    func validatePhone(_ input: String) {
+        let digits = input.filter(\.isNumber)
+        let isValid = (9...10).contains(digits.count)
+        phoneValidationSubject.send(isValid)
+
+        if isValid {
+            userInfo.phone = digits
+        }
+    }
+    
+    func validateVenmoUsername(_ input: String) {
+        let isValid = VenmoPaymentHandler.isValidInput(input)
+        venmoUsernameValidationSubject.send(isValid)
+        
+        if isValid {
+            userInfo.venmoUsername = VenmoPaymentHandler.normalizeUsername(input)
+        }
+    }
     
     func validateEmail(email: String) {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -916,6 +1010,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             if !steps.contains(where: { $0 is OBPaywallViewController }) {
                 steps.append(OBPaywallViewController())
             }
+            
+            steps.removeAll { $0 is OBVenmoViewController }
+        } else if userInfo.role == .sitter {
+            insertVenmoStepIfNeeded()
         }
 
         // ALWAYS add finish step for both nest owners AND sitters if it doesn't exist
@@ -928,6 +1026,19 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         containerViewController.updateTotalSteps(steps.count)
 
         Logger.log(level: .info, category: .signup, message: "🎯 ONBOARDING: Total steps after role selection: \(steps.count)")
+    }
+    
+    private func insertVenmoStepIfNeeded() {
+        guard userInfo.role == .sitter else { return }
+        guard !steps.contains(where: { $0 is OBVenmoViewController }) else { return }
+        
+        if let phoneIndex = steps.firstIndex(where: { $0 is OBPhoneViewController }) {
+            steps.insert(OBVenmoViewController(), at: phoneIndex + 1)
+        } else if let finishIndex = steps.firstIndex(where: { $0 is OBFinishViewController }) {
+            steps.insert(OBVenmoViewController(), at: finishIndex)
+        } else {
+            steps.append(OBVenmoViewController())
+        }
     }
 
     func validateNest(name: String, address: String) {

@@ -67,6 +67,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         DispatchQueue.main.async { [weak self] in
             self?.applyHomeScreenNavigationAppearance(appMode: .sitter)
         }
+        setFCMToken()
     }
     
     override func setup() {
@@ -86,7 +87,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             
-            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateView.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 120),
+            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 40),
             emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
@@ -177,9 +179,10 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 return section
 
             case .sitterInfoBanner:
-                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let height = SitterInfoBannerCell.preferredHeight
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
-                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(76))
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
                 section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 18, bottom: 8, trailing: 18)
@@ -308,11 +311,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 cell.onClose = { [weak self] in
                     self?.dismissFamiliesBanner()
                 }
-
-                var backgroundConfig = UIBackgroundConfiguration.listCell()
-                backgroundConfig.backgroundColor = NNColors.EventColors.green.fill
-                backgroundConfig.cornerRadius = 12
-                cell.backgroundConfiguration = backgroundConfig
             }
         }
 
@@ -424,9 +422,11 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 headerView.configure(title: title)
             case .upcomingSessions:
                 return
-            case .setupProgress:
-                return
             case .sitterInfoBanner:
+                return
+            case .premiumPromo:
+                return
+            case .readinessScore:
                 return
             }
         }

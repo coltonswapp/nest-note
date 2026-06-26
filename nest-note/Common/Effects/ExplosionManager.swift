@@ -37,8 +37,19 @@ class ExplosionManager {
 
     private init() {}
 
-    private func setupExplosionWindow() {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+    /// Creates the overlay window and SpriteKit scene so the first explosion renders correctly.
+    static func prepare(windowScene: UIWindowScene? = nil) {
+        shared.prepareExplosionWindow(windowScene: windowScene)
+    }
+
+    private func prepareExplosionWindow(windowScene: UIWindowScene?) {
+        guard explosionWindow == nil else { return }
+        setupExplosionWindow(windowScene: windowScene)
+    }
+
+    private func setupExplosionWindow(windowScene: UIWindowScene? = nil) {
+        let scene = windowScene ?? UIApplication.shared.connectedScenes.first as? UIWindowScene
+        guard let scene else { return }
 
         let window = PassthroughWindow(windowScene: scene)
         window.windowLevel = .alert + 2 // Higher than toast window
@@ -84,10 +95,7 @@ class ExplosionManager {
     }
 
     func triggerExplosion(preset: ExplosionPreset, at point: CGPoint) {
-        // Setup explosion window if not already done
-        if explosionWindow == nil {
-            setupExplosionWindow()
-        }
+        prepareExplosionWindow(windowScene: nil)
 
         guard let scene = explosionScene else {
             return

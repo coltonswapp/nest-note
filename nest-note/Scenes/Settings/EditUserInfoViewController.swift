@@ -2,30 +2,38 @@ import UIKit
 
 enum EditUserInfoType: String {
     case name = "Name"
+    case phone = "Phone"
     case nestName = "Nest Name"
     case nestAddress = "Nest Address"
+    case venmoUsername = "Venmo Username"
     
     var title: String {
         switch self {
         case .name: return "Edit Name"
+        case .phone: return "Edit Phone Number"
         case .nestName: return "Edit Nest Name"
         case .nestAddress: return "Edit Nest Address"
+        case .venmoUsername: return "Edit Venmo Username"
         }
     }
     
     var description: String {
         switch self {
         case .name: return "Your name is how others on NestNote will see you. Full name is preferred."
+        case .phone: return "So sitters and families can reach you when it matters."
         case .nestName: return "Changes will be reflected in new sessions going forward."
         case .nestAddress: return "It's important that your sitter have access to your address for emergencies & directions."
+        case .venmoUsername: return "Parents can pay you through Venmo after a session ends. Your username is only visible to families you sit for."
         }
     }
     
     var placeholder: String {
         switch self {
         case .name: return "Enter your name"
+        case .phone: return "Phone Number"
         case .nestName: return "Enter nest name"
         case .nestAddress: return "Enter nest address"
+        case .venmoUsername: return "username"
         }
     }
     
@@ -33,18 +41,38 @@ enum EditUserInfoType: String {
         switch self {
         case .name:
             return UserService.shared.currentUser?.personalInfo.name ?? ""
+        case .phone:
+            return PhoneNumberFormatter.displayString(for: UserService.shared.currentUser?.personalInfo.phone) ?? ""
         case .nestName:
             return NestService.shared.currentNest?.name ?? ""
         case .nestAddress:
             return NestService.shared.currentNest?.address ?? ""
+        case .venmoUsername:
+            return UserService.shared.currentUser?.personalInfo.venmoUsername ?? ""
         }
     }
     
     var textContentType: UITextContentType {
         switch self {
         case .name: return .name
+        case .phone: return .telephoneNumber
         case .nestAddress: return .fullStreetAddress
         case .nestName: return .familyName
+        case .venmoUsername: return .username
+        }
+    }
+    
+    var keyboardType: UIKeyboardType {
+        switch self {
+        case .phone: return .phonePad
+        default: return .default
+        }
+    }
+    
+    var autocapitalizationType: UITextAutocapitalizationType {
+        switch self {
+        case .venmoUsername: return .none
+        default: return .sentences
         }
     }
 }
@@ -166,6 +194,12 @@ class EditUserInfoViewController: NNViewController {
         textField.placeholder = type.placeholder
         textField.text = type.currentValue
         textField.textContentType = type.textContentType
+        textField.autocapitalizationType = type.autocapitalizationType
+        textField.keyboardType = type.keyboardType
+        if type == .venmoUsername {
+            textField.autocorrectionType = .no
+            VenmoPaymentHandler.applyUsernamePrefix(to: textField)
+        }
         
         // Configure sheet presentation
         if let sheet = sheetPresentationController {
@@ -205,6 +239,13 @@ class EditUserInfoViewController: NNViewController {
     }
     
     @objc private func textFieldDidChange() {
+        if type == .phone {
+            let digits = PhoneNumberFormatter.digits(from: textField.text ?? "")
+            let formatted = PhoneNumberFormatter.formattedDisplay(for: digits)
+            if textField.text != formatted {
+                textField.text = formatted
+            }
+        }
         updateSaveButtonState()
     }
     
@@ -212,14 +253,25 @@ class EditUserInfoViewController: NNViewController {
         let newValue = textField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentValue = type.currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Enable save button only if:
-        // 1. The new value is not empty
-        // 2. The new value is different from the current value
-        saveButton.isEnabled = !newValue.isEmpty && newValue != currentValue
+        switch type {
+        case .phone:
+            let newDigits = PhoneNumberFormatter.digits(from: newValue)
+            let currentDigits = PhoneNumberFormatter.digits(from: currentValue)
+            let isChanged = newDigits != currentDigits
+            saveButton.isEnabled = isChanged && PhoneNumberFormatter.isValid(newDigits)
+        case .venmoUsername:
+            let isChanged = newValue != currentValue
+            let isValid = newValue.isEmpty || VenmoPaymentHandler.isValidInput(newValue)
+            saveButton.isEnabled = isChanged && isValid
+        default:
+            saveButton.isEnabled = !newValue.isEmpty && newValue != currentValue
+        }
     }
     
     @objc private func saveButtonTapped() {
-        guard let newValue = textField.text?.trimmingCharacters(in: .whitespacesAndNewlines), !newValue.isEmpty else {
+        let newValue = textField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        if type != .venmoUsername && type != .phone && newValue.isEmpty {
             return
         }
         
@@ -230,6 +282,8 @@ class EditUserInfoViewController: NNViewController {
                 switch type {
                 case .name:
                     try await UserService.shared.updateName(newValue)
+                case .phone:
+                    try await UserService.shared.updatePhone(newValue)
                 case .nestName:
                     if let currentNest = NestService.shared.currentNest {
                         try await NestService.shared.updateNestName(currentNest.id, newValue)
@@ -238,6 +292,8 @@ class EditUserInfoViewController: NNViewController {
                     if let currentNest = NestService.shared.currentNest {
                         try await NestService.shared.updateNestAddress(currentNest.id, newValue)
                     }
+                case .venmoUsername:
+                    try await UserService.shared.updateVenmoUsername(newValue)
                 }
                 
                 try await Task.sleep(for: .seconds(1))
@@ -260,5 +316,13 @@ class EditUserInfoViewController: NNViewController {
 extension EditUserInfoViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
+        return true
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard type == .venmoUsername else { return true }
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let characterSet = CharacterSet(charactersIn: string)
+        return allowedCharacters.isSuperset(of: characterSet)
     }
 }

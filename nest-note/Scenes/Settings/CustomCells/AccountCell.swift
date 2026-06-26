@@ -24,7 +24,7 @@ class AccountCell: UICollectionViewCell {
         setupViews()
         configureSelectionBehavior()
         backgroundColor = .secondarySystemGroupedBackground
-        layer.cornerRadius = 12
+        layer.cornerRadius = 20
         layer.masksToBounds = true
     }
     

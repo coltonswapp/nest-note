@@ -365,9 +365,8 @@ extension NotificationsViewController: NotificationCellDelegate {
             // Request notification permissions if not already granted
             await UserService.shared.requestNotificationPermissions()
             
-            // Get current FCM token and ensure it's saved to the database
-            let fcmToken = try await Messaging.messaging().token()
-            try await UserService.shared.updateFCMToken(fcmToken)
+            // Wait for APNS registration, then fetch and save FCM token
+            try await UserService.shared.fetchAndPersistFCMToken()
             Logger.log(level: .info, category: .general, message: "FCM token updated successfully when enabling notifications")
             
             // Refresh the UI to show updated FCM tokens

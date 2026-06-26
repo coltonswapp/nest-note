@@ -161,6 +161,13 @@ final class MarkdownTestViewController: NNViewController {
 private extension Theme {
     static var nestNoteGitHub: Theme {
         Theme.gitHub
+            // GitHub's dark background (#18191d) doesn't match `systemBackground` (near-black),
+            // so the padded markdown content reads as a different-colored panel in dark mode.
+            .text {
+                ForegroundColor(Color(.label))
+                BackgroundColor(Color(.systemBackground))
+                FontSize(16)
+            }
             .heading1 { configuration in
                 VStack(alignment: .leading, spacing: 0) {
                     configuration.label
@@ -270,7 +277,7 @@ private struct MarkdownPreviewView: View {
             .padding(.bottom, scrollBottomPadding)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .background(Color(.systemBackground))
+        .background(Color.clear)
         .ignoresSafeArea(edges: .top)
     }
 }

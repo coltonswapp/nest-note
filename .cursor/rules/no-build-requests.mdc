@@ -1,0 +1,27 @@
+---
+description: Do not run or request builds unless the user explicitly asks
+alwaysApply: true
+---
+
+# No Build Requests
+
+Never run build commands or ask for permissions to build unless the user explicitly requests a build.
+
+## Do not run
+
+- `xcodebuild`, XcodeBuildMCP build tools, or simulator build-and-run
+- `swift build`, `npm run build`, `yarn build`, `pnpm build`, `make`, Gradle, Maven, Cargo build, etc.
+- Any command whose primary purpose is compiling or linking the app
+
+## Do not request elevated permissions
+
+- Do not request `all`, `full_network`, or other permissions solely to run a build or resolve package dependencies for verification.
+
+## Instead
+
+- Rely on static checks (linters, type errors in the editor) when verifying changes.
+- Tell the user what to run locally if a build is the only way to confirm something—and only when they ask or when a build is truly required to complete their request.
+
+## Exception
+
+- Run a build only when the user explicitly asks (e.g. "build the project", "run xcodebuild", "verify it compiles").

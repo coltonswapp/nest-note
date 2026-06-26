@@ -35,8 +35,12 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     /// When true, the Selected segment is shown on first layout (e.g. opening from "view more" in session editor).
     var showsSelectedTabInitially = false
     
+    /// When true, Continue stays available after clearing all items (session edit flow).
+    var allowsEmptySelection = false
+    
     private var currentSelectedIds: [String] = []
     private var allSelectableItemIds: [String] = []
+    private var initialPeakSelectionCount = 0
     
     private var selectionLimit: Int? = nil
     private var isProUser: Bool = false
@@ -255,6 +259,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     // Method to set initial selected IDs (from EditSessionViewController)
     func setInitialSelectedItemIds(_ ids: [String]) {
         currentSelectedIds = ids
+        initialPeakSelectionCount = ids.count
         updateSelectionCounter()
     }
     
@@ -337,6 +342,8 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     private func setupSelectionCounterView() {
         selectionCounterView = SelectItemsCountView()
+        selectionCounterView.allowsEmptySelection = allowsEmptySelection
+        selectionCounterView.peakSelectionCount = initialPeakSelectionCount
         selectionCounterView.selectionLimit = selectionLimit
         selectionCounterView.onContinueTapped = { [weak self] in
             guard let self = self else { return }
@@ -371,6 +378,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         }
         
         selectionCounterView?.count = currentSelectedIds.count
+        selectionCounterView?.peakSelectionCount = max(selectionCounterView?.peakSelectionCount ?? 0, currentSelectedIds.count)
         updateSegmentedControlTitle()
         
         if let navController = navigationController {
