@@ -57,6 +57,12 @@ class HorizontalSliderView: UIVisualEffectView {
 
     var onSlideComplete: (() -> Void)?
 
+    var slideTitle: String = "Slide to Enter" {
+        didSet {
+            textLabel.text = slideTitle
+        }
+    }
+
     init(effect: UIVisualEffect?, isStaticThumb: Bool = true) {
         self.isStaticThumb = isStaticThumb
         super.init(effect: effect)
@@ -120,6 +126,7 @@ class HorizontalSliderView: UIVisualEffectView {
     }
 
     private func setupText() {
+        textLabel.text = slideTitle
         contentView.addSubview(textLabel)
         contentView.addSubview(shimmerView)
         shimmerView.layer.addSublayer(shimmerLayer)

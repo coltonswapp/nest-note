@@ -173,6 +173,7 @@ class NNEmptyStateView: UIView {
     func addMenuToActionButton(menu: UIMenu) {
         actionButton.showsMenuAsPrimaryAction = true
         actionButton.menu = menu
+//        actionButton.setValue(false, forKey: "showsMenuFromSource")
     }
     
     func addAction(title: String, backgroundColor: UIColor = NNColors.primary.withAlphaComponent(0.15), foregroundColor: UIColor = NNColors.primary, tag: Int) {

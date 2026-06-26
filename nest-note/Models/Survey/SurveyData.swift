@@ -68,9 +68,37 @@ struct FeatureVote: Codable {
 
 // MARK: - Survey Metrics
 struct SurveyMetrics: Codable, Equatable, Hashable {
+    /// Aggregated onboarding paywall dwell time (parents only); updated by Cloud Function from response metadata.
+    struct PaywallDwellAggregate: Codable, Equatable, Hashable {
+        let count: Int
+        let totalSeconds: Double
+        let avgSeconds: Double
+
+        var asDictionary: [String: Any] {
+            [
+                "count": count,
+                "totalSeconds": totalSeconds,
+                "avgSeconds": avgSeconds,
+            ]
+        }
+    }
+
     let totalResponses: Int
     let lastUpdated: Date
     let questionMetrics: [String: QuestionMetric]
+    let paywallDwell: PaywallDwellAggregate?
+
+    init(
+        totalResponses: Int,
+        lastUpdated: Date,
+        questionMetrics: [String: QuestionMetric],
+        paywallDwell: PaywallDwellAggregate? = nil
+    ) {
+        self.totalResponses = totalResponses
+        self.lastUpdated = lastUpdated
+        self.questionMetrics = questionMetrics
+        self.paywallDwell = paywallDwell
+    }
     
     struct QuestionMetric: Codable, Equatable, Hashable {
         let totalResponses: Int
@@ -87,11 +115,15 @@ struct SurveyMetrics: Codable, Equatable, Hashable {
     }
     
     var asDictionary: [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "totalResponses": totalResponses,
             "lastUpdated": Timestamp(date: lastUpdated),
             "questionMetrics": questionMetrics.mapValues { $0.asDictionary }
         ]
+        if let paywallDwell = paywallDwell {
+            dict["paywallDwell"] = paywallDwell.asDictionary
+        }
+        return dict
     }
 }
 

@@ -7,6 +7,7 @@
 
 import UIKit
 import MessageUI
+import SwiftUI
 
 final class OBFinishViewController: NNOnboardingViewController, MFMailComposeViewControllerDelegate {
 
@@ -95,6 +96,18 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         return slider
     }()
 
+    private lazy var inviteCarouselHostingController: UIHostingController<SitterInviteCarouselView> = {
+        let controller = UIHostingController(
+            rootView: SitterInviteCarouselView { [weak self] color in
+                self?.updateGlowTint(color)
+            }
+        )
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.backgroundColor = .clear
+        controller.view.alpha = 0
+        return controller
+    }()
+
     private lazy var supportButton: UIButton = {
         let button = UIButton(type: .system)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -110,14 +123,22 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     }()
 
     private var isDebugMode = false
+    private var debugForceSitterFinish = false
     private var cardBottomConstraint: NSLayoutConstraint?
+    private var carouselCenterYConstraint: NSLayoutConstraint?
     private var hasStartedSlideAnimation = false
     private var hasStartedCardAnimation = false
+    private var lastSetupError: Error?
+
+    private var isSitterFinish: Bool {
+        if debugForceSitterFinish { return true }
+        return (coordinator as? OnboardingCoordinator)?.currentRole == .sitter
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        let userRole = (coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner
+        let userRole = debugForceSitterFinish ? NestUser.UserType.sitter : ((coordinator as? OnboardingCoordinator)?.currentRole ?? .nestOwner)
 
         if userRole == .sitter {
             setupOnboarding(
@@ -136,7 +157,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         beginFinishFlow()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
     }
     
     private func beginFinishFlow() {
@@ -180,10 +207,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
 
         switch failedAtStep {
         case "profile_creation":
+            lastSetupError = underlyingError
+            let presentation = OnboardingSetupErrorPresentation.presentation(for: underlyingError)
             showCriticalError(
-                title: "Account Creation Failed",
-                message: "We couldn't create your account. Please check your connection and try again.",
-                canRetry: true
+                title: presentation.alertTitle,
+                message: presentation.alertMessage,
+                canRetry: true,
+                error: underlyingError
             )
             Tracker.shared.track(.userProfileCreationFailed, error: underlyingError.localizedDescription)
 
@@ -206,10 +236,12 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
             )
 
         case "onboarding_completion", "delegate_notification":
+            lastSetupError = underlyingError
             showCriticalError(
                 title: "Setup Incomplete",
                 message: "Your account was created but setup couldn't be completed. Please restart the app.",
-                canRetry: false
+                canRetry: false,
+                error: underlyingError
             )
 
         default:
@@ -218,6 +250,7 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     }
 
     private func handleGenericFailure(_ error: Error) {
+        lastSetupError = error
         Tracker.shared.track(.onboardingCompletionFailed, error: error.localizedDescription)
 
         if Self.failureCount >= 2 {
@@ -225,18 +258,21 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
             showCriticalError(
                 title: "Setup Failed",
                 message: "We're having trouble completing your setup. Please contact support for assistance.",
-                canRetry: false
+                canRetry: false,
+                error: error
             )
         } else {
+            let presentation = OnboardingSetupErrorPresentation.presentation(for: error)
             showCriticalError(
-                title: "Setup Failed",
-                message: "Something went wrong during setup. Please try again.",
-                canRetry: true
+                title: presentation.alertTitle,
+                message: presentation.alertMessage,
+                canRetry: true,
+                error: error
             )
         }
     }
 
-    private func showCriticalError(title: String, message: String, canRetry: Bool) {
+    private func showCriticalError(title: String, message: String, canRetry: Bool, error: Error) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
 
         if canRetry {
@@ -246,7 +282,8 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         }
 
         alert.addAction(UIAlertAction(title: "Back", style: .cancel) { [weak self] _ in
-            (self?.coordinator as? OnboardingCoordinator)?.handleErrorNavigation(AuthError.unknown)
+            let navigationError = self?.lastSetupError ?? error
+            (self?.coordinator as? OnboardingCoordinator)?.handleErrorNavigation(navigationError)
         })
 
         present(alert, animated: true)
@@ -265,64 +302,142 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     override func setupContent() {
         view.addSubview(activityIndicator)
 
-        // Glow views go behind the card
-        view.addSubview(glowView3)
-        view.addSubview(glowView2)
-        view.addSubview(glowView)
+        if isSitterFinish {
+            view.addSubview(glowView3)
+            view.addSubview(glowView2)
+            view.addSubview(glowView)
+            addChild(inviteCarouselHostingController)
+            view.addSubview(inviteCarouselHostingController.view)
+            inviteCarouselHostingController.didMove(toParent: self)
+        } else {
+            // Glow views go behind the card
+            view.addSubview(glowView3)
+            view.addSubview(glowView2)
+            view.addSubview(glowView)
+            view.addSubview(nestCreationCardView)
+        }
 
-        view.addSubview(nestCreationCardView)
         view.addSubview(slideToEnterView)
         view.addSubview(supportButton)
 
-        // Start card off-screen at the bottom
-        cardBottomConstraint = nestCreationCardView.centerYAnchor.constraint(equalTo: view.bottomAnchor, constant: 200)
+        if isSitterFinish {
+            carouselCenterYConstraint = inviteCarouselHostingController.view.centerYAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: 200
+            )
 
-        NSLayoutConstraint.activate([
-            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            activityIndicator.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 44),
-            activityIndicator.heightAnchor.constraint(equalToConstant: 100),
-            activityIndicator.widthAnchor.constraint(equalToConstant: 100),
+            NSLayoutConstraint.activate([
+                activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                activityIndicator.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 44),
+                activityIndicator.heightAnchor.constraint(equalToConstant: 100),
+                activityIndicator.widthAnchor.constraint(equalToConstant: 100),
 
-            nestCreationCardView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            cardBottomConstraint!,
-            nestCreationCardView.widthAnchor.constraint(equalToConstant: 280),
-            nestCreationCardView.heightAnchor.constraint(equalToConstant: 350),
+                inviteCarouselHostingController.view.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                inviteCarouselHostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                inviteCarouselHostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                carouselCenterYConstraint!,
+                inviteCarouselHostingController.view.heightAnchor.constraint(equalToConstant: 302),
 
-            // Inner glow view
-            glowView.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
-            glowView.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
-            glowView.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.05),
-            glowView.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.6),
+                glowView.centerXAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerXAnchor),
+                glowView.centerYAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerYAnchor),
+                glowView.widthAnchor.constraint(equalToConstant: 280 * 1.05),
+                glowView.heightAnchor.constraint(equalToConstant: 290 * 0.6),
 
-            glowView2.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
-            glowView2.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
-            glowView2.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.1),
-            glowView2.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.7),
+                glowView2.centerXAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerXAnchor),
+                glowView2.centerYAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerYAnchor),
+                glowView2.widthAnchor.constraint(equalToConstant: 280 * 1.1),
+                glowView2.heightAnchor.constraint(equalToConstant: 290 * 0.7),
 
-            glowView3.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
-            glowView3.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
-            glowView3.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.15),
-            glowView3.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.8),
+                glowView3.centerXAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerXAnchor),
+                glowView3.centerYAnchor.constraint(equalTo: inviteCarouselHostingController.view.centerYAnchor),
+                glowView3.widthAnchor.constraint(equalToConstant: 280 * 1.15),
+                glowView3.heightAnchor.constraint(equalToConstant: 290 * 0.8),
 
-            slideToEnterView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            slideToEnterView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            slideToEnterView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+                slideToEnterView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+                slideToEnterView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+                slideToEnterView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
 
-            supportButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            supportButton.topAnchor.constraint(equalTo: nestCreationCardView.bottomAnchor, constant: 60),
-            supportButton.heightAnchor.constraint(equalToConstant: 44),
-            supportButton.widthAnchor.constraint(equalToConstant: 200),
-        ])
+                supportButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                supportButton.topAnchor.constraint(equalTo: inviteCarouselHostingController.view.bottomAnchor, constant: 60),
+                supportButton.heightAnchor.constraint(equalToConstant: 44),
+                supportButton.widthAnchor.constraint(equalToConstant: 200),
+            ])
+        } else {
+            // Start card off-screen at the bottom
+            cardBottomConstraint = nestCreationCardView.centerYAnchor.constraint(equalTo: view.bottomAnchor, constant: 200)
+
+            NSLayoutConstraint.activate([
+                activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                activityIndicator.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 44),
+                activityIndicator.heightAnchor.constraint(equalToConstant: 100),
+                activityIndicator.widthAnchor.constraint(equalToConstant: 100),
+
+                nestCreationCardView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                cardBottomConstraint!,
+                nestCreationCardView.widthAnchor.constraint(equalToConstant: 280),
+                nestCreationCardView.heightAnchor.constraint(equalToConstant: 350),
+
+                // Inner glow view
+                glowView.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
+                glowView.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
+                glowView.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.05),
+                glowView.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.6),
+
+                glowView2.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
+                glowView2.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
+                glowView2.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.1),
+                glowView2.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.7),
+
+                glowView3.centerXAnchor.constraint(equalTo: nestCreationCardView.centerXAnchor),
+                glowView3.centerYAnchor.constraint(equalTo: nestCreationCardView.centerYAnchor),
+                glowView3.widthAnchor.constraint(equalTo: nestCreationCardView.widthAnchor, multiplier: 1.15),
+                glowView3.heightAnchor.constraint(equalTo: nestCreationCardView.heightAnchor, multiplier: 0.8),
+
+                slideToEnterView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+                slideToEnterView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+                slideToEnterView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+
+                supportButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                supportButton.topAnchor.constraint(equalTo: nestCreationCardView.bottomAnchor, constant: 60),
+                supportButton.heightAnchor.constraint(equalToConstant: 44),
+                supportButton.widthAnchor.constraint(equalToConstant: 200),
+            ])
+        }
 
         // Override slider's internal alpha (HorizontalSliderView sets alpha = 1.0 in resetPosition)
         slideToEnterView.alpha = 0
     }
     
+    private func configureGlowShadowPaths(cardWidth: CGFloat, cardHeight: CGFloat) {
+        let glowLayers: [(UIView, CGFloat, CGFloat)] = [
+            (glowView, 1.05, 0.6),
+            (glowView2, 1.1, 0.7),
+            (glowView3, 1.15, 0.8)
+        ]
+
+        for (view, widthMultiplier, heightMultiplier) in glowLayers {
+            let width = cardWidth * widthMultiplier
+            let height = cardHeight * heightMultiplier
+            view.layer.shadowPath = UIBezierPath(
+                ovalIn: CGRect(x: 0, y: 0, width: width, height: height)
+            ).cgPath
+        }
+    }
+
+    private func updateGlowTint(_ color: UIColor) {
+        [glowView, glowView2, glowView3].forEach { view in
+            view.layer.removeAnimation(forKey: "shadowColor")
+            view.layer.shadowColor = color.cgColor
+        }
+    }
+
     private func playSuccessTransition() {
         Self.resetFailureCount()
 
-        let nestName = "Your Nest"
-        nestCreationCardView.configure(nestName: nestName, createdDate: Date())
+        if !isSitterFinish {
+            let nestName = "Your Nest"
+            nestCreationCardView.configure(nestName: nestName, createdDate: Date())
+        }
 
         animateSuccessSequence()
     }
@@ -350,6 +465,36 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         guard !hasStartedCardAnimation else { return }
         hasStartedCardAnimation = true
 
+        if isSitterFinish {
+            configureGlowShadowPaths(cardWidth: 280, cardHeight: 290)
+            if let initialTint = SitterFinishCarouselMockData.items.first?.bannerTintColor {
+                updateGlowTint(initialTint)
+            }
+            inviteCarouselHostingController.view.alpha = 1
+            glowView.alpha = 1.0
+            glowView2.alpha = 1.0
+            glowView3.alpha = 1.0
+
+            carouselCenterYConstraint?.isActive = false
+            carouselCenterYConstraint = inviteCarouselHostingController.view.centerYAnchor.constraint(
+                equalTo: view.centerYAnchor,
+                constant: 20
+            )
+            carouselCenterYConstraint?.isActive = true
+
+            UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
+                self.view.layoutIfNeeded()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                guard let self else { return }
+                ExplosionManager.trigger(.atomic, at: CGPoint(x: view.center.x, y: view.frame.maxY))
+                HapticsHelper.lightHaptic()
+            }
+            return
+        }
+
+        configureGlowShadowPaths(cardWidth: 280, cardHeight: 350)
         nestCreationCardView.alpha = 1
         nestCreationCardView.transform = CGAffineTransform(rotationAngle: 2 * .pi / 180)
         glowView.alpha = 1.0
@@ -375,8 +520,15 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         guard !hasStartedSlideAnimation else { return }
         hasStartedSlideAnimation = true
 
-        self.titleLabel.text = "Your nest has been created!"
-        self.subtitleLabel.text = "Swipe below to enter your nest."
+        if isSitterFinish {
+            self.titleLabel.text = "You're ready to sit!"
+            self.subtitleLabel.text = "Join sessions and watch over nests when families invite you."
+            self.slideToEnterView.slideTitle = "Slide to Get Started"
+        } else {
+            self.titleLabel.text = "Your nest has been created!"
+            self.subtitleLabel.text = "Swipe below to enter your nest."
+            self.slideToEnterView.slideTitle = "Slide to Enter"
+        }
 
         self.slideToEnterView.isHidden = false
         self.slideToEnterView.alpha = 0.0
@@ -401,10 +553,17 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         glowView3.layer.removeAllAnimations()
 
         UIView.animate(withDuration: 0.5) {
-            self.nestCreationCardView.alpha = 0
-            self.glowView.alpha = 0
-            self.glowView2.alpha = 0
-            self.glowView3.alpha = 0
+            if self.isSitterFinish {
+                self.inviteCarouselHostingController.view.alpha = 0
+                self.glowView.alpha = 0
+                self.glowView2.alpha = 0
+                self.glowView3.alpha = 0
+            } else {
+                self.nestCreationCardView.alpha = 0
+                self.glowView.alpha = 0
+                self.glowView2.alpha = 0
+                self.glowView3.alpha = 0
+            }
             self.slideToEnterView.alpha = 0
         }
 
@@ -413,12 +572,21 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
                 self.dismiss(animated: true)
             } else {
                 (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
+                RatingManager.shared.trackOnboardingComplete()
             }
         }
     }
 
     func enableDebugMode() {
         isDebugMode = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.playSuccessTransition()
+        }
+    }
+
+    func enableSitterDebugMode() {
+        isDebugMode = true
+        debugForceSitterFinish = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.playSuccessTransition()
         }

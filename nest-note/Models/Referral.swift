@@ -8,8 +8,16 @@ struct Referral: Codable {
     let timestamp: Date
     let userRole: String     // "nester" or "sitter"
     let isValid: Bool        // Whether the referral was successfully processed
-    
-    init(referralCode: String, referredUserId: String, referredUserEmail: String, userRole: String, isValid: Bool = true) {
+    let referrerUserId: String?
+
+    init(
+        referralCode: String,
+        referredUserId: String,
+        referredUserEmail: String,
+        userRole: String,
+        isValid: Bool = true,
+        referrerUserId: String? = nil
+    ) {
         self.id = UUID().uuidString
         self.referralCode = referralCode
         self.referredUserId = referredUserId
@@ -17,6 +25,7 @@ struct Referral: Codable {
         self.timestamp = Date()
         self.userRole = userRole
         self.isValid = isValid
+        self.referrerUserId = referrerUserId
     }
 }
 

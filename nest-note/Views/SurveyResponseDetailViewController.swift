@@ -159,15 +159,26 @@ class SurveyResponseDetailViewController: NNViewController {
             }
             basicInfoItems.append(.basicInfo(title: "Duration", value: durationString))
         }
+
+        if let paywallSecStr = survey.metadata["paywall_dwell_seconds"],
+           let paywallSec = TimeInterval(paywallSecStr), paywallSec > 0 {
+            let whole = Int(round(paywallSec))
+            let paywallFormatted = whole >= 60
+                ? String(format: "%d min %d sec", whole / 60, whole % 60)
+                : String(format: "%d sec", whole)
+            basicInfoItems.append(.basicInfo(title: "Paywall time (onboarding)", value: paywallFormatted))
+        }
         
         snapshot.appendItems(basicInfoItems, toSection: .basicInfo)
 
         // Metadata Section
-        if !survey.metadata.isEmpty {
+        let skipPaywallKey = "paywall_dwell_seconds"
+        let metadataItems = survey.metadata
+            .filter { $0.key != skipPaywallKey }
+            .sorted(by: { $0.key < $1.key })
+            .map { Item.metadata(key: $0.key, value: $0.value) }
+        if !metadataItems.isEmpty {
             snapshot.appendSections([.metadata])
-            let metadataItems = survey.metadata.sorted(by: { $0.key < $1.key }).map { key, value in
-                Item.metadata(key: key, value: value)
-            }
             snapshot.appendItems(metadataItems, toSection: .metadata)
         }
 

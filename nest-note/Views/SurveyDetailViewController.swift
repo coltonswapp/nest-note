@@ -50,6 +50,15 @@ class SurveyDetailViewController: NNViewController {
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
+
+    private let paywallDwellLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.monospacedSystemFont(ofSize: 14.0, weight: .regular)
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
     
     // MARK: - Initialization
     init(surveyType: SurveyResponse.SurveyType, metrics: SurveyMetrics) {
@@ -95,31 +104,58 @@ class SurveyDetailViewController: NNViewController {
         headerView.addSubview(titleLabel)
         headerView.addSubview(responsesLabel)
         headerView.addSubview(lastUpdatedLabel)
-        
+        headerView.addSubview(paywallDwellLabel)
+
+        let paywallTop = paywallDwellLabel.topAnchor.constraint(equalTo: lastUpdatedLabel.bottomAnchor, constant: 4)
+        let paywallHeightZero = paywallDwellLabel.heightAnchor.constraint(equalToConstant: 0)
+        let pinPaywallBottom = paywallDwellLabel.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -24)
+        let pinLastUpdatedBottom = lastUpdatedLabel.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -24)
+
         NSLayoutConstraint.activate([
             headerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100),
-            
+
             titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 24),
             titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 4),
             titleLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
-            
+
             responsesLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             responsesLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 4),
             responsesLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
-            
+
             lastUpdatedLabel.topAnchor.constraint(equalTo: responsesLabel.bottomAnchor, constant: 4),
             lastUpdatedLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 4),
             lastUpdatedLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
-            lastUpdatedLabel.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -24)
+
+            paywallTop,
+            paywallDwellLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 4),
+            paywallDwellLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16)
         ])
-        
+
         titleLabel.text = surveyType == .parentSurvey ? "Parent Survey Results" : "Sitter Survey Results"
         responsesLabel.text = "\(metrics.totalResponses) total responses"
-        
+
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .short
         lastUpdatedLabel.text = "Last updated: \(dateFormatter.string(from: metrics.lastUpdated))"
+
+        let hasPaywallStats = surveyType == .parentSurvey && metrics.paywallDwell.map { $0.count > 0 } == true
+        if hasPaywallStats, let paywall = metrics.paywallDwell {
+            let avg = Int(round(paywall.avgSeconds))
+            paywallDwellLabel.text = "Avg. onboarding paywall time: \(avg)s (from \(paywall.count) responses with data)"
+            paywallDwellLabel.isHidden = false
+            paywallTop.constant = 4
+            paywallHeightZero.isActive = false
+            pinPaywallBottom.isActive = true
+            pinLastUpdatedBottom.isActive = false
+        } else {
+            paywallDwellLabel.text = nil
+            paywallDwellLabel.isHidden = true
+            paywallTop.constant = 0
+            paywallHeightZero.isActive = true
+            pinPaywallBottom.isActive = false
+            pinLastUpdatedBottom.isActive = true
+        }
     }
     
     private func createQuestionViews() {

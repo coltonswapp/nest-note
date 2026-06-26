@@ -19,6 +19,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private var footerRegistration: UICollectionView.SupplementaryRegistration<UICollectionViewListCell>!
     
     private var nestCreationCoordinator: NestCreationCoordinator?
+    private static let settingsPromoHeight: CGFloat = 136
+    private static let settingsPromoVerticalPadding: CGFloat = 6
+    private static let sitterReferralBannerHeight: CGFloat = 118
+    private static let sitterReferralBannerVerticalPadding: CGFloat = 0
+
+    private var hasProSubscription = true
+    private var isFreeTrialEligible = false
+    private var readinessScore: Int?
+    private var isCopyingSitterReferralInvite = false
+    private var isFirstAppearance = true
     
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -38,6 +48,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         configureCollectionView()
         configureDataSource()
         applyInitialSnapshots()
+        refreshPromoVisibility()
         collectionView.delegate = self
         
         // Add observer for user information updates
@@ -59,9 +70,40 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        
-        // Reload data when returning to this screen (e.g., after sign out)
-        applyInitialSnapshots()
+        if isFirstAppearance {
+            isFirstAppearance = false
+        } else {
+            applyInitialSnapshots()
+        }
+        refreshPromoVisibility()
+    }
+
+    private func refreshPromoVisibility() {
+        Task {
+            async let hasPro = SubscriptionService.shared.hasProSubscription()
+            async let trialEligible = SubscriptionService.shared.isEligibleForFreeTrial()
+            async let score = loadReadinessScoreIfNeeded()
+            let (pro, trial, readinessScore) = await (hasPro, trialEligible, score)
+            await MainActor.run {
+                self.hasProSubscription = pro
+                self.isFreeTrialEligible = trial
+                self.readinessScore = readinessScore
+                self.applyInitialSnapshots()
+            }
+        }
+    }
+
+    private func loadReadinessScoreIfNeeded() async -> Int? {
+        guard FeatureFlagService.shared.isEnabled(.nestReadinessScoreEnabled),
+              ModeManager.shared.isNestOwnerMode,
+              UserService.shared.isSignedIn,
+              let nestID = NestService.shared.currentNest?.id,
+              NestReadinessBannerStore.isHomeBannerDismissed(for: nestID) else {
+            return nil
+        }
+
+        let result = try? await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
+        return result?.totalScore
     }
 
     override func setup() {
@@ -164,12 +206,47 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         let layout = UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
             let section = self.dataSource.snapshot().sectionIdentifiers[sectionIndex]
             switch section {
-            case .account, .currentNest:
+            case .premiumPromo:
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(Self.settingsPromoHeight)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 20, leading: 18, bottom: 20, trailing: 18)
+                return section
+
+            case .sitterReferral:
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(Self.sitterReferralBannerHeight)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 18, bottom: 14, trailing: 18)
+                return section
+
+            case .account:
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(80))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
                 let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
                 let section = NSCollectionLayoutSection(group: group)
                 section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 20, trailing: 18)
+                return section
+
+            case .currentNest:
+                var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+                config.headerMode = .supplementary
+                let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
+                let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: headerSize,
+                    elementKind: UICollectionView.elementKindSectionHeader,
+                    alignment: .top
+                )
+                section.boundarySupplementaryItems = [header]
                 return section
                 
             case .myNest, .mySitting, .general, .admin, .experimental:
@@ -205,6 +282,38 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     private func configureDataSource() {
+        let sitterReferralCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, Item> { [weak self] cell, _, item in
+            if case .sitterReferral = item {
+                cell.configure(
+                    variant: .stackedIconsLabel,
+                    ctaTitle: self?.isCopyingSitterReferralInvite == true ? "Copying…" : SitterReferralCopy.ctaTitle,
+                    title: SitterReferralCopy.title,
+                    subtitle: SitterReferralCopy.subtitle,
+                    contentVerticalPadding: Self.sitterReferralBannerVerticalPadding
+                )
+                cell.onUpgradeTapped = { [weak self] in
+                    self?.handleSitterReferralCopyInvite()
+                }
+            }
+        }
+
+        let premiumPromoCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, Item> { [weak self] cell, _, item in
+            if case .premiumPromo = item {
+                cell.configure(
+                    variant: .stackedIconsLabel,
+                    ctaTitle: PremiumPromoCopy.ctaTitle(
+                        isFreeTrialEligible: self?.isFreeTrialEligible ?? false
+                    ),
+                    title: PremiumPromoCopy.settingsTitle,
+                    subtitle: PremiumPromoCopy.settingsSubtitle,
+                    contentVerticalPadding: Self.settingsPromoVerticalPadding
+                )
+                cell.onUpgradeTapped = { [weak self] in
+                    self?.presentPremiumPaywall()
+                }
+            }
+        }
+
         let accountCellRegistration = UICollectionView.CellRegistration<AccountCell, Item> { cell, indexPath, item in
             if case let .account(email, name) = item {
                 cell.configure(email: email, name: name)
@@ -215,6 +324,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             var content = cell.defaultContentConfiguration()
             
             switch item {
+            case .readinessScore:
+                break
             case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
                 content.text = title
                 
@@ -252,104 +363,67 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 cell.accessories = [.disclosureIndicator()]
                 
             case .adminItem(let title, let symbolName):
-                // Handle "Debug as" separately with segmented control
+                content.text = title
                 if title == "Debug as" {
-                    let currentStatus = FeatureFlagService.shared.getDebugUserStatus()
-                    let debugAsItem = Item.adminItem(title: "Debug as", symbolName: "person.crop.circle.badge.checkmark")
-                    
-                    // Configure content
-                    content.text = title
-                    let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
-                    let image = UIImage(systemName: symbolName, withConfiguration: symbolConfiguration)?
-                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                    content.image = image
-                    content.imageProperties.tintColor = NNColors.primary
-                    content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-                    content.imageToTextPadding = 16
-                    content.directionalLayoutMargins.top = 16
-                    content.directionalLayoutMargins.bottom = 16
-                    
-                    // Create segmented control
-                    let segmentedControl = UISegmentedControl(items: ["Free", "Pro"])
-                    segmentedControl.selectedSegmentIndex = currentStatus == "pro" ? 1 : 0
-                    segmentedControl.addAction(UIAction { [weak self] _ in
-                        let newStatus = segmentedControl.selectedSegmentIndex == 1 ? "pro" : "free"
-                        Logger.log(level: .info, category: .general, message: "🔧 DEBUG: Setting debug status to \(newStatus)")
-                        FeatureFlagService.shared.setDebugUserStatus(newStatus)
-                        
-                        // Force reconfigure the cell to ensure state is synced
-                        DispatchQueue.main.async { [weak self] in
-                            guard let self = self else { return }
-                            var snapshot = self.dataSource.snapshot()
-                            if #available(iOS 15.0, *) {
-                                snapshot.reconfigureItems([debugAsItem])
-                            } else {
-                                snapshot.reloadItems([debugAsItem])
-                            }
-                            self.dataSource.apply(snapshot, animatingDifferences: false)
-                        }
-                    }, for: .valueChanged)
-                    
-                    // Create accessory view with proper sizing
-                    let accessoryView = UIView()
-                    accessoryView.addSubview(segmentedControl)
-                    segmentedControl.translatesAutoresizingMaskIntoConstraints = false
-                    
-                    NSLayoutConstraint.activate([
-                        segmentedControl.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
-                        segmentedControl.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
-                        segmentedControl.widthAnchor.constraint(equalToConstant: 100),
-                        segmentedControl.heightAnchor.constraint(equalToConstant: 32)
-                    ])
-                    
-                    // Size the accessory view to fit the segmented control
-                    accessoryView.frame = CGRect(x: 0, y: 0, width: 100, height: 44)
-                    
-                    let accessoryConfig = UICellAccessory.CustomViewConfiguration(
-                        customView: accessoryView,
-                        placement: .trailing(displayed: .always),
-                        reservedLayoutWidth: .custom(100)
-                    )
-                    
-                    cell.contentConfiguration = content
-                    cell.accessories = [.customView(configuration: accessoryConfig)]
-                } else {
-                    // Standard admin items
-                    content.text = title
-                    let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
-                    let image = UIImage(systemName: symbolName, withConfiguration: symbolConfiguration)?
-                        .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                    content.image = image
-                    content.imageProperties.tintColor = NNColors.primary
-                    content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-                    content.imageToTextPadding = 16
-                    content.directionalLayoutMargins.top = 16
-                    content.directionalLayoutMargins.bottom = 16
-                    
-                    cell.contentConfiguration = content
-                    cell.accessories = [.disclosureIndicator()]
+                    content.secondaryText = FeatureFlagService.shared.getDebugUserStatus().capitalized
+                    content.secondaryTextProperties.color = .secondaryLabel
                 }
+                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
+                let image = UIImage(systemName: symbolName, withConfiguration: symbolConfiguration)?
+                    .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+                content.image = image
+                content.imageProperties.tintColor = NNColors.primary
+                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                content.imageToTextPadding = 16
+                content.directionalLayoutMargins.top = 16
+                content.directionalLayoutMargins.bottom = 16
+
+                cell.contentConfiguration = content
+                cell.accessories = [.disclosureIndicator()]
                 
             default:
                 break
             }
         }
         
+        let readinessScoreCellRegistration = UICollectionView.CellRegistration<NestReadinessCompactCell, Item> { cell, _, item in
+            if case let .readinessScore(score) = item {
+                cell.configure(score: score)
+            }
+        }
+
         let currentNestCellRegistration = UICollectionView.CellRegistration<CurrentNestCell, Item> { cell, indexPath, item in
             if case let .currentNest(name, address) = item {
-                // Check if this is the "no nest" placeholder
                 let isNoNest = name.contains("Let's Setup")
                 cell.configure(name: name, address: address, isNoNest: isNoNest)
             }
         }
         
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            switch self.dataSource.snapshot().sectionIdentifiers[indexPath.section] {
+            switch item {
+            case .premiumPromo:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: premiumPromoCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .sitterReferral:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: sitterReferralCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .readinessScore:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: readinessScoreCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
             case .account:
                 return collectionView.dequeueConfiguredReusableCell(using: accountCellRegistration, for: indexPath, item: item)
             case .currentNest:
                 return collectionView.dequeueConfiguredReusableCell(using: currentNestCellRegistration, for: indexPath, item: item)
-            case .myNest, .mySitting, .general, .admin, .experimental:
+            case .myNestItem, .generalItem, .adminItem, .experimentalItem:
                 return collectionView.dequeueConfiguredReusableCell(using: listCellRegistration, for: indexPath, item: item)
             }
         }
@@ -368,6 +442,16 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+
+        if !hasProSubscription && ModeManager.shared.isNestOwnerMode {
+            snapshot.appendSections([.premiumPromo])
+            snapshot.appendItems([.premiumPromo], toSection: .premiumPromo)
+        }
+
+        if shouldShowSitterReferralBanner {
+            snapshot.appendSections([.sitterReferral])
+            snapshot.appendItems([.sitterReferral], toSection: .sitterReferral)
+        }
         
         // Determine sections based on app mode
         let sections: [Section]
@@ -391,13 +475,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         // Current Nest section - only if user is signed in and is not in sitter mode
         if UserService.shared.isSignedIn && ModeManager.shared.isNestOwnerMode {
+            var currentNestItems: [Item] = []
             if let currentNest = NestService.shared.currentNest {
-                snapshot.appendItems([.currentNest(name: currentNest.name, address: currentNest.address)],
-                                   toSection: .currentNest)
+                currentNestItems.append(.currentNest(name: currentNest.name, address: currentNest.address))
+                appendReadinessItems(to: &currentNestItems, nestID: currentNest.id)
             } else {
-                snapshot.appendItems([.currentNest(name: "Let's Setup Your Nest", address: "Tap here to create your nest")],
-                                   toSection: .currentNest)
+                currentNestItems.append(.currentNest(name: "Let's Setup Your Nest", address: "Tap here to create your nest"))
             }
+            snapshot.appendItems(currentNestItems, toSection: .currentNest)
         }
         
         // My Nest and My Sitting sections
@@ -436,8 +521,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("App Icon", "app"),
             ("Rate App", "star"),
             ("Terms & Privacy", "doc.text"),
-            ("Support", "questionmark.circle"),
-            ("Reset Setup", "arrow.counterclockwise")
+            ("Support", "questionmark.circle")
         ].map { Item.generalItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(generalItems, toSection: .general)
         
@@ -447,19 +531,20 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Survey Dashboard", "chart.bar.doc.horizontal"),
             ("Referral Admin", "person.badge.plus.fill"),
             ("Referral Analytics", "chart.line.uptrend.xyaxis"),
+            ("Sitter Referral Payouts", "dollarsign.circle.fill"),
             ("View Logs", "doc.text.magnifyingglass"),
             ("UserDefaults Viewer", "list.bullet.rectangle"),
             ("Reset App State", "arrow.counterclockwise"),
             ("Debug as", "person.crop.circle.badge.checkmark"),
         ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(adminItems, toSection: .admin)
-
         snapshot.appendSections([.experimental])
-        let experimentalItems = [
+        var experimentalItems = [
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
             ("Explosion Playground", "sparkles.rectangle.stack"),
             ("Finish Screen", "slider.horizontal.below.rectangle"),
+            ("Sitter Finish Screen", "person.crop.circle.badge.checkmark"),
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
@@ -479,18 +564,42 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
             ("Toast Test", "text.bubble.fill"),
+            ("Markdown Preview", "doc.richtext"),
+            ("Sitters article (full)", "text.book.closed"),
+            ("Sitters article (brief)", "text.book.closed.fill"),
             ("Test Schedule View", "calendar.day.timeline.left"),
             ("Test Routine Detail", "list.bullet.clipboard"),
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
+            ("Feature Info Paywall", "sparkles.rectangle.stack"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
+
+        if isNestReadinessEnabled, NestService.shared.currentNest != nil {
+            experimentalItems.append(.experimentalItem(title: "Show on Home Screen", symbolName: "house.fill"))
+        }
+
         snapshot.appendItems(experimentalItems, toSection: .experimental)
         #endif
         
         dataSource.apply(snapshot, animatingDifferences: false)
     }
-    
+
+    private var isNestReadinessEnabled: Bool {
+        FeatureFlagService.shared.isEnabled(.nestReadinessScoreEnabled)
+    }
+
+    private func appendReadinessItems(to items: inout [Item], nestID: String) {
+        guard isNestReadinessEnabled else { return }
+
+        let showOnHome = !NestReadinessBannerStore.isHomeBannerDismissed(for: nestID)
+        if !showOnHome, let score = readinessScore {
+            items.append(.readinessScore(score: score))
+        }
+    }
+
     enum Section: String, Hashable, CaseIterable {
+        case premiumPromo = "Premium"
+        case sitterReferral = "Refer Friends"
         case account = "Account"
         case currentNest = "Current Nest"
         case myNest = "My Nest"
@@ -501,8 +610,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     enum Item: Hashable {
+        case premiumPromo
+        case sitterReferral
         case account(email: String, name: String)
         case currentNest(name: String, address: String)
+        case readinessScore(score: Int)
         case myNestItem(title: String, symbolName: String)
         case generalItem(title: String, symbolName: String)
         case adminItem(title: String, symbolName: String)
@@ -512,6 +624,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     #if DEBUG
     private func handleDebugItemSelection(_ title: String) {
         switch title {
+        case "Debug as":
+            showDebugUserStatusPicker()
         case "Reset App State":
             // Add reset logic
             print("Resetting app state...")
@@ -531,6 +645,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Finish Screen":
             let finishVC = OBFinishViewController()
             finishVC.enableDebugMode()
+            let nav = UINavigationController(rootViewController: finishVC)
+            present(nav, animated: true)
+        case "Sitter Finish Screen":
+            let finishVC = OBFinishViewController()
+            finishVC.enableSitterDebugMode()
             let nav = UINavigationController(rootViewController: finishVC)
             present(nav, animated: true)
         case "Onboarding":
@@ -561,8 +680,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Event Creation":
             let vc = SessionEventViewController(entryRepository: NestService.shared)
             present(vc, animated: true)
-        case "Glassy Button Playground":
-            navigationController?.pushViewController(GlassyButtonPlayground(), animated: true)
         case "Entry Review":
             break
 //            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
@@ -600,6 +717,15 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Markdown Preview":
+            let vc = MarkdownTestViewController()
+            navigationController?.pushViewController(vc, animated: true)
+        case "Sitters article (full)":
+            let vc = MarkdownTestViewController(markdown: SittersGettingFamiliesArticle.markdownFull)
+            navigationController?.pushViewController(vc, animated: true)
+        case "Sitters article (brief)":
+            let vc = MarkdownTestViewController(markdown: SittersGettingFamiliesArticle.markdownBrief)
+            navigationController?.pushViewController(vc, animated: true)
         case "Survey Dashboard":
             let vc = SurveyDashboardViewController()
             let nav = UINavigationController(rootViewController: vc)
@@ -626,15 +752,103 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             resetTooltipsDatastore()
         case "Test Subscription Status":
             showSubscriptionStatus()
+        case "Feature Info Paywall":
+            showFeatureInfoPaywall()
+        case "Show on Home Screen":
+            showReadinessHomeBannerPicker()
         case "Referral Admin":
             let vc = ReferralAdminViewController()
             navigationController?.pushViewController(vc, animated: true)
         case "Referral Analytics":
             let vc = ReferralAnalyticsViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Sitter Referral Payouts":
+            let vc = SitterReferralPayoutsViewController()
+            navigationController?.pushViewController(vc, animated: true)
         default:
             break
         }
+    }
+
+    private func showDebugUserStatusPicker() {
+        let currentStatus = FeatureFlagService.shared.getDebugUserStatus()
+
+        let alert = UIAlertController(
+            title: "Debug as",
+            message: "Choose which subscription tier to simulate.",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(
+            title: currentStatus == "free" ? "Free ✓" : "Free",
+            style: .default
+        ) { [weak self] _ in
+            FeatureFlagService.shared.setDebugUserStatus("free")
+            self?.reconfigureDebugAsItem()
+        })
+
+        alert.addAction(UIAlertAction(
+            title: currentStatus == "pro" ? "Pro ✓" : "Pro",
+            style: .default
+        ) { [weak self] _ in
+            FeatureFlagService.shared.setDebugUserStatus("pro")
+            self?.reconfigureDebugAsItem()
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.view.window != nil else { return }
+            self.present(alert, animated: true)
+        }
+    }
+
+    private func reconfigureDebugAsItem() {
+        let debugAsItem = Item.adminItem(title: "Debug as", symbolName: "person.crop.circle.badge.checkmark")
+        var snapshot = dataSource.snapshot()
+        if #available(iOS 15.0, *) {
+            snapshot.reconfigureItems([debugAsItem])
+        } else {
+            snapshot.reloadItems([debugAsItem])
+        }
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func showReadinessHomeBannerPicker() {
+        guard let nestID = NestService.shared.currentNest?.id else { return }
+
+        let showOnHome = !NestReadinessBannerStore.isHomeBannerDismissed(for: nestID)
+        let alert = UIAlertController(
+            title: "Show on Home Screen",
+            message: "Choose where the Nest Score banner appears.",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(
+            title: showOnHome ? "Show on Home Screen ✓" : "Show on Home Screen",
+            style: .default
+        ) { [weak self] _ in
+            NestReadinessBannerStore.setHomeBannerVisible(true, for: nestID)
+            self?.refreshPromoVisibility()
+        })
+
+        alert.addAction(UIAlertAction(
+            title: showOnHome ? "Show in Settings Only" : "Show in Settings Only ✓",
+            style: .default
+        ) { [weak self] _ in
+            NestReadinessBannerStore.setHomeBannerVisible(false, for: nestID)
+            self?.refreshPromoVisibility()
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+
+        present(alert, animated: true)
     }
     #endif
 
@@ -643,23 +857,27 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         navigationController?.pushViewController(vc, animated: true)
     }
     
-    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return true }
-        
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+
         #if DEBUG
-        // Prevent selection for "Debug as" item since it uses a menu button
-        if case .adminItem(let title, _) = item, title == "Debug as" {
-            return false
+        switch item {
+        case .adminItem(let title, _), .experimentalItem(let title, _):
+            handleDebugItemSelection(title)
+            collectionView.deselectItem(at: indexPath, animated: true)
+            return
+        default:
+            break
         }
         #endif
         
-        return true
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
-        
         switch item {
+        case .premiumPromo:
+            presentPremiumPaywall()
+        case .sitterReferral:
+            handleSitterReferralCopyInvite()
+        case .readinessScore:
+            presentReadinessDetail()
         case .account(let email, let name):
             if UserService.shared.isSignedIn {
                 showUserProfile()
@@ -727,7 +945,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                             if hasProSubscription {
                                 showSubscriptionStatus()
                             } else {
-                                showRevenueCatPaywall()
+                                presentPremiumPaywall()
                             }
                         }
                     }
@@ -748,8 +966,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 present(nav, animated: true)
             case "Rate App":
                 RatingManager.shared.requestRatingManually()
-            case "Reset Setup":
-                showResetSetupConfirmation()
             case "Terms & Privacy":
                 showPrivacyPolicy()
             case "Support":
@@ -757,20 +973,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             default:
                 print("Selected General item: \(title)")
             }
-        
-        #if DEBUG
-        case .adminItem(let title, _):
-            // Skip selection handling for "Debug as" since it uses a menu button
-            if title != "Debug as" {
-                handleDebugItemSelection(title)
-            } else {
-                // Don't deselect - let the menu button handle interaction
-                return
-            }
-        case .experimentalItem(let title, _):
-            handleDebugItemSelection(title)
-        #endif
-            
+
         default:
             return
         }
@@ -830,14 +1033,122 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         present(nestCreationCoordinator.start(), animated: true)
     }
     
+    private var shouldShowSitterReferralBanner: Bool {
+        FeatureFlagService.shared.isEnabled(.sitterReferralProgramEnabled)
+            && UserService.shared.isSignedIn
+            && ModeManager.shared.isSitterMode
+    }
+
+    private func handleSitterReferralCopyInvite() {
+        guard !isCopyingSitterReferralInvite else { return }
+        guard let user = UserService.shared.currentUser else { return }
+
+        let venmo = user.personalInfo.venmoUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if venmo.isEmpty {
+            let alert = UIAlertController(
+                title: "Add Your Venmo",
+                message: "Add your Venmo in Profile so we can pay you when a family subscribes.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Go to Profile", style: .default) { [weak self] _ in
+                self?.showUserProfile()
+            })
+            alert.addAction(UIAlertAction(title: "Copy Anyway", style: .default) { [weak self] _ in
+                self?.performSitterReferralCopyInvite(for: user)
+            })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            present(alert, animated: true)
+            return
+        }
+
+        performSitterReferralCopyInvite(for: user)
+    }
+
+    private func performSitterReferralCopyInvite(for user: NestUser) {
+        isCopyingSitterReferralInvite = true
+        applyInitialSnapshots()
+
+        Task {
+            do {
+                let code = try await SitterReferralService.shared.getOrCreateCode(for: user)
+                let message = SitterReferralLinkBuilder.inviteMessage(
+                    sitterName: user.personalInfo.name,
+                    code: code
+                )
+                await MainActor.run {
+                    UIPasteboard.general.string = message
+                    isCopyingSitterReferralInvite = false
+                    applyInitialSnapshots()
+                    showToast(text: "Invite copied!")
+                    HapticsHelper.lightHaptic()
+                    Tracker.shared.trackSitterReferralInviteCopied(
+                        hasVenmo: !(user.personalInfo.venmoUsername ?? "").isEmpty
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    isCopyingSitterReferralInvite = false
+                    applyInitialSnapshots()
+                    showToast(text: "Couldn't create invite. Try again.")
+                }
+            }
+        }
+    }
+
+    private func presentPremiumPaywall() {
+        let paywall = FeatureInfoPaywallViewController()
+        paywall.modalPresentationStyle = .pageSheet
+        if let sheet = paywall.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(paywall, animated: true)
+    }
+
+    private func presentReadinessDetail() {
+        let detailVC = NestReadinessDetailViewController()
+        detailVC.delegate = self
+        detailVC.modalPresentationStyle = .pageSheet
+        if let sheet = detailVC.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(detailVC, animated: true)
+    }
+
+    private func presentCategoryView(category: String) {
+        guard NestService.shared.currentNest != nil else { return }
+
+        Task {
+            do {
+                let (_, places) = try await NestService.shared.fetchEntriesAndPlaces()
+                await MainActor.run {
+                    let categoryVC = NestCategoryViewController(
+                        category: category,
+                        places: places,
+                        entryRepository: NestService.shared
+                    )
+                    self.navigationController?.pushViewController(categoryVC, animated: true)
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to fetch places for category view: \(error)")
+                await MainActor.run {
+                    let categoryVC = NestCategoryViewController(
+                        category: category,
+                        places: [],
+                        entryRepository: NestService.shared
+                    )
+                    self.navigationController?.pushViewController(categoryVC, animated: true)
+                }
+            }
+        }
+    }
+
     private func showRevenueCatPaywall() {
         let paywallViewController = PaywallViewController()
         
         paywallViewController.delegate = self
         present(paywallViewController, animated: true)
-        
-        // Mark the final setup step as complete when paywall is viewed
-        SetupService.shared.markStepComplete(.finalStep)
     }
     
     private func showSubscriptionStatus() {
@@ -851,29 +1162,20 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         present(subscriptionStatusVC, animated: true)
     }
-    
-    private func showResetSetupConfirmation() {
-        let alert = UIAlertController(
-            title: "Reset Setup",
-            message: "This will reset your setup progress and you'll need to go through the setup flow again. Are you sure?",
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Reset", style: .destructive) { _ in
-            SetupService.shared.resetSetupForCurrentUser()
-            
-            // Show confirmation
-            let successAlert = UIAlertController(
-                title: "Setup Reset",
-                message: "Your setup has been reset. You'll see the setup flow on your next visit to the home screen.",
-                preferredStyle: .alert
-            )
-            successAlert.addAction(UIAlertAction(title: "OK", style: .default))
-            self.present(successAlert, animated: true)
-        })
-        
-        present(alert, animated: true)
+
+    private func showFeatureInfoPaywall() {
+        presentPaywallPreview(FeatureInfoPaywallViewController())
+    }
+
+    private func presentPaywallPreview(_ paywallVC: UIViewController) {
+        paywallVC.modalPresentationStyle = .pageSheet
+
+        if let sheet = paywallVC.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+
+        present(paywallVC, animated: true)
     }
     
     private func showPrivacyPolicy() {
@@ -1070,6 +1372,7 @@ extension SettingsViewController: PaywallViewControllerDelegate {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
         TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) {
+            SubscriptionService.shared.notifySuccessfulPurchase()
             self.showToast(text: "Subscription activated!")
             Logger.log(level: .info, category: .purchases, message: "Subscription purchase completed")
             
@@ -1130,5 +1433,13 @@ extension SettingsViewController: CreateSessionRequestViewControllerDelegate {
         let inviteDetailVC = InviteDetailViewController()
         inviteDetailVC.configure(with: inviteCode, sessionID: sessionID, sitter: nil, isSitterInitiated: true)
         controller.navigationController?.pushViewController(inviteDetailVC, animated: true)
+    }
+}
+
+extension SettingsViewController: NestReadinessDetailViewControllerDelegate {
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didSelectCategory category: String) {
+        controller.dismiss(animated: true) { [weak self] in
+            self?.presentCategoryView(category: category)
+        }
     }
 }

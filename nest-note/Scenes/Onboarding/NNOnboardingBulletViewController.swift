@@ -16,6 +16,11 @@ final class NNOnboardingBulletViewController: NNOnboardingViewController {
         ctaButton?.addTarget(self, action: #selector(continueButtonTapped), for: .touchUpInside)
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        bulletStack?.animateItemsIn(initialDelay: 0.08)
+    }
+
     func configure(title: String, subtitle: String?, bullets: [NNBulletItem], ctaText: String? = nil) {
         self.configuredTitle = title
         self.configuredSubtitle = subtitle
@@ -29,6 +34,7 @@ final class NNOnboardingBulletViewController: NNOnboardingViewController {
         let stack = NNBulletStack(items: bulletItems)
         stack.translatesAutoresizingMaskIntoConstraints = false
         self.bulletStack = stack
+        stack.prepareItemsForSlideIn()
 
         view.addSubview(stack)
 

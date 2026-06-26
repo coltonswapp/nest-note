@@ -18,6 +18,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     private var isLoadingEvents = false
     private var pinnedCategories: [String] = []
     private var categories: [NestCategory] = []
+
+    /// Persisted dismissal for the "Getting families on NestNote" intro banner shown to new sitters.
+    private static let familiesBannerDismissedKey = "SitterHome.familiesBanner.dismissed"
+    private var isFamiliesBannerDismissed: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.familiesBannerDismissedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.familiesBannerDismissedKey) }
+    }
     
     private lazy var loadingSpinner: UIActivityIndicatorView = {
         let spinner = UIActivityIndicatorView(style: .large)
@@ -60,6 +67,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         DispatchQueue.main.async { [weak self] in
             self?.applyHomeScreenNavigationAppearance(appMode: .sitter)
         }
+        setFCMToken()
     }
     
     override func setup() {
@@ -79,7 +87,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             loadingSpinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             loadingSpinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             
-            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyStateView.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 120),
+            emptyStateView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 40),
             emptyStateView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
@@ -168,7 +177,17 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
                 section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 16)
                 return section
-                
+
+            case .sitterInfoBanner:
+                let height = SitterInfoBannerCell.preferredHeight
+                let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(height))
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 18, bottom: 8, trailing: 18)
+                return section
+
             default:
                 return nil
             }
@@ -283,6 +302,18 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             }
         }
         
+        let sitterInfoBannerRegistration = UICollectionView.CellRegistration<SitterInfoBannerCell, HomeItem> { [weak self] cell, indexPath, item in
+            if case .sitterInfoBanner = item {
+                cell.configure(
+                    title: "New to NestNote?",
+                    subtitle: "Learn how sessions work and how to invite a family."
+                )
+                cell.onClose = { [weak self] in
+                    self?.dismissFamiliesBanner()
+                }
+            }
+        }
+
         let moreEventsRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, HomeItem> { cell, indexPath, item in
             if case let .moreEvents(count) = item {
                 var content = cell.defaultContentConfiguration()
@@ -350,6 +381,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                     for: indexPath,
                     item: item
                 )
+            case .sitterInfoBanner:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: sitterInfoBannerRegistration,
+                    for: indexPath,
+                    item: item
+                )
             default:
                 fatalError("Unexpected item type")
             }
@@ -385,7 +422,11 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 headerView.configure(title: title)
             case .upcomingSessions:
                 return
-            case .setupProgress:
+            case .sitterInfoBanner:
+                return
+            case .premiumPromo:
+                return
+            case .readinessScore:
                 return
             }
         }
@@ -471,12 +512,11 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         case .noSession:
             loadingSpinner.stopAnimating()
             emptyStateView.isHidden = false
-            
+
             // Clear the collection view content but keep it visible so the
             // navigation bar's large-title scroll tracking stays connected.
-            var empty = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
-            dataSource.apply(empty, animatingDifferences: false)
-            
+            applyNoSessionSnapshot()
+
             emptyStateView.animateIn()
             emptyStateView.isUserInteractionEnabled = true
             
@@ -624,6 +664,40 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     
     private func applyEmptySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
+
+    /// Snapshot used for the no-session state. Shows the intro banner (unless the
+    /// sitter dismissed it) above the centered empty-state message.
+    private func applyNoSessionSnapshot() {
+        var snapshot = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
+        if !isFamiliesBannerDismissed {
+            snapshot.appendSections([.sitterInfoBanner])
+            snapshot.appendItems([.sitterInfoBanner], toSection: .sitterInfoBanner)
+        }
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func presentFamiliesArticle() {
+        HapticsHelper.lightHaptic()
+        let vc = MarkdownTestViewController(markdown: SittersGettingFamiliesArticle.markdownBrief)
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+            sheet.preferredCornerRadius = 24
+        }
+        present(nav, animated: true)
+    }
+
+    private func dismissFamiliesBanner() {
+        guard !isFamiliesBannerDismissed else { return }
+        isFamiliesBannerDismissed = true
+
+        var snapshot = dataSource.snapshot()
+        guard snapshot.sectionIdentifiers.contains(.sitterInfoBanner) else { return }
+        snapshot.deleteSections([.sitterInfoBanner])
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
@@ -855,7 +929,10 @@ extension SitterHomeViewController: UICollectionViewDelegate {
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }
-            
+
+        case .sitterInfoBanner:
+            presentFamiliesArticle()
+
         default:
             break
         }

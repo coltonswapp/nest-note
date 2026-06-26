@@ -107,11 +107,18 @@ class SurveyDashboardViewController: NNViewController {
                 ).characters)
 
                 // Add 30-day count if available
+                var secondary = ""
                 if let thirtyDayCount = self?.survey30DayCounts[type] {
-                    content.secondaryText = "\(responsesString) (\(thirtyDayCount) in last 30 days)"
+                    secondary = "\(responsesString) (\(thirtyDayCount) in last 30 days)"
                 } else {
-                    content.secondaryText = responsesString
+                    secondary = responsesString
                 }
+                if type == .parentSurvey, let paywall = metrics.paywallDwell, paywall.count > 0 {
+                    let avg = Int(round(paywall.avgSeconds))
+                    secondary += "\nAvg. paywall time: \(avg)s (\(paywall.count) with data)"
+                }
+                content.secondaryText = secondary
+                content.secondaryTextProperties.numberOfLines = 0
 
                 // Set layout margins
                 content.directionalLayoutMargins.top = 16

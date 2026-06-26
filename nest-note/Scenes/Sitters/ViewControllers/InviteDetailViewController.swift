@@ -27,6 +27,7 @@ class InviteDetailViewController: NNViewController {
     private var inviteCode: String?
     private var inviteExists: Bool = false
     private var isSitterInitiated: Bool = false
+    private var sessionPaymentContext: SessionPaymentContext?
 
     // Track original state for change detection
     private var originalSitter: SitterItem?
@@ -84,6 +85,20 @@ class InviteDetailViewController: NNViewController {
         case sitter
         case code
     }
+
+    struct SessionPaymentContext {
+        let title: String
+        let startDate: Date
+        let sitterName: String
+        let venmoUsername: String?
+    }
+
+    private var canPaySitterWithVenmo: Bool {
+        guard !isSitterInitiated,
+              let venmoUsername = sessionPaymentContext?.venmoUsername,
+              !venmoUsername.isEmpty else { return false }
+        return true
+    }
     
     init(sitter: SitterItem? = nil, sessionID: String? = nil) {
         self.selectedSitter = sitter
@@ -138,6 +153,7 @@ class InviteDetailViewController: NNViewController {
         
         // Register cells and headers
         collectionView.register(SitterCell.self, forCellWithReuseIdentifier: SitterCell.reuseIdentifier)
+        collectionView.register(VenmoPayCell.self, forCellWithReuseIdentifier: VenmoPayCell.reuseIdentifier)
         collectionView.register(CodeCell.self, forCellWithReuseIdentifier: CodeCell.reuseIdentifier)
         collectionView.register(
             NNSectionHeaderView.self,
@@ -272,7 +288,8 @@ class InviteDetailViewController: NNViewController {
                         self.inviteExists = true
                         self.updateActionButtonsVisibility()
                         self.applySnapshot()
-                        self.createUpdateButton.isEnabled = false
+                        self.updateButtonTitle()
+                        self.updateButtonState()
                     }
                 } catch {
                     await MainActor.run {
@@ -409,6 +426,18 @@ class InviteDetailViewController: NNViewController {
             applySnapshot()
         }
     }
+
+    func configureSessionPayment(from session: SessionItem) {
+        sessionPaymentContext = SessionPaymentContext(
+            title: session.title,
+            startDate: session.startDate,
+            sitterName: session.assignedSitter?.name ?? selectedSitter?.name ?? "Sitter",
+            venmoUsername: session.assignedSitter?.venmoUsername
+        )
+        if isViewLoaded {
+            applySnapshot()
+        }
+    }
     
     private func updateButtonTitle() {
         let buttonTitle = inviteExists ? "Update Invite" : "Create Invite"
@@ -418,8 +447,8 @@ class InviteDetailViewController: NNViewController {
     private func updateButtonState() {
         guard createUpdateButton != nil else { return }
         
-        // Enable button only if there are unsaved changes
-        let shouldEnable = hasUnsavedChanges
+        // Open invites can be created without a sitter; updates require sitter changes
+        let shouldEnable = !inviteExists || hasUnsavedChanges
         createUpdateButton.isEnabled = shouldEnable
         createUpdateButton.alpha = shouldEnable ? 1.0 : 0.5
     }
@@ -456,7 +485,9 @@ class InviteDetailViewController: NNViewController {
         ) { [weak self] (footerView, string, indexPath) in
             guard let self else { return }
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            if section == .code {
+            if section == .sitter && canPaySitterWithVenmo {
+                footerView.configure(text: "Opens Venmo so you can send payment to your sitter.")
+            } else if section == .code {
                 if isSitterInitiated {
                     footerView.configure(text: "Share this code with the Nest Owner. They'll use it to accept your session request and can adjust the dates if needed.")
                 } else {
@@ -475,6 +506,15 @@ class InviteDetailViewController: NNViewController {
                 }
                 cell.configure(with: sitterItem.sitter)
                 cell.delegate = self
+                return cell
+            } else if let venmoItem = item as? VenmoPayCellItem {
+                guard let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: VenmoPayCell.reuseIdentifier,
+                    for: indexPath
+                ) as? VenmoPayCell else {
+                    fatalError("Could not create VenmoPayCell")
+                }
+                cell.configure(sitterName: venmoItem.sitterName)
                 return cell
             } else if let codeItem = item as? CodeCellItem {
                 guard let cell = collectionView.dequeueReusableCell(
@@ -517,13 +557,18 @@ class InviteDetailViewController: NNViewController {
         // Sitter section - only show for owner-initiated invites
         if !isSitterInitiated {
             snapshot.appendSections([.sitter])
+            var sitterItems: [AnyHashable] = []
             if let sitter = selectedSitter {
-                snapshot.appendItems([SitterCellItem(sitter: sitter)], toSection: .sitter)
+                sitterItems.append(SitterCellItem(sitter: sitter))
             } else {
                 // Show placeholder for "Invite a Sitter"
                 let placeholderSitter = SitterItem(id: "placeholder", name: "Invite a Sitter", email: "")
-                snapshot.appendItems([SitterCellItem(sitter: placeholderSitter)], toSection: .sitter)
+                sitterItems.append(SitterCellItem(sitter: placeholderSitter))
             }
+            if canPaySitterWithVenmo, let context = sessionPaymentContext {
+                sitterItems.append(VenmoPayCellItem(sitterName: context.sitterName))
+            }
+            snapshot.appendItems(sitterItems, toSection: .sitter)
         }
 
         // Code section
@@ -533,6 +578,19 @@ class InviteDetailViewController: NNViewController {
 
 
         dataSource.apply(snapshot, animatingDifferences: true)
+    }
+
+    private func payWithVenmoButtonTapped() {
+        guard let context = sessionPaymentContext,
+              let venmoUsername = context.venmoUsername,
+              !venmoUsername.isEmpty else { return }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        let dateString = dateFormatter.string(from: context.startDate)
+        let note = "NestNote: \(context.title) – \(dateString)"
+
+        VenmoPaymentHandler.payWithVenmo(username: venmoUsername, note: note)
     }
     
     // MARK: - Email Functions
@@ -609,6 +667,10 @@ extension InviteDetailViewController: UICollectionViewDelegate {
             return true
         }
         
+        if item is VenmoPayCellItem {
+            return true
+        }
+
         // Allow selection for CodeCellItem to show alert
         if item is CodeCellItem {
             return true
@@ -619,6 +681,10 @@ extension InviteDetailViewController: UICollectionViewDelegate {
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+
+        if item is VenmoPayCellItem {
+            payWithVenmoButtonTapped()
+        }
         
         if item is CodeCellItem {
             // Copy invite code and show feedback
@@ -660,6 +726,19 @@ struct CodeCellItem: Hashable {
     
     static func == (lhs: CodeCellItem, rhs: CodeCellItem) -> Bool {
         return lhs.id == rhs.id
+    }
+}
+
+struct VenmoPayCellItem: Hashable {
+    let id = UUID()
+    let sitterName: String
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: VenmoPayCellItem, rhs: VenmoPayCellItem) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -873,6 +952,75 @@ extension InviteDetailViewController {
     }
 }
 
+
+// MARK: - VenmoPayCell
+class VenmoPayCell: UICollectionViewListCell {
+    static let reuseIdentifier = "VenmoPayCell"
+
+    private let iconImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.image = UIImage(named: "venmo-icon")
+        imageView.layer.cornerRadius = 4
+        imageView.clipsToBounds = true
+        return imageView
+    }()
+
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyL
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let chevronImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(systemName: "chevron.right")
+        imageView.tintColor = .tertiaryLabel
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        contentView.addSubview(iconImageView)
+        contentView.addSubview(titleLabel)
+        contentView.addSubview(chevronImageView)
+
+        NSLayoutConstraint.activate([
+            iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            iconImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 24),
+            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevronImageView.leadingAnchor, constant: -8),
+
+            chevronImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            chevronImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            chevronImageView.widthAnchor.constraint(equalToConstant: 14),
+            chevronImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            contentView.heightAnchor.constraint(equalToConstant: 56)
+        ])
+    }
+
+    func configure(sitterName: String) {
+        titleLabel.text = "Pay with Venmo"
+    }
+}
 
 // MARK: - SitterCell
 protocol SitterCellDelegate: AnyObject {

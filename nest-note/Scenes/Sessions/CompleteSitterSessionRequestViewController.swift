@@ -73,7 +73,9 @@ class CompleteSitterSessionRequestViewController: NNViewController {
 
         alert.addAction(UIAlertAction(title: "Done", style: .default) { [weak self] _ in
             // Dismiss all the way back to home
-            self?.presentingViewController?.dismiss(animated: true)
+            self?.presentingViewController?.dismiss(animated: true) {
+                RatingManager.shared.trackSitterRequestAccepted()
+            }
         })
 
         present(alert, animated: true)
@@ -121,11 +123,13 @@ extension CompleteSitterSessionRequestViewController: EditSessionViewControllerD
                     // Post notification so SessionsViewController can reload
                     NotificationCenter.default.post(name: .sessionDidChange, object: nil)
                     
-                    // Small delay to show success animation before dismissing
+                    // Small delay to show success animation before prompting for notifications
                     Task {
                         try? await Task.sleep(for: .seconds(0.75))
                         await MainActor.run {
-                            self.showSuccessAndDismiss()
+                            SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
+                                self?.showSuccessAndDismiss()
+                            }
                         }
                     }
                 }

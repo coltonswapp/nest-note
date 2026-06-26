@@ -33,10 +33,12 @@ struct OnboardingStep: Codable {
         case preview = "preview"
         case missingInfo = "missing_info"
         case name = "name"
+        case phone = "phone"
         case email = "email"
         case password = "password"
         case createNest = "create_nest"
         case referral = "referral"
+        case venmoUsername = "venmo_username"
         case paywall = "paywall"
         case finish = "finish"
     }
