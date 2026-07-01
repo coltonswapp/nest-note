@@ -109,6 +109,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             do {
                 try await UserService.shared.updateFCMToken(fcmToken)
                 Logger.log(level: .info, category: .general, message: "Successfully updated FCM token in Firestore")
+                await AdminNotificationService.shared.syncRegisteredTokenIfNeeded(fcmToken)
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to update FCM token: \(error.localizedDescription)")
                 Logger.log(level: .error, category: .general, message: "Detailed error: \(error)")
@@ -120,7 +121,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                               willPresent notification: UNNotification,
                               withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // Handle foreground notifications
+        Logger.log(
+            level: .info,
+            category: .general,
+            message: "Will present notification: \(notification.request.content.title) — \(notification.request.content.body)"
+        )
         handleNotificationContent(notification.request.content)
         completionHandler([.banner, .sound, .badge])
     }
@@ -144,6 +149,36 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private func handleNotificationContent(_ content: UNNotificationContent) {
         // Extract userInfo from the notification content
         let userInfo = content.userInfo
+        
+        if let type = userInfo["type"] as? String, type == "new_signup" {
+            NotificationCenter.default.post(
+                name: .adminSignupNotificationTapped,
+                object: nil,
+                userInfo: userInfo
+            )
+            AdminNotificationRouter.shared.handleSignupNotification(userInfo: userInfo)
+            Logger.log(
+                level: .info,
+                category: .general,
+                message: "Handled admin signup notification (surveyId: \(userInfo["surveyId"] as? String ?? "none"))"
+            )
+            return
+        }
+
+        if let gcmData = userInfo["gcm.notification.data"] as? [String: Any],
+           let type = gcmData["type"] as? String, type == "new_signup" {
+            var merged = userInfo as? [String: Any] ?? [:]
+            for (key, value) in gcmData {
+                merged[key] = value
+            }
+            NotificationCenter.default.post(
+                name: .adminSignupNotificationTapped,
+                object: nil,
+                userInfo: merged
+            )
+            AdminNotificationRouter.shared.handleSignupNotification(userInfo: merged)
+            return
+        }
         
         // Check if this is a session status change notification
         if let type = userInfo["type"] as? String, type == "session_status_change",

@@ -10,13 +10,17 @@ import UIKit
 final class MarkdownTestViewController: NNViewController {
 
     private let markdownBody: String
+    private let showsShareButton: Bool
 
     /// Space below the markdown so the last lines stay above the floating share button.
     private static let markdownScrollBottomInset: CGFloat = 96
 
-    /// - Parameter markdown: Raw markdown string. Defaults to the built-in lorem preview.
-    init(markdown: String = MarkdownPreviewView.sampleMarkdown) {
+    /// - Parameters:
+    ///   - markdown: Raw markdown string. Defaults to the built-in lorem preview.
+    ///   - showsShareButton: When false, omits the floating share CTA (e.g. in-app help articles).
+    init(markdown: String = MarkdownPreviewView.sampleMarkdown, showsShareButton: Bool = true) {
         self.markdownBody = markdown
+        self.showsShareButton = showsShareButton
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -26,10 +30,11 @@ final class MarkdownTestViewController: NNViewController {
     }
 
     private lazy var markdownHost: UIHostingController<MarkdownPreviewView> = {
+        let bottomPadding = showsShareButton ? Self.markdownScrollBottomInset : 24
         let host = UIHostingController(
             rootView: MarkdownPreviewView(
                 markdown: markdownBody,
-                scrollBottomPadding: Self.markdownScrollBottomInset
+                scrollBottomPadding: bottomPadding
             )
         )
         host.view.backgroundColor = .clear
@@ -102,6 +107,7 @@ final class MarkdownTestViewController: NNViewController {
         view.addSubview(markdownHost.view)
         markdownHost.didMove(toParent: self)
         view.addSubview(closeGlassView)
+        guard showsShareButton else { return }
         let blurImage = UIImage(named: "testBG3")
         shareNestNoteButton.pinToBottom(
             of: view,

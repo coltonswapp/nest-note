@@ -93,6 +93,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var surveyStartTime: Date? // Track when survey started for duration calculation
         /// Total seconds the user had onboarding paywall sheets open (main + exit offer).
         var paywallDwellSeconds: TimeInterval = 0
+        /// Set when the onboarding paywall completes; nil for sitters (no paywall).
+        var paywallSubscribed: Bool?
         var isAppleSignIn: Bool = false
         var referralCode: String?
         var venmoUsername: String?
@@ -545,7 +547,32 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     func finishSetup() async throws {
         Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: Starting finish setup process")
-        Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: User role: \(userInfo.role), Apple sign in: \(userInfo.isAppleSignIn)")
+
+        let logIdentifier = userInfo.email.isEmpty
+            ? (UserService.shared.currentFirebaseUserID ?? "unknown")
+            : userInfo.email
+        SignupLogService.shared.startCapturing(identifier: logIdentifier)
+
+        Tracker.shared.setUserContext(
+            email: userInfo.email.isEmpty ? UserService.shared.currentFirebaseUserEmail : userInfo.email,
+            userID: UserService.shared.currentFirebaseUserID
+        )
+
+        let useAppleSignUp = userInfo.isAppleSignIn || UserService.shared.isAuthenticatedWithApple
+        if useAppleSignUp && !userInfo.isAppleSignIn {
+            Logger.log(
+                level: .info,
+                category: .signup,
+                message: "🎯 FINISH SETUP: Detected Apple auth session — using completeAppleSignUp despite isAppleSignIn=false"
+            )
+            userInfo.isAppleSignIn = true
+        }
+
+        Logger.log(
+            level: .info,
+            category: .signup,
+            message: "🎯 FINISH SETUP: User role: \(userInfo.role), Apple sign in: \(userInfo.isAppleSignIn)"
+        )
 
         #if DEBUG
         if isDebugMode {
@@ -569,7 +596,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             ])
 
             let user: NestUser
-            if userInfo.isAppleSignIn {
+            if useAppleSignUp {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: Using Apple Sign In profile completion")
                 user = try await UserService.shared.completeAppleSignUp(with: userInfo)
             } else {
@@ -579,7 +606,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 1: ✅ Successfully completed signup for user: \(user.personalInfo.name)")
             Tracker.shared.trackOnboardingStep("profile_creation", result: true, additionalInfo: ["user_id": user.id])
-            if userInfo.isAppleSignIn {
+            if useAppleSignUp {
                 Tracker.shared.track(.appleSignUpSucceeded)
             } else {
                 Tracker.shared.track(.regularSignUpSucceeded)
@@ -627,6 +654,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             }
 
             // STEP 3: Optional - Survey Submission (non-blocking)
+            var submittedSurveyResponseId: String?
+
             if !userInfo.surveyResponses.isEmpty {
                 Logger.log(level: .info, category: .signup, message: "🎯 STEP 3: Submitting survey responses...")
                 Tracker.shared.trackOnboardingStep("survey_submission", additionalInfo: [
@@ -648,14 +677,41 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                     "userId": user.id,
                     "role": userInfo.role.rawValue,
                     "app_version": appVersion,
-                    "onboarding_variant": onboardingVariant
+                    "onboarding_variant": onboardingVariant,
+                    "name": user.personalInfo.name,
+                    "email": user.personalInfo.email,
+                    "is_apple_signin": userInfo.isAppleSignIn ? "true" : "false",
+                    "discovery_method": userInfo.surveyResponses["discovery_method"]?.first ?? "",
+                    "created_at": ISO8601DateFormatter().string(from: Date())
                 ]
+                if let phone = user.personalInfo.phone, !phone.isEmpty {
+                    surveyMetadata["phone"] = phone
+                }
+                if let venmo = user.personalInfo.venmoUsername, !venmo.isEmpty {
+                    surveyMetadata["venmo_username"] = venmo
+                }
+                if let nestName = userInfo.nestInfo?.name, !nestName.isEmpty {
+                    surveyMetadata["nest_name"] = nestName
+                }
+                if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
+                    surveyMetadata["referral_code"] = referralCode
+                }
                 if userInfo.paywallDwellSeconds > 0 {
                     surveyMetadata["paywall_dwell_seconds"] = String(Int(round(userInfo.paywallDwellSeconds)))
                 }
+                if userInfo.role == .nestOwner {
+                    if let subscribed = userInfo.paywallSubscribed {
+                        surveyMetadata["paywall_converted"] = subscribed ? "true" : "false"
+                    }
+                } else {
+                    surveyMetadata["paywall_converted"] = "n/a"
+                }
+
+                let responseId = UUID().uuidString
+                submittedSurveyResponseId = responseId
 
                 let response = SurveyResponse(
-                    id: UUID().uuidString,
+                    id: responseId,
                     timestamp: Date(),
                     surveyType: userInfo.role == .nestOwner ? .parentSurvey : .sitterSurvey,
                     version: appVersion,
@@ -688,6 +744,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 4: ✅ Onboarding completion flag set")
             Tracker.shared.trackOnboardingStep("onboarding_completion", result: true)
             completedSteps.append("onboarding_completion")
+
+            try await UserService.shared.markOnboardingComplete(
+                userId: user.id,
+                lastSurveyResponseId: submittedSurveyResponseId
+            )
+            completedSteps.append("onboarding_firestore_completion")
 
             // STEP 5: Critical - Notify Completion (MUST succeed)
             Logger.log(level: .info, category: .signup, message: "🎯 STEP 5: Notifying authentication delegate...")
@@ -729,7 +791,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             }
 
             // Track the overall finish setup failure
-            if userInfo.isAppleSignIn {
+            if useAppleSignUp {
                 Tracker.shared.track(.appleSignUpAttempted, result: false, error: error.localizedDescription)
             } else {
                 Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
@@ -897,6 +959,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     func addPaywallDwellTime(_ seconds: TimeInterval) {
         guard seconds > 0 else { return }
         userInfo.paywallDwellSeconds += seconds
+    }
+
+    func recordPaywallOutcome(subscribed: Bool) {
+        userInfo.paywallSubscribed = subscribed
     }
 
     func updateSurveyResponses(_ responses: [String: [String]]) {

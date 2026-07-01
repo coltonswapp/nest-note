@@ -97,6 +97,7 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
         let dwellSeconds = secondsOnPaywall()
         recordDwellTimeIfNeeded()
+        (coordinator as? OnboardingCoordinator)?.recordPaywallOutcome(subscribed: subscribed)
 
         if subscribed {
             OnboardingAnalyticsService.shared.recordConversion(type: "purchase", productId: "feature_info_paywall")

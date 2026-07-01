@@ -11,9 +11,18 @@ import RevenueCatUI
 import CoreLocation
 
 class NestCategoryViewController: NNViewController, NestLoadable, CollectionViewLoadable, PaywallPresentable, PaywallViewControllerDelegate, PlaceListViewControllerDelegate {
+    enum ItemDisplayLayout {
+        case standard
+        case waterfallGrid
+    }
+
     // MARK: - Properties
     internal let entryRepository: EntryRepository
     private let category: String
+    private let itemDisplayLayout: ItemDisplayLayout
+    private var waterfallLayout: WaterfallCollectionLayout?
+    private var waterfallHeightCache: [IndexPath: CGFloat] = [:]
+    private lazy var waterfallSizingCell = WaterfallGridCell(frame: .zero)
 
     // Toolbar support
     private var isUsingToolbar: Bool {
@@ -180,11 +189,19 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         return entryRepository is NestService ? .nestService : .sitterViewService
     }
     
-    init(category: String, entries: [BaseEntry] = [], places: [PlaceItem] = [], entryRepository: EntryRepository, isEditOnlyMode: Bool = false) {
+    init(
+        category: String,
+        entries: [BaseEntry] = [],
+        places: [PlaceItem] = [],
+        entryRepository: EntryRepository,
+        isEditOnlyMode: Bool = false,
+        itemDisplayLayout: ItemDisplayLayout = .waterfallGrid
+    ) {
         self.category = category
         self.entries = entries
         self.entryRepository = entryRepository
         self.isEditOnlyMode = isEditOnlyMode
+        self.itemDisplayLayout = itemDisplayLayout
         // For nest owners, access level doesn't matter since they bypass all checks. For sitters, use provided level or default to standard
         super.init(nibName: nil, bundle: nil)
         
@@ -392,7 +409,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = itemDisplayLayout == .waterfallGrid
+            ? .systemGroupedBackground
+            : .systemBackground
         setupCollectionView()
         setupLoadingIndicator()
         setupRefreshControl()
@@ -590,9 +609,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         collectionView.backgroundColor = .systemBackground
         view.addSubview(collectionView)
         
-        // Add top content inset for better spacing
-        collectionView.contentInset.top = 30
-        collectionView.verticalScrollIndicatorInsets.top = 30
+        // Minimal top inset — filter chips live in the navigation bar palette above.
+        collectionView.contentInset.top = 8
+        collectionView.verticalScrollIndicatorInsets.top = 8
         
         // Set content insets based on iOS version and toolbar usage
         if isUsingToolbar {
@@ -615,6 +634,14 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
         collectionView.register(PlaceCell.self, forCellWithReuseIdentifier: PlaceCell.reuseIdentifier)
         collectionView.register(RoutineCell.self, forCellWithReuseIdentifier: RoutineCell.reuseIdentifier)
+        collectionView.register(
+            WaterfallGridCell.self,
+            forCellWithReuseIdentifier: WaterfallGridCell.reuseIdentifier
+        )
+
+        if itemDisplayLayout == .waterfallGrid {
+            collectionView.backgroundColor = .systemGroupedBackground
+        }
         
         // Register section headers
         collectionView.register(UICollectionReusableView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "SectionHeader")
@@ -623,6 +650,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     private func createLayout() -> UICollectionViewLayout {
+        if itemDisplayLayout == .waterfallGrid {
+            let layout = WaterfallCollectionLayout()
+            layout.delegate = self
+            waterfallLayout = layout
+            return layout
+        }
+
         let layout = UICollectionViewCompositionalLayout { [weak self] (sectionIndex, layoutEnvironment) -> NSCollectionLayoutSection? in
             guard let self = self else { return nil }
             
@@ -851,6 +885,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             guard let dataSource = self.dataSource else { return nil }
             let snapshot = dataSource.snapshot()
             let section = snapshot.sectionIdentifiers[indexPath.section]
+
+            if self.itemDisplayLayout == .waterfallGrid {
+                return self.dequeueWaterfallCell(in: collectionView, for: item, section: section, at: indexPath)
+            }
             
             // Handle folders section
             if section == .folders, let folderData = item as? FolderData {
@@ -1035,11 +1073,18 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             label.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
             label.textColor = UIColor.secondaryLabel
             label.translatesAutoresizingMaskIntoConstraints = false
+
+            let leadingInset = self.itemDisplayLayout == .waterfallGrid
+                ? Self.waterfallSectionHeaderLeadingInset
+                : 16
+            let bottomInset = self.itemDisplayLayout == .waterfallGrid
+                ? Self.sectionHeaderLabelBottomInset
+                : 8
             
             header.addSubview(label)
             NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
-                label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -8)
+                label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: leadingInset),
+                label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -bottomInset)
             ])
             
             return header
@@ -1070,16 +1115,25 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .folders section with \(folders.count) folders")
         }
         
-        // Add codes entries section if we have them and it's enabled
-        if !codesEntries.isEmpty && enabledSections.contains(.codes) {
-            sectionsData[.codes] = codesEntries
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .codes section")
-        }
-        
-        // Add other entries section if we have them and it's enabled
-        if !otherEntries.isEmpty && enabledSections.contains(.codes) {
-            sectionsData[.other] = otherEntries
-            Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .other section")
+        // Add entries section(s)
+        if itemDisplayLayout == .waterfallGrid {
+            let sortedEntries = entries.sorted {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            if !sortedEntries.isEmpty && enabledSections.contains(.codes) {
+                sectionsData[.codes] = sortedEntries
+                Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding waterfall .codes section")
+            }
+        } else {
+            if !codesEntries.isEmpty && enabledSections.contains(.codes) {
+                sectionsData[.codes] = codesEntries
+                Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .codes section")
+            }
+
+            if !otherEntries.isEmpty && enabledSections.contains(.codes) {
+                sectionsData[.other] = otherEntries
+                Logger.log(level: .info, category: logCategory, message: "DEBUGGING: Adding .other section")
+            }
         }
         
         // Add places section if we have places and it's enabled
@@ -1150,6 +1204,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         Logger.log(level: .info, category: logCategory, message: "🔄 CRASH DEBUG: Starting snapshot application...")
         isApplyingSnapshot = true
+        waterfallHeightCache.removeAll()
         
         Task { @MainActor in
             do {
@@ -1179,6 +1234,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                         guard let self else { return }
                         
                         self.isApplyingSnapshot = false
+                        if self.itemDisplayLayout == .waterfallGrid {
+                            self.waterfallLayout?.invalidateLayout()
+                        }
                         Logger.log(level: .info, category: logCategory, message: "✅ CRASH DEBUG: Snapshot applied successfully")
                     }
                 }
@@ -2271,7 +2329,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         guard entryRepository is NestService else { return }
         let vc = ContactDetailViewController(category: category)
         vc.contactDelegate = self
-        present(vc, animated: true)
+        // Defer until the add menu finishes dismissing (avoids presentation timing issues on Simulator).
+        DispatchQueue.main.async {
+            self.present(vc, animated: true)
+        }
     }
 
     func addPilotCardTapped() {
@@ -2991,7 +3052,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         
         // Create a custom path that matches the folder shape
         let cellBounds = cell.bounds
-        let customPath = createFolderShapePath(in: cellBounds)
+        let customPath = FolderShape.backFolderPath(in: cellBounds)
         parameters.visiblePath = UIBezierPath(cgPath: customPath)
         
         // Set background color to clear to show the custom shape
@@ -2999,69 +3060,6 @@ extension NestCategoryViewController: UICollectionViewDelegate {
         
         // Create the targeted preview with the custom parameters
         return UITargetedPreview(view: cell, parameters: parameters)
-    }
-    
-    private func createFolderShapePath(in rect: CGRect) -> CGPath {
-        let path = CGMutablePath()
-        let width = rect.width
-        let height = rect.height
-        
-        // Scale the SVG path to fit the cell (SVG is 170x151)
-        let scaleX = width / 170.0
-        let scaleY = height / 151.0
-        
-        // Start point from SVG: M0 18.4316
-        path.move(to: CGPoint(x: 0, y: 18.4316 * scaleY))
-        
-        // Curve: C0 8.49052 8.05888 0.431641 18 0.431641
-        path.addCurve(to: CGPoint(x: 18 * scaleX, y: 0.431641 * scaleY),
-                      control1: CGPoint(x: 0, y: 8.49052 * scaleY),
-                      control2: CGPoint(x: 8.05888 * scaleX, y: 0.431641 * scaleY))
-        
-        // Line: H50.8316
-        path.addLine(to: CGPoint(x: 50.8316 * scaleX, y: 0.431641 * scaleY))
-        
-        // Curve for tab: C53.6933 0.431641 56.5138 1.11397 59.0591 2.42202
-        path.addCurve(to: CGPoint(x: 59.0591 * scaleX, y: 2.42202 * scaleY),
-                      control1: CGPoint(x: 53.6933 * scaleX, y: 0.431641 * scaleY),
-                      control2: CGPoint(x: 56.5138 * scaleX, y: 1.11397 * scaleY))
-        
-        // Line: L79.3719 12.861
-        path.addLine(to: CGPoint(x: 79.3719 * scaleX, y: 12.861 * scaleY)) // Folder Tab Angled Line
-        
-        // Curve: C81.9172 14.1691 84.7377 14.8514 87.5995 14.8514
-        path.addCurve(to: CGPoint(x: 87.5995 * scaleX, y: 14.8514 * scaleY),
-                      control1: CGPoint(x: 81.9172 * scaleX, y: 14.1691 * scaleY),
-                      control2: CGPoint(x: 84.7377 * scaleX, y: 14.8514 * scaleY))
-        
-        // Line: H152
-        path.addLine(to: CGPoint(x: 152 * scaleX, y: 14.8514 * scaleY))
-        
-        // Curve: C161.941 14.8514 170 22.9103 170 32.8514
-        path.addCurve(to: CGPoint(x: 170 * scaleX, y: 32.8514 * scaleY),
-                      control1: CGPoint(x: 161.941 * scaleX, y: 14.8514 * scaleY),
-                      control2: CGPoint(x: 170 * scaleX, y: 22.9103 * scaleY))
-        
-        // Line: V132.431
-        path.addLine(to: CGPoint(x: 170 * scaleX, y: 132.431 * scaleY))
-        
-        // Curve: C170 142.372 161.941 150.431 152 150.431
-        path.addCurve(to: CGPoint(x: 152 * scaleX, y: 150.431 * scaleY),
-                      control1: CGPoint(x: 170 * scaleX, y: 142.372 * scaleY),
-                      control2: CGPoint(x: 161.941 * scaleX, y: 150.431 * scaleY))
-        
-        // Line: H18
-        path.addLine(to: CGPoint(x: 18 * scaleX, y: 150.431 * scaleY))
-        
-        // Curve: C8.05887 150.431 0 142.372 0 132.431
-        path.addCurve(to: CGPoint(x: 0, y: 132.431 * scaleY),
-                      control1: CGPoint(x: 8.05887 * scaleX, y: 150.431 * scaleY),
-                      control2: CGPoint(x: 0, y: 142.372 * scaleY))
-        
-        // Close path: Z
-        path.closeSubpath()
-        
-        return path
     }
     
     func collectionView(_ collectionView: UICollectionView, willEndContextMenuInteraction configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
@@ -3492,6 +3490,265 @@ extension NestCategoryViewController {
     }
 }
 
+// MARK: - Waterfall Grid Layout
+
+private extension NestCategoryViewController {
+    static let waterfallFolderCellHeight: CGFloat = 144
+
+    func dequeueWaterfallCell(
+        in collectionView: UICollectionView,
+        for item: AnyHashable,
+        section: Section,
+        at indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        if section == .folders, let folderData = item as? FolderData {
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: FolderCollectionViewCell.reuseIdentifier,
+                for: indexPath
+            ) as! FolderCollectionViewCell
+            cell.configure(with: folderData)
+            return cell
+        }
+
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: WaterfallGridCell.reuseIdentifier,
+            for: indexPath
+        ) as! WaterfallGridCell
+
+        switch section {
+        case .folders:
+            break
+        case .places:
+            if let place = item as? PlaceItem {
+                cell.configure(
+                    title: place.alias ?? place.title,
+                    content: place.address,
+                    layoutStyle: .place,
+                    showsPlaceThumbnail: true,
+                    isEditMode: isEditingMode,
+                    isSelected: selectedPlaces.contains(place)
+                )
+                loadPlaceThumbnail(for: place, into: cell)
+            }
+        case .routines:
+            if let routine = item as? RoutineItem {
+                cell.configure(
+                    title: routine.title,
+                    content: Self.routinePreviewLabel(for: routine),
+                    isEditMode: isEditingMode,
+                    isSelected: selectedRoutines.contains(routine)
+                )
+            }
+        case .pilotCards:
+            if let pilot = item as? PilotCardItem {
+                cell.configure(
+                    title: pilot.title,
+                    content: pilot.body,
+                    isEditMode: isEditingMode,
+                    isSelected: selectedPilotCards.contains(pilot)
+                )
+            }
+        case .contacts:
+            if let contact = item as? ContactItem {
+                cell.configure(
+                    title: contact.title,
+                    content: contact.phoneNumber,
+                    isEditMode: isEditingMode,
+                    isSelected: selectedContacts.contains(contact)
+                )
+            }
+        case .unknownItems:
+            if let unknown = item as? UnknownItem {
+                cell.configure(
+                    title: unknown.title,
+                    content: "Type: \(unknown.originalTypeString)",
+                    isEditMode: isEditingMode,
+                    isSelected: selectedUnknownItems.contains(unknown)
+                )
+            }
+        case .codes, .other:
+            if let entry = item as? BaseEntry {
+                cell.configure(
+                    title: entry.title,
+                    content: entry.content,
+                    contentLineLimit: WaterfallGridCell.entryContentLineLimit,
+                    isEditMode: isEditingMode,
+                    isSelected: selectedEntries.contains(entry)
+                )
+            }
+        }
+
+        return cell
+    }
+
+    func loadPlaceThumbnail(for place: PlaceItem, into cell: WaterfallGridCell) {
+        guard place.thumbnailURLs != nil else { return }
+
+        Task {
+            do {
+                let image = try await entryRepository.loadImages(for: place)
+                await MainActor.run {
+                    cell.configure(
+                        title: place.alias ?? place.title,
+                        content: place.address,
+                        thumbnail: image,
+                        layoutStyle: .place,
+                        showsPlaceThumbnail: true,
+                        isEditMode: isEditingMode,
+                        isSelected: selectedPlaces.contains(place)
+                    )
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: logCategory,
+                    message: "Failed to load waterfall place thumbnail: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    static func routinePreviewLabel(for routine: RoutineItem) -> String {
+        WaterfallGridCell.routinePreviewText(
+            for: routine.routineActions,
+            emptyFallback: routine.frequency ?? "Routine"
+        )
+    }
+
+    func configureWaterfallSizingCell(for item: AnyHashable, section: Section, columnWidth: CGFloat) {
+        waterfallSizingCell.prepareForReuse()
+
+        switch section {
+        case .folders:
+            break
+        case .places:
+            if let place = item as? PlaceItem {
+                waterfallSizingCell.configure(
+                    title: place.alias ?? place.title,
+                    content: place.address,
+                    thumbnail: place.thumbnailURLs != nil ? UIImage() : nil,
+                    layoutStyle: .place,
+                    showsPlaceThumbnail: true
+                )
+            }
+        case .routines:
+            if let routine = item as? RoutineItem {
+                waterfallSizingCell.configure(
+                    title: routine.title,
+                    content: Self.routinePreviewLabel(for: routine)
+                )
+            }
+        case .pilotCards:
+            if let pilot = item as? PilotCardItem {
+                waterfallSizingCell.configure(
+                    title: pilot.title,
+                    content: pilot.body
+                )
+            }
+        case .contacts:
+            if let contact = item as? ContactItem {
+                waterfallSizingCell.configure(
+                    title: contact.title,
+                    content: contact.phoneNumber
+                )
+            }
+        case .unknownItems:
+            if let unknown = item as? UnknownItem {
+                waterfallSizingCell.configure(
+                    title: unknown.title,
+                    content: "Type: \(unknown.originalTypeString)"
+                )
+            }
+        case .codes, .other:
+            if let entry = item as? BaseEntry {
+                waterfallSizingCell.configure(
+                    title: entry.title,
+                    content: entry.content,
+                    contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                )
+            }
+        }
+
+        waterfallSizingCell.updateThumbnailHeight(forColumnWidth: columnWidth)
+    }
+
+    func measuredWaterfallHeight(for indexPath: IndexPath, columnWidth: CGFloat) -> CGFloat {
+        if let cached = waterfallHeightCache[indexPath] {
+            return cached
+        }
+
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              indexPath.section < sectionOrder.count else {
+            return 120
+        }
+
+        let section = sectionOrder[indexPath.section]
+        if section == .folders {
+            waterfallHeightCache[indexPath] = Self.waterfallFolderCellHeight
+            return Self.waterfallFolderCellHeight
+        }
+
+        configureWaterfallSizingCell(for: item, section: section, columnWidth: columnWidth)
+
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        attributes.size = CGSize(width: columnWidth, height: 0)
+        let fitted = waterfallSizingCell.preferredLayoutAttributesFitting(attributes)
+        waterfallHeightCache[indexPath] = fitted.size.height
+        return fitted.size.height
+    }
+
+    func shouldShowWaterfallHeader(for section: Section) -> Bool {
+        switch section {
+        case .codes:
+            return true
+        case .other:
+            return !sectionOrder.contains(.codes)
+        default:
+            return true
+        }
+    }
+
+    func waterfallHeaderTitle(for section: Section) -> String {
+        switch section {
+        case .folders: return "FOLDERS"
+        case .codes, .other: return "ENTRIES"
+        case .places: return "PLACES"
+        case .routines: return "ROUTINES"
+        case .pilotCards: return "PILOT"
+        case .contacts: return "CONTACTS"
+        case .unknownItems: return "UNSUPPORTED"
+        }
+    }
+}
+
+extension NestCategoryViewController: WaterfallCollectionLayoutDelegate {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        heightForItemAt indexPath: IndexPath,
+        columnWidth: CGFloat
+    ) -> CGFloat {
+        measuredWaterfallHeight(for: indexPath, columnWidth: columnWidth)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        shouldShowHeaderForSection section: Int
+    ) -> Bool {
+        guard section < sectionOrder.count else { return false }
+        return shouldShowWaterfallHeader(for: sectionOrder[section])
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        heightForHeaderInSection section: Int
+    ) -> CGFloat {
+        Self.waterfallSectionHeaderHeight
+    }
+}
+
 extension NestCategoryViewController: NNCategoryFilterViewDelegate {
     func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateSelection selection: NNCategoryFilterView.Selection) {
         // Map selection to our concrete enabledSections
@@ -3522,6 +3779,11 @@ extension NestCategoryViewController: NNCategoryFilterViewDelegate {
 }
 
 extension NestCategoryViewController {
+    static let waterfallSectionHeaderHeight: CGFloat = 36
+    static let sectionHeaderLabelBottomInset: CGFloat = 12
+    /// Section inset + card content inset so headers align with text inside waterfall cards.
+    static let waterfallSectionHeaderLeadingInset: CGFloat = 32
+
     // Section Header size
     static let headerSize = NSCollectionLayoutSize(
         widthDimension: .fractionalWidth(1.0),

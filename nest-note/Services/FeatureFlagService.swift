@@ -24,6 +24,8 @@ final class FeatureFlagService {
         case pilotCardItemsEnabled = "pilot_card_items_enabled"
         case nestReadinessScoreEnabled = "nest_readiness_score_enabled"
         case sitterReferralProgramEnabled = "sitter_referral_program_enabled"
+        /// When enabled, shows a Settings option to text the NestNote support line.
+        case supportTextEnabled = "support_text_enabled"
         
         var defaultValue: Bool {
             switch self {
@@ -51,6 +53,8 @@ final class FeatureFlagService {
                 #else
                 return false
                 #endif
+            case .supportTextEnabled:
+                return true
             }
         }
     }
