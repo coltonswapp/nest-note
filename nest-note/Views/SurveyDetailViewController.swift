@@ -212,8 +212,7 @@ class SurveyDetailViewController: NNViewController {
     
     // Helper method to get question text based on ID
     private func getQuestionText(for questionId: String) -> String {
-        
-        return "\(questionId)"
+        SurveyQuestionCatalog.title(for: questionId, surveyType: surveyType)
     }
     
     private func createAnswerView(answer: String, count: Int, percentage: Double, total: Int) -> UIView {

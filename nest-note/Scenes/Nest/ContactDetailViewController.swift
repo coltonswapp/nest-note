@@ -31,8 +31,7 @@ final class ContactDetailViewController: NNSheetViewController {
         let textView = UITextView()
         textView.font = .bodyXL
         textView.backgroundColor = .clear
-        let placeholder = NSAttributedString(string: "Phone")
-        textView.perform(NSSelectorFromString("setAttributedPlaceholder:"), with: placeholder)
+        textView.setPlaceHolder("Phone")
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isScrollEnabled = true
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
@@ -140,10 +139,12 @@ final class ContactDetailViewController: NNSheetViewController {
         }
 
         updateSaveButtonState()
+    }
 
-        if existingContact == nil && !isReadOnly {
-            titleField.becomeFirstResponder()
-        }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard existingContact == nil, !isReadOnly, !titleField.isFirstResponder else { return }
+        titleField.becomeFirstResponder()
     }
 
     override func addContentToContainer() {
@@ -168,7 +169,7 @@ final class ContactDetailViewController: NNSheetViewController {
 
         if !isReadOnly {
             constraints.append(contentsOf: [
-                phoneTextView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+                phoneTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
                 folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -16),
                 ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),

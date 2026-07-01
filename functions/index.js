@@ -2,7 +2,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onCall, onRequest} = require("firebase-functions/v2/https");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const sgMail = require("@sendgrid/mail");
@@ -58,6 +58,249 @@ function calculatePercentages(distribution, total) {
     return acc;
   }, {});
 }
+
+/**
+ * Formats a date as yyyy-MM-dd for daily signup buckets.
+ * @param {Date} date
+ * @return {string}
+ */
+function formatDailyKey(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Formats a date as yyyy-Www for weekly signup buckets (ISO week).
+ * @param {Date} date
+ * @return {string}
+ */
+function formatWeeklyKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+/**
+ * Increments daily and weekly signup counters by role.
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {string} primaryRole
+ */
+async function incrementSignupCounters(db, primaryRole) {
+  const now = new Date();
+  const dailyKey = formatDailyKey(now);
+  const weeklyKey = formatWeeklyKey(now);
+  const bucket = primaryRole === "sitter" ? "sitter" : "parent";
+  const increment = admin.firestore.FieldValue.increment(1);
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+  const dailyRef = db.collection("surveyData").doc("signups")
+      .collection("daily").doc(dailyKey);
+  const weeklyRef = db.collection("surveyData").doc("signups")
+      .collection("weekly").doc(weeklyKey);
+
+  await Promise.all([
+    dailyRef.set({
+      [bucket]: increment,
+      total: increment,
+      lastUpdated: timestamp,
+    }, {merge: true}),
+    weeklyRef.set({
+      [bucket]: increment,
+      total: increment,
+      lastUpdated: timestamp,
+    }, {merge: true}),
+  ]);
+}
+
+/**
+ * Sends an admin push notification for a new signup.
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {string} userId
+ * @param {Object} userData
+ * @param {boolean} isTest
+ */
+async function sendAdminSignupPush(db, userId, userData, isTest = false) {
+  const configRef = db.collection("adminConfig").doc("signupAlerts");
+  const configDoc = await configRef.get();
+  if (!configDoc.exists) {
+    const message = "Admin signup alerts are not configured. Enable \"Signup alerts on this device\" first.";
+    logger.info("Admin signup alerts: no config document");
+    if (isTest) {
+      throw new HttpsError("failed-precondition", message);
+    }
+    return {sent: false, reason: message};
+  }
+
+  const config = configDoc.data() || {};
+  if (!config.enabled || !config.fcmToken) {
+    const message = "Signup alerts are disabled or missing an FCM token. Enable them in Settings → Notifications.";
+    logger.info("Admin signup alerts: disabled or missing token");
+    if (isTest) {
+      throw new HttpsError("failed-precondition", message);
+    }
+    return {sent: false, reason: message};
+  }
+
+  const primaryRole = userData.primaryRole || "nester";
+  const isSitter = primaryRole === "sitter";
+  const personalInfo = userData.personalInfo || {};
+  const name = personalInfo.name || "Unknown";
+  const email = personalInfo.email || "";
+  const surveyId = userData.lastSurveyResponseId || "";
+  let discoveryMethod = "Unknown source";
+
+  if (surveyId) {
+    try {
+      const surveyDoc = await db.collection("surveyData")
+          .doc("surveyResponses")
+          .collection("responses")
+          .doc(surveyId)
+          .get();
+      if (surveyDoc.exists) {
+        const surveyData = surveyDoc.data() || {};
+        const meta = surveyData.metadata || {};
+        if (meta.discovery_method) {
+          discoveryMethod = meta.discovery_method;
+        } else {
+          const responses = surveyData.responses || [];
+          const discovery = responses.find((r) => r.questionId === "discovery_method");
+          if (discovery && discovery.answers && discovery.answers[0]) {
+            discoveryMethod = discovery.answers[0];
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to load survey ${surveyId} for admin push: ${error.message}`);
+    }
+  }
+
+  const roleLabel = isSitter ? "sitter" : "parent";
+  const source = discoveryMethod && discoveryMethod !== "Unknown source" ?
+    discoveryMethod :
+    "an unknown source";
+  const title = isTest ? "Test Signup Alert" : "New signup";
+  const body = isTest ?
+    "Admin signup alerts are working." :
+    `A new ${roleLabel} signed up from ${source}`;
+
+  const payloadData = {
+    type: "new_signup",
+    surveyId: String(surveyId || ""),
+    userId: String(userId || ""),
+    role: String(primaryRole || ""),
+    name: String(name || ""),
+    email: String(email || ""),
+  };
+
+  const message = {
+    token: config.fcmToken,
+    notification: {title, body},
+    data: payloadData,
+    android: {priority: "high"},
+    apns: {
+      headers: {
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+      },
+      payload: {
+        aps: {
+          "alert": {
+            title: title,
+            body: body,
+          },
+          "sound": "default",
+          "interruption-level": "time-sensitive",
+        },
+        ...payloadData,
+      },
+    },
+  };
+
+  try {
+    await admin.messaging().send(message);
+    logger.info(`Admin signup push sent for user ${userId}`);
+    return {sent: true};
+  } catch (error) {
+    logger.error(`Admin signup push failed: ${error.message}`);
+    if (error.code === "messaging/registration-token-not-registered" ||
+        error.code === "messaging/invalid-argument") {
+      await configRef.set({enabled: false}, {merge: true});
+    }
+    if (isTest) {
+      throw new HttpsError(
+          "internal",
+          `Failed to send push notification: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Cloud function: increment signup counters when a user profile is created.
+ */
+exports.onUserProfileCreated = functions.firestore
+    .onDocumentCreated("users/{userId}", async (event) => {
+      const userData = event.data.data();
+      const db = admin.firestore();
+
+      try {
+        await incrementSignupCounters(db, userData.primaryRole || "nester");
+        logger.info(`Signup counters updated for user ${event.params.userId}`);
+      } catch (error) {
+        logger.error("Error updating signup counters:", error);
+        throw error;
+      }
+    });
+
+/**
+ * Cloud function: send admin push when onboarding completes.
+ */
+exports.onUserOnboardingComplete = functions.firestore
+    .onDocumentUpdated("users/{userId}", async (event) => {
+      const before = event.data.before.data();
+      const after = event.data.after.data();
+
+      if (before.onboardingCompletedAt || !after.onboardingCompletedAt) {
+        return null;
+      }
+
+      try {
+        await sendAdminSignupPush(
+            admin.firestore(),
+            event.params.userId,
+            after,
+        );
+      } catch (error) {
+        logger.error("Error sending admin signup push:", error);
+      }
+
+      return null;
+    });
+
+/**
+ * Callable: send a test admin signup alert to the registered device.
+ */
+exports.sendTestAdminSignupAlert = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in");
+  }
+
+  const db = admin.firestore();
+  await sendAdminSignupPush(
+      db,
+      request.auth.uid,
+      {
+        primaryRole: "nester",
+        personalInfo: {name: "Test User", email: "test@nestnoteapp.com"},
+        lastSurveyResponseId: "",
+      },
+      true,
+  );
+
+  return {success: true};
+});
 
 /**
  * Sends an email using SendGrid
@@ -1254,6 +1497,59 @@ exports.cleanupOldInvites = onSchedule("0 0 */7 * *", async (event) => {
 });
 
 /**
+ * Maps RevenueCat webhook events to a Firestore subscription snapshot on users/{uid}.
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {Object} event RevenueCat event payload
+ * @return {Promise<void>}
+ */
+async function syncUserSubscriptionFromRevenueCatEvent(db, event) {
+  const attributes = event.subscriber_attributes || {};
+  const userId = getSubscriberAttribute(attributes, "firebase_uid");
+  if (!userId) {
+    return;
+  }
+
+  const eventType = event.type;
+  const periodType = String(event.period_type || "").toUpperCase();
+  let status = null;
+
+  switch (eventType) {
+    case "INITIAL_PURCHASE":
+      status = periodType === "TRIAL" ? "trial" : "active";
+      break;
+    case "RENEWAL":
+      status = "active";
+      break;
+    case "UNCANCELLATION":
+      status = periodType === "TRIAL" ? "trial" : "active";
+      break;
+    case "CANCELLATION":
+      status = periodType === "TRIAL" ? "trial_cancelled" : "cancelled";
+      break;
+    case "EXPIRATION":
+      status = "expired";
+      break;
+    case "BILLING_ISSUE":
+      status = "billing_issue";
+      break;
+    default:
+      return;
+  }
+
+  await db.collection("users").doc(userId).set({
+    subscription: {
+      status,
+      productId: event.product_id || null,
+      periodType: event.period_type || null,
+      lastEventType: eventType,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  }, {merge: true});
+
+  logger.info(`Updated subscription snapshot for user ${userId}: ${status} (${eventType})`);
+}
+
+/**
  * RevenueCat webhook — records sitter referral conversions for manual Venmo payout.
  * Qualifies on paid events (price > 0): INITIAL_PURCHASE and RENEWAL (trial conversion).
  */
@@ -1280,6 +1576,14 @@ exports.revenueCatWebhook = onRequest({
     return;
   }
 
+  const db = admin.firestore();
+
+  try {
+    await syncUserSubscriptionFromRevenueCatEvent(db, event);
+  } catch (error) {
+    logger.warn(`Subscription snapshot sync failed: ${error.message}`);
+  }
+
   const eventType = event.type;
   const qualifyingTypes = ["INITIAL_PURCHASE", "RENEWAL"];
   if (!qualifyingTypes.includes(eventType)) {
@@ -1303,7 +1607,6 @@ exports.revenueCatWebhook = onRequest({
     return;
   }
 
-  const db = admin.firestore();
   const codeDoc = await db.collection("valid_referral_codes").doc(referralCode).get();
   if (!codeDoc.exists) {
     res.status(200).send("Unknown referral code");

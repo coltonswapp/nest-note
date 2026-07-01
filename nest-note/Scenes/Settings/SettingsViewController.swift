@@ -249,7 +249,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 section.boundarySupplementaryItems = [header]
                 return section
                 
-            case .myNest, .mySitting, .general, .admin, .experimental:
+            case .myNest, .mySitting, .general, .support, .admin, .experimental:
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
@@ -326,7 +326,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             switch item {
             case .readinessScore:
                 break
-            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
+            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .supportItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
                 content.text = title
                 
                 // Create a symbol configuration with semibold weight
@@ -423,7 +423,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 return collectionView.dequeueConfiguredReusableCell(using: accountCellRegistration, for: indexPath, item: item)
             case .currentNest:
                 return collectionView.dequeueConfiguredReusableCell(using: currentNestCellRegistration, for: indexPath, item: item)
-            case .myNestItem, .generalItem, .adminItem, .experimentalItem:
+            case .myNestItem, .generalItem, .supportItem, .adminItem, .experimentalItem:
                 return collectionView.dequeueConfiguredReusableCell(using: listCellRegistration, for: indexPath, item: item)
             }
         }
@@ -457,12 +457,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         let sections: [Section]
         if UserService.shared.isSignedIn {
             if ModeManager.shared.isSitterMode {
-                sections = [.account, .mySitting, .general]
+                sections = [.account, .mySitting, .general, .support]
             } else {
-                sections = [.account, .currentNest, .myNest, .general]
+                sections = [.account, .currentNest, .myNest, .general, .support]
             }
         } else {
-            sections = [.account, .myNest, .general]
+            sections = [.account, .myNest, .general, .support]
         }
         
         snapshot.appendSections(sections)
@@ -520,10 +520,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Notifications", "bell"),
             ("App Icon", "app"),
             ("Rate App", "star"),
-            ("Terms & Privacy", "doc.text"),
-            ("Support", "questionmark.circle")
+            ("Terms & Privacy", "doc.text")
         ].map { Item.generalItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(generalItems, toSection: .general)
+
+        let supportItems = makeSupportItems()
+        snapshot.appendItems(supportItems, toSection: .support)
         
         #if DEBUG
         snapshot.appendSections([.admin])
@@ -572,6 +574,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
             ("Feature Info Paywall", "sparkles.rectangle.stack"),
+            ("Waterfall Grid", "square.grid.2x2"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
 
         if isNestReadinessEnabled, NestService.shared.currentNest != nil {
@@ -605,6 +608,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case myNest = "My Nest"
         case mySitting = "My Sitting"
         case general = "General"
+        case support = "Support"
         case admin = "Admin"
         case experimental = "Experimental"
     }
@@ -617,6 +621,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case readinessScore(score: Int)
         case myNestItem(title: String, symbolName: String)
         case generalItem(title: String, symbolName: String)
+        case supportItem(title: String, symbolName: String)
         case adminItem(title: String, symbolName: String)
         case experimentalItem(title: String, symbolName: String)
     }
@@ -754,6 +759,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             showSubscriptionStatus()
         case "Feature Info Paywall":
             showFeatureInfoPaywall()
+        case "Waterfall Grid":
+            presentWaterfallGridExperiment()
         case "Show on Home Screen":
             showReadinessHomeBannerPicker()
         case "Referral Admin":
@@ -968,10 +975,19 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 RatingManager.shared.requestRatingManually()
             case "Terms & Privacy":
                 showPrivacyPolicy()
-            case "Support":
-                showContactPage()
             default:
                 print("Selected General item: \(title)")
+            }
+        case .supportItem(let title, _):
+            switch title {
+            case "How It Works":
+                showHowItWorks()
+            case "Text Support":
+                showTextSupport()
+            case "Contact Support":
+                showContactPage()
+            default:
+                print("Selected Support item: \(title)")
             }
 
         default:
@@ -1144,6 +1160,59 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         }
     }
 
+    #if DEBUG
+    private func presentWaterfallGridExperiment() {
+        guard UserService.shared.isSignedIn else {
+            showSignInPrompt()
+            return
+        }
+
+        guard NestService.shared.currentNest != nil else {
+            showNestSetupPrompt()
+            return
+        }
+
+        Task {
+            do {
+                let (groupedEntries, places) = try await NestService.shared.fetchEntriesAndPlaces()
+                let category = Self.bestCategoryForWaterfallExperiment(from: groupedEntries)
+
+                await MainActor.run {
+                    let categoryVC = NestCategoryViewController(
+                        category: category,
+                        places: places,
+                        entryRepository: NestService.shared,
+                        itemDisplayLayout: .waterfallGrid
+                    )
+                    self.navigationController?.pushViewController(categoryVC, animated: true)
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .general,
+                    message: "Failed to launch waterfall grid experiment: \(error)"
+                )
+                await MainActor.run {
+                    self.showToast(text: "Couldn't load category data")
+                }
+            }
+        }
+    }
+
+    private static func bestCategoryForWaterfallExperiment(from groupedEntries: [String: [BaseEntry]]) -> String {
+        let topLevelCounts = groupedEntries.reduce(into: [String: Int]()) { counts, pair in
+            let topLevel = pair.key.components(separatedBy: "/").first ?? pair.key
+            counts[topLevel, default: 0] += pair.value.count
+        }
+
+        if let richest = topLevelCounts.max(by: { $0.value < $1.value })?.key, richest.isEmpty == false {
+            return richest
+        }
+
+        return "Household"
+    }
+    #endif
+
     private func showRevenueCatPaywall() {
         let paywallViewController = PaywallViewController()
         
@@ -1188,6 +1257,72 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         guard let url = URL(string: "https://www.nestnoteapp.com/contact") else { return }
         let safariVC = SFSafariViewController(url: url)
         present(safariVC, animated: true)
+    }
+
+    private func makeSupportItems() -> [Item] {
+        var items: [(String, String)] = [
+            ("How It Works", "book.pages"),
+        ]
+
+        if FeatureFlagService.shared.isEnabled(.supportTextEnabled) {
+            items.append(("Text Support", "message"))
+        }
+
+        items.append(("Contact Support", "questionmark.circle"))
+        return items.map { Item.supportItem(title: $0.0, symbolName: $0.1) }
+    }
+
+    private func showHowItWorks() {
+        let vc = MarkdownTestViewController(
+            markdown: HowItWorksArticle.markdown,
+            showsShareButton: false
+        )
+        navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showTextSupport() {
+        var messageLines = ["Hi NestNote support, I need help with:"]
+
+        if let userID = UserService.shared.currentUser?.id {
+            messageLines.append("")
+            messageLines.append("User ID: \(userID)")
+        }
+
+        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String {
+            messageLines.append("App version: \(version) (\(build))")
+        }
+
+        let body = messageLines.joined(separator: "\n")
+        var allowedCharacters = CharacterSet.urlQueryAllowed
+        allowedCharacters.insert(charactersIn: ":/")
+
+        guard let encodedBody = body.addingPercentEncoding(withAllowedCharacters: allowedCharacters),
+              let smsURL = URL(string: "sms:\(SupportContact.textSupportPhoneNumber)?body=\(encodedBody)") else {
+            showTextSupportUnavailableAlert()
+            return
+        }
+
+        guard UIApplication.shared.canOpenURL(smsURL) else {
+            showTextSupportUnavailableAlert()
+            return
+        }
+
+        UIApplication.shared.open(smsURL)
+        HapticsHelper.lightHaptic()
+    }
+
+    private func showTextSupportUnavailableAlert() {
+        let alert = UIAlertController(
+            title: "Messages Not Available",
+            message: "Text us at \(SupportContact.textSupportDisplayNumber) and we'll help you out.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Copy Number", style: .default) { _ in
+            UIPasteboard.general.string = SupportContact.textSupportDisplayNumber
+        })
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
     }
 
     private func showDeleteAccountConfirmation() {

@@ -54,7 +54,20 @@ struct Feedback: Hashable {
     }
 }
 
-// MARK: - Feedback Metrics Model
+// MARK: - Signup Stats
+struct SignupPeriodStats: Codable, Hashable {
+    let parent: Int
+    let sitter: Int
+    let total: Int
+
+    static let empty = SignupPeriodStats(parent: 0, sitter: 0, total: 0)
+}
+
+enum SignupPeriod {
+    case today
+    case thisWeek
+}
+
 struct FeedbackMetrics: Hashable {
     let totalSubmissions: Int
     let lastUpdated: Date
@@ -194,7 +207,7 @@ final class SurveyService {
         }
     }
 
-    func getRecentSurveyResponses(limit: Int = 25) async throws -> [SurveyResponse] {
+    func getRecentSurveyResponses(limit: Int = 20) async throws -> [SurveyResponse] {
         let query = db.collection("surveyData")
             .document("surveyResponses")
             .collection("responses")
@@ -202,35 +215,91 @@ final class SurveyService {
             .limit(to: limit)
 
         let snapshot = try await query.getDocuments()
-        return snapshot.documents.compactMap { document -> SurveyResponse? in
-            guard let timestamp = document.data()["timestamp"] as? Timestamp,
-                  let surveyType = document.data()["surveyType"] as? String,
-                  let version = document.data()["version"] as? String,
-                  let responses = document.data()["responses"] as? [[String: Any]],
-                  let metadata = document.data()["metadata"] as? [String: String] else {
+        return snapshot.documents.compactMap { parseSurveyResponseDocument($0) }
+    }
+
+    func getSurveyResponse(id: String) async throws -> SurveyResponse? {
+        let document = try await db.collection("surveyData")
+            .document("surveyResponses")
+            .collection("responses")
+            .document(id)
+            .getDocument()
+
+        guard document.exists else { return nil }
+        return parseSurveyResponseDocument(document)
+    }
+
+    func getSignupStats(period: SignupPeriod) async throws -> SignupPeriodStats {
+        let docId: String
+        switch period {
+        case .today:
+            docId = Self.dailySignupKey(for: Date())
+        case .thisWeek:
+            docId = Self.weeklySignupKey(for: Date())
+        }
+
+        let collection = period == .today ? "daily" : "weekly"
+        let document = try await db.collection("surveyData")
+            .document("signups")
+            .collection(collection)
+            .document(docId)
+            .getDocument()
+
+        guard let data = document.data() else {
+            return .empty
+        }
+
+        let parent = data["parent"] as? Int ?? (data["parent"] as? NSNumber)?.intValue ?? 0
+        let sitter = data["sitter"] as? Int ?? (data["sitter"] as? NSNumber)?.intValue ?? 0
+        let total = data["total"] as? Int ?? (data["total"] as? NSNumber)?.intValue ?? (parent + sitter)
+        return SignupPeriodStats(parent: parent, sitter: sitter, total: total)
+    }
+
+    private func parseSurveyResponseDocument(_ document: DocumentSnapshot) -> SurveyResponse? {
+        guard let timestamp = document.data()?["timestamp"] as? Timestamp,
+              let surveyType = document.data()?["surveyType"] as? String,
+              let version = document.data()?["version"] as? String,
+              let responses = document.data()?["responses"] as? [[String: Any]],
+              let metadata = document.data()?["metadata"] as? [String: String] else {
+            return nil
+        }
+
+        let questionResponses = responses.compactMap { response -> SurveyResponse.QuestionResponse? in
+            guard let questionId = response["questionId"] as? String,
+                  let answers = response["answers"] as? [String] else {
                 return nil
             }
-
-            let questionResponses = responses.compactMap { response -> SurveyResponse.QuestionResponse? in
-                guard let questionId = response["questionId"] as? String,
-                      let answers = response["answers"] as? [String] else {
-                    return nil
-                }
-                return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
-            }
-
-            let duration = document.data()["duration"] as? TimeInterval
-            
-            return SurveyResponse(
-                id: document.documentID,
-                timestamp: timestamp.dateValue(),
-                surveyType: SurveyResponse.SurveyType(rawValue: surveyType) ?? .parentSurvey,
-                version: version,
-                responses: questionResponses,
-                metadata: metadata,
-                duration: duration
-            )
+            return SurveyResponse.QuestionResponse(questionId: questionId, answers: answers)
         }
+
+        let duration = document.data()?["duration"] as? TimeInterval
+
+        return SurveyResponse(
+            id: document.documentID,
+            timestamp: timestamp.dateValue(),
+            surveyType: SurveyResponse.SurveyType(rawValue: surveyType) ?? .parentSurvey,
+            version: version,
+            responses: questionResponses,
+            metadata: metadata,
+            duration: duration
+        )
+    }
+
+    private static func dailySignupKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func weeklySignupKey(for date: Date) -> String {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let week = calendar.component(.weekOfYear, from: date)
+        let year = calendar.component(.yearForWeekOfYear, from: date)
+        return String(format: "%d-W%02d", year, week)
     }
 
     func getSurveyResponsesInLast30Days(type: SurveyResponse.SurveyType) async throws -> Int {

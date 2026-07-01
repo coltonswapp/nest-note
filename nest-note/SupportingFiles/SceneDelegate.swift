@@ -335,6 +335,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
                 }
             }
+            return
+        }
+
+        if let type = userInfo["type"] as? String, type == "new_signup" {
+            NotificationCenter.default.post(
+                name: .adminSignupNotificationTapped,
+                object: nil,
+                userInfo: userInfo
+            )
+            AdminNotificationRouter.shared.handleSignupNotification(userInfo: userInfo)
         }
     }
 }
