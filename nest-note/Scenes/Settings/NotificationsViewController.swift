@@ -113,13 +113,12 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
+        #if DEBUG
         let fcmTokenCellRegistration = UICollectionView.CellRegistration<FCMTokenCell, Item> { cell, indexPath, item in
             if case let .fcmToken(token, uploadDate) = item {
                 cell.configure(token: token, uploadDate: uploadDate)
             }
         }
-
-        #if DEBUG
         let adminAlertCellRegistration = UICollectionView.CellRegistration<NotificationCell, Item> { cell, indexPath, item in
             if case let .adminSignupAlerts(isEnabled) = item {
                 cell.configure(
