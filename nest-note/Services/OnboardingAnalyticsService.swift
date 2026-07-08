@@ -17,7 +17,6 @@ final class OnboardingAnalyticsService {
 
     // MARK: - Session Data Model
     private struct OnboardingSessionData {
-        var variant: String = ""
         var startTime: Date = Date()
         var surveyResponses: [SurveyResponse.QuestionResponse] = []
         var discoveryMethod: String = ""
@@ -35,26 +34,23 @@ final class OnboardingAnalyticsService {
     // MARK: - Session Management
 
     /// Starts a new onboarding session
-    func startSession(variant: String) {
+    func startSession() {
         sessionData = OnboardingSessionData()
-        sessionData.variant = variant
         sessionData.startTime = Date()
 
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
 
         // Initialize metadata with onboarding info
         sessionData.metadata = [
-            "onboarding_variant": variant,
             "session_type": "parent_onboarding",
             "start_time": ISO8601DateFormatter().string(from: Date()),
             "app_version": appVersion
         ]
 
-        Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Started session - variant: \(variant)")
+        Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Started session")
 
         // Track session start
         Analytics.logEvent("parent_onboarding_started", parameters: [
-            "onboarding_variant": variant,
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ])
     }
@@ -68,8 +64,7 @@ final class OnboardingAnalyticsService {
 
         Analytics.logEvent("onboarding_step_completed", parameters: [
             "step_id": stepId,
-            "step_index": sessionData.stepsCompleted.count,
-            "onboarding_variant": sessionData.variant
+            "step_index": sessionData.stepsCompleted.count
         ])
     }
 
@@ -96,7 +91,6 @@ final class OnboardingAnalyticsService {
 
         // Track individual question responses for detailed analysis
         Analytics.logEvent("parent_onboarding_response", parameters: [
-            "onboarding_variant": sessionData.variant,
             "question_id": questionId,
             "answers": answers.joined(separator: ","),
             "answer_count": answers.count
@@ -124,7 +118,6 @@ final class OnboardingAnalyticsService {
 
         // Track conversion with full context
         var parameters: [String: Any] = [
-            "onboarding_variant": sessionData.variant,
             "conversion_type": type,
             "onboarding_duration_seconds": Int(duration),
             "steps_completed": sessionData.stepsCompleted.count,
@@ -138,8 +131,6 @@ final class OnboardingAnalyticsService {
         // Add survey responses to conversion event
         for response in sessionData.surveyResponses {
             switch response.questionId {
-            case "top_priority":
-                parameters["top_priority"] = response.answers.first ?? ""
             case "communication_methods":
                 parameters["communication_methods"] = response.answers.joined(separator: ",")
             case "care_responsibilities":
@@ -170,7 +161,6 @@ final class OnboardingAnalyticsService {
 
         // Track completion with full session summary
         var parameters: [String: Any] = [
-            "onboarding_variant": sessionData.variant,
             "converted": sessionData.hasConverted,
             "conversion_type": sessionData.conversionType,
             "onboarding_duration_seconds": Int(duration),
@@ -181,13 +171,8 @@ final class OnboardingAnalyticsService {
 
         // Add key survey insights
         for response in sessionData.surveyResponses {
-            switch response.questionId {
-            case "top_priority":
-                parameters["top_priority"] = response.answers.first ?? ""
-            case "discovery_method":
+            if response.questionId == "discovery_method" {
                 parameters["discovery_source"] = response.answers.first ?? ""
-            default:
-                break
             }
         }
 
@@ -207,7 +192,6 @@ final class OnboardingAnalyticsService {
         Logger.log(level: .info, category: .general, message: "📊 ONBOARDING: Drop-off - step: \(sessionData.currentStep), reason: \(reason)")
 
         Analytics.logEvent("parent_onboarding_dropoff", parameters: [
-            "onboarding_variant": sessionData.variant,
             "last_step": sessionData.currentStep,
             "steps_completed": sessionData.stepsCompleted.count,
             "duration_seconds": Int(duration),
@@ -218,15 +202,9 @@ final class OnboardingAnalyticsService {
 
     // MARK: - Quick Access Methods
 
-    /// Gets current variant for other components to use
-    var currentVariant: String {
-        return sessionData.variant
-    }
-
     /// Gets formatted session summary for debugging
     var sessionSummary: String {
         return """
-        Variant: \(sessionData.variant)
         Steps: \(sessionData.stepsCompleted.count)
         Responses: \(sessionData.surveyResponses.count)
         Discovery: \(sessionData.discoveryMethod)

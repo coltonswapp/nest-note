@@ -4,6 +4,7 @@ import FirebaseFirestore
 struct UserSubscriptionSnapshot: Equatable {
     let status: String
     let productId: String?
+    let periodType: String?
     let updatedAt: Date?
 
     static func parse(from data: [String: Any]?) -> UserSubscriptionSnapshot? {
@@ -14,8 +15,21 @@ struct UserSubscriptionSnapshot: Equatable {
         }
 
         let productId = subscription["productId"] as? String
+        let periodType = subscription["periodType"] as? String
         let updatedAt = (subscription["updatedAt"] as? Timestamp)?.dateValue()
-        return UserSubscriptionSnapshot(status: status, productId: productId, updatedAt: updatedAt)
+        return UserSubscriptionSnapshot(
+            status: status,
+            productId: productId,
+            periodType: periodType,
+            updatedAt: updatedAt
+        )
+    }
+
+    var isTrialPeriod: Bool {
+        if status == "trial" || status == "trial_cancelled" {
+            return true
+        }
+        return periodType?.uppercased() == "TRIAL"
     }
 }
 
@@ -39,16 +53,22 @@ enum SurveySubscriptionStatus: Hashable {
             return .sitterFree
         }
 
+        let paywallConverted = metadata["paywall_converted"]
+        let startedTrialAtSignup = metadata["paywall_started_trial"] == "true"
+
         if let liveSnapshot {
+            if liveSnapshot.isTrialPeriod {
+                return liveSnapshot.status == "trial_cancelled" ? .trialCancelled : .trial
+            }
+
             switch liveSnapshot.status {
-            case "trial":
-                return .trial
             case "active":
+                if paywallConverted == "true" {
+                    return .convertedAtSignup
+                }
                 return .active
             case "cancelled":
                 return .cancelled
-            case "trial_cancelled":
-                return .trialCancelled
             case "expired":
                 return .expired
             case "billing_issue":
@@ -58,7 +78,11 @@ enum SurveySubscriptionStatus: Hashable {
             }
         }
 
-        switch metadata["paywall_converted"] {
+        if startedTrialAtSignup {
+            return .trial
+        }
+
+        switch paywallConverted {
         case "true":
             return .convertedAtSignup
         case "false":
@@ -90,9 +114,9 @@ enum SurveySubscriptionStatus: Hashable {
         case .skippedPaywall:
             return "Skipped paywall at signup"
         case .convertedAtSignup:
-            return "Started subscription during onboarding"
+            return "Started paid subscription during onboarding"
         case .trial:
-            return "Active free trial"
+            return "Started free trial during onboarding"
         case .active:
             return "Active subscription"
         case .cancelled:
@@ -114,13 +138,13 @@ enum SurveySubscriptionStatus: Hashable {
             return SubscriptionTagStyle(
                 textColor: UIColor { traits in
                     traits.userInterfaceStyle == .dark ?
-                        UIColor(red: 0.91, green: 0.58, blue: 0.42, alpha: 1) :
-                        UIColor(red: 0.72, green: 0.38, blue: 0.18, alpha: 1)
+                        UIColor(red: 0.98, green: 0.86, blue: 0.28, alpha: 1) :
+                        UIColor(red: 0.62, green: 0.48, blue: 0.02, alpha: 1)
                 },
                 backgroundColor: UIColor { traits in
                     traits.userInterfaceStyle == .dark ?
-                        UIColor(red: 0.24, green: 0.16, blue: 0.13, alpha: 1) :
-                        UIColor(red: 0.98, green: 0.90, blue: 0.84, alpha: 1)
+                        UIColor(red: 0.24, green: 0.20, blue: 0.08, alpha: 1) :
+                        UIColor(red: 0.99, green: 0.96, blue: 0.78, alpha: 1)
                 }
             )
         case .active:

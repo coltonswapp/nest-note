@@ -78,8 +78,53 @@ struct AssignedSitter: Identifiable, Hashable, Codable {
     var email: String
     var userID: String?  // Optional if they have an account
     var venmoUsername: String? = nil
-    var inviteStatus: SessionInviteStatus 
+    var hourlyRateCents: Int? = nil
+    var inviteStatus: SessionInviteStatus
     var inviteID: String?  // Reference to invite if one exists
+
+    init(
+        id: String,
+        name: String,
+        email: String,
+        userID: String? = nil,
+        venmoUsername: String? = nil,
+        hourlyRateCents: Int? = nil,
+        inviteStatus: SessionInviteStatus,
+        inviteID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.email = email
+        self.userID = userID
+        self.venmoUsername = venmoUsername
+        self.hourlyRateCents = hourlyRateCents
+        self.inviteStatus = inviteStatus
+        self.inviteID = inviteID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let decodedUserID = try container.decodeIfPresent(String.self, forKey: .userID)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? decodedUserID
+            ?? UUID().uuidString
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
+        userID = decodedUserID
+        venmoUsername = try container.decodeIfPresent(String.self, forKey: .venmoUsername)
+        hourlyRateCents = try container.decodeIfPresent(Int.self, forKey: .hourlyRateCents)
+        inviteID = try container.decodeIfPresent(String.self, forKey: .inviteID)
+
+        if let inviteStatus = try container.decodeIfPresent(SessionInviteStatus.self, forKey: .inviteStatus) {
+            self.inviteStatus = inviteStatus
+        } else if inviteID != nil {
+            // Legacy sessions stored a sitter + invite before inviteStatus existed.
+            self.inviteStatus = .accepted
+        } else {
+            self.inviteStatus = .none
+        }
+    }
     
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -106,6 +151,11 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
     var earlyAccessEndDate: Date?
     /// Legacy Firestore key `entryIds`; stores IDs for all selected nest items (any `BaseItem` type).
     var entryIds: [String]?
+    var pdfGeneratedAt: Date?
+    var pdfContentHash: String?
+    var paymentReminderScheduledFor: Date?
+    var paymentReminderSentAt: Date?
+    var paymentReminderCancelledAt: Date?
     
     /// Type-neutral accessor (same underlying storage as `entryIds`).
     var selectedNestItemIds: [String]? {
@@ -179,7 +229,12 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         ownerID: String? = NestService.shared.currentNest?.ownerId,
         earlyAccessDuration: EarlyAccessDuration = .halfDay,
         earlyAccessEndDate: Date? = nil,
-        entryIds: [String]? = nil
+        entryIds: [String]? = nil,
+        pdfGeneratedAt: Date? = nil,
+        pdfContentHash: String? = nil,
+        paymentReminderScheduledFor: Date? = nil,
+        paymentReminderSentAt: Date? = nil,
+        paymentReminderCancelledAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -194,6 +249,11 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         self.earlyAccessDuration = earlyAccessDuration
         self.earlyAccessEndDate = earlyAccessEndDate
         self.entryIds = entryIds
+        self.pdfGeneratedAt = pdfGeneratedAt
+        self.pdfContentHash = pdfContentHash
+        self.paymentReminderScheduledFor = paymentReminderScheduledFor
+        self.paymentReminderSentAt = paymentReminderSentAt
+        self.paymentReminderCancelledAt = paymentReminderCancelledAt
     }
     
     /// Determines if the session can be marked as active based on business rules
@@ -279,19 +339,24 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         case entryIds
         /// Preferred key for new clients; decodes from `entryIds` when absent.
         case selectedItemIds = "selectedItemIds"
+        case pdfGeneratedAt
+        case pdfContentHash
+        case paymentReminderScheduledFor
+        case paymentReminderSentAt
+        case paymentReminderCancelledAt
     }
     
     required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        id = try container.decode(String.self, forKey: .id)
-        title = try container.decode(String.self, forKey: .title)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         startDate = try container.decode(Date.self, forKey: .startDate)
         endDate = try container.decode(Date.self, forKey: .endDate)
-        isMultiDay = try container.decode(Bool.self, forKey: .isMultiDay)
+        isMultiDay = try container.decodeIfPresent(Bool.self, forKey: .isMultiDay) ?? false
         // Initialize events as an empty array since we're not decoding it
         events = []
-        assignedSitter = try container.decodeIfPresent(AssignedSitter.self, forKey: .assignedSitter)
+        assignedSitter = try? container.decode(AssignedSitter.self, forKey: .assignedSitter)
         nestID = try container.decodeIfPresent(String.self, forKey: .nestID) ?? ""
         ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)
         // Handle earlyAccessDuration with backwards compatibility for unknown enum values
@@ -303,6 +368,11 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         earlyAccessEndDate = try container.decodeIfPresent(Date.self, forKey: .earlyAccessEndDate)
         entryIds = try container.decodeIfPresent([String].self, forKey: .selectedItemIds)
             ?? container.decodeIfPresent([String].self, forKey: .entryIds)
+        pdfGeneratedAt = try container.decodeIfPresent(Date.self, forKey: .pdfGeneratedAt)
+        pdfContentHash = try container.decodeIfPresent(String.self, forKey: .pdfContentHash)
+        paymentReminderScheduledFor = try container.decodeIfPresent(Date.self, forKey: .paymentReminderScheduledFor)
+        paymentReminderSentAt = try container.decodeIfPresent(Date.self, forKey: .paymentReminderSentAt)
+        paymentReminderCancelledAt = try container.decodeIfPresent(Date.self, forKey: .paymentReminderCancelledAt)
         
         // For existing sessions without a status, infer it based on dates
         if let status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) {
@@ -331,6 +401,11 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
         let ids = entryIds
         try container.encodeIfPresent(ids, forKey: .selectedItemIds)
         try container.encodeIfPresent(ids, forKey: .entryIds)
+        try container.encodeIfPresent(pdfGeneratedAt, forKey: .pdfGeneratedAt)
+        try container.encodeIfPresent(pdfContentHash, forKey: .pdfContentHash)
+        try container.encodeIfPresent(paymentReminderScheduledFor, forKey: .paymentReminderScheduledFor)
+        try container.encodeIfPresent(paymentReminderSentAt, forKey: .paymentReminderSentAt)
+        try container.encodeIfPresent(paymentReminderCancelledAt, forKey: .paymentReminderCancelledAt)
     }
     
     // MARK: - Sitter Management
@@ -357,7 +432,12 @@ class SessionItem: Hashable, Codable, SessionDisplayable {
             ownerID: self.ownerID,
             earlyAccessDuration: self.earlyAccessDuration,
             earlyAccessEndDate: self.earlyAccessEndDate,
-            entryIds: self.entryIds
+            entryIds: self.entryIds,
+            pdfGeneratedAt: self.pdfGeneratedAt,
+            pdfContentHash: self.pdfContentHash,
+            paymentReminderScheduledFor: self.paymentReminderScheduledFor,
+            paymentReminderSentAt: self.paymentReminderSentAt,
+            paymentReminderCancelledAt: self.paymentReminderCancelledAt
         )
         return copiedSession
     }

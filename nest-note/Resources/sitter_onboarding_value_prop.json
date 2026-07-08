@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "flow": {
+    "name": "sitter_onboarding_value_prop",
+    "steps": [
+      {
+        "id": "sitter_missing_info",
+        "type": "missing_info",
+        "config": {
+          "type": "missing_info",
+          "title": "Scattered info makes every sit harder.",
+          "stat_text": "Most sitters still get critical info via texts and sticky notes",
+          "subtitle": "Without organized session info, you're often missing:",
+          "items": [
+            "Emergency contacts",
+            "Bedtime routines",
+            "House access codes",
+            "Allergy & medical info",
+            "Your hourly rate"
+          ],
+          "cta_text": "Continue"
+        }
+      },
+      {
+        "id": "sitter_experience",
+        "type": "bullet",
+        "config": {
+          "type": "bullet",
+          "title": "Sitters who use NestNote experience",
+          "subtitle": null,
+          "bullets": [
+            {
+              "title": "Fewer mid-sit texts",
+              "description": "When routines and codes are documented, you spend less time chasing parents",
+              "icon_name": "exclamationmark.bubble.fill"
+            },
+            {
+              "title": "Arrive prepared",
+              "description": "Emergency contacts, routines, and house info in one place for your session",
+              "icon_name": "checkmark.shield.fill"
+            },
+            {
+              "title": "Get paid your rate",
+              "description": "Set your hourly rate so families calculate payment at what you're worth",
+              "icon_name": "dollarsign.circle.fill"
+            },
+            {
+              "title": "Paid on time",
+              "description": "NestNote reminds parents to pay after sessions—you're not awkwardly following up",
+              "icon_name": "bell.badge.fill"
+            }
+          ],
+          "cta_text": "I want that too!"
+        }
+      }
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import UIKit
+import FirebaseAnalytics
 
 class NestSessionsViewController: NNViewController {
     struct MonthSection: Hashable {
@@ -548,10 +549,33 @@ class NestSessionsViewController: NNViewController {
     }
     
     @objc private func ctaTapped() {
-        let vc = EditSessionViewController()
-        vc.delegate = self
-        vc.modalPresentationStyle = .pageSheet
-        present(UINavigationController(rootViewController: vc), animated: true)
+        Task {
+            let canCreate = await SubscriptionService.shared.canUseFullFeatures()
+            await MainActor.run {
+                guard canCreate else {
+                    Analytics.logEvent("second_session_gate_hit", parameters: [
+                        "source": "sessions_tab_cta"
+                    ])
+                    presentPremiumPaywall()
+                    return
+                }
+
+                let vc = EditSessionViewController()
+                vc.delegate = self
+                vc.modalPresentationStyle = .pageSheet
+                present(UINavigationController(rootViewController: vc), animated: true)
+            }
+        }
+    }
+
+    private func presentPremiumPaywall() {
+        let paywall = FeatureInfoPaywallViewController()
+        paywall.modalPresentationStyle = .pageSheet
+        if let sheet = paywall.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(paywall, animated: true)
     }
     
     @objc private func findSessionTapped() {

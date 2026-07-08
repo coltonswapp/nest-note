@@ -277,9 +277,7 @@ private class SurveyResponseCell: UICollectionViewListCell {
         let roleLabel = survey.surveyType == .parentSurvey ? "Parent Survey" : "Sitter Survey"
         let userIdPrefix = metadata["userId"].map { String($0.prefix(5)) }
 
-        if let name, !name.isEmpty {
-            titleLabel.text = name
-        } else if let userIdPrefix {
+        if let userIdPrefix {
             titleLabel.text = "\(roleLabel) · \(userIdPrefix)"
         } else {
             titleLabel.text = roleLabel
@@ -293,11 +291,7 @@ private class SurveyResponseCell: UICollectionViewListCell {
 
         var subtitleParts: [String] = []
         if let name, !name.isEmpty {
-            if let userIdPrefix {
-                subtitleParts.append("\(roleLabel) · \(userIdPrefix)")
-            } else {
-                subtitleParts.append(roleLabel)
-            }
+            subtitleParts.append(name)
         }
         subtitleParts.append(contentsOf: [email, phone, discoveryMethod])
         subtitleLabel.text = subtitleParts.joined(separator: " • ")

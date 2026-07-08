@@ -537,7 +537,7 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
 
         if isSitterFinish {
             self.titleLabel.text = "You're ready to sit!"
-            self.subtitleLabel.text = "Join sessions and watch over nests when families invite you."
+            self.subtitleLabel.text = "Join sessions with an invite code—or send a session request to a family."
             self.slideToEnterView.slideTitle = "Slide to Get Started"
         } else {
             self.titleLabel.text = "Your nest has been created!"

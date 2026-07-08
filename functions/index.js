@@ -7,6 +7,8 @@ const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const sgMail = require("@sendgrid/mail");
 const {handleSessionAccepted} = require("./sessionAccepted");
+const {handleSessionCompleted} = require("./sessionCompleted");
+const {getOwnerFCMTokens, sendPushToTokens} = require("./pushNotifications");
 
 // Define the SendGrid API key secret
 const sendGridApiKey = defineSecret("SENDGRID_API_KEY");
@@ -1384,47 +1386,173 @@ exports.onSessionAccepted = functions.firestore
     });
 
 /**
- * Function that cleans up invite documents when a session is completed
+ * Sends a one-time payment reminder push to the session owner.
+ * @param {Object} sessionData
+ * @param {string} nestId
+ * @param {string} sessionId
+ * @return {Promise<Object>}
  */
-exports.cleanupInviteOnComplete = functions.firestore
-    .onDocumentUpdated("nests/{nestId}/sessions/{sessionId}", async (event) => {
-      const beforeData = event.data.before.data();
-      const afterData = event.data.after.data();
-      const {sessionId} = event.params;
+async function sendPaymentReminderNotification(sessionData, nestId, sessionId) {
+  const ownerId = sessionData.ownerID;
+  if (!ownerId) {
+    logger.warn(`[PaymentReminder] No ownerID for session ${sessionId}`);
+    return {status: "skipped", reason: "missing_owner"};
+  }
 
-      // Only continue if the status changed to COMPLETED
-      if (beforeData.status !== SessionStatus.COMPLETED &&
-          afterData.status === SessionStatus.COMPLETED) {
-        try {
-          const db = admin.firestore();
-          logger.info(`Session ${sessionId} status` +
-              ` changed to COMPLETED. Cleaning up invite.`);
+  const logPrefix = `[PaymentReminder][Session ${sessionId}] `;
+  const {tokens, skippedReason} = await getOwnerFCMTokens(
+      admin.firestore(),
+      ownerId,
+      logPrefix,
+  );
 
-          // Check if this session has an assigned sitter with invite
-          if (afterData.assignedSitter &&
-              afterData.assignedSitter.userID &&
-              afterData.assignedSitter.inviteID) {
-            const inviteID = afterData.assignedSitter.inviteID;
-            const inviteRef = db.collection("invites").doc(inviteID);
+  if (skippedReason) {
+    return {status: "skipped", reason: skippedReason};
+  }
 
-            try {
-              await inviteRef.delete();
-              logger.info(`Successfully deleted invite ${inviteID}` +
-                 ` for session ${sessionId}`);
-            } catch (error) {
-              logger.error(`Error deleting invite` +
-                ` ${inviteID}: ${error.message}`);
-            }
-          } else {
-            logger.info(`Session ${sessionId} has no` +
-                ` assigned sitter with invite, skipping cleanup`);
-          }
-        } catch (error) {
-          logger.error(`Error cleaning up invite: ${error.message}`);
-        }
+  const notificationTitle = "Remember to pay your sitter!";
+  const notificationBody = "Show your sitter some love with a prompt payment.";
+  const dataPayload = {
+    type: "session_payment_reminder",
+    sessionId: sessionId || "",
+    nestId: nestId || "",
+    ownerID: ownerId,
+    timestamp: new Date().toISOString(),
+  };
+
+  await sendPushToTokens({
+    tokens,
+    userId: ownerId,
+    logPrefix,
+    removeInvalidToken,
+    buildMessage: () => ({
+      notification: {
+        title: notificationTitle,
+        body: notificationBody,
+      },
+      data: dataPayload,
+      android: {
+        priority: "high",
+      },
+      apns: {
+        payload: {
+          aps: {
+            "interruption-level": "time-sensitive",
+            "contentAvailable": true,
+            "sound": "default",
+          },
+          userInfo: dataPayload,
+        },
+      },
+    }),
+  });
+
+  return {status: "sent"};
+}
+
+/**
+ * Hourly job that sends due payment reminder pushes to session owners.
+ */
+exports.sendPaymentReminders = onSchedule("0 * * * *", async (event) => {
+  const db = admin.firestore();
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    logger.info("[PaymentReminder] Checking for due payment reminders...");
+
+    const snapshot = await db.collectionGroup("sessions")
+        .where("status", "==", SessionStatus.COMPLETED)
+        .where("paymentReminderScheduledFor", "<=", now)
+        .get();
+
+    if (snapshot.empty) {
+      logger.info("[PaymentReminder] No due reminders");
+      return null;
+    }
+
+    logger.info(
+        `[PaymentReminder] Found ${snapshot.size} completed sessions past reminder time`,
+    );
+
+    let processedCount = 0;
+    let skippedAlreadySent = 0;
+
+    for (const doc of snapshot.docs) {
+      const sessionData = doc.data();
+      if (sessionData.paymentReminderSentAt) {
+        skippedAlreadySent++;
+        continue;
+      }
+      if (sessionData.paymentReminderCancelledAt) {
+        logger.info(
+            `[PaymentReminder] Skipping cancelled reminder for session ${doc.id}`,
+        );
+        await doc.ref.update({
+          paymentReminderSentAt: admin.firestore.Timestamp.now(),
+        });
+        processedCount++;
+        continue;
       }
 
-      return null;
+      const nestId = doc.ref.parent.parent.id;
+      const sessionId = doc.id;
+
+      try {
+        const result = await sendPaymentReminderNotification(
+            sessionData,
+            nestId,
+            sessionId,
+        );
+        logger.info(
+            `[PaymentReminder] Session ${sessionId} send result: ` +
+            `${JSON.stringify(result)}`,
+        );
+      } catch (error) {
+        logger.error(
+            `[PaymentReminder] Failed to send for session ${sessionId}: ` +
+            `${error.message}`,
+        );
+      }
+
+      await doc.ref.update({
+        paymentReminderSentAt: admin.firestore.Timestamp.now(),
+      });
+      processedCount++;
+    }
+
+    logger.info(
+        `[PaymentReminder] Processed ${processedCount} reminders ` +
+        `(skipped ${skippedAlreadySent} already sent)`,
+    );
+    return null;
+  } catch (error) {
+    logger.error(`[PaymentReminder] Cron failed: ${error.message}`);
+    throw new Error(`Failed to send payment reminders: ${error.message}`);
+  }
+});
+
+/**
+ * Runs completion-side effects when a session transitions to completed.
+ */
+exports.onSessionCompleted = functions.firestore
+    .onDocumentUpdated("nests/{nestId}/sessions/{sessionId}", async (event) => {
+      const {nestId, sessionId} = event.params;
+
+      try {
+        return await handleSessionCompleted({
+          db: admin.firestore(),
+          nestId,
+          sessionId,
+          before: event.data.before.data(),
+          after: event.data.after.data(),
+        });
+      } catch (error) {
+        logger.error(
+            `[SessionCompleted] Orchestrator failed for session ${sessionId}: ` +
+            `${error.message}`,
+        );
+        return null;
+      }
     });
 
 /**

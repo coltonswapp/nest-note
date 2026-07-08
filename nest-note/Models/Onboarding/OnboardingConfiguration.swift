@@ -50,6 +50,7 @@ enum StepConfiguration: Codable {
     case bullet(BulletStepConfig)
     case image(ImageStepConfig)
     case preview(PreviewStepConfig)
+    case missingInfo(MissingInfoStepConfig)
     case basic(BasicStepConfig)
 
     enum CodingKeys: String, CodingKey {
@@ -73,6 +74,9 @@ enum StepConfiguration: Codable {
         case "preview":
             let config = try PreviewStepConfig(from: decoder)
             self = .preview(config)
+        case "missing_info":
+            let config = try MissingInfoStepConfig(from: decoder)
+            self = .missingInfo(config)
         default:
             let config = try BasicStepConfig(from: decoder)
             self = .basic(config)
@@ -94,6 +98,9 @@ enum StepConfiguration: Codable {
             try config.encode(to: encoder)
         case .preview(let config):
             try container.encode("preview", forKey: .type)
+            try config.encode(to: encoder)
+        case .missingInfo(let config):
+            try container.encode("missing_info", forKey: .type)
             try config.encode(to: encoder)
         case .basic(let config):
             try container.encode("basic", forKey: .type)
@@ -165,6 +172,23 @@ struct ImageStepConfig: Codable {
         case title
         case subtitle
         case imageName = "image_name"
+        case ctaText = "cta_text"
+    }
+}
+
+// MARK: - Missing Info Step Configuration
+struct MissingInfoStepConfig: Codable {
+    let title: String?
+    let subtitle: String?
+    let statText: String?
+    let items: [String]?
+    let ctaText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case subtitle
+        case statText = "stat_text"
+        case items
         case ctaText = "cta_text"
     }
 }

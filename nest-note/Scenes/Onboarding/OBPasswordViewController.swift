@@ -68,7 +68,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
         let label = UILabel()
         label.text = text
         label.textColor = .systemGray
-        label.font = .bodyM
+        label.font = .captionBoldS
         
         stack.addArrangedSubview(imageView)
         stack.addArrangedSubview(label)

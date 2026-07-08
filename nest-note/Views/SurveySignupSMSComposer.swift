@@ -1,13 +1,15 @@
 import UIKit
 
 enum SurveySignupSMSComposer {
-    static func welcomeMessage(firstName: String, isSitter: Bool) -> String {
+    static func welcomeMessage(firstName: String, surveyType: SurveyResponse.SurveyType) -> String {
         let greeting = "hi \(firstName) — my name is Colton from the NestNote app."
         let thanks = "Thanks so much for signing up! If you have any questions I can answer, let me know!"
-        let referral = isSitter ?
-            "Also, I'm giving $10 via Venmo per family you get to sign up to NestNote!! 💰 let me know if you refer someone so I can get you some cash!!" :
-            "Also, I'm giving $10 via Venmo for every friend or sitter you get to sign up to NestNote!! 💰 let me know if you refer someone so I can get you some cash!!"
 
+        guard surveyType == .sitterSurvey else {
+            return [greeting, "", thanks].joined(separator: "\n")
+        }
+
+        let referral = "Also, I'm giving $10 via Venmo per family you get to sign up to NestNote!! 💰 let me know if you refer someone so I can get you some cash!!"
         return [greeting, "", thanks, "", referral].joined(separator: "\n")
     }
 

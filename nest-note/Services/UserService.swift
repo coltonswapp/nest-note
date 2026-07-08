@@ -724,7 +724,8 @@ final class UserService {
                     name: fullName,
                     email: email,
                     phone: info.phone.isEmpty ? nil : info.phone,
-                    venmoUsername: info.venmoUsername
+                    venmoUsername: info.venmoUsername,
+                    hourlyRateCents: info.hourlyRateCents
                 ),
                 primaryRole: info.role,
                 roles: .init(
@@ -824,6 +825,7 @@ final class UserService {
                 email: email,
                 phone: info.phone.isEmpty ? nil : info.phone,
                 venmoUsername: info.venmoUsername,
+                hourlyRateCents: info.hourlyRateCents,
                 notificationPreferences: .default
             ),
             primaryRole: info.role,
@@ -1417,6 +1419,32 @@ final class UserService {
         
         Logger.log(level: .info, category: .userService, message: "User name updated successfully to: \(newName)")
     }
+
+    /// Whether the current user has already completed their one free fully-featured session.
+    var hasUsedFreeSession: Bool {
+        currentUser?.hasUsedFreeSession ?? false
+    }
+
+    /// Marks the user's one free fully-featured session as used after session completion.
+    func markFreeSessionUsed() async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard currentUser.hasUsedFreeSession != true else { return }
+
+        let docRef = db.collection("users").document(currentUser.id)
+        try await docRef.updateData([
+            "hasUsedFreeSession": true,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+
+        self.currentUser?.hasUsedFreeSession = true
+        saveAuthState()
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+
+        Logger.log(level: .info, category: .userService, message: "Marked free session as used for user: \(currentUser.id)")
+    }
     
     func updatePhone(_ rawPhone: String) async throws {
         guard let currentUser = currentUser else {
@@ -1482,6 +1510,67 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "Venmo username updated successfully")
+    }
+
+    func updateHourlyRate(_ hourlyRateCents: Int?) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        if let hourlyRateCents {
+            guard (SessionPaymentCalculator.minimumHourlyRateCents...SessionPaymentCalculator.maximumHourlyRateCents).contains(hourlyRateCents) else {
+                throw AuthError.invalidUserData
+            }
+        }
+
+        let docRef = db.collection("users").document(currentUser.id)
+        if let hourlyRateCents {
+            try await docRef.updateData([
+                "personalInfo.hourlyRateCents": hourlyRateCents,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        } else {
+            try await docRef.updateData([
+                "personalInfo.hourlyRateCents": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        }
+
+        self.currentUser?.personalInfo.hourlyRateCents = hourlyRateCents
+        saveAuthState()
+
+        try await patchHourlyRateOnAssignedSessions(userId: currentUser.id, hourlyRateCents: hourlyRateCents)
+
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+
+        Logger.log(level: .info, category: .userService, message: "Hourly rate updated successfully")
+    }
+
+    private func patchHourlyRateOnAssignedSessions(userId: String, hourlyRateCents: Int?) async throws {
+        let sitterSessionsRef = db.collection("users").document(userId).collection("sitterSessions")
+        let snapshot = try await sitterSessionsRef.getDocuments()
+
+        for document in snapshot.documents {
+            guard let sitterSession = try? document.data(as: SitterSession.self) else { continue }
+
+            let sessionRef = db.collection("nests").document(sitterSession.nestID)
+                .collection("sessions").document(sitterSession.id)
+
+            let sessionSnapshot = try await sessionRef.getDocument()
+            guard sessionSnapshot.exists,
+                  let sessionData = sessionSnapshot.data(),
+                  let assignedSitterData = sessionData["assignedSitter"] as? [String: Any],
+                  let assignedUserID = assignedSitterData["userID"] as? String,
+                  assignedUserID == userId else {
+                continue
+            }
+
+            if let hourlyRateCents {
+                try await sessionRef.updateData(["assignedSitter.hourlyRateCents": hourlyRateCents])
+            } else {
+                try await sessionRef.updateData(["assignedSitter.hourlyRateCents": FieldValue.delete()])
+            }
+        }
     }
     
     private func patchVenmoUsernameOnAssignedSessions(userId: String, venmoUsername: String?) async throws {

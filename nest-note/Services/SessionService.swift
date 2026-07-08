@@ -29,6 +29,72 @@ enum SessionError: LocalizedError {
     }
 }
 
+private enum SessionDocumentDecoder {
+    static func decode(_ document: DocumentSnapshot) -> SessionItem? {
+        do {
+            return try decodeWithDocumentIDFallback(document)
+        } catch {
+            Logger.log(
+                level: .error,
+                category: .sessionService,
+                message: "Failed to decode session \(document.documentID): \(describeDecodingError(error))"
+            )
+            return nil
+        }
+    }
+
+    private static func decodeWithDocumentIDFallback(_ document: DocumentSnapshot) throws -> SessionItem {
+        do {
+            let session = try document.data(as: SessionItem.self)
+            return normalizedSession(session, documentID: document.documentID)
+        } catch {
+            guard var data = document.data() else { throw error }
+
+            if data["id"] == nil {
+                data["id"] = document.documentID
+            }
+
+            let session = try Firestore.Decoder().decode(SessionItem.self, from: data)
+            return normalizedSession(session, documentID: document.documentID)
+        }
+    }
+
+    private static func normalizedSession(_ session: SessionItem, documentID: String) -> SessionItem {
+        if session.id.isEmpty {
+            session.id = documentID
+        }
+        return session
+    }
+
+    private static func describeDecodingError(_ error: Error) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return error.localizedDescription
+        }
+
+        switch decodingError {
+        case .keyNotFound(let key, let context):
+            let path = codingPathDescription(context.codingPath)
+            return "Missing key '\(key.stringValue)' at \(path)"
+        case .typeMismatch(let type, let context):
+            let path = codingPathDescription(context.codingPath)
+            return "Type mismatch for \(type) at \(path): \(context.debugDescription)"
+        case .valueNotFound(let type, let context):
+            let path = codingPathDescription(context.codingPath)
+            return "Missing value for \(type) at \(path): \(context.debugDescription)"
+        case .dataCorrupted(let context):
+            let path = codingPathDescription(context.codingPath)
+            return "Corrupted data at \(path): \(context.debugDescription)"
+        @unknown default:
+            return decodingError.localizedDescription
+        }
+    }
+
+    private static func codingPathDescription(_ path: [CodingKey]) -> String {
+        guard !path.isEmpty else { return "root" }
+        return path.map(\.stringValue).joined(separator: ".")
+    }
+}
+
 class SessionService {
     static let shared = SessionService()
     let db = Firestore.firestore()
@@ -126,8 +192,9 @@ class SessionService {
         }
         
         do {
-            // Use the Firestore decoder which will now skip the events field
-            let session = try sessionDoc.data(as: SessionItem.self)
+            guard let session = SessionDocumentDecoder.decode(sessionDoc) else {
+                return nil
+            }
             Logger.log(level: .info, category: .sessionService, message: "Session fetched successfully ✅")
             return session
         } catch {
@@ -149,7 +216,7 @@ class SessionService {
                 .collection("sessions")
 
             let snapshot = try await sessionsRef.getDocuments()
-            let sessions = try snapshot.documents.compactMap { try $0.data(as: SessionItem.self) }
+            let sessions = snapshot.documents.compactMap(SessionDocumentDecoder.decode)
 
             Logger.log(level: .info, category: .sessionService, message: "Fetched \(sessions.count) sessions ✅")
             return sessions
@@ -196,6 +263,23 @@ class SessionService {
             throw error
         }
     }
+
+    func cancelPaymentReminder(nestID: String, sessionID: String) async throws {
+        Logger.log(
+            level: .info,
+            category: .sessionService,
+            message: "Cancelling payment reminder for session: \(sessionID)"
+        )
+
+        let sessionRef = db.collection("nests")
+            .document(nestID)
+            .collection("sessions")
+            .document(sessionID)
+
+        try await sessionRef.setData([
+            "paymentReminderCancelledAt": Timestamp(date: Date())
+        ], merge: true)
+    }
     
     // MARK: - Delete
     func deleteSession(nestID: String, sessionID: String) async throws {
@@ -208,6 +292,8 @@ class SessionService {
         
         try await sessionRef.delete()
         Logger.log(level: .info, category: .sessionService, message: "Session deleted successfully ✅")
+        
+        SessionPDFService.shared.removeLocalPDFFile(nestID: nestID, sessionID: sessionID)
         
         // Remove from in-memory cache to prevent stale sessions from reappearing
         if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
@@ -1197,6 +1283,7 @@ class SessionService {
                 }
                 existing.inviteID = invite.id
                 existing.venmoUsername = UserService.shared.currentUser?.personalInfo.venmoUsername
+                existing.hourlyRateCents = UserService.shared.currentUser?.personalInfo.hourlyRateCents
                 updatedAssignedSitter = existing
             } else {
                 let currentUser = Auth.auth().currentUser
@@ -1210,6 +1297,7 @@ class SessionService {
                     email: joinerEmail,
                     userID: currentUserID,
                     venmoUsername: UserService.shared.currentUser?.personalInfo.venmoUsername,
+                    hourlyRateCents: UserService.shared.currentUser?.personalInfo.hourlyRateCents,
                     inviteStatus: .accepted,
                     inviteID: invite.id
                 )
@@ -1331,6 +1419,7 @@ class SessionService {
                 name: sitterName,
                 email: sitterEmail,
                 userID: currentUserID,
+                hourlyRateCents: UserService.shared.currentUser?.personalInfo.hourlyRateCents,
                 inviteStatus: .invited,  // Use .invited instead of .pending
                 inviteID: inviteID
             ),
@@ -1615,6 +1704,7 @@ class SessionService {
             name: sitterInfo.name,
             email: sitterInfo.email,
             userID: sitterInfo.userID,
+            hourlyRateCents: placeholder.assignedSitter?.hourlyRateCents ?? completedSession.assignedSitter?.hourlyRateCents,
             inviteStatus: .accepted,
             inviteID: inviteID
         )

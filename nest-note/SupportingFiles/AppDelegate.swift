@@ -133,8 +133,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                               didReceive response: UNNotificationResponse,
                               withCompletionHandler completionHandler: @escaping () -> Void) {
-        // Handle notification response when app is in background
+        let userInfo = response.notification.request.content.userInfo
         handleNotificationContent(response.notification.request.content)
+
+        if SessionPaymentReminderRouter.notificationType(from: userInfo) == "session_payment_reminder" {
+            SessionPaymentReminderRouter.shared.handlePaymentReminderNotification(userInfo: userInfo)
+            completionHandler()
+            return
+        }
         
         // Always refresh data when app is opened via notification tap
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -177,6 +183,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 userInfo: merged
             )
             AdminNotificationRouter.shared.handleSignupNotification(userInfo: merged)
+            return
+        }
+
+        if SessionPaymentReminderRouter.notificationType(from: userInfo) == "session_payment_reminder" {
+            SessionPaymentReminderRouter.shared.handlePaymentReminderNotification(userInfo: userInfo)
+            Logger.log(
+                level: .info,
+                category: .general,
+                message: "Handled payment reminder notification for session \(userInfo["sessionId"] as? String ?? "unknown")"
+            )
             return
         }
         

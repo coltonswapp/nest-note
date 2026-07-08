@@ -15,7 +15,8 @@ private enum FeatureInfoPaywallStage {
 final class FeatureInfoPaywallViewController: NNViewController {
 
     /// When set, the paywall runs in onboarding mode and calls back instead of dismissing modally.
-    var onPaywallFinished: ((Bool) -> Void)? {
+    /// Parameters: subscribed, startedTrial (meaningful only when subscribed is true).
+    var onPaywallFinished: ((_ subscribed: Bool, _ startedTrial: Bool) -> Void)? {
         didSet {
             showsDelayedCloseButton = onPaywallFinished != nil
         }
@@ -24,13 +25,6 @@ final class FeatureInfoPaywallViewController: NNViewController {
     private var showsDelayedCloseButton = false
     private var hasAnimatedCloseButton = false
 
-    private final class PassThroughView: UIView {
-        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-            let hitView = super.hitTest(point, with: event)
-            return hitView === self ? nil : hitView
-        }
-    }
-
     private final class ReferralEntryState: ReferralCodeEntryPresenting {
         var referralCodeInput = ""
         var referralCodeError: String?
@@ -38,9 +32,12 @@ final class FeatureInfoPaywallViewController: NNViewController {
         var onApplyReferralCode: (String) -> Void = { _ in }
     }
 
-    private let bottomBlurFadeHeight: CGFloat = 20
+    private let featuresBlurFadeHeight: CGFloat = 8
+    private let checkoutBlurFadeHeight: CGFloat = 20
     private let scrollBottomPadding: CGFloat = 16
     private let footerHeight: CGFloat = 36
+    private let checkoutIconScale: CGFloat = 0.72
+    private let checkoutIconFanOffsetX: CGFloat = 42
 
     private var planCardViews: [PaywallPlanCardView] = []
     private var selectedPackage: Package?
@@ -56,9 +53,12 @@ final class FeatureInfoPaywallViewController: NNViewController {
     private var standardComparisonPackages: [PackageType: Package] = [:]
     private var prefetchedPartnerPackages: [Package] = []
     private var loadingIndicatorConstraints: [NSLayoutConstraint] = []
+    private var bottomBlurTopConstraint: NSLayoutConstraint?
+    private var featuresPanelTopConstraint: NSLayoutConstraint?
+    private var checkoutPanelTopConstraint: NSLayoutConstraint?
 
-    private let bottomPanelContainer: PassThroughView = {
-        let view = PassThroughView()
+    private let bottomPanelContainer: EdgeElementContainerView = {
+        let view = EdgeElementContainerView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.backgroundColor = .clear
         view.clipsToBounds = false
@@ -534,14 +534,12 @@ final class FeatureInfoPaywallViewController: NNViewController {
             bottomBlurView.leadingAnchor.constraint(equalTo: bottomPanelContainer.leadingAnchor),
             bottomBlurView.trailingAnchor.constraint(equalTo: bottomPanelContainer.trailingAnchor),
             bottomBlurView.bottomAnchor.constraint(equalTo: bottomPanelContainer.bottomAnchor),
-            bottomBlurView.topAnchor.constraint(equalTo: bottomPanelContainer.topAnchor, constant: -bottomBlurFadeHeight),
 
             continueButton.leadingAnchor.constraint(equalTo: bottomPanelContainer.leadingAnchor, constant: 20),
             continueButton.trailingAnchor.constraint(equalTo: bottomPanelContainer.trailingAnchor, constant: -20),
             continueButton.bottomAnchor.constraint(equalTo: bottomPanelContainer.bottomAnchor, constant: -12),
             continueButton.heightAnchor.constraint(equalToConstant: 55),
 
-            checkoutPanel.topAnchor.constraint(equalTo: bottomPanelContainer.topAnchor),
             checkoutPanel.leadingAnchor.constraint(equalTo: bottomPanelContainer.leadingAnchor),
             checkoutPanel.trailingAnchor.constraint(equalTo: bottomPanelContainer.trailingAnchor),
             checkoutPanel.bottomAnchor.constraint(equalTo: bottomPanelContainer.bottomAnchor),
@@ -624,6 +622,22 @@ final class FeatureInfoPaywallViewController: NNViewController {
             retryButton.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
 
+        featuresPanelTopConstraint = continueButton.topAnchor.constraint(
+            equalTo: bottomPanelContainer.topAnchor,
+            constant: 12
+        )
+        checkoutPanelTopConstraint = checkoutPanel.topAnchor.constraint(
+            equalTo: bottomPanelContainer.topAnchor
+        )
+        featuresPanelTopConstraint?.isActive = true
+        checkoutPanelTopConstraint?.isActive = false
+
+        bottomBlurTopConstraint = bottomBlurView.topAnchor.constraint(
+            equalTo: bottomPanelContainer.topAnchor,
+            constant: -featuresBlurFadeHeight
+        )
+        bottomBlurTopConstraint?.isActive = true
+
         if showsDelayedCloseButton {
             NSLayoutConstraint.activate([
                 closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
@@ -642,8 +656,18 @@ final class FeatureInfoPaywallViewController: NNViewController {
             view.bringSubviewToFront(closeButton)
         }
 
+        installScrollEdgeInteractionIfNeeded()
         prepareFeaturesContentForSlideIn()
         prepareCheckoutPanelOffscreen()
+    }
+
+    private func installScrollEdgeInteractionIfNeeded() {
+        guard #available(iOS 26.0, *) else { return }
+
+        let interaction = UIScrollEdgeElementContainerInteraction()
+        interaction.scrollView = scrollView
+        interaction.edge = .bottom
+        bottomPanelContainer.addInteraction(interaction)
     }
 
     private func prepareFeaturesContentForSlideIn() {
@@ -811,6 +835,14 @@ final class FeatureInfoPaywallViewController: NNViewController {
         prepareCheckoutPanelOffscreen()
         prepareCheckoutContentForSlideIn()
 
+        featuresPanelTopConstraint?.isActive = false
+        checkoutPanelTopConstraint?.isActive = true
+        bottomBlurTopConstraint?.constant = -checkoutBlurFadeHeight
+        view.layoutIfNeeded()
+        updateScrollInsets()
+
+        let referralTargetOffset = contentOffsetKeepingReferralVisible()
+
         animateCheckoutContentIn {
             if shouldSlashPrices {
                 self.playPartnerPriceSlashAnimations()
@@ -826,9 +858,43 @@ final class FeatureInfoPaywallViewController: NNViewController {
         ) {
             self.checkoutPanel.transform = .identity
             self.continueButton.alpha = 0
+            self.applyCheckoutIconTransforms()
+            self.scrollView.contentOffset = referralTargetOffset
+            self.view.layoutIfNeeded()
         } completion: { _ in
             self.continueButton.isHidden = true
+            self.updateScrollInsets()
         }
+    }
+
+    private func applyCheckoutIconTransforms() {
+        let stackedScale = checkoutIconScale * 0.94
+        backIconLeftCard.transform = Self.iconTransform(
+            offsetX: -checkoutIconFanOffsetX,
+            rotationDegrees: -Self.iconFanRotationDegrees,
+            scale: stackedScale
+        )
+        backIconRightCard.transform = Self.iconTransform(
+            offsetX: checkoutIconFanOffsetX,
+            rotationDegrees: Self.iconFanRotationDegrees,
+            scale: stackedScale
+        )
+        iconCard.transform = Self.iconTransform(offsetY: -3, scale: checkoutIconScale)
+    }
+
+    private func contentOffsetKeepingReferralVisible() -> CGPoint {
+        view.layoutIfNeeded()
+
+        let referralFrame = referralSectionStack.convert(referralSectionStack.bounds, to: scrollView)
+        let visibleBottom = scrollView.bounds.height - scrollView.adjustedContentInset.bottom
+        let targetY = referralFrame.maxY - visibleBottom + scrollBottomPadding
+        let minOffsetY = -scrollView.adjustedContentInset.top
+        let maxOffsetY = max(
+            minOffsetY,
+            scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
+        )
+        let clampedY = min(max(targetY, minOffsetY), maxOffsetY)
+        return CGPoint(x: 0, y: clampedY)
     }
 
     private func playPartnerPriceSlashAnimations() {
@@ -1269,7 +1335,7 @@ final class FeatureInfoPaywallViewController: NNViewController {
 
         Task {
             do {
-                _ = try await SubscriptionService.shared.purchase(
+                let customerInfo = try await SubscriptionService.shared.purchase(
                     package: selectedPackage,
                     referralCode: appliedReferralCode,
                     referralCodeType: appliedReferralCodeType
@@ -1277,7 +1343,10 @@ final class FeatureInfoPaywallViewController: NNViewController {
                 await MainActor.run {
                     setLoading(false)
                     TikTokTracker.shared.trackSubscribe()
-                    dismissPaywall(showing: "Subscription activated!")
+                    dismissPaywall(
+                        showing: "Subscription activated!",
+                        customerInfo: customerInfo
+                    )
                 }
             } catch SubscriptionError.purchaseCancelled {
                 await MainActor.run {
@@ -1303,7 +1372,10 @@ final class FeatureInfoPaywallViewController: NNViewController {
                     setLoading(false)
                     if customerInfo.entitlements.active["Pro"] != nil {
                         TikTokTracker.shared.trackSubscribe()
-                        dismissPaywall(showing: "Subscription restored!")
+                        dismissPaywall(
+                            showing: "Subscription restored!",
+                            customerInfo: customerInfo
+                        )
                     } else {
                         showToast(text: "No active subscription found.")
                     }
@@ -1348,18 +1420,19 @@ final class FeatureInfoPaywallViewController: NNViewController {
         present(SFSafariViewController(url: url), animated: true)
     }
 
-    private func dismissPaywall(showing message: String) {
+    private func dismissPaywall(showing message: String, customerInfo: CustomerInfo) {
         Task {
             await SubscriptionService.shared.refreshCustomerInfo()
             await MainActor.run {
-                finishPaywall(subscribed: true, successMessage: message)
+                let startedTrial = SubscriptionService.shared.isInTrialPeriod(customerInfo)
+                finishPaywall(subscribed: true, startedTrial: startedTrial, successMessage: message)
             }
         }
     }
 
-    private func finishPaywall(subscribed: Bool, successMessage: String? = nil) {
+    private func finishPaywall(subscribed: Bool, startedTrial: Bool = false, successMessage: String? = nil) {
         if let onPaywallFinished {
-            onPaywallFinished(subscribed)
+            onPaywallFinished(subscribed, startedTrial)
             return
         }
 

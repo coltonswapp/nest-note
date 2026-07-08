@@ -119,7 +119,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
             configureReadOnlyMode()
         }
         
-        itemsHiddenDuringTransition = [saveButton, infoButton]
+        itemsHiddenDuringTransition = [saveButton]
         
         if entry == nil && !isReadOnly && titleField.text?.isEmpty ?? false {
             titleField.becomeFirstResponder()
@@ -161,14 +161,14 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                 
                 saveButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 saveButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                saveButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                saveButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
                 saveButton.heightAnchor.constraint(equalToConstant: 46),
             ])
         } else {
             // Read-only mode - no save button
             constraints.append(contentsOf: [
                 contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
-                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
             ])
         }
         
@@ -178,7 +178,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     // MARK: - NNSheetViewController Override
     
     override func setupInfoButton() {
-        infoButton.isHidden = false
+        setLeadingBarButtonHidden(false)
         
         if isReadOnly {
             setupReadOnlyInfoMenu()
@@ -226,8 +226,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         menuItems.append(contentsOf: [createdAtAction, modifiedAtAction])
         
         let menu = UIMenu(title: "", children: menuItems)
-        infoButton.menu = menu
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonMenu(menu)
     }
     
     private func setupReadOnlyInfoMenu() {
@@ -237,8 +236,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
         let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
         
-        infoButton.menu = UIMenu(title: "", children: [createdAtAction, modifiedAtAction])
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonMenu(UIMenu(title: "", children: [createdAtAction, modifiedAtAction]))
     }
     
     
@@ -383,7 +381,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         if detailsTipShouldShow {
             NNTipManager.shared.showTip(
                 EntryDetailTips.entryDetailsTip,
-                sourceView: infoButton,
+                sourceView: navigationBar,
                 in: self,
                 pinToEdge: .leading,
                 offset: CGPoint(x: 8, y: 0)

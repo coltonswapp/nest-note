@@ -8,6 +8,10 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>webcredentials:app.nestnoteapp.com</string>
+	</array>
 	<key>com.apple.developer.usernotifications.time-sensitive</key>
 	<true/>
 </dict>

@@ -65,8 +65,8 @@ final class LoginViewController: NNViewController {
         field.autocapitalizationType = .none
         field.spellCheckingType = .no
         field.delegate = self
+        field.accessibilityIdentifier = "email-field"
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
-        field.addTarget(self, action: #selector(emailFieldDidChange), for: .editingChanged)
         return field
     }()
     
@@ -78,6 +78,7 @@ final class LoginViewController: NNViewController {
         field.isPasswordTextField = true
         field.returnKeyType = .default
         field.textContentType = .password
+        field.accessibilityIdentifier = "password-field"
         field.delegate = self
         field.addTarget(self, action: #selector(textFieldDidChange), for: .editingChanged)
         return field
@@ -203,7 +204,6 @@ final class LoginViewController: NNViewController {
         setupKeyboardObservers()
         setupNavBar()
         configureForMode()
-        loadSavedCredentials()
         updateLoginButtonState()
     }
     
@@ -265,9 +265,8 @@ final class LoginViewController: NNViewController {
     }
 
     private func presentSignUpFlow() {
-        let onboardingVariant = FeatureFlagService.shared.getOnboardingFlowConfigName()
-        Logger.log(level: .info, category: .general, message: "Creating onboarding coordinator with variant: \(onboardingVariant)")
-        let onboardingCoordinator = OnboardingCoordinator(configFileName: onboardingVariant)
+        Logger.log(level: .info, category: .general, message: "Creating onboarding coordinator")
+        let onboardingCoordinator = OnboardingCoordinator()
         let containerVC = onboardingCoordinator.start()
         onboardingCoordinator.authenticationDelegate = self.delegate
 
@@ -289,8 +288,6 @@ final class LoginViewController: NNViewController {
         view.addSubview(loginStack)
         view.addSubview(loginButton)
         view.addSubview(bottomStack)
-        
-        setupAutofillConfiguration()
     }
     
     override func constrainSubviews() {
@@ -336,51 +333,12 @@ final class LoginViewController: NNViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
     }
     
-    private func setupAutofillConfiguration() {
-        // Set accessibility identifiers for autofill
-        emailField.accessibilityIdentifier = "email-field"
-        passwordField.accessibilityIdentifier = "password-field"
-        
-        // Ensure proper content types for autofill
-        emailField.textContentType = .username
-        passwordField.textContentType = .password
-        
-        // Enable autofill on the view
-        if #available(iOS 12.0, *) {
-            emailField.textContentType = .username
-            passwordField.textContentType = .password
-        }
-    }
-    
     @objc private func backTapped() {
         navigationController?.popViewController(animated: true)
     }
     
     @objc private func textFieldDidChange() {
         updateLoginButtonState()
-    }
-    
-    @objc private func emailFieldDidChange() {
-        guard let email = emailField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !email.isEmpty else {
-            passwordField.text = ""
-            return
-        }
-        
-        // Auto-populate password if available in keychain
-        if let savedPassword = KeychainService.shared.retrieveCredentials(for: email) {
-            passwordField.text = savedPassword
-            updateLoginButtonState()
-            
-            // Provide visual feedback that autofill occurred
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                HapticsHelper.lightHaptic()
-            }
-        } else {
-            // Clear password field if no saved credentials
-            passwordField.text = ""
-            updateLoginButtonState()
-        }
     }
     
     private func updateLoginButtonState() {
@@ -564,8 +522,6 @@ final class LoginViewController: NNViewController {
                     loginButton.stopLoading(withSuccess: true)
                     Logger.log(level: .info, category: .general, message: "Successfully signed in")
                     
-                    self.saveCredentialsToKeychain(email: email, password: password)
-                    
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         self.delegate?.authenticationComplete()
                         self.dismiss(animated: true)
@@ -585,31 +541,6 @@ final class LoginViewController: NNViewController {
                     }
                 }
             }
-        }
-    }
-    
-    private func saveCredentialsToKeychain(email: String, password: String) {
-        // Check if user wants to save credentials
-        guard KeychainService.shared.shouldPromptForSaving() else {
-            Logger.log(level: .info, category: .general, message: "Credential saving is disabled by user preference")
-            return
-        }
-        
-        let success = KeychainService.shared.saveCredentials(email: email, password: password)
-        if success {
-            Logger.log(level: .info, category: .general, message: "Credentials saved to keychain successfully")
-        }
-    }
-    
-    private func loadSavedCredentials() {
-        // Get the most recently used email from user defaults or keychain
-        let storedEmails = KeychainService.shared.retrieveAllStoredEmails()
-        
-        // If we have stored emails, we could populate the most recent one
-        // For now, we'll let the user start typing and auto-populate from there
-        
-        if !storedEmails.isEmpty {
-            Logger.log(level: .info, category: .general, message: "Found \(storedEmails.count) saved email addresses in keychain")
         }
     }
     

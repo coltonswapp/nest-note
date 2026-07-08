@@ -76,7 +76,7 @@ final class NNFeedbackViewController: NNSheetViewController {
     // MARK: - Private Properties
     private var textViewBottomConstraint: NSLayoutConstraint?
     private let buttonStackHeight: CGFloat = 46
-    private let buttonStackBottomPadding: CGFloat = 16
+    private var buttonStackBottomPadding: CGFloat { Self.ctaBottomPadding }
     private let blurHeight: CGFloat = 72
     
     override func viewDidLoad() {
@@ -141,19 +141,16 @@ final class NNFeedbackViewController: NNSheetViewController {
             UIPasteboard.general.string = feedback.nestId
         })
         
-        infoButton.menu = UIMenu(title: "", children: [createdAtAction, userId, userEmail, nestId])
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonMenu(UIMenu(title: "", children: [createdAtAction, userId, userEmail, nestId]))
     }
     
     override func setupInfoButton() {
         guard let feedback = feedback else {
-            // No feedback data to show, hide the info button
-            infoButton.isHidden = true
+            setLeadingBarButtonHidden(true)
             return
         }
         
-        // Show info button and configure menu with feedback metadata
-        infoButton.isHidden = false
+        setLeadingBarButtonHidden(false)
         setupFeedbackInfoMenu()
     }
     
@@ -185,7 +182,7 @@ final class NNFeedbackViewController: NNSheetViewController {
                 
                 buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -buttonStackBottomPadding).with(priority: .defaultHigh),
+                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -buttonStackBottomPadding),
                 buttonStackView.heightAnchor.constraint(equalToConstant: buttonStackHeight),
                 
                 deleteButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.2),
@@ -199,7 +196,7 @@ final class NNFeedbackViewController: NNSheetViewController {
                 
                 buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -buttonStackBottomPadding).with(priority: .defaultHigh),
+                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -buttonStackBottomPadding),
                 buttonStackView.heightAnchor.constraint(equalToConstant: buttonStackHeight),
                 
                 doneButton.widthAnchor.constraint(lessThanOrEqualTo: buttonStackView.widthAnchor, multiplier: 0.2),

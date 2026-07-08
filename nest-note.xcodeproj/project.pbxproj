@@ -26,6 +26,7 @@
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
 		F6C1A0B02E50000100D24D95 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = F6C1A0B12E50000100D24D95 /* MarkdownUI */; };
 		F6E9EE532DA596DF009113C6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = F6E9EE522DA596DF009113C6 /* FirebaseMessaging */; };
+		F6F78AB82FFEE344006BC82E /* NNKit in Frameworks */ = {isa = PBXBuildFile; productRef = F6F78AB72FFEE344006BC82E /* NNKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -78,6 +79,7 @@
 				F66E292C2CD077E900B90ABC /* FirebaseDatabase in Frameworks */,
 				F67037832DFCA686000D897E /* StoreKit.framework in Frameworks */,
 				F67037812DFCA5DD000D897E /* RevenueCatUI in Frameworks */,
+				F6F78AB82FFEE344006BC82E /* NNKit in Frameworks */,
 				F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */,
 				F66E292A2CD077E900B90ABC /* FirebaseCrashlytics in Frameworks */,
 				F6A81B902E56524600D24D95 /* QRCode in Frameworks */,
@@ -162,6 +164,7 @@
 				F67037802DFCA5DD000D897E /* RevenueCatUI */,
 				F6A81B8F2E56524600D24D95 /* QRCode */,
 				F6C1A0B12E50000100D24D95 /* MarkdownUI */,
+				F6F78AB72FFEE344006BC82E /* NNKit */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -197,6 +200,7 @@
 				F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */,
 				F6C1A0B22E50000100D24D95 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				F6F78AB62FFEE344006BC82E /* XCLocalSwiftPackageReference "../cs-ios-style-guide" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F64DE3EA2CB1C893006D21FC /* Products */;
@@ -477,6 +481,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		F6F78AB62FFEE344006BC82E /* XCLocalSwiftPackageReference "../cs-ios-style-guide" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../cs-ios-style-guide";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -594,6 +605,10 @@
 		F6E9EE522DA596DF009113C6 /* FirebaseMessaging */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FirebaseMessaging;
+		};
+		F6F78AB72FFEE344006BC82E /* NNKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NNKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -156,10 +156,8 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     // MARK: - Setup Methods
     
     override func setupInfoButton() {
-        // Configure the base class info button with place-specific menu
-        infoButton.isHidden = false
-        infoButton.menu = createMenu()
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonHidden(false)
+        setLeadingBarButtonMenu(createMenu())
     }
     
     override func addContentToContainer() {
@@ -200,10 +198,10 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             buttonStackView.heightAnchor.constraint(equalToConstant: 46),
         ] + (isReadOnly ? [
             buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
         ] : [
             buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
             saveButton.widthAnchor.constraint(equalTo: buttonStackView.widthAnchor)
         ]))
     }
@@ -585,7 +583,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         if NNTipManager.shared.shouldShowTip(PlaceDetailTips.editLocationTip) {
             NNTipManager.shared.showTip(
                 PlaceDetailTips.editLocationTip,
-                sourceView: infoButton,
+                sourceView: navigationBar,
                 in: self,
                 pinToEdge: .leading,
                 offset: CGPoint(x: 8, y: 0)

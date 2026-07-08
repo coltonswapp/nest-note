@@ -31,6 +31,7 @@ final class SitterSessionDetailViewController: NNViewController {
         case sessionEvent(SessionEvent)
         case moreEvents(Int)
         case expenses
+        case sessionPaymentEarnings(String)
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -55,6 +56,9 @@ final class SitterSessionDetailViewController: NNViewController {
                 hasher.combine(count)
             case .expenses:
                 hasher.combine(6)
+            case .sessionPaymentEarnings(let equation):
+                hasher.combine(7)
+                hasher.combine(equation)
             }
         }
         
@@ -74,6 +78,8 @@ final class SitterSessionDetailViewController: NNViewController {
                 return c1 == c2
             case (.expenses, .expenses):
                 return true
+            case let (.sessionPaymentEarnings(e1), .sessionPaymentEarnings(e2)):
+                return e1 == e2
             default:
                 return false
             }
@@ -305,12 +311,29 @@ final class SitterSessionDetailViewController: NNViewController {
         let earlyAccessRegistration = UICollectionView.CellRegistration<AccessCell, Item> { [weak self] cell, indexPath, item in
             if case let .earlyAccess(duration) = item {
                 if let self = self, self.session.status == .completed {
-                    // Show completion status instead of early access duration
                     cell.configureAsCompleted()
                 } else {
                     cell.configure(with: duration)
                 }
             }
+        }
+
+        let sessionPaymentEarningsRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            guard case let .sessionPaymentEarnings(equation) = item else { return }
+
+            var content = cell.defaultContentConfiguration()
+            content.text = equation
+            let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
+            content.image = UIImage(systemName: "dollarsign.circle.fill", withConfiguration: symbolConfiguration)?
+                .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
+            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+            content.imageToTextPadding = 8
+            content.textProperties.font = .preferredFont(forTextStyle: .body)
+            content.secondaryText = "Expected earnings"
+            content.secondaryTextProperties.font = .bodyM
+            content.secondaryTextProperties.color = .secondaryLabel
+            cell.accessories = []
+            cell.contentConfiguration = content
         }
         
         let eventsCellRegistration = UICollectionView.CellRegistration<EventsCell, Item> { cell, indexPath, item in
@@ -435,6 +458,13 @@ final class SitterSessionDetailViewController: NNViewController {
                     for: indexPath,
                     item: item
                 )
+
+            case .sessionPaymentEarnings:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: sessionPaymentEarningsRegistration,
+                    for: indexPath,
+                    item: item
+                )
                 
             case .events:
                 return collectionView.dequeueConfiguredReusableCell(
@@ -496,10 +526,14 @@ final class SitterSessionDetailViewController: NNViewController {
         var nameItems: [Item] = [.nestName(name: nestName)]
         if !isArchivedSession {
             if session.status == .completed {
-                // Show completion status in early access cell for completed sessions
-                nameItems.append(.earlyAccess(.none)) // We'll override the display in the cell registration
+                nameItems.append(.earlyAccess(.none))
             } else if session.earlyAccessDuration != .none {
                 nameItems.append(.earlyAccess(session.earlyAccessDuration))
+            }
+
+            if session.isPaymentMoment,
+               let summary = SessionPaymentCalculator.summary(for: session) {
+                nameItems.append(.sessionPaymentEarnings(summary.equationText))
             }
         }
         snapshot.appendItems(nameItems, toSection: .name)

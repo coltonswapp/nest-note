@@ -155,7 +155,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     // Check user's pro status and set selection limit
     private func checkProStatusAndSetLimit() async {
         // Use the same pro status checking as other features for consistency
-        isProUser = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+        isProUser = await SubscriptionService.shared.canUseFullFeatures()
         selectionLimit = isProUser ? nil : FeatureFlagService.shared.getFreeUserSelectionLimit()
         
         await MainActor.run {

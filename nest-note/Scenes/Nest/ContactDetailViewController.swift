@@ -98,6 +98,15 @@ final class ContactDetailViewController: NNSheetViewController {
 
     private var pendingImportFromContacts = false
 
+    private var originalTitle: String?
+    private var originalPhone: String?
+
+    private var hasUnsavedChanges = false {
+        didSet {
+            updateSaveButtonState()
+        }
+    }
+
     init(category: String, contact: ContactItem? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
         self.existingContact = contact
@@ -120,6 +129,9 @@ final class ContactDetailViewController: NNSheetViewController {
 
         phoneTextView.text = existingContact?.phoneNumber
         phoneTextView.delegate = self
+
+        originalTitle = existingContact?.title
+        originalPhone = existingContact?.phoneNumber
 
         configureFolderLabel()
 
@@ -173,7 +185,7 @@ final class ContactDetailViewController: NNSheetViewController {
                 folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -16),
                 ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
                 ctaStack.heightAnchor.constraint(equalToConstant: 46),
                 importButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: 0.45),
                 saveButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: 0.55),
@@ -184,7 +196,7 @@ final class ContactDetailViewController: NNSheetViewController {
                 folderLabel.bottomAnchor.constraint(equalTo: callButton.topAnchor, constant: -16),
                 callButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 callButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                callButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                callButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
                 callButton.heightAnchor.constraint(equalToConstant: 46),
             ])
         }
@@ -199,12 +211,11 @@ final class ContactDetailViewController: NNSheetViewController {
 
     override func setupInfoButton() {
         guard !isReadOnly else {
-            infoButton.isHidden = true
+            setLeadingBarButtonHidden(true)
             return
         }
-        infoButton.isHidden = false
-        infoButton.menu = createInfoMenu()
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonHidden(false)
+        setLeadingBarButtonMenu(createInfoMenu())
     }
 
     private func configureFolderLabel() {
@@ -240,13 +251,12 @@ final class ContactDetailViewController: NNSheetViewController {
     }
 
     private func configureReadOnlyInfoMenu() {
-        infoButton.isHidden = false
+        setLeadingBarButtonHidden(false)
         let createdAt = existingContact?.createdAt ?? Date()
         let modifiedAt = existingContact?.updatedAt ?? Date()
         let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
         let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
-        infoButton.menu = UIMenu(title: "", children: [createdAtAction, modifiedAtAction])
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonMenu(UIMenu(title: "", children: [createdAtAction, modifiedAtAction]))
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -391,7 +401,7 @@ final class ContactDetailViewController: NNSheetViewController {
         }
         titleField.text = name
         markImported()
-        updateSaveButtonState()
+        checkForUnsavedChanges()
     }
 
     private func importPhoneOnly(contact: CNContact, phones: [String]) {
@@ -405,12 +415,12 @@ final class ContactDetailViewController: NNSheetViewController {
             presentPhonePicker(phones: phones) { [weak self] chosen in
                 self?.phoneTextView.text = chosen
                 self?.markImported()
-                self?.updateSaveButtonState()
+                self?.checkForUnsavedChanges()
             }
             return
         }
         markImported()
-        updateSaveButtonState()
+        checkForUnsavedChanges()
     }
 
     private func importNameAndPhone(contact: CNContact, phones: [String]) {
@@ -420,7 +430,7 @@ final class ContactDetailViewController: NNSheetViewController {
 
         guard !phones.isEmpty else {
             markImported()
-            updateSaveButtonState()
+            checkForUnsavedChanges()
             let hasName = !(titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             if !hasName {
                 shakeContainerView()
@@ -431,12 +441,12 @@ final class ContactDetailViewController: NNSheetViewController {
         if phones.count == 1 {
             phoneTextView.text = phones[0]
             markImported()
-            updateSaveButtonState()
+            checkForUnsavedChanges()
         } else {
             presentPhonePicker(phones: phones) { [weak self] chosen in
                 self?.phoneTextView.text = chosen
                 self?.markImported()
-                self?.updateSaveButtonState()
+                self?.checkForUnsavedChanges()
             }
         }
     }
@@ -465,7 +475,17 @@ final class ContactDetailViewController: NNSheetViewController {
     }
 
     @objc private func titleFieldChanged() {
-        updateSaveButtonState()
+        checkForUnsavedChanges()
+    }
+
+    private func checkForUnsavedChanges() {
+        let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentPhone = normalizedPhoneString()
+
+        let titleChanged = currentTitle != originalTitle
+        let phoneChanged = currentPhone != originalPhone
+
+        hasUnsavedChanges = titleChanged || phoneChanged
     }
 
     private func normalizedPhoneString() -> String {
@@ -482,7 +502,12 @@ final class ContactDetailViewController: NNSheetViewController {
     private func updateSaveButtonState() {
         let nameOk = !(titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         let phoneOk = !normalizedPhoneString().isEmpty
-        saveButton.isEnabled = nameOk && phoneOk
+
+        if existingContact == nil {
+            saveButton.isEnabled = nameOk && phoneOk
+        } else {
+            saveButton.isEnabled = nameOk && phoneOk && hasUnsavedChanges
+        }
     }
 
     @objc private func saveButtonTapped() {
@@ -574,7 +599,7 @@ extension ContactDetailViewController: UITextFieldDelegate {
 
 extension ContactDetailViewController: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
-        updateSaveButtonState()
+        checkForUnsavedChanges()
     }
 }
 

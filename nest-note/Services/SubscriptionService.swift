@@ -249,6 +249,11 @@ final class SubscriptionService {
         return result.customerInfo
     }
 
+    /// Whether the given customer info reflects an active free-trial period (not a paid subscription yet).
+    func isInTrialPeriod(_ customerInfo: CustomerInfo) -> Bool {
+        customerInfo.entitlements.active["Pro"]?.periodType == .trial
+    }
+
     /// Notifies interested services after a successful subscription purchase.
     func notifySuccessfulPurchase() {
         RatingManager.shared.trackPremiumPurchase()
@@ -317,6 +322,12 @@ extension SubscriptionService {
         let tier = await getCurrentTier()
         return feature.isAvailable(for: tier)
     }
+
+    /// Whether the user can access full session features (Pro subscription or unused free session).
+    func canUseFullFeatures() async -> Bool {
+        if await hasProSubscription() { return true }
+        return !UserService.shared.hasUsedFreeSession
+    }
 }
 
 // MARK: - Pro Features Enum
@@ -325,12 +336,14 @@ enum ProFeature {
     case multiDaySessions
     case sessionEvents
     case nestReview
+    case sessionPDFExport
 
     static let paywallFeatures: [ProFeature] = [
         .unlimitedEntries,
         .multiDaySessions,
         .sessionEvents,
-        .nestReview
+        .nestReview,
+        .sessionPDFExport
     ]
 
     var iconName: String {
@@ -343,6 +356,8 @@ enum ProFeature {
             return "calendar.day.timeline.left"
         case .nestReview:
             return "doc.text.magnifyingglass"
+        case .sessionPDFExport:
+            return "doc.richtext"
         }
     }
     
@@ -365,6 +380,8 @@ enum ProFeature {
             return "Session Events"
         case .nestReview:
             return "Nest Review"
+        case .sessionPDFExport:
+            return "Session PDF Export"
         }
     }
     
@@ -378,6 +395,8 @@ enum ProFeature {
             return "Add detailed scheduling within sessions"
         case .nestReview:
             return "Quickly review and update outdated nest information"
+        case .sessionPDFExport:
+            return "Generate and share a printable PDF of session details"
         }
     }
     
@@ -393,6 +412,8 @@ enum ProFeature {
             return "Pro Feature"
         case .nestReview:
             return "Pro Feature"
+        case .sessionPDFExport:
+            return "Pro Feature"
         }
     }
     
@@ -406,6 +427,8 @@ enum ProFeature {
             return "Session events are a Pro feature. Upgrade to Pro for session events and more features."
         case .nestReview:
             return "Nest Review is a Pro feature. Upgrade to Pro to quickly update outdated information and more features."
+        case .sessionPDFExport:
+            return "Session PDF export is a Pro feature. Upgrade to Pro to generate and share session PDFs and more features."
         }
     }
     
@@ -419,6 +442,8 @@ enum ProFeature {
             return "Subscription activated! You can now create session events & do so much more!"
         case .nestReview:
             return "Subscription activated! You can now use Nest Review & do so much more!"
+        case .sessionPDFExport:
+            return "Subscription activated! You can now export session PDFs & do so much more!"
         }
     }
 }

@@ -8,18 +8,16 @@ class SurveyResponseDetailViewController: NNViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var contactName: String?
     private var contactPhone: String?
-    private var isSitterSignup: Bool
 
     private static let userProfileMetadataKeys: Set<String> = [
         "userId", "name", "email", "phone", "venmo_username", "nest_name",
         "referral_code", "is_apple_signin", "discovery_method", "created_at", "role",
-        "paywall_converted"
+        "paywall_converted", "paywall_started_trial", "onboarding_variant"
     ]
 
     // MARK: - Initialization
     init(survey: SurveyResponse) {
         self.survey = survey
-        self.isSitterSignup = survey.surveyType == .sitterSurvey
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -64,7 +62,7 @@ class SurveyResponseDetailViewController: NNViewController {
 
     @objc private func messageButtonTapped() {
         let firstName = SurveySignupSMSComposer.firstName(from: contactName)
-        let body = SurveySignupSMSComposer.welcomeMessage(firstName: firstName, isSitter: isSitterSignup)
+        let body = SurveySignupSMSComposer.welcomeMessage(firstName: firstName, surveyType: survey.surveyType)
 
         guard SurveySignupSMSComposer.openMessages(phone: contactPhone, body: body) else {
             let alert = UIAlertController(
@@ -187,7 +185,6 @@ class SurveyResponseDetailViewController: NNViewController {
         var profileItems = buildUserProfileItems(from: survey.metadata)
         var resolvedName = survey.metadata["name"]
         var resolvedPhone = survey.metadata["phone"]
-        var resolvedIsSitter = isSitterSignup
 
         if let userId = survey.metadata["userId"],
            (metadataNeedsLiveProfile || profileItems.isEmpty),
@@ -195,7 +192,6 @@ class SurveyResponseDetailViewController: NNViewController {
             profileItems = buildUserProfileItems(from: survey.metadata, user: user)
             resolvedName = resolvedName ?? user.personalInfo.name
             resolvedPhone = resolvedPhone ?? user.personalInfo.phone
-            resolvedIsSitter = user.primaryRole == .sitter
         }
 
         var subscriptionSnapshot: UserSubscriptionSnapshot?
@@ -214,14 +210,10 @@ class SurveyResponseDetailViewController: NNViewController {
         if resolvedPhone?.isEmpty != false {
             resolvedPhone = profileItems.first(where: { $0.title == "Phone" })?.value
         }
-        if let role = profileItems.first(where: { $0.title == "Role" })?.value {
-            resolvedIsSitter = role == "Sitter"
-        }
 
         await MainActor.run {
             contactName = resolvedName
             contactPhone = resolvedPhone
-            isSitterSignup = resolvedIsSitter
             applySnapshot(userProfileItems: profileItems)
         }
     }

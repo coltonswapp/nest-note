@@ -4,7 +4,7 @@ import Security
 final class KeychainService {
     static let shared = KeychainService()
     
-    private let serviceName = "nestnote.app"
+    private let serviceName = "app.nestnoteapp.com"
     
     private init() {}
     

@@ -86,7 +86,6 @@ final class AccessCell: UICollectionViewListCell {
     }
     
     func configureAsCompleted() {
-        // Update appearance to show completion status
         let symbolConfig = UIImage.SymbolConfiguration(weight: .semibold)
         iconImageView.image = UIImage(systemName: "checkmark.circle.fill", withConfiguration: symbolConfig)
         iconImageView.tintColor = .systemGreen

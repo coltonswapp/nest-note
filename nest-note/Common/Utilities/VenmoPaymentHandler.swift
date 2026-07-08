@@ -50,15 +50,30 @@ enum VenmoPaymentHandler {
         textField.leftViewMode = .always
     }
     
-    static func payWithVenmo(username: String, note: String) {
-        let encodedNote = note.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? note
-        let encodedUsername = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
-        
-        guard let venmoURL = URL(string: "venmo://paycharge?txn=pay&recipients=\(encodedUsername)&note=\(encodedNote)"),
-              let webURL = URL(string: "https://account.venmo.com/pay?recipients=\(encodedUsername)&note=\(encodedNote)") else {
+    static func payWithVenmo(username: String, note: String, amountCents: Int? = nil) {
+        let cleanUsername = username.hasPrefix("@") ? String(username.dropFirst()) : username
+        var queryItems = [
+            URLQueryItem(name: "txn", value: "pay"),
+            URLQueryItem(name: "recipients", value: cleanUsername),
+            URLQueryItem(name: "note", value: note)
+        ]
+
+        if let amountCents {
+            let amount = String(format: "%.2f", Double(amountCents) / 100.0)
+            queryItems.append(URLQueryItem(name: "amount", value: amount))
+        }
+
+        var venmoComponents = URLComponents(string: "venmo://paycharge")
+        venmoComponents?.queryItems = queryItems
+
+        var webComponents = URLComponents(string: "https://account.venmo.com/pay")
+        webComponents?.queryItems = queryItems
+
+        guard let venmoURL = venmoComponents?.url,
+              let webURL = webComponents?.url else {
             return
         }
-        
+
         if UIApplication.shared.canOpenURL(venmoURL) {
             UIApplication.shared.open(venmoURL)
         } else {

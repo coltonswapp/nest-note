@@ -164,11 +164,11 @@ final class SessionEventViewController: NNSheetViewController {
         super.viewDidLoad()
         setupDateTimeControls()
         
-        // Hide info button for new events (no event data yet)
-        infoButton.isHidden = event == nil
+        // Hide leading bar button for new events (no event data yet)
+        setLeadingBarButtonHidden(event == nil)
         setupInfoMenu()
         
-        itemsHiddenDuringTransition = [buttonStackView, infoButton]
+        itemsHiddenDuringTransition = [buttonStackView]
         
         titleField.delegate = self
         titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
@@ -242,8 +242,7 @@ final class SessionEventViewController: NNSheetViewController {
     // MARK: - Setup Methods
     
     override func setupInfoButton() {
-        // SessionEventViewController doesn't need an info button
-        infoButton.isHidden = true
+        setLeadingBarButtonHidden(true)
     }
     
     override func addContentToContainer() {
@@ -321,7 +320,7 @@ final class SessionEventViewController: NNSheetViewController {
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46)
         ])
     }
@@ -350,8 +349,7 @@ final class SessionEventViewController: NNSheetViewController {
         }
         
         let menu = UIMenu(title: "", children: menuItems)
-        infoButton.menu = menu
-        infoButton.showsMenuAsPrimaryAction = true
+        setLeadingBarButtonMenu(menu)
     }
     
     private func handleDeleteTapped() {

@@ -19,14 +19,12 @@ final class RevenueCatAttributeService {
         phone: String,
         displayName: String,
         discoveryMethod: String?,
-        onboardingVariant: String,
         referralCode: String?
     ) {
         applySubscriberAttributes(email: email, phone: phone, displayName: displayName)
         applyCustomAttributes(buildOnboardingCustomAttributes(
             firebaseUID: nil,
             discoveryMethod: discoveryMethod,
-            onboardingVariant: onboardingVariant,
             referralCode: referralCode
         ))
         syncAttributes()
@@ -76,14 +74,12 @@ final class RevenueCatAttributeService {
     func syncOnboardingContext(
         for user: NestUser,
         discoveryMethod: String?,
-        onboardingVariant: String,
         referralCode: String?,
         referralCodeType: ReferralCodeType? = nil
     ) {
-        var custom = buildOnboardingCustomAttributes(
+        let custom = buildOnboardingCustomAttributes(
             firebaseUID: user.id,
             discoveryMethod: discoveryMethod,
-            onboardingVariant: onboardingVariant,
             referralCode: referralCode,
             referralCodeType: referralCodeType
         )
@@ -187,13 +183,10 @@ final class RevenueCatAttributeService {
     private func buildOnboardingCustomAttributes(
         firebaseUID: String?,
         discoveryMethod: String?,
-        onboardingVariant: String,
         referralCode: String?,
         referralCodeType: ReferralCodeType? = nil
     ) -> [String: String] {
-        var attributes: [String: String] = [
-            "onboarding_variant": onboardingVariant
-        ]
+        var attributes: [String: String] = [:]
 
         if let firebaseUID, !firebaseUID.isEmpty {
             attributes["firebase_uid"] = firebaseUID

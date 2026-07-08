@@ -328,7 +328,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 break
             case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .supportItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
                 content.text = title
-                
+
                 // Create a symbol configuration with semibold weight
                 let symbolConfiguration = UIImage.SymbolConfiguration(weight: .bold)
                 
@@ -547,6 +547,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Explosion Playground", "sparkles.rectangle.stack"),
             ("Finish Screen", "slider.horizontal.below.rectangle"),
             ("Sitter Finish Screen", "person.crop.circle.badge.checkmark"),
+            ("Sitter Payment Setup", "dollarsign.circle"),
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
@@ -656,6 +657,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let finishVC = OBFinishViewController()
             finishVC.enableSitterDebugMode()
             let nav = UINavigationController(rootViewController: finishVC)
+            present(nav, animated: true)
+        case "Sitter Payment Setup":
+            let venmoVC = OBVenmoViewController()
+            venmoVC.enableDebugMode()
+            let nav = UINavigationController(rootViewController: venmoVC)
             present(nav, animated: true)
         case "Onboarding":
             present(OnboardingCoordinator().start(), animated: true)

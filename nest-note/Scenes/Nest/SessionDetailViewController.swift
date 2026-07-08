@@ -143,8 +143,7 @@ final class SessionDetailViewController: NNSheetViewController {
     // MARK: - Setup Methods
     
     override func setupInfoButton() {
-        // SessionDetailViewController doesn't need an info button
-        infoButton.isHidden = true
+        setLeadingBarButtonHidden(true)
     }
     
     override func addContentToContainer() {
@@ -211,7 +210,7 @@ final class SessionDetailViewController: NNSheetViewController {
             buttonStackView.topAnchor.constraint(greaterThanOrEqualTo: multiDayStack.bottomAnchor, constant: 24),
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46)
         ])
     }

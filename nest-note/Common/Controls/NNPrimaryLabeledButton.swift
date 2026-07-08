@@ -66,7 +66,11 @@ class NNBaseControl: UIControl {
     }()
     
     private var visualEffectView: UIVisualEffectView?
-    
+
+    /// Bottom constraint created by `pinToBottomEdgeContainer(of:scrollView:...)`, exposed so
+    /// callers can animate it (e.g. keyboard avoidance).
+    private(set) var pinnedBottomConstraint: NSLayoutConstraint?
+
     // MARK: - Initialization
     init(title: String, image: UIImage? = nil, backgroundColor: UIColor = NNColors.primary, foregroundColor: UIColor = .white) {
         super.init(frame: .zero)
@@ -236,6 +240,51 @@ class NNBaseControl: UIControl {
         ])
     }
     
+    /// Pins the control to the bottom inside a transparent passthrough container sized for a
+    /// scroll edge effect region. If a scroll view is provided, installs a `.bottom`
+    /// `UIScrollEdgeElementContainerInteraction` so content scrolls under the control with the
+    /// system edge effect — the iOS 26 replacement for `pinToBottom(addBlurEffect: true)`.
+    /// The control must not already be in the view hierarchy.
+    @available(iOS 26.0, *)
+    @discardableResult
+    func pinToBottomEdgeContainer(of view: UIView,
+                                  scrollView: UIScrollView? = nil,
+                                  horizontalPadding: CGFloat = 20,
+                                  bottomPadding: CGFloat = 10,
+                                  height: CGFloat = 55,
+                                  effectTopPadding: CGFloat = 16) -> UIView {
+        let container = EdgeElementContainerView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(container)
+
+        translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(self)
+
+        let bottomConstraint = self.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -bottomPadding)
+        pinnedBottomConstraint = bottomConstraint
+
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            container.topAnchor.constraint(equalTo: self.topAnchor, constant: -effectTopPadding),
+
+            self.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: horizontalPadding),
+            self.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -horizontalPadding),
+            self.heightAnchor.constraint(equalToConstant: height),
+            bottomConstraint
+        ])
+
+        if let scrollView {
+            let interaction = UIScrollEdgeElementContainerInteraction()
+            interaction.scrollView = scrollView
+            interaction.edge = .bottom
+            container.addInteraction(interaction)
+        }
+
+        return container
+    }
+
     private func setupVisualEffectView(in view: UIView, useSafeArea: Bool, blurRadius: Double, blurMaskImage: UIImage?) {
         visualEffectView = UIVisualEffectView()
         guard let visualEffectView = visualEffectView else { return }
@@ -820,5 +869,14 @@ class NNSmallPrimaryButton: UIButton {
         didSet {
             layer.borderColor = backgroundColor?.lighter(by: 15).cgColor
         }
+    }
+}
+
+/// Transparent container that never swallows touches itself (subviews still receive them).
+/// Hosts UIScrollEdgeElementContainerInteraction on iOS 26+.
+final class EdgeElementContainerView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let result = super.hitTest(point, with: event)
+        return result === self ? nil : result
     }
 }

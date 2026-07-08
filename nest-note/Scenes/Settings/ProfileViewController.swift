@@ -154,6 +154,10 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
                         title: "Venmo Username",
                         detail: VenmoPaymentHandler.displayUsername(user.personalInfo.venmoUsername)
                     ))
+                    items.append(.info(
+                        title: "Hourly Rate",
+                        detail: SessionPaymentCalculator.displayHourlyRate(user.personalInfo.hourlyRateCents)
+                    ))
                 }
                 
                 items.append(.info(title: "User ID", detail: user.id ?? "--"))
@@ -189,6 +193,10 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
                 present(nav, animated: true)
             case "Venmo Username":
                 let editVC = EditUserInfoViewController(type: .venmoUsername)
+                let nav = UINavigationController(rootViewController: editVC)
+                present(nav, animated: true)
+            case "Hourly Rate":
+                let editVC = EditUserInfoViewController(type: .hourlyRate)
                 let nav = UINavigationController(rootViewController: editVC)
                 present(nav, animated: true)
             default:

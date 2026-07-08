@@ -14,14 +14,25 @@ class NestUser: Codable {
     var roles: UserRoles
     var sitterReferralCode: String?
     var createdAt: Date?
+    /// Set to true when the user completes their one free fully-featured session.
+    var hasUsedFreeSession: Bool?
 
-    init(id: String, personalInfo: PersonalInfo, primaryRole: UserType, roles: UserRoles, sitterReferralCode: String? = nil, createdAt: Date? = nil) {
+    init(
+        id: String,
+        personalInfo: PersonalInfo,
+        primaryRole: UserType,
+        roles: UserRoles,
+        sitterReferralCode: String? = nil,
+        createdAt: Date? = nil,
+        hasUsedFreeSession: Bool? = nil
+    ) {
         self.id = id
         self.personalInfo = personalInfo
         self.primaryRole = primaryRole
         self.roles = roles
         self.sitterReferralCode = sitterReferralCode
         self.createdAt = createdAt
+        self.hasUsedFreeSession = hasUsedFreeSession
     }
     
     struct PersonalInfo: Codable {
@@ -29,6 +40,7 @@ class NestUser: Codable {
         var email: String
         var phone: String?
         var venmoUsername: String?
+        var hourlyRateCents: Int?
         var notificationPreferences: NotificationPreferences?
     }
     

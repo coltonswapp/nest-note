@@ -57,31 +57,34 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     }
     
     private func createLayout() -> UICollectionViewLayout {
-        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-        config.headerMode = .supplementary
-        config.footerMode = .supplementary
-        
-        return UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
+        UICollectionViewCompositionalLayout { [weak self] sectionIndex, layoutEnvironment in
+            var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            config.headerMode = .supplementary
+
+            let showsDisabledNotificationsFooter = sectionIndex == 0 && !(self?.notificationsEnabled ?? false)
+            config.footerMode = showsDisabledNotificationsFooter ? .supplementary : .none
+
             let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-            
-            // Standardize header size
+
             let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: headerSize,
                 elementKind: UICollectionView.elementKindSectionHeader,
                 alignment: .top
             )
-            
-            // Footer size
-            let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(20))
-            let footer = NSCollectionLayoutBoundarySupplementaryItem(
-                layoutSize: footerSize,
-                elementKind: UICollectionView.elementKindSectionFooter,
-                alignment: .bottom
-            )
-            
-            section.boundarySupplementaryItems = [header, footer]
-            
+
+            var supplementaryItems = [header]
+            if showsDisabledNotificationsFooter {
+                let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
+                let footer = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: footerSize,
+                    elementKind: UICollectionView.elementKindSectionFooter,
+                    alignment: .bottom
+                )
+                supplementaryItems.append(footer)
+            }
+
+            section.boundarySupplementaryItems = supplementaryItems
             return section
         }
     }
@@ -96,14 +99,12 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
         
         footerRegistration = UICollectionView.SupplementaryRegistration<NotificationFooterView>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { [weak self] (footerView, string, indexPath) in
-            guard let self = self else { return }
-            footerView.configure { [weak self] in
+        ) { (footerView, string, indexPath) in
+            footerView.configure {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)
                 }
             }
-            footerView.isHidden = self.notificationsEnabled
         }
         
         let notificationCellRegistration = UICollectionView.CellRegistration<NotificationCell, Item> { cell, indexPath, item in
@@ -659,8 +660,8 @@ class NotificationFooterView: UICollectionReusableView {
         NSLayoutConstraint.activate([
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24)
+            messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
         ])
         
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))

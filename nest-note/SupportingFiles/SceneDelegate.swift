@@ -23,11 +23,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         self.window = window
 
-        ExplosionManager.prepare(windowScene: windowScene)
-        
         // Create and start coordinator
         let coordinator = LaunchCoordinator(window: window)
         self.coordinator = coordinator
+
+        // Show the loading screen immediately so iOS doesn't dismiss the launch
+        // screen onto an empty window while async setup runs.
+        coordinator.installLoadingPlaceholder()
+
+        // Prepare the explosion overlay after the main window is visible.
+        ExplosionManager.prepare(windowScene: windowScene)
         
         Task {
             do {
@@ -335,6 +340,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     NotificationCenter.default.post(name: .sessionStatusDidChange, object: nil)
                 }
             }
+            return
+        }
+
+        if SessionPaymentReminderRouter.notificationType(from: userInfo) == "session_payment_reminder" {
+            SessionPaymentReminderRouter.shared.handlePaymentReminderNotification(userInfo: userInfo)
             return
         }
 
