@@ -43,6 +43,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     func getCurrentCategoryPath() -> String { category }
     private var selectAllBarButtonItem: UIBarButtonItem?
     private var allItemIdsInScope: Set<String> = []
+    private var hasPreparedSelectableItemsInScope = false
     private var inScopeEntries: [BaseEntry] = []
     private var inScopePlaces: [PlaceItem] = []
     private var inScopeRoutines: [RoutineItem] = []
@@ -1333,15 +1334,27 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private func updateSelectAllButtonTitle() {
         guard isEditOnlyMode else { return }
         let total = allItemIdsInScope.count
-        let selectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-            + selectedPilotCards.count + selectedContacts.count + selectedUnknownItems.count
-        let isAllSelected = total > 0 && selectedCount >= total
+        let selectedInScopeCount = selectedItemIdsInScope().count
+        let isAllSelected = total > 0 && selectedInScopeCount >= total
         selectAllBarButtonItem?.title = isAllSelected ? "Clear All" : "Select All"
         selectAllBarButtonItem?.isEnabled = total > 0
     }
     
     private func updateSelectAllButtonAfterSelectionChange() {
         if isEditOnlyMode { updateSelectAllButtonTitle() }
+    }
+    
+    /// Selected IDs that belong to the current folder (and descendants), ignoring selections restored from other folders.
+    private func selectedItemIdsInScope() -> Set<String> {
+        let allSelectedIds = Set(
+            selectedEntries.map(\.id)
+            + selectedPlaces.map(\.id)
+            + selectedRoutines.map(\.id)
+            + selectedPilotCards.map(\.id)
+            + selectedContacts.map(\.id)
+            + selectedUnknownItems.map(\.id)
+        )
+        return allSelectedIds.intersection(allItemIdsInScope)
     }
     
     private func prepareSelectableItemsInScope() async {
@@ -1372,6 +1385,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 self.inScopeContacts = contactItems
                 self.inScopeUnknownItems = unknowns
                 self.allItemIdsInScope = ids
+                self.hasPreparedSelectableItemsInScope = true
                 self.updateSelectAllButtonTitle()
             }
         } catch {
@@ -1383,6 +1397,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 self.inScopeContacts = []
                 self.inScopeUnknownItems = []
                 self.allItemIdsInScope = []
+                self.hasPreparedSelectableItemsInScope = true
                 self.updateSelectAllButtonTitle()
             }
         }
@@ -1390,19 +1405,31 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     @objc private func didTapSelectAll() {
         guard isEditOnlyMode else { return }
+        
+        // Wait until in-scope items are prepared; otherwise the first tap can no-op.
+        guard hasPreparedSelectableItemsInScope else {
+            Task {
+                await prepareSelectableItemsInScope()
+                await MainActor.run { self.didTapSelectAll() }
+            }
+            return
+        }
+        
+        guard !allItemIdsInScope.isEmpty else { return }
+        
         let total = allItemIdsInScope.count
-        let currentSelectedCount = selectedEntries.count + selectedPlaces.count + selectedRoutines.count
-            + selectedPilotCards.count + selectedContacts.count + selectedUnknownItems.count
-        let isAllSelected = total > 0 && currentSelectedCount >= total
+        let selectedInScopeCount = selectedItemIdsInScope().count
+        let isAllSelected = total > 0 && selectedInScopeCount >= total
         
         if isAllSelected {
-            // Clear all selections
-            selectedEntries.removeAll()
-            selectedPlaces.removeAll()
-            selectedRoutines.removeAll()
-            selectedPilotCards.removeAll()
-            selectedContacts.removeAll()
-            selectedUnknownItems.removeAll()
+            // Clear only this folder's selections; keep items from other folders.
+            let inScope = allItemIdsInScope
+            selectedEntries = selectedEntries.filter { !inScope.contains($0.id) }
+            selectedPlaces = selectedPlaces.filter { !inScope.contains($0.id) }
+            selectedRoutines = selectedRoutines.filter { !inScope.contains($0.id) }
+            selectedPilotCards = selectedPilotCards.filter { !inScope.contains($0.id) }
+            selectedContacts = selectedContacts.filter { !inScope.contains($0.id) }
+            selectedUnknownItems = selectedUnknownItems.filter { !inScope.contains($0.id) }
         } else {
             // Select items, respecting the limit
             if let limit = selectionLimit {
@@ -1422,51 +1449,57 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 // Add entries first (up to limit)
                 for entry in inScopeEntries {
                     if itemsSelected >= availableSlots { break }
-                    selectedEntries.insert(entry)
-                    itemsSelected += 1
+                    if selectedEntries.insert(entry).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 
                 // Add places next (up to remaining limit)
                 for place in inScopePlaces {
                     if itemsSelected >= availableSlots { break }
-                    selectedPlaces.insert(place)
-                    itemsSelected += 1
+                    if selectedPlaces.insert(place).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 
                 // Add routines last (up to remaining limit)
                 for routine in inScopeRoutines {
                     if itemsSelected >= availableSlots { break }
-                    selectedRoutines.insert(routine)
-                    itemsSelected += 1
+                    if selectedRoutines.insert(routine).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 for pilot in inScopePilotCards {
                     if itemsSelected >= availableSlots { break }
-                    selectedPilotCards.insert(pilot)
-                    itemsSelected += 1
+                    if selectedPilotCards.insert(pilot).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 for contact in inScopeContacts {
                     if itemsSelected >= availableSlots { break }
-                    selectedContacts.insert(contact)
-                    itemsSelected += 1
+                    if selectedContacts.insert(contact).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 for unknown in inScopeUnknownItems {
                     if itemsSelected >= availableSlots { break }
-                    selectedUnknownItems.insert(unknown)
-                    itemsSelected += 1
+                    if selectedUnknownItems.insert(unknown).inserted {
+                        itemsSelected += 1
+                    }
                 }
                 
                 // Show alert if we couldn't select all items due to limit
-                if total > availableSlots {
+                if (total - selectedInScopeCount) > availableSlots {
                     showSelectionLimitAlert()
                 }
             } else {
-                // No limit (pro user), select all
-                selectedEntries = Set(inScopeEntries)
-                selectedPlaces = Set(inScopePlaces)
-                selectedRoutines = Set(inScopeRoutines)
-                selectedPilotCards = Set(inScopePilotCards)
-                selectedContacts = Set(inScopeContacts)
-                selectedUnknownItems = Set(inScopeUnknownItems)
+                // No limit (pro user): union in-scope items so other-folder selections stay intact.
+                selectedEntries.formUnion(inScopeEntries)
+                selectedPlaces.formUnion(inScopePlaces)
+                selectedRoutines.formUnion(inScopeRoutines)
+                selectedPilotCards.formUnion(inScopePilotCards)
+                selectedContacts.formUnion(inScopeContacts)
+                selectedUnknownItems.formUnion(inScopeUnknownItems)
             }
         }
         notifySelectEntriesDelegate()

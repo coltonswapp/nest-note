@@ -297,7 +297,6 @@ class NestSessionsViewController: NNViewController {
                     style: .destructive
                 ) { _ in
                     self.deleteSession(sessionItem, completion: completion)
-                    self.deleteSession(sessionItem, completion: completion)
                 })
                 
                 self.present(alert, animated: true)
@@ -599,14 +598,9 @@ class NestSessionsViewController: NNViewController {
                 try await sessionService.deleteSession(nestID: nestID, sessionID: session.id)
                 
                 await MainActor.run {
-                    // Remove from source of truth first
+                    // Remove from source of truth; didSet rebuilds the collection view
                     self.allSessions.removeAll { $0.id == session.id }
                     
-                    // Update UI to reflect the deletion by rebuilding from source
-                    self.updateDisplayedSessions()
-                    
-                    // Log successful deletion
-                    Logger.log(level: .info, category: .sessionService, message: "Session deleted successfully ✅")
                     showToast(text: "Session deleted")
                     if session.status.contains([.inProgress, .extended]) {
                         NotificationCenter.default.post(name: .sessionDidChange, object: nil)

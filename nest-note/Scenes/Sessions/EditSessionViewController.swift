@@ -73,6 +73,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Properties for select entries flow
     private var currentSelectEntriesNavController: UINavigationController?
+    private var hasCreatedSessionInFlow = false
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -99,7 +100,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let buttonTitle: String
         if isCompletingRequest {
             buttonTitle = "Create Session"
-        } else if isEditingSession {
+        } else if isSessionPersisted {
             buttonTitle = "Save Changes"
         } else {
             buttonTitle = "Next"
@@ -130,6 +131,14 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private let isEditingSession: Bool
+    
+    private var isSessionPersisted: Bool {
+        isEditingSession || hasCreatedSessionInFlow
+    }
+    
+    private var shouldShowSelectEntriesSection: Bool {
+        isEditingSession || hasCreatedSessionInFlow || isCompletingRequest
+    }
     
     // Computed properties to access current date values
     private var currentDateSelection: (startDate: Date, endDate: Date, isMultiDay: Bool)? {
@@ -934,7 +943,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     return
                 }
 
-                if isEditingSession {
+                if isSessionPersisted {
                     try await updateSession()
                 } else {
                     
@@ -954,21 +963,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     // Notify sessions list to reload now that a new session exists
                     delegate?.editSessionViewController(self, didCreateSession: newSession)
 
-                    // Auto-create an open invite and pass it to the InviteDetailViewController
-                    Task { [weak self] in
-                        guard let self = self else { return }
-                        do {
-                            let invite = try await SessionService.shared.createOpenInvite(sessionID: newSession.id)
-                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
-                            inviteDetailVC.delegate = self
-                            inviteDetailVC.configure(with: invite.code, sessionID: newSession.id, sitter: nil)
-                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
-                        } catch {
-                            // If open invite creation fails, still navigate and allow manual creation
-                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
-                            inviteDetailVC.delegate = self
-                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
-                        }
+                    await MainActor.run {
+                        self.transitionToPostCreateState()
+                        self.pushSelectEntriesCreationStep()
                     }
                     return
                 }
@@ -978,7 +975,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             } catch ServiceError.noCurrentNest {
                 showToast(text: "Something went wrong", sentiment: .negative)
             } catch {
-                showToast(text: "Failed to \(isEditingSession ? "update" : "create") session")
+                showToast(text: "Failed to \(isSessionPersisted ? "update" : "create") session")
                 Logger.log(level: .error, category: .sessionService, message: "Error saving session: \(error.localizedDescription)")
             }
         }
@@ -1369,7 +1366,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            var sections: [Section] = [.date, .status, .selectEntries, .events]
+            var sections: [Section] = [.date, .status]
+            if shouldShowSelectEntriesSection {
+                sections.append(.selectEntries)
+            }
+            sections.append(.events)
             
             // Only show expenses section if user hasn't voted on the feature
             if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
@@ -1386,7 +1387,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
+            if shouldShowSelectEntriesSection {
+                snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
+            }
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -1629,22 +1632,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func presentSelectEntriesFlow(showSelectedTab: Bool = false) {
         guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
         
-        // Create the folder view controller directly
-        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
-        folderVC.showsSelectedTabInitially = showSelectedTab
-        folderVC.allowsEmptySelection = true
-        folderVC.title = "Select Items"
-        folderVC.delegate = self
-        
-        // Pass current selected item IDs to restore selection state
-        folderVC.setInitialSelectedItemIds(selectedItemIds)
-        
-        // Add cancel button
-        folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel,
-            target: self,
-            action: #selector(selectEntriesDidCancel)
+        let folderVC = makeSelectEntriesFolderViewController(
+            entryRepository: entryRepository,
+            showsSelectedTabInitially: showSelectedTab,
+            includeCancelButton: true
         )
+        
+        folderVC.onContinueTapped = { [weak self] selectedIds in
+            self?.selectEntriesDidFinish(with: selectedIds)
+        }
         
         // Create navigation controller and present normally
         let navController = UINavigationController(rootViewController: folderVC)
@@ -1655,12 +1651,79 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Store reference for later use
         currentSelectEntriesNavController = navController
         
-        // Set up continue callback to receive selected IDs
-        folderVC.onContinueTapped = { [weak self] selectedIds in
-            self?.selectEntriesDidFinish(with: selectedIds)
+        present(navController, animated: true)
+    }
+    
+    private func pushSelectEntriesCreationStep() {
+        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+        
+        let folderVC = makeSelectEntriesFolderViewController(
+            entryRepository: entryRepository,
+            showsSelectedTabInitially: false,
+            includeCancelButton: false,
+            showsCreationHeader: true
+        )
+        
+        folderVC.onContinueTapped = { [weak self, weak folderVC] selectedIds in
+            guard let self, let folderVC else { return }
+            self.selectEntriesCreationDidFinish(with: selectedIds, from: folderVC)
         }
         
-        present(navController, animated: true)
+        navigationController?.pushViewController(folderVC, animated: true)
+    }
+    
+    private func makeSelectEntriesFolderViewController(
+        entryRepository: EntryRepository,
+        showsSelectedTabInitially: Bool,
+        includeCancelButton: Bool,
+        showsCreationHeader: Bool = false
+    ) -> ModifiedSelectFolderViewController {
+        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
+        folderVC.showsSelectedTabInitially = showsSelectedTabInitially
+        folderVC.allowsEmptySelection = true
+        folderVC.showsCreationHeader = showsCreationHeader
+        folderVC.title = showsCreationHeader ? nil : "Select Items"
+        folderVC.delegate = self
+        folderVC.setInitialSelectedItemIds(selectedItemIds)
+        
+        if includeCancelButton {
+            folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .cancel,
+                target: self,
+                action: #selector(selectEntriesDidCancel)
+            )
+        }
+        
+        return folderVC
+    }
+    
+    private func transitionToPostCreateState() {
+        hasCreatedSessionInFlow = true
+        syncOriginalSessionFromCurrent()
+        addSelectEntriesSectionIfNeeded()
+        updateSaveButtonState()
+    }
+    
+    private func addSelectEntriesSectionIfNeeded() {
+        guard shouldShowSelectEntriesSection else { return }
+        
+        var snapshot = dataSource.snapshot()
+        guard !snapshot.sectionIdentifiers.contains(.selectEntries) else {
+            updateSelectEntriesSection()
+            return
+        }
+        
+        if let eventsSection = snapshot.sectionIdentifiers.first(where: { $0 == .events || $0 == .expenses }) {
+            snapshot.insertSections([.selectEntries], beforeSection: eventsSection)
+        } else {
+            snapshot.appendSections([.selectEntries])
+        }
+        
+        snapshot.appendItems(
+            [.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(),
+            toSection: .selectEntries
+        )
+        dataSource.apply(snapshot, animatingDifferences: true)
     }
     
     @objc private func selectEntriesDidCancel() {
@@ -1669,6 +1732,60 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func selectEntriesDidFinish(with selectedIds: [String]) {
+        let alert = makeSelectEntriesConfirmationAlert(selectedIds: selectedIds) { [weak self] in
+            guard let self else { return }
+            self.selectedItemIds = selectedIds
+            self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
+            self.currentSelectEntriesNavController?.dismiss(animated: true)
+            self.currentSelectEntriesNavController = nil
+            self.fetchSelectedItemPreviews()
+            self.checkForChanges()
+        }
+        
+        currentSelectEntriesNavController?.present(alert, animated: true)
+    }
+    
+    private func selectEntriesCreationDidFinish(
+        with selectedIds: [String],
+        from folderVC: ModifiedSelectFolderViewController
+    ) {
+        selectedItemIds = selectedIds
+        sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
+        
+        folderVC.startContinueLoading()
+        
+        Task {
+            do {
+                // Persist entries and create the invite in parallel so InviteDetail is ready sooner.
+                async let updateTask: Void = SessionService.shared.updateSession(sessionItem)
+                async let inviteTask = SessionService.shared.createOpenInvite(sessionID: sessionItem.id)
+                
+                try await updateTask
+                let invite = try? await inviteTask
+                
+                await MainActor.run {
+                    self.syncOriginalSessionFromCurrent()
+                    self.fetchSelectedItemPreviews()
+                    self.delegate?.editSessionViewController(self, didUpdateSession: self.sessionItem)
+                    
+                    folderVC.animateContinueOff {
+                        self.pushInviteDetail(for: self.sessionItem, inviteCode: invite?.code)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    folderVC.stopContinueLoading(withSuccess: false) {
+                        folderVC.showToast(text: "Failed to save selected items", sentiment: .negative)
+                    }
+                }
+            }
+        }
+    }
+    
+    private func makeSelectEntriesConfirmationAlert(
+        selectedIds: [String],
+        confirmHandler: @escaping () -> Void
+    ) -> UIAlertController {
         let totalCount = selectedIds.count
         
         let alert: UIAlertController
@@ -1687,20 +1804,31 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             )
         }
         
-        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
-        let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
-            self.selectedItemIds = selectedIds
-            self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
-            self.currentSelectEntriesNavController?.dismiss(animated: true)
-            self.currentSelectEntriesNavController = nil
-            self.fetchSelectedItemPreviews()
-            self.checkForChanges()
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Continue", style: .default) { _ in
+            confirmHandler()
+        })
+        
+        return alert
+    }
+    
+    private func navigateToInviteDetail(for session: SessionItem) {
+        Task { [weak self] in
+            guard let self else { return }
+            let invite = try? await SessionService.shared.createOpenInvite(sessionID: session.id)
+            await MainActor.run {
+                self.pushInviteDetail(for: session, inviteCode: invite?.code)
+            }
         }
-        
-        alert.addAction(cancelAction)
-        alert.addAction(confirmAction)
-        
-        currentSelectEntriesNavController?.present(alert, animated: true)
+    }
+    
+    private func pushInviteDetail(for session: SessionItem, inviteCode: String?) {
+        let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: session.id)
+        inviteDetailVC.delegate = self
+        if let inviteCode {
+            inviteDetailVC.configure(with: inviteCode, sessionID: session.id, sitter: nil)
+        }
+        navigationController?.pushViewController(inviteDetailVC, animated: true)
     }
     
     /// When contacts or entries are selected, those are spelled out and places, routines, and other types roll into "N more".
@@ -1783,17 +1911,24 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func updateSaveButtonState() {
-        saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
+        saveButton.isEnabled = isCompletingRequest || !isSessionPersisted || hasUnsavedChanges
         
         // Debug logging for save button state
         Logger.log(level: .debug, category: .sessionService, message: "=== Save Button State Debug ===")
-        Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
+        Logger.log(level: .debug, category: .sessionService, message: "isSessionPersisted: \(isSessionPersisted)")
         Logger.log(level: .debug, category: .sessionService, message: "hasUnsavedChanges: \(hasUnsavedChanges)")
         Logger.log(level: .debug, category: .sessionService, message: "saveButton.isEnabled: \(saveButton.isEnabled)")
         Logger.log(level: .debug, category: .sessionService, message: "=== End Save Button Debug ===")
         
         // Update button title to show state
-        let baseTitle = isEditingSession ? "Save Changes" : "Next"
+        let baseTitle: String
+        if isCompletingRequest {
+            baseTitle = "Create Session"
+        } else if isSessionPersisted {
+            baseTitle = "Save Changes"
+        } else {
+            baseTitle = "Next"
+        }
         saveButton.titleLabel.text = baseTitle
         
         // Optionally animate the button if there are changes
@@ -3147,7 +3282,7 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
         }
         
         currentSelectEntriesNavController?.pushViewController(categoryVC, animated: true)
-        
+            ?? controller.navigationController?.pushViewController(categoryVC, animated: true)
     }
 }
 
