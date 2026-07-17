@@ -88,6 +88,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         var paywallStartedTrial: Bool?
         var isAppleSignIn: Bool = false
         var referralCode: String?
+        var referralCodeType: ReferralCodeType?
         var venmoUsername: String?
         var hourlyRateCents: Int?
         
@@ -102,14 +103,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         return userInfo.role
     }
 
-    // Public accessor for paywall offering based on referral code
+    /// Analytics helper — partner offering is for creator codes only.
+    /// Actual package loading is gated by FeatureInfoPaywallViewController.usesCreatorPartnerPricing.
     var paywallOfferingId: String? {
-        // If user has a referral code, show the partner offering
-        if let referralCode = userInfo.referralCode, !referralCode.isEmpty {
-            return "partner"
-        }
-        // Otherwise, use default offering (nil = default)
-        return nil
+        guard let referralCode = userInfo.referralCode, !referralCode.isEmpty else { return nil }
+        guard (userInfo.referralCodeType ?? .creator) == .creator else { return nil }
+        return "partner"
     }
 
     // Public accessor for nest name
@@ -243,7 +242,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             phone: userInfo.phone,
             displayName: userInfo.fullName,
             discoveryMethod: userInfo.surveyResponses["discovery_method"]?.first,
-            referralCode: userInfo.referralCode
+            onboardingVariant: onboardingVariant,
+            referralCode: userInfo.referralCode,
+            referralCodeType: userInfo.referralCodeType
         )
     }
 
@@ -1106,8 +1107,11 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Note: role_selection is handled in next() method to ensure proper navigation timing
     }
     
-    func updateReferralCode(_ referralCode: String?) {
-        userInfo.referralCode = referralCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : referralCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+    func updateReferralCode(_ referralCode: String?, type: ReferralCodeType? = nil) {
+        let trimmed = referralCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed?.isEmpty == true) ? nil : trimmed
+        userInfo.referralCode = normalized
+        userInfo.referralCodeType = normalized == nil ? nil : type
     }
     
     // MARK: - Validation Methods

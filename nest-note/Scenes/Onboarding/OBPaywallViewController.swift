@@ -40,8 +40,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
         }
         paywall.onPaywallFinished = { [weak self] subscribed, startedTrial in
             let referralCode = paywall.currentReferralCode
+            let referralCodeType = paywall.currentReferralCodeType
             self?.dismissPresentedPaywall {
-                self?.completePaywall(subscribed: subscribed, startedTrial: startedTrial, referralCode: referralCode)
+                self?.completePaywall(
+                    subscribed: subscribed,
+                    referralCode: referralCode,
+                    referralCodeType: referralCodeType
+                )
             }
         }
 
@@ -88,12 +93,16 @@ final class OBPaywallViewController: NNOnboardingViewController {
         (coordinator as? OnboardingCoordinator)?.addPaywallDwellTime(seconds)
     }
 
-    private func completePaywall(subscribed: Bool, startedTrial: Bool = false, referralCode: String?) {
+    private func completePaywall(
+        subscribed: Bool,
+        referralCode: String?,
+        referralCodeType: ReferralCodeType? = nil
+    ) {
         guard !hasCompletedPaywall else { return }
         hasCompletedPaywall = true
 
         if let referralCode {
-            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode)
+            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode, type: referralCodeType)
         }
 
         let dwellSeconds = secondsOnPaywall()
@@ -184,6 +193,10 @@ extension OBPaywallViewController: UIAdaptivePresentationControllerDelegate {
         }
 
         presentedPaywall = nil
-        completePaywall(subscribed: false, referralCode: paywall.currentReferralCode)
+        completePaywall(
+            subscribed: false,
+            referralCode: paywall.currentReferralCode,
+            referralCodeType: paywall.currentReferralCodeType
+        )
     }
 }
