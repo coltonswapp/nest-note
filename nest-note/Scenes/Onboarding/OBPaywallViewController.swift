@@ -61,6 +61,12 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
         present(paywall, animated: true)
 
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            return
+        }
+        #endif
+
         Analytics.logEvent("paywall_presented", parameters: [
             "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
             "paywall_type": "feature_info"
@@ -86,6 +92,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
     private func recordDwellTimeIfNeeded() {
         guard !dwellRecorded, let start = paywallPresentedAt else { return }
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            dwellRecorded = true
+            paywallPresentedAt = nil
+            return
+        }
+        #endif
         dwellRecorded = true
         paywallPresentedAt = nil
         let seconds = Date().timeIntervalSince(start)
@@ -112,7 +125,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
             startedTrial: startedTrial
         )
 
-        if subscribed {
+        #if DEBUG
+        let isPreviewMode = (coordinator as? OnboardingCoordinator)?.isPreviewMode == true
+        #else
+        let isPreviewMode = false
+        #endif
+
+        if subscribed, !isPreviewMode {
             OnboardingAnalyticsService.shared.recordConversion(type: "purchase", productId: "feature_info_paywall")
             Analytics.logEvent("paywall_conversion", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
@@ -121,8 +140,7 @@ final class OBPaywallViewController: NNOnboardingViewController {
                 "paywall_type": "feature_info"
             ])
             Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Feature info paywall conversion completed")
-            (coordinator as? OnboardingCoordinator)?.next()
-        } else {
+        } else if !subscribed, !isPreviewMode {
             Analytics.logEvent("paywall_declined", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
                 "dwell_seconds": dwellSeconds,

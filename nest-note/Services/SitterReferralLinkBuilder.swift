@@ -6,6 +6,8 @@ enum SitterReferralCopy {
     /// Short subtitle kept for any compact surfaces.
     static let subtitle = screenSubtitle
     static let ctaTitle = "Share Invite"
+    static let generateCodeTitle = "Generate Code"
+    static let bannerCtaTitle = "Learn More"
     static let settingsRowTitle = "Refer Families"
     static let missingVenmoNote = "Add your Venmo in Profile so we can pay you when a family subscribes."
 }

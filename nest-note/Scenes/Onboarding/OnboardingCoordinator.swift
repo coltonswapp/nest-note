@@ -196,8 +196,19 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     // MARK: - Coordination
+    #if DEBUG
+    private(set) var isPreviewMode = false
+
+    func enablePreviewMode() {
+        isPreviewMode = true
+        Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: Preview mode enabled — side effects disabled")
+    }
+    #endif
+
     func start() -> UIViewController {
-        OnboardingAnalyticsService.shared.startSession()
+        performUnlessPreviewMode {
+            OnboardingAnalyticsService.shared.startSession(variant: onboardingVariant)
+        }
 
         Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: Starting parent onboarding flow")
 
@@ -236,6 +247,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     func syncRevenueCatAttributesBeforePaywallIfNeeded() {
         guard !hasSyncedRevenueCatBeforePaywall else { return }
         hasSyncedRevenueCatBeforePaywall = true
+
+        #if DEBUG
+        guard !isPreviewMode else { return }
+        #endif
 
         RevenueCatAttributeService.shared.syncBeforePaywall(
             email: userInfo.email,
@@ -594,8 +609,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             // So we can proceed with incrementing it
         }
 
-        // Record the step the user just completed
-        OnboardingAnalyticsService.shared.recordStepCompleted(analyticsStepId(for: currentVC))
+        performUnlessPreviewMode {
+            OnboardingAnalyticsService.shared.recordStepCompleted(analyticsStepId(for: currentVC))
+        }
 
         currentStepIndex += 1
         
@@ -690,11 +706,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         )
 
         #if DEBUG
-        if isDebugMode {
-            Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: Debug mode enabled - using mock flow")
+        if isPreviewMode {
+            Logger.log(level: .info, category: .signup, message: "🎯 FINISH SETUP: Preview mode enabled - skipping account creation")
             try await Task.sleep(for: .seconds(2))
-            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-            self.authenticationDelegate?.signUpComplete()
             return
         }
         #endif
@@ -1100,8 +1114,10 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         // Merge new responses with existing ones
         userInfo.surveyResponses.merge(responses) { _, new in new }
 
-        for (questionId, answers) in responses {
-            OnboardingAnalyticsService.shared.recordSurveyResponse(questionId: questionId, answers: answers)
+        performUnlessPreviewMode {
+            for (questionId, answers) in responses {
+                OnboardingAnalyticsService.shared.recordSurveyResponse(questionId: questionId, answers: answers)
+            }
         }
 
         // Note: role_selection is handled in next() method to ensure proper navigation timing
@@ -1189,8 +1205,9 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         roleValidationSubject.send(true)
         updateRole(role) // This now calls ensureRequiredStepsExist() internally
 
-        // Record role selection in analytics
-        OnboardingAnalyticsService.shared.recordRole(role.rawValue)
+        performUnlessPreviewMode {
+            OnboardingAnalyticsService.shared.recordRole(role.rawValue)
+        }
     }
     
     private func ensureRequiredStepsExist() {
@@ -1332,9 +1349,15 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         let configFileName = role == .nestOwner ? "parent_survey_config" : "sitter_survey_config"
         return SurveyConfiguration.loadLocal(named: configFileName)
     }
+
+    private func performUnlessPreviewMode(_ block: () -> Void) {
+        #if DEBUG
+        guard !isPreviewMode else { return }
+        #endif
+        block()
+    }
     
     #if DEBUG
-    private var isDebugMode = false
     private var debugTapCount = 0
     private let debugTapThreshold = 3
     private var debugTimer: Timer?
@@ -1362,9 +1385,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private func presentDebugOptions() {
         let alert = UIAlertController(title: "Debug Mode", message: nil, preferredStyle: .actionSheet)
         
-        alert.addAction(UIAlertAction(title: "Enable Debug Mode", style: .default) { [weak self] _ in
-            self?.isDebugMode = true
-            Logger.log(level: .debug, category: .general, message: "Debug mode enabled for Onboarding")
+        alert.addAction(UIAlertAction(title: "Enable Preview Mode", style: .default) { [weak self] _ in
+            self?.enablePreviewMode()
         })
         
         alert.addAction(UIAlertAction(title: "Skip to Email", style: .default) { [weak self] _ in
@@ -1398,7 +1420,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     }
     
     private func skipToViewController<T: NNOnboardingViewController>(_ viewControllerType: T.Type) {
-        isDebugMode = true
+        enablePreviewMode()
         
         // Find the target view controller in allSteps
         guard let targetVC = allSteps.first(where: { $0 is T }) else {
@@ -1410,22 +1432,19 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         navigationController.pushViewController(targetVC, animated: true)
         containerViewController.updateProgress(step: currentStepIndex)
     }
-    
-    // Modify validateStep to bypass validation in debug mode
-    private func ifDebugMode() -> Bool {
-        #if DEBUG
-        if isDebugMode { return true }
-        #endif
-        
-        return false
-    }
     #endif
 }
 
 // MARK: - OnboardingContainerDelegate
 extension OnboardingCoordinator {
     func onboardingContainerDidRequestAbort(_ container: OnboardingContainerViewController) {
+        #if DEBUG
+        if !isPreviewMode {
+            OnboardingAnalyticsService.shared.recordDropOff(reason: "user_abort")
+        }
+        #else
         OnboardingAnalyticsService.shared.recordDropOff(reason: "user_abort")
+        #endif
 
         // Handle abort - go back to landing page
         // Check if we're pushed on a navigation stack or presented modally
@@ -1446,10 +1465,13 @@ extension OnboardingCoordinator {
     private func skipSurveySteps() {
         Logger.log(level: .info, category: .general, message: "Skipping survey steps for Apple user: \(userInfo.isAppleSignIn), role: \(userInfo.role)")
 
-        Analytics.logEvent("onboarding_survey_skipped", parameters: [
-            "user_role": userInfo.role.rawValue,
-            "is_apple_signin": userInfo.isAppleSignIn
-        ])
+        performUnlessPreviewMode {
+            Analytics.logEvent("onboarding_survey_skipped", parameters: [
+                "user_role": userInfo.role.rawValue,
+                "is_apple_signin": userInfo.isAppleSignIn,
+                "onboarding_variant": onboardingVariant
+            ])
+        }
 
         // Remove all survey, bullet, preview, and missing_info steps from the flow
         steps.removeAll { vc in

@@ -45,50 +45,6 @@ final class SitterReferralViewController: NNViewController {
         return label
     }()
 
-    private let codeCard: UIView = {
-        let view = UIView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.backgroundColor = .secondarySystemGroupedBackground
-        view.layer.cornerRadius = 16
-        view.layer.cornerCurve = .continuous
-        return view
-    }()
-
-    private let codeCaptionLabel: UILabel = {
-        let label = UILabel()
-        label.text = "Your referral code"
-        label.font = .bodyM
-        label.textColor = .secondaryLabel
-        label.textAlignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-
-    private let codeLabel: UILabel = {
-        let label = UILabel()
-        label.text = "••••••"
-        label.font = UIFont.monospacedSystemFont(ofSize: 28, weight: .bold)
-        label.textColor = .label
-        label.textAlignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.adjustsFontSizeToFitWidth = true
-        label.minimumScaleFactor = 0.7
-        return label
-    }()
-
-    private lazy var copyCodeButton: UIButton = {
-        var config = UIButton.Configuration.plain()
-        config.title = "Copy Code"
-        config.image = UIImage(systemName: "doc.on.doc")
-        config.imagePadding = 6
-        config.baseForegroundColor = NNColors.primary
-        config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
-        let button = UIButton(configuration: config)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.addTarget(self, action: #selector(copyCodeTapped), for: .touchUpInside)
-        return button
-    }()
-
     private let venmoNoteLabel: UILabel = {
         let label = UILabel()
         label.font = .bodyM
@@ -100,27 +56,71 @@ final class SitterReferralViewController: NNViewController {
         return label
     }()
 
-    private lazy var shareInviteButton: NNPrimaryLabeledButton = {
-        let button = NNPrimaryLabeledButton(title: SitterReferralCopy.ctaTitle)
-        button.addTarget(self, action: #selector(shareInviteTapped), for: .touchUpInside)
+    private lazy var codeCopyButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
+            title: "--------",
+            image: nil,
+            backgroundColor: NNColors.primary.withAlphaComponent(0.15),
+            foregroundColor: NNColors.primary
+        )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        button.setContentInsets(UIEdgeInsets(top: 0, left: 4, bottom: 0, right: 4))
+        button.titleLabel.adjustsFontSizeToFitWidth = true
+        button.titleLabel.minimumScaleFactor = 0.7
+        button.addTarget(self, action: #selector(codeCopyTapped), for: .touchUpInside)
         return button
     }()
 
+    private lazy var primaryActionButton: NNLoadingButton = {
+        let button = NNLoadingButton(
+            title: SitterReferralCopy.generateCodeTitle,
+            titleColor: .white,
+            fillStyle: .fill(NNColors.primary)
+        )
+        button.addTarget(self, action: #selector(primaryActionTapped), for: .touchUpInside)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private lazy var bottomButtonStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [primaryActionButton, codeCopyButton])
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.distribution = .fill
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    private let bottomActionBar: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    private var codeCopyWidthConstraint: NSLayoutConstraint!
+
     private var referralCode: String?
-    private var isLoadingCode = false
+    private var isGeneratingCode = false
     private var isSharing = false
 
     init() {
         self.infoView = NNBulletStack(items: [
             NNBulletItem(
+                title: "Walk in ready for anything",
+                description: "Families share emergency contacts, routines, and house details in NestNote before you arrive.",
+                iconName: "list.bullet.clipboard.fill"
+            ),
+            NNBulletItem(
+                title: "Get paid without the chase",
+                description: "NestNote surfaces your rates to families and sends payment reminders so you're not following up.",
+                iconName: "banknote.fill"
+            ),
+            NNBulletItem(
                 title: "Share your code",
                 description: "Send families your referral code when they download NestNote and sign up.",
                 iconName: "square.and.arrow.up"
-            ),
-            NNBulletItem(
-                title: "They subscribe at full price",
-                description: "Your code rewards you — it doesn’t discount their plan.",
-                iconName: "creditcard"
             ),
             NNBulletItem(
                 title: "Get $10 via Venmo",
@@ -139,7 +139,7 @@ final class SitterReferralViewController: NNViewController {
         super.viewDidLoad()
         setupView()
         setupNavigationBar()
-        loadReferralCode()
+        restoreExistingCodeIfAvailable()
         updateVenmoNote()
     }
 
@@ -158,26 +158,29 @@ final class SitterReferralViewController: NNViewController {
         view.addSubview(topImageView)
         view.addSubview(scrollView)
         scrollView.addSubview(containerView)
+        view.addSubview(bottomActionBar)
+        bottomActionBar.addSubview(bottomButtonStack)
 
         containerView.addSubview(titleLabel)
         containerView.addSubview(subtitleLabel)
         containerView.addSubview(infoView)
-        containerView.addSubview(codeCard)
-        codeCard.addSubview(codeCaptionLabel)
-        codeCard.addSubview(codeLabel)
-        codeCard.addSubview(copyCodeButton)
         containerView.addSubview(venmoNoteLabel)
 
         infoView.translatesAutoresizingMaskIntoConstraints = false
 
-        shareInviteButton.pinToBottom(of: view, addBlurEffect: true)
+        setupBottomBlurEffect()
         topImageView.pinToTop(of: view)
+
+        codeCopyWidthConstraint = codeCopyButton.widthAnchor.constraint(
+            equalTo: bottomButtonStack.widthAnchor,
+            multiplier: 0.32
+        )
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: topImageView.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: shareInviteButton.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomActionBar.topAnchor, constant: -8),
 
             containerView.topAnchor.constraint(equalTo: scrollView.topAnchor),
             containerView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
@@ -197,63 +200,103 @@ final class SitterReferralViewController: NNViewController {
             infoView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 36),
             infoView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -36),
 
-            codeCard.topAnchor.constraint(equalTo: infoView.bottomAnchor, constant: 28),
-            codeCard.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
-            codeCard.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
-
-            codeCaptionLabel.topAnchor.constraint(equalTo: codeCard.topAnchor, constant: 16),
-            codeCaptionLabel.leadingAnchor.constraint(equalTo: codeCard.leadingAnchor, constant: 16),
-            codeCaptionLabel.trailingAnchor.constraint(equalTo: codeCard.trailingAnchor, constant: -16),
-
-            codeLabel.topAnchor.constraint(equalTo: codeCaptionLabel.bottomAnchor, constant: 8),
-            codeLabel.leadingAnchor.constraint(equalTo: codeCard.leadingAnchor, constant: 16),
-            codeLabel.trailingAnchor.constraint(equalTo: codeCard.trailingAnchor, constant: -16),
-
-            copyCodeButton.topAnchor.constraint(equalTo: codeLabel.bottomAnchor, constant: 4),
-            copyCodeButton.centerXAnchor.constraint(equalTo: codeCard.centerXAnchor),
-            copyCodeButton.bottomAnchor.constraint(equalTo: codeCard.bottomAnchor, constant: -10),
-
-            venmoNoteLabel.topAnchor.constraint(equalTo: codeCard.bottomAnchor, constant: 16),
+            venmoNoteLabel.topAnchor.constraint(equalTo: infoView.bottomAnchor, constant: 24),
             venmoNoteLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 28),
             venmoNoteLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -28),
             venmoNoteLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -24),
+
+            bottomActionBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            bottomActionBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            bottomActionBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+            bottomActionBar.heightAnchor.constraint(equalToConstant: 55),
+
+            bottomButtonStack.topAnchor.constraint(equalTo: bottomActionBar.topAnchor),
+            bottomButtonStack.leadingAnchor.constraint(equalTo: bottomActionBar.leadingAnchor),
+            bottomButtonStack.trailingAnchor.constraint(equalTo: bottomActionBar.trailingAnchor),
+            bottomButtonStack.bottomAnchor.constraint(equalTo: bottomActionBar.bottomAnchor),
+
+            codeCopyWidthConstraint,
+        ])
+
+        showPendingCodeState()
+    }
+
+    private func setupBottomBlurEffect() {
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .regular))
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(blur, belowSubview: bottomActionBar)
+
+        NSLayoutConstraint.activate([
+            blur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            blur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            blur.topAnchor.constraint(equalTo: bottomActionBar.topAnchor, constant: -16),
         ])
     }
 
-    private func loadReferralCode() {
-        guard !isLoadingCode else { return }
+    private func restoreExistingCodeIfAvailable() {
         guard let user = UserService.shared.currentUser else {
-            codeLabel.text = "Sign in required"
-            shareInviteButton.isEnabled = false
-            copyCodeButton.isEnabled = false
+            primaryActionButton.isEnabled = false
             return
         }
 
-        isLoadingCode = true
-        shareInviteButton.isEnabled = false
-        copyCodeButton.isEnabled = false
-        codeLabel.text = "Generating…"
+        let existing = user.sitterReferralCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() ?? ""
 
-        Task {
-            do {
-                let code = try await SitterReferralService.shared.getOrCreateCode(for: user)
-                await MainActor.run {
-                    referralCode = code
-                    codeLabel.text = code
-                    shareInviteButton.isEnabled = true
-                    copyCodeButton.isEnabled = true
-                    isLoadingCode = false
-                }
-            } catch {
-                await MainActor.run {
-                    codeLabel.text = "Couldn't load"
-                    shareInviteButton.isEnabled = false
-                    copyCodeButton.isEnabled = false
-                    isLoadingCode = false
-                    showToast(text: "Couldn't create your code. Try again.")
-                }
-            }
+        guard !existing.isEmpty else { return }
+
+        referralCode = existing
+        showGeneratedCodeState(code: existing, animated: false)
+    }
+
+    private func showPendingCodeState() {
+        guard referralCode == nil else { return }
+
+        codeCopyButton.isHidden = true
+        codeCopyButton.alpha = 1
+        codeCopyButton.transform = .identity
+        codeCopyWidthConstraint.isActive = false
+        primaryActionButton.stopLoading()
+        primaryActionButton.setTitle(SitterReferralCopy.generateCodeTitle)
+        primaryActionButton.isEnabled = UserService.shared.currentUser != nil
+    }
+
+    private func showGeneratedCodeState(code: String, animated: Bool = true) {
+        referralCode = code
+        codeCopyButton.setTitle(code)
+        codeCopyButton.isUserInteractionEnabled = true
+        primaryActionButton.stopLoading()
+        primaryActionButton.setTitle(SitterReferralCopy.ctaTitle)
+        primaryActionButton.isEnabled = true
+        codeCopyWidthConstraint.isActive = true
+
+        guard animated else {
+            codeCopyButton.isHidden = false
+            return
         }
+
+        codeCopyButton.isHidden = false
+        codeCopyButton.alpha = 0
+        codeCopyButton.transform = CGAffineTransform(scaleX: 0.85, y: 0.85).translatedBy(x: 12, y: 0)
+        view.layoutIfNeeded()
+
+        UIView.animate(
+            withDuration: 0.5,
+            delay: 0,
+            usingSpringWithDamping: 0.72,
+            initialSpringVelocity: 0.6,
+            options: [.allowUserInteraction]
+        ) {
+            self.codeCopyButton.alpha = 1
+            self.codeCopyButton.transform = .identity
+        }
+    }
+
+    private func showGeneratingCodeState() {
+        codeCopyButton.isHidden = true
+        codeCopyWidthConstraint.isActive = false
+        primaryActionButton.startLoading()
     }
 
     private func updateVenmoNote() {
@@ -271,14 +314,63 @@ final class SitterReferralViewController: NNViewController {
         dismiss(animated: true)
     }
 
-    @objc private func copyCodeTapped() {
-        guard let code = referralCode, !code.isEmpty else { return }
-        UIPasteboard.general.string = code
-        HapticsHelper.lightHaptic()
-        showToast(text: "Code copied!")
+    @objc private func primaryActionTapped() {
+        if referralCode == nil {
+            generateReferralCode()
+        } else {
+            shareInviteTapped()
+        }
     }
 
-    @objc private func shareInviteTapped() {
+    private func generateReferralCode() {
+        guard !isGeneratingCode else { return }
+        guard let user = UserService.shared.currentUser else { return }
+
+        isGeneratingCode = true
+        showGeneratingCodeState()
+
+        Task {
+            do {
+                let code = try await SitterReferralService.shared.getOrCreateCode(for: user)
+                await MainActor.run {
+                    isGeneratingCode = false
+                    showGeneratedCodeState(code: code, animated: true)
+                }
+            } catch {
+                await MainActor.run {
+                    isGeneratingCode = false
+                    codeCopyButton.isHidden = true
+                    codeCopyWidthConstraint.isActive = false
+                    primaryActionButton.stopLoading(withSuccess: false)
+                    primaryActionButton.setTitle(SitterReferralCopy.generateCodeTitle)
+                    primaryActionButton.isEnabled = UserService.shared.currentUser != nil
+                    showToast(text: "Couldn't create your code. Try again.")
+                }
+            }
+        }
+    }
+
+    @objc private func codeCopyTapped() {
+        guard let code = referralCode, !code.isEmpty else { return }
+
+        UIPasteboard.general.string = code
+        codeCopyButton.showCopiedFeedback()
+        HapticsHelper.lightHaptic()
+        triggerCodeCopyExplosion()
+    }
+
+    private func triggerCodeCopyExplosion() {
+        let center = CGPoint(x: codeCopyButton.bounds.midX, y: codeCopyButton.bounds.midY)
+        let explosionPoint: CGPoint
+        if let window = view.window {
+            explosionPoint = codeCopyButton.convert(center, to: window)
+        } else {
+            explosionPoint = codeCopyButton.convert(center, to: view)
+        }
+        ExplosionManager.trigger(.small, at: explosionPoint)
+    }
+
+    private func shareInviteTapped() {
         guard !isSharing, let code = referralCode, !code.isEmpty else { return }
         guard let user = UserService.shared.currentUser else { return }
 
@@ -301,8 +393,8 @@ final class SitterReferralViewController: NNViewController {
         }
 
         if let popover = activityVC.popoverPresentationController {
-            popover.sourceView = shareInviteButton
-            popover.sourceRect = shareInviteButton.bounds
+            popover.sourceView = primaryActionButton
+            popover.sourceRect = primaryActionButton.bounds
         }
 
         present(activityVC, animated: true)

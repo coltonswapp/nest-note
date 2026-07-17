@@ -21,6 +21,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private var nestCreationCoordinator: NestCreationCoordinator?
     private static let settingsPromoHeight: CGFloat = 136
     private static let settingsPromoVerticalPadding: CGFloat = 6
+    private static let sitterReferralBannerHeight: CGFloat = 118
+    private static let sitterReferralBannerVerticalPadding: CGFloat = 0
 
     private var hasProSubscription = true
     private var isFreeTrialEligible = false
@@ -214,6 +216,17 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 section.contentInsets = NSDirectionalEdgeInsets(top: 20, leading: 18, bottom: 20, trailing: 18)
                 return section
 
+            case .sitterReferral:
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(Self.sitterReferralBannerHeight)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 18, bottom: 14, trailing: 18)
+                return section
+
             case .account:
                 let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(80))
                 let item = NSCollectionLayoutItem(layoutSize: itemSize)
@@ -268,6 +281,21 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     private func configureDataSource() {
+        let sitterReferralCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, Item> { [weak self] cell, _, item in
+            if case .sitterReferral = item {
+                cell.configure(
+                    variant: .stackedIconsLabel,
+                    ctaTitle: SitterReferralCopy.bannerCtaTitle,
+                    title: SitterReferralCopy.title,
+                    subtitle: SitterReferralCopy.subtitle,
+                    contentVerticalPadding: Self.sitterReferralBannerVerticalPadding
+                )
+                cell.onUpgradeTapped = { [weak self] in
+                    self?.presentSitterReferralScreen()
+                }
+            }
+        }
+
         let premiumPromoCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, Item> { [weak self] cell, _, item in
             if case .premiumPromo = item {
                 cell.configure(
@@ -378,6 +406,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     for: indexPath,
                     item: item
                 )
+            case .sitterReferral:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: sitterReferralCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
             case .readinessScore:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: readinessScoreCellRegistration,
@@ -411,6 +445,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         if !hasProSubscription && ModeManager.shared.isNestOwnerMode {
             snapshot.appendSections([.premiumPromo])
             snapshot.appendItems([.premiumPromo], toSection: .premiumPromo)
+        }
+
+        if shouldShowSitterReferralBanner {
+            snapshot.appendSections([.sitterReferral])
+            snapshot.appendItems([.sitterReferral], toSection: .sitterReferral)
         }
         
         // Determine sections based on app mode
@@ -541,6 +580,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Feature Info Paywall", "sparkles.rectangle.stack"),
             ("Waterfall Grid", "square.grid.2x2"),
             ("Sitter Referral Screen", "gift.fill"),
+            ("Delete Sitter Referral Code", "trash"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
 
         if isNestReadinessEnabled, NestService.shared.currentNest != nil {
@@ -568,6 +608,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
     enum Section: String, Hashable, CaseIterable {
         case premiumPromo = "Premium"
+        case sitterReferral = "Refer Friends"
         case account = "Account"
         case currentNest = "Current Nest"
         case myNest = "My Nest"
@@ -580,6 +621,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
     enum Item: Hashable {
         case premiumPromo
+        case sitterReferral
         case account(email: String, name: String)
         case currentNest(name: String, address: String)
         case readinessScore(score: Int)
@@ -627,7 +669,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let nav = UINavigationController(rootViewController: venmoVC)
             present(nav, animated: true)
         case "Onboarding":
-            present(OnboardingCoordinator().start(), animated: true)
+            let coordinator = OnboardingCoordinator()
+            coordinator.enablePreviewMode()
+            present(coordinator.start(), animated: true)
         case "Create Session":
             let vc = EditSessionViewController()
             vc.modalPresentationStyle = .pageSheet
@@ -732,6 +776,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             presentWaterfallGridExperiment()
         case "Sitter Referral Screen":
             presentSitterReferralScreen()
+        case "Delete Sitter Referral Code":
+            deleteSitterReferralCodeForDebug()
         case "Show on Home Screen":
             showReadinessHomeBannerPicker()
         case "Referral Admin":
@@ -852,6 +898,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         switch item {
         case .premiumPromo:
             presentPremiumPaywall()
+        case .sitterReferral:
+            presentSitterReferralScreen()
         case .readinessScore:
             presentReadinessDetail()
         case .account(let email, let name):
@@ -1022,10 +1070,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         present(nestCreationCoordinator.start(), animated: true)
     }
     
-    private var shouldShowSitterReferralEntry: Bool {
+    private var shouldShowSitterReferralBanner: Bool {
         FeatureFlagService.shared.isEnabled(.sitterReferralProgramEnabled)
             && UserService.shared.isSignedIn
             && ModeManager.shared.isSitterMode
+    }
+
+    private var shouldShowSitterReferralEntry: Bool {
+        shouldShowSitterReferralBanner
     }
 
     private func presentSitterReferralScreen() {
@@ -1034,6 +1086,44 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         nav.modalPresentationStyle = .pageSheet
         present(nav, animated: true)
     }
+
+    #if DEBUG
+    private func deleteSitterReferralCodeForDebug() {
+        guard let user = UserService.shared.currentUser else {
+            showToast(text: "Sign in required")
+            return
+        }
+
+        let existingCode = user.sitterReferralCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !existingCode.isEmpty else {
+            showToast(text: "No referral code to delete")
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Delete Referral Code?",
+            message: "Removes \(existingCode.uppercased()) from Firestore and your profile.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            Task {
+                do {
+                    try await SitterReferralService.shared.deleteReferralCode(for: user)
+                    await MainActor.run {
+                        self?.showToast(text: "Referral code deleted")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self?.showToast(text: "Couldn't delete code. Try again.")
+                    }
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+    #endif
 
     private func presentPremiumPaywall() {
         let paywall = FeatureInfoPaywallViewController()

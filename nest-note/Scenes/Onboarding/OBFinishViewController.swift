@@ -587,7 +587,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
                 self.dismiss(animated: true)
             } else {
                 (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
+                #if DEBUG
+                if (self.coordinator as? OnboardingCoordinator)?.isPreviewMode != true {
+                    RatingManager.shared.trackOnboardingComplete()
+                }
+                #else
                 RatingManager.shared.trackOnboardingComplete()
+                #endif
             }
         }
     }
