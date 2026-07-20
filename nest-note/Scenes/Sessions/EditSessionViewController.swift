@@ -1769,7 +1769,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     self.delegate?.editSessionViewController(self, didUpdateSession: self.sessionItem)
                     
                     folderVC.animateContinueOff {
-                        self.pushInviteDetail(for: self.sessionItem, inviteCode: invite?.code)
+                        self.pushInviteYourSitter(for: self.sessionItem, inviteCode: invite?.code)
                     }
                 }
             } catch {
@@ -1817,18 +1817,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             guard let self else { return }
             let invite = try? await SessionService.shared.createOpenInvite(sessionID: session.id)
             await MainActor.run {
-                self.pushInviteDetail(for: session, inviteCode: invite?.code)
+                self.pushInviteYourSitter(for: session, inviteCode: invite?.code)
             }
         }
     }
     
-    private func pushInviteDetail(for session: SessionItem, inviteCode: String?) {
-        let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: session.id)
-        inviteDetailVC.delegate = self
-        if let inviteCode {
-            inviteDetailVC.configure(with: inviteCode, sessionID: session.id, sitter: nil)
-        }
-        navigationController?.pushViewController(inviteDetailVC, animated: true)
+    private func pushInviteYourSitter(for session: SessionItem, inviteCode: String?) {
+        let code = inviteCode ?? "000000"
+        let inviteVC = InviteYourSitterViewController(inviteCode: code, session: session)
+        navigationController?.pushViewController(inviteVC, animated: true)
     }
     
     /// When contacts or entries are selected, those are spelled out and places, routines, and other types roll into "N more".

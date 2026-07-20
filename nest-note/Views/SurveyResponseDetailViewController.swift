@@ -12,7 +12,7 @@ class SurveyResponseDetailViewController: NNViewController {
     private static let userProfileMetadataKeys: Set<String> = [
         "userId", "name", "email", "phone", "venmo_username", "nest_name",
         "referral_code", "is_apple_signin", "discovery_method", "created_at", "role",
-        "paywall_converted", "paywall_started_trial", "onboarding_variant"
+        "paywall_converted", "paywall_started_trial"
     ]
 
     // MARK: - Initialization

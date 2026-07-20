@@ -19,7 +19,6 @@ final class RevenueCatAttributeService {
         phone: String,
         displayName: String,
         discoveryMethod: String?,
-        onboardingVariant: String,
         referralCode: String?,
         referralCodeType: ReferralCodeType? = nil
     ) {
@@ -27,7 +26,6 @@ final class RevenueCatAttributeService {
         applyCustomAttributes(buildOnboardingCustomAttributes(
             firebaseUID: nil,
             discoveryMethod: discoveryMethod,
-            onboardingVariant: onboardingVariant,
             referralCode: referralCode,
             referralCodeType: referralCodeType
         ))

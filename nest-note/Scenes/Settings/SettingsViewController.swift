@@ -569,6 +569,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
+            ("Test Invite Your Sitter", "person.wave.2.fill"),
             ("Toast Test", "text.bubble.fill"),
             ("Markdown Preview", "doc.richtext"),
             ("Sitters article (full)", "text.book.closed"),
@@ -732,6 +733,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Invite Card Animation":
             let vc = InviteCardAnimationDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Test Invite Your Sitter":
+            let vc = InviteYourSitterViewController.makeDebugInstance()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)

@@ -207,7 +207,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
     func start() -> UIViewController {
         performUnlessPreviewMode {
-            OnboardingAnalyticsService.shared.startSession(variant: onboardingVariant)
+            OnboardingAnalyticsService.shared.startSession()
         }
 
         Logger.log(level: .info, category: .general, message: "📋 ONBOARDING: Starting parent onboarding flow")
@@ -257,7 +257,6 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             phone: userInfo.phone,
             displayName: userInfo.fullName,
             discoveryMethod: userInfo.surveyResponses["discovery_method"]?.first,
-            onboardingVariant: onboardingVariant,
             referralCode: userInfo.referralCode,
             referralCodeType: userInfo.referralCodeType
         )
@@ -1468,8 +1467,7 @@ extension OnboardingCoordinator {
         performUnlessPreviewMode {
             Analytics.logEvent("onboarding_survey_skipped", parameters: [
                 "user_role": userInfo.role.rawValue,
-                "is_apple_signin": userInfo.isAppleSignIn,
-                "onboarding_variant": onboardingVariant
+                "is_apple_signin": userInfo.isAppleSignIn
             ])
         }
 

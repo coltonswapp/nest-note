@@ -219,6 +219,12 @@ final class SitterReferralViewController: NNViewController {
         ])
 
         showPendingCodeState()
+        infoView.prepareItemsForSlideIn()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        infoView.animateItemsIn(initialDelay: 0.08)
     }
 
     private func setupBottomBlurEffect() {

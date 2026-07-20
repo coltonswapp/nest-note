@@ -44,6 +44,7 @@ final class OBPaywallViewController: NNOnboardingViewController {
             self?.dismissPresentedPaywall {
                 self?.completePaywall(
                     subscribed: subscribed,
+                    startedTrial: startedTrial,
                     referralCode: referralCode,
                     referralCodeType: referralCodeType
                 )
@@ -108,6 +109,7 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
     private func completePaywall(
         subscribed: Bool,
+        startedTrial: Bool = false,
         referralCode: String?,
         referralCodeType: ReferralCodeType? = nil
     ) {
