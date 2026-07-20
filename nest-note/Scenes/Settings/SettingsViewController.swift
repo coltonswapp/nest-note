@@ -27,7 +27,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private var hasProSubscription = true
     private var isFreeTrialEligible = false
     private var readinessScore: Int?
-    private var isCopyingSitterReferralInvite = false
     private var isFirstAppearance = true
     
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
@@ -286,13 +285,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             if case .sitterReferral = item {
                 cell.configure(
                     variant: .stackedIconsLabel,
-                    ctaTitle: self?.isCopyingSitterReferralInvite == true ? "Copying…" : SitterReferralCopy.ctaTitle,
+                    ctaTitle: SitterReferralCopy.bannerCtaTitle,
                     title: SitterReferralCopy.title,
                     subtitle: SitterReferralCopy.subtitle,
                     contentVerticalPadding: Self.sitterReferralBannerVerticalPadding
                 )
                 cell.onUpgradeTapped = { [weak self] in
-                    self?.handleSitterReferralCopyInvite()
+                    self?.presentSitterReferralScreen()
                 }
             }
         }
@@ -488,10 +487,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         // My Nest and My Sitting sections
         if UserService.shared.isSignedIn {
             if ModeManager.shared.isSitterMode {
-                let sittingItems = [
+                var sittingRows = [
                     ("Sessions", "calendar"),
                     ("Saved Nests", "heart"),
-                ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
+                ]
+                if shouldShowSitterReferralEntry {
+                    sittingRows.append((SitterReferralCopy.settingsRowTitle, "gift.fill"))
+                }
+                let sittingItems = sittingRows.map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
             } else {
                 let nestItems = [
@@ -566,6 +569,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
             ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
+            ("Test Invite Your Sitter", "person.wave.2.fill"),
             ("Toast Test", "text.bubble.fill"),
             ("Markdown Preview", "doc.richtext"),
             ("Sitters article (full)", "text.book.closed"),
@@ -576,6 +580,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Test Subscription Status", "creditcard.circle"),
             ("Feature Info Paywall", "sparkles.rectangle.stack"),
             ("Waterfall Grid", "square.grid.2x2"),
+            ("Sitter Referral Screen", "gift.fill"),
+            ("Delete Sitter Referral Code", "trash"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
 
         if isNestReadinessEnabled, NestService.shared.currentNest != nil {
@@ -664,7 +670,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let nav = UINavigationController(rootViewController: venmoVC)
             present(nav, animated: true)
         case "Onboarding":
-            present(OnboardingCoordinator().start(), animated: true)
+            let coordinator = OnboardingCoordinator()
+            coordinator.enablePreviewMode()
+            present(coordinator.start(), animated: true)
         case "Create Session":
             let vc = EditSessionViewController()
             vc.modalPresentationStyle = .pageSheet
@@ -725,6 +733,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Invite Card Animation":
             let vc = InviteCardAnimationDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
+        case "Test Invite Your Sitter":
+            let vc = InviteYourSitterViewController.makeDebugInstance()
+            let nav = UINavigationController(rootViewController: vc)
+            present(nav, animated: true)
         case "Toast Test":
             let vc = ToastTestViewController()
             navigationController?.pushViewController(vc, animated: true)
@@ -767,6 +779,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             showFeatureInfoPaywall()
         case "Waterfall Grid":
             presentWaterfallGridExperiment()
+        case "Sitter Referral Screen":
+            presentSitterReferralScreen()
+        case "Delete Sitter Referral Code":
+            deleteSitterReferralCodeForDebug()
         case "Show on Home Screen":
             showReadinessHomeBannerPicker()
         case "Referral Admin":
@@ -888,7 +904,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case .premiumPromo:
             presentPremiumPaywall()
         case .sitterReferral:
-            handleSitterReferralCopyInvite()
+            presentSitterReferralScreen()
         case .readinessScore:
             presentReadinessDetail()
         case .account(let email, let name):
@@ -911,9 +927,11 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             }
         case .myNestItem(let title, _):
             if UserService.shared.isSignedIn {
-                // Check if there's a current nest (skip check for Sessions in sitter mode)
+                // Check if there's a current nest (skip for sitter-only rows that don't need a nest)
                 let hasCurrentNest = NestService.shared.currentNest != nil
-                if !hasCurrentNest && !(ModeManager.shared.isSitterMode && title == "Sessions") {
+                let skipsNestRequirement = ModeManager.shared.isSitterMode
+                    && (title == "Sessions" || title == SitterReferralCopy.settingsRowTitle)
+                if !hasCurrentNest && !skipsNestRequirement {
                     // Show prompt to set up nest first
                     showNestSetupPrompt()
                     collectionView.deselectItem(at: indexPath, animated: true)
@@ -933,6 +951,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                         let nav = UINavigationController(rootViewController: sessionsVC)
                         present(nav, animated: true)
                     }
+                case SitterReferralCopy.settingsRowTitle:
+                    presentSitterReferralScreen()
                 case "Saved Sitters":
                     let sitterListVC = SitterListViewController(displayMode: .default)
                     let nav = UINavigationController(rootViewController: sitterListVC)
@@ -1061,61 +1081,54 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             && ModeManager.shared.isSitterMode
     }
 
-    private func handleSitterReferralCopyInvite() {
-        guard !isCopyingSitterReferralInvite else { return }
-        guard let user = UserService.shared.currentUser else { return }
+    private var shouldShowSitterReferralEntry: Bool {
+        shouldShowSitterReferralBanner
+    }
 
-        let venmo = user.personalInfo.venmoUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if venmo.isEmpty {
-            let alert = UIAlertController(
-                title: "Add Your Venmo",
-                message: "Add your Venmo in Profile so we can pay you when a family subscribes.",
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "Go to Profile", style: .default) { [weak self] _ in
-                self?.showUserProfile()
-            })
-            alert.addAction(UIAlertAction(title: "Copy Anyway", style: .default) { [weak self] _ in
-                self?.performSitterReferralCopyInvite(for: user)
-            })
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            present(alert, animated: true)
+    private func presentSitterReferralScreen() {
+        let vc = SitterReferralViewController()
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+
+    #if DEBUG
+    private func deleteSitterReferralCodeForDebug() {
+        guard let user = UserService.shared.currentUser else {
+            showToast(text: "Sign in required")
             return
         }
 
-        performSitterReferralCopyInvite(for: user)
-    }
+        let existingCode = user.sitterReferralCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !existingCode.isEmpty else {
+            showToast(text: "No referral code to delete")
+            return
+        }
 
-    private func performSitterReferralCopyInvite(for user: NestUser) {
-        isCopyingSitterReferralInvite = true
-        applyInitialSnapshots()
-
-        Task {
-            do {
-                let code = try await SitterReferralService.shared.getOrCreateCode(for: user)
-                let message = SitterReferralLinkBuilder.inviteMessage(
-                    sitterName: user.personalInfo.name,
-                    code: code
-                )
-                await MainActor.run {
-                    UIPasteboard.general.string = message
-                    isCopyingSitterReferralInvite = false
-                    applyInitialSnapshots()
-                    showToast(text: "Invite copied!")
-                    HapticsHelper.lightHaptic()
-                    Tracker.shared.trackSitterReferralInviteCopied(
-                        hasVenmo: !(user.personalInfo.venmoUsername ?? "").isEmpty
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    isCopyingSitterReferralInvite = false
-                    applyInitialSnapshots()
-                    showToast(text: "Couldn't create invite. Try again.")
+        let alert = UIAlertController(
+            title: "Delete Referral Code?",
+            message: "Removes \(existingCode.uppercased()) from Firestore and your profile.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            Task {
+                do {
+                    try await SitterReferralService.shared.deleteReferralCode(for: user)
+                    await MainActor.run {
+                        self?.showToast(text: "Referral code deleted")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self?.showToast(text: "Couldn't delete code. Try again.")
+                    }
                 }
             }
-        }
+        })
+        present(alert, animated: true)
     }
+    #endif
 
     private func presentPremiumPaywall() {
         let paywall = FeatureInfoPaywallViewController()

@@ -9,7 +9,7 @@ final class SitterReferralService {
 
     private init() {}
 
-    /// Idempotent — safe to call on every Copy Invite tap.
+    /// Idempotent — creates a code only when the sitter explicitly requests one.
     func getOrCreateCode(for user: NestUser) async throws -> String {
         if let cached = cachedCodeByUserId[user.id] {
             return cached
@@ -61,6 +61,27 @@ final class SitterReferralService {
 
         throw ReferralError.networkError
     }
+
+    #if DEBUG
+    /// Removes the sitter's referral code from Firestore and clears local state (debug only).
+    func deleteReferralCode(for user: NestUser) async throws {
+        guard let rawCode = user.sitterReferralCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawCode.isEmpty else {
+            return
+        }
+
+        let code = rawCode.uppercased()
+        try await db.collection("valid_referral_codes").document(code).delete()
+        try await db.collection("users").document(user.id).updateData([
+            "sitterReferralCode": FieldValue.delete(),
+        ])
+
+        user.sitterReferralCode = nil
+        cachedCodeByUserId.removeValue(forKey: user.id)
+        Logger.log(level: .info, category: .referral, message: "Deleted sitter referral code \(code) for user \(user.id)")
+    }
+    #endif
 
     private static func codePrefix(from name: String) -> String {
         let letters = name.uppercased().filter { $0.isLetter }

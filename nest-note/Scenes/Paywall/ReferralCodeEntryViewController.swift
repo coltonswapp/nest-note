@@ -26,7 +26,7 @@ final class ReferralCodeEntryViewController: UIViewController {
 
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Support a creator and unlock partner pricing."
+        label.text = "Have a code? Enter it here to apply your referral."
         label.font = .systemFont(ofSize: 15)
         label.textColor = .secondaryLabel
         label.textAlignment = .center

@@ -44,7 +44,15 @@ final class FeatureInfoPaywallViewController: NNViewController {
     private var loadedPackages: [Package] = []
     private var appliedReferralCode: String?
     private var appliedReferralCodeType: ReferralCodeType?
+
+    /// Partner / YearlyPartner pricing is for creator codes only.
+    /// Sitter referral codes reward the sitter ($10 Venmo) while the family pays full price.
+    private var usesCreatorPartnerPricing: Bool {
+        appliedReferralCode != nil && (appliedReferralCodeType ?? .creator) == .creator
+    }
+
     var currentReferralCode: String? { appliedReferralCode }
+    var currentReferralCodeType: ReferralCodeType? { appliedReferralCodeType }
     var pendingReferralCodeToApply: String?
     var pendingReferralSource: ReferralApplicationSource = .deepLink
     private let referralState = ReferralEntryState()
@@ -763,10 +771,10 @@ final class FeatureInfoPaywallViewController: NNViewController {
         Task {
             do {
                 let sorted: [Package]
-                if appliedReferralCode != nil, !prefetchedPartnerPackages.isEmpty {
+                if usesCreatorPartnerPricing, !prefetchedPartnerPackages.isEmpty {
                     sorted = prefetchedPartnerPackages
                 } else {
-                    let offeringIdentifier = appliedReferralCode == nil ? nil : "partner"
+                    let offeringIdentifier = usesCreatorPartnerPricing ? "partner" : nil
                     let offering = try await SubscriptionService.shared.fetchOffering(identifier: offeringIdentifier)
                     sorted = Self.filteredPaywallPackages(from: offering)
                 }
@@ -774,14 +782,14 @@ final class FeatureInfoPaywallViewController: NNViewController {
                 guard !sorted.isEmpty else {
                     await MainActor.run {
                         setLoading(false)
-                        showError(appliedReferralCode == nil
-                            ? "No subscription plans are available right now."
-                            : "Partner plans aren't available right now.")
+                        showError(usesCreatorPartnerPricing
+                            ? "Partner plans aren't available right now."
+                            : "No subscription plans are available right now.")
                     }
                     return
                 }
 
-                let shouldSlashPrices = appliedReferralCode != nil && !standardComparisonPackages.isEmpty
+                let shouldSlashPrices = usesCreatorPartnerPricing && !standardComparisonPackages.isEmpty
 
                 await MainActor.run {
                     configurePackages(sorted, animatePriceSlash: shouldSlashPrices)
@@ -1152,7 +1160,7 @@ final class FeatureInfoPaywallViewController: NNViewController {
         if stage == .features {
             continueToCheckout()
         } else {
-            loadOffering(identifier: appliedReferralCode == nil ? nil : "partner")
+            loadOffering(identifier: usesCreatorPartnerPricing ? "partner" : nil)
         }
     }
 

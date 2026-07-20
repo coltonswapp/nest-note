@@ -2,8 +2,14 @@ import Foundation
 
 enum SitterReferralCopy {
     static let title = "Earn $10 per family"
-    static let subtitle = "Invite a family to NestNote. When they subscribe, you get $10 via Venmo."
-    static let ctaTitle = "Copy Invite"
+    static let screenSubtitle = "Invite a family to NestNote. When they subscribe, you get $10 via Venmo."
+    /// Short subtitle kept for any compact surfaces.
+    static let subtitle = screenSubtitle
+    static let ctaTitle = "Share Invite"
+    static let generateCodeTitle = "Generate Code"
+    static let bannerCtaTitle = "Learn More"
+    static let settingsRowTitle = "Refer Families"
+    static let missingVenmoNote = "Add your Venmo in Profile so we can pay you when a family subscribes."
 }
 
 enum SitterReferralLinkBuilder {

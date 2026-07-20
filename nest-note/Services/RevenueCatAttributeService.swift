@@ -19,13 +19,15 @@ final class RevenueCatAttributeService {
         phone: String,
         displayName: String,
         discoveryMethod: String?,
-        referralCode: String?
+        referralCode: String?,
+        referralCodeType: ReferralCodeType? = nil
     ) {
         applySubscriberAttributes(email: email, phone: phone, displayName: displayName)
         applyCustomAttributes(buildOnboardingCustomAttributes(
             firebaseUID: nil,
             discoveryMethod: discoveryMethod,
-            referralCode: referralCode
+            referralCode: referralCode,
+            referralCodeType: referralCodeType
         ))
         syncAttributes()
 

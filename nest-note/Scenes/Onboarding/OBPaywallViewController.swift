@@ -40,8 +40,14 @@ final class OBPaywallViewController: NNOnboardingViewController {
         }
         paywall.onPaywallFinished = { [weak self] subscribed, startedTrial in
             let referralCode = paywall.currentReferralCode
+            let referralCodeType = paywall.currentReferralCodeType
             self?.dismissPresentedPaywall {
-                self?.completePaywall(subscribed: subscribed, startedTrial: startedTrial, referralCode: referralCode)
+                self?.completePaywall(
+                    subscribed: subscribed,
+                    startedTrial: startedTrial,
+                    referralCode: referralCode,
+                    referralCodeType: referralCodeType
+                )
             }
         }
 
@@ -55,6 +61,12 @@ final class OBPaywallViewController: NNOnboardingViewController {
         paywallPresentedAt = Date()
 
         present(paywall, animated: true)
+
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            return
+        }
+        #endif
 
         Analytics.logEvent("paywall_presented", parameters: [
             "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
@@ -81,6 +93,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
     private func recordDwellTimeIfNeeded() {
         guard !dwellRecorded, let start = paywallPresentedAt else { return }
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            dwellRecorded = true
+            paywallPresentedAt = nil
+            return
+        }
+        #endif
         dwellRecorded = true
         paywallPresentedAt = nil
         let seconds = Date().timeIntervalSince(start)
@@ -88,12 +107,17 @@ final class OBPaywallViewController: NNOnboardingViewController {
         (coordinator as? OnboardingCoordinator)?.addPaywallDwellTime(seconds)
     }
 
-    private func completePaywall(subscribed: Bool, startedTrial: Bool = false, referralCode: String?) {
+    private func completePaywall(
+        subscribed: Bool,
+        startedTrial: Bool = false,
+        referralCode: String?,
+        referralCodeType: ReferralCodeType? = nil
+    ) {
         guard !hasCompletedPaywall else { return }
         hasCompletedPaywall = true
 
         if let referralCode {
-            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode)
+            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode, type: referralCodeType)
         }
 
         let dwellSeconds = secondsOnPaywall()
@@ -103,7 +127,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
             startedTrial: startedTrial
         )
 
-        if subscribed {
+        #if DEBUG
+        let isPreviewMode = (coordinator as? OnboardingCoordinator)?.isPreviewMode == true
+        #else
+        let isPreviewMode = false
+        #endif
+
+        if subscribed, !isPreviewMode {
             OnboardingAnalyticsService.shared.recordConversion(type: "purchase", productId: "feature_info_paywall")
             Analytics.logEvent("paywall_conversion", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
@@ -112,8 +142,7 @@ final class OBPaywallViewController: NNOnboardingViewController {
                 "paywall_type": "feature_info"
             ])
             Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Feature info paywall conversion completed")
-            (coordinator as? OnboardingCoordinator)?.next()
-        } else {
+        } else if !subscribed, !isPreviewMode {
             Analytics.logEvent("paywall_declined", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
                 "dwell_seconds": dwellSeconds,
@@ -184,6 +213,10 @@ extension OBPaywallViewController: UIAdaptivePresentationControllerDelegate {
         }
 
         presentedPaywall = nil
-        completePaywall(subscribed: false, referralCode: paywall.currentReferralCode)
+        completePaywall(
+            subscribed: false,
+            referralCode: paywall.currentReferralCode,
+            referralCodeType: paywall.currentReferralCodeType
+        )
     }
 }

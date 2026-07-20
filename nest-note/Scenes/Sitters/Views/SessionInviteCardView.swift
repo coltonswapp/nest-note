@@ -6,12 +6,22 @@
 //
 import UIKit
 
+protocol SessionInviteCardViewDelegate: AnyObject {
+    func sessionInviteCardViewDidTapInviteCode(_ card: SessionInviteCardView)
+    func sessionInviteCardViewDidTapQRCode(_ card: SessionInviteCardView)
+}
+
 class SessionInviteCardView: UIView {
 
     enum DisplayStyle {
         case standard
         case compact
+        /// Standard ticket chrome with slightly smaller body content (keeps pattern size).
+        case reveal
+        case codeReveal
     }
+
+    weak var delegate: SessionInviteCardViewDelegate?
 
     private let displayStyle: DisplayStyle
     // Add content view to manage hierarchy
@@ -53,7 +63,7 @@ class SessionInviteCardView: UIView {
         label.font = .h1
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .center
-        label.text = "Debug Text"
+        label.text = "Debug Nest"
         return label
     }()
     
@@ -82,6 +92,39 @@ class SessionInviteCardView: UIView {
         label.numberOfLines = 0
         label.textColor = .secondaryLabel
         return label
+    }()
+
+    private let inviteCodeLabel: UILabel = {
+        let label = UILabel()
+        label.font = .h1
+        label.textAlignment = .center
+        label.textColor = .label
+        label.isUserInteractionEnabled = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let inviteCodeUnderline: UIView = {
+        let view = UIView()
+        view.backgroundColor = .label
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    private lazy var qrButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        button.setImage(UIImage(systemName: "qrcode", withConfiguration: config), for: .normal)
+        button.tintColor = .label
+        button.backgroundColor = .secondarySystemGroupedBackground
+        button.layer.cornerRadius = 18
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.15
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(qrButtonTapped), for: .touchUpInside)
+        return button
     }()
 
     private var sessionDateBottomConstraint: NSLayoutConstraint?
@@ -169,7 +212,22 @@ class SessionInviteCardView: UIView {
         // Place the icon image inside the shadow container
         appIconContainer.addSubview(appIconView)
 
+        contentView.addSubview(inviteCodeLabel)
+        contentView.addSubview(inviteCodeUnderline)
+        addSubview(qrButton)
+
+        let codeTap = UITapGestureRecognizer(target: self, action: #selector(inviteCodeTapped))
+        inviteCodeLabel.addGestureRecognizer(codeTap)
+
         let metrics = layoutMetrics(for: displayStyle)
+        let isCodeReveal = displayStyle == .codeReveal
+
+        appIconContainer.isHidden = isCodeReveal
+        nestNameLabel.isHidden = isCodeReveal
+        sessionDateLabel.isHidden = isCodeReveal
+        inviteCodeLabel.isHidden = !isCodeReveal
+        inviteCodeUnderline.isHidden = !isCodeReveal
+        qrButton.isHidden = !isCodeReveal
         
         NSLayoutConstraint.activate([
             // Content view constraints
@@ -199,35 +257,56 @@ class SessionInviteCardView: UIView {
             inviteBadgeLabel.leadingAnchor.constraint(equalTo: inviteBadgeView.leadingAnchor, constant: metrics.badgeHorizontalPadding),
             inviteBadgeLabel.trailingAnchor.constraint(equalTo: inviteBadgeView.trailingAnchor, constant: -metrics.badgeHorizontalPadding),
             inviteBadgeLabel.bottomAnchor.constraint(equalTo: inviteBadgeView.bottomAnchor, constant: -metrics.badgeVerticalPadding),
-
-            // App icon container below perforation
-            appIconContainer.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            appIconContainer.topAnchor.constraint(equalTo: perforationView.bottomAnchor, constant: metrics.iconTopSpacing),
-            appIconContainer.widthAnchor.constraint(equalToConstant: metrics.iconSize),
-            appIconContainer.heightAnchor.constraint(equalTo: appIconContainer.widthAnchor),
-
-            // Icon fills its container
-            appIconView.topAnchor.constraint(equalTo: appIconContainer.topAnchor),
-            appIconView.leadingAnchor.constraint(equalTo: appIconContainer.leadingAnchor),
-            appIconView.trailingAnchor.constraint(equalTo: appIconContainer.trailingAnchor),
-            appIconView.bottomAnchor.constraint(equalTo: appIconContainer.bottomAnchor),
-
-            // Title and dates centered under icon
-            nestNameLabel.topAnchor.constraint(equalTo: appIconContainer.bottomAnchor, constant: metrics.titleTopSpacing),
-            nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
-            nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding),
-
-            sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: metrics.dateTopSpacing),
-            sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
-            sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding)
         ])
 
-        if let bottomPadding = metrics.bottomPadding {
-            sessionDateBottomConstraint = sessionDateLabel.bottomAnchor.constraint(
-                equalTo: contentView.bottomAnchor,
-                constant: -bottomPadding
-            )
-            sessionDateBottomConstraint?.isActive = true
+        if isCodeReveal {
+            NSLayoutConstraint.activate([
+                inviteCodeLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                inviteCodeLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: 24),
+                inviteCodeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
+                inviteCodeLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding),
+
+                inviteCodeUnderline.topAnchor.constraint(equalTo: inviteCodeLabel.bottomAnchor, constant: 4),
+                inviteCodeUnderline.leadingAnchor.constraint(equalTo: inviteCodeLabel.leadingAnchor),
+                inviteCodeUnderline.trailingAnchor.constraint(equalTo: inviteCodeLabel.trailingAnchor),
+                inviteCodeUnderline.heightAnchor.constraint(equalToConstant: 2),
+
+                qrButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                qrButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+                qrButton.widthAnchor.constraint(equalToConstant: 36),
+                qrButton.heightAnchor.constraint(equalToConstant: 36),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                // App icon container below perforation
+                appIconContainer.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                appIconContainer.topAnchor.constraint(equalTo: perforationView.bottomAnchor, constant: metrics.iconTopSpacing),
+                appIconContainer.widthAnchor.constraint(equalToConstant: metrics.iconSize),
+                appIconContainer.heightAnchor.constraint(equalTo: appIconContainer.widthAnchor),
+
+                // Icon fills its container
+                appIconView.topAnchor.constraint(equalTo: appIconContainer.topAnchor),
+                appIconView.leadingAnchor.constraint(equalTo: appIconContainer.leadingAnchor),
+                appIconView.trailingAnchor.constraint(equalTo: appIconContainer.trailingAnchor),
+                appIconView.bottomAnchor.constraint(equalTo: appIconContainer.bottomAnchor),
+
+                // Title and dates centered under icon
+                nestNameLabel.topAnchor.constraint(equalTo: appIconContainer.bottomAnchor, constant: metrics.titleTopSpacing),
+                nestNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
+                nestNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding),
+
+                sessionDateLabel.topAnchor.constraint(equalTo: nestNameLabel.bottomAnchor, constant: metrics.dateTopSpacing),
+                sessionDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: metrics.horizontalPadding),
+                sessionDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -metrics.horizontalPadding)
+            ])
+
+            if let bottomPadding = metrics.bottomPadding {
+                sessionDateBottomConstraint = sessionDateLabel.bottomAnchor.constraint(
+                    equalTo: contentView.bottomAnchor,
+                    constant: -bottomPadding
+                )
+                sessionDateBottomConstraint?.isActive = true
+            }
         }
     }
 
@@ -244,6 +323,14 @@ class SessionInviteCardView: UIView {
             inviteBadgeLabel.font = .h4
             sessionDateLabel.font = .bodyM
             appIconView.layer.cornerRadius = 14
+        case .reveal:
+            nestNameLabel.font = .h2
+            inviteBadgeLabel.font = .h4
+            sessionDateLabel.font = .bodyM
+            appIconView.layer.cornerRadius = 12
+        case .codeReveal:
+            inviteBadgeLabel.font = .h3
+            inviteCodeLabel.font = .boldSystemRounded(ofSize: 32)
         }
     }
 
@@ -285,6 +372,30 @@ class SessionInviteCardView: UIView {
                 bottomPadding: 20,
                 patternHeightMultiplier: 0.36
             )
+        case .reveal:
+            return LayoutMetrics(
+                badgeVerticalPadding: 4,
+                badgeHorizontalPadding: 10,
+                iconTopSpacing: 36,
+                iconSize: 56,
+                titleTopSpacing: 16,
+                dateTopSpacing: 6,
+                horizontalPadding: 18,
+                bottomPadding: 24,
+                patternHeightMultiplier: 0.4
+            )
+        case .codeReveal:
+            return LayoutMetrics(
+                badgeVerticalPadding: 6,
+                badgeHorizontalPadding: 14,
+                iconTopSpacing: 0,
+                iconSize: 0,
+                titleTopSpacing: 0,
+                dateTopSpacing: 0,
+                horizontalPadding: 20,
+                bottomPadding: nil,
+                patternHeightMultiplier: 0.4
+            )
         }
     }
     
@@ -299,6 +410,19 @@ class SessionInviteCardView: UIView {
         inviteBadgeView.backgroundColor = NNColors.primaryOpaque
         inviteBadgeView.layer.borderColor = NNColors.primary.cgColor
         inviteBadgeLabel.textColor = NNColors.primary
+    }
+
+    func configure(withInviteCode code: String) {
+        applyBannerTint(NNColors.primary)
+        inviteBadgeLabel.text = "SESSION INVITE"
+
+        let digits = code.filter(\.isNumber)
+        guard digits.count >= 6 else {
+            inviteCodeLabel.text = code
+            return
+        }
+        let normalized = String(digits.prefix(6))
+        inviteCodeLabel.text = String(normalized.prefix(3)) + "-" + String(normalized.suffix(3))
     }
     
     func configure(with session: SessionItem, invite: Invite, bannerTintColor: UIColor? = nil) {
@@ -351,6 +475,47 @@ class SessionInviteCardView: UIView {
                 \(startDateStr)\(yearStr)
                 \(startTimeStr) - \(endTimeStr)
                 """
+        }
+    }
+
+    @objc private func inviteCodeTapped() {
+        delegate?.sessionInviteCardViewDidTapInviteCode(self)
+    }
+
+    @objc private func qrButtonTapped() {
+        delegate?.sessionInviteCardViewDidTapQRCode(self)
+    }
+
+    func showCopyFeedback(text: String = "Copied!", duration: TimeInterval = 1.0) {
+        HapticsHelper.lightHaptic()
+
+        let copiedLabel = UILabel()
+        copiedLabel.text = text
+        copiedLabel.textColor = .white
+        copiedLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        copiedLabel.textAlignment = .center
+        copiedLabel.font = .captionBoldM
+        copiedLabel.layer.cornerRadius = 10
+        copiedLabel.clipsToBounds = true
+        copiedLabel.alpha = 0
+        copiedLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(copiedLabel)
+        NSLayoutConstraint.activate([
+            copiedLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            copiedLabel.centerYAnchor.constraint(equalTo: inviteCodeLabel.centerYAnchor),
+            copiedLabel.widthAnchor.constraint(equalToConstant: 100),
+            copiedLabel.heightAnchor.constraint(equalToConstant: 40),
+        ])
+
+        UIView.animate(withDuration: 0.2) {
+            copiedLabel.alpha = 1
+        }
+
+        UIView.animate(withDuration: 0.5, delay: duration, options: [], animations: {
+            copiedLabel.alpha = 0
+        }) { _ in
+            copiedLabel.removeFromSuperview()
         }
     }
 
