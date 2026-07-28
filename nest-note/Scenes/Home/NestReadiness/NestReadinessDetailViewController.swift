@@ -66,13 +66,24 @@ final class NestReadinessDetailViewController: NNViewController, UICollectionVie
         collectionView.delegate = self
         view.addSubview(collectionView)
 
-        doneButton.pinToBottom(of: view, addBlurEffect: true)
+        let bottomConstraint: NSLayoutConstraint
+        if #available(iOS 26.0, *) {
+            doneButton.pinToBottomEdgeContainer(of: view, scrollView: collectionView)
+            // Extend under the Done button; inset keeps the resting position at the button's top
+            // (button height 55 + bottom padding 10, relative to the safe area).
+            bottomConstraint = collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            collectionView.contentInset.bottom = 65
+            collectionView.verticalScrollIndicatorInsets.bottom = 65
+        } else {
+            doneButton.pinToBottom(of: view, addBlurEffect: true)
+            bottomConstraint = collectionView.bottomAnchor.constraint(equalTo: doneButton.topAnchor)
+        }
 
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: doneButton.topAnchor)
+            bottomConstraint
         ])
     }
 

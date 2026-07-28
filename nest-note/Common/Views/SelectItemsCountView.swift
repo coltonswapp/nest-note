@@ -13,13 +13,20 @@ class SelectItemsCountView: UIVisualEffectView {
     private let icon = UIImageView()
     private let countLabel = UILabel()
     private let iconLabelStack = UIStackView()
-    private let continueButton = UIButton(type: .system)
+    private let continueContainer = UIView()
+    private let continueTitleLabel = UILabel()
+    private let spinner = NNLoadingSpinner()
+    private let continueTapButton = UIButton(type: .system)
     private let stackView = UIStackView()
+    private var isLoading = false
 
     var onContinueTapped: (() -> Void)?
     
     /// When true, the bar stays visible after the user clears a non-empty selection so they can confirm zero items.
     var allowsEmptySelection: Bool = false
+    
+    /// When true, the bar is always visible (creation wizard step).
+    var alwaysShowsContinue: Bool = false
     
     /// Highest selection count seen this session; used with `allowsEmptySelection` to keep Continue available after clearing.
     var peakSelectionCount: Int = 0
@@ -113,20 +120,49 @@ class SelectItemsCountView: UIVisualEffectView {
     }
     
     private func setupContinueButton() {
-        var configuration = UIButton.Configuration.filled()
+        continueContainer.translatesAutoresizingMaskIntoConstraints = false
+        continueContainer.backgroundColor = .systemBlue
+        continueContainer.layer.cornerRadius = 18
+        continueContainer.clipsToBounds = true
         
-        var container = AttributeContainer()
-        container.font = .systemFont(ofSize: 18, weight: .bold)
-        configuration.attributedTitle = AttributedString("Continue", attributes: container)
-
-        configuration.baseBackgroundColor = .systemBlue
-        configuration.baseForegroundColor = .white
-        configuration.cornerStyle = .capsule
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+        continueTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        continueTitleLabel.text = "Continue"
+        continueTitleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        continueTitleLabel.textColor = .white
+        continueTitleLabel.textAlignment = .center
         
-        continueButton.configuration = configuration
-        continueButton.addTarget(self, action: #selector(continueButtonTapped), for: .touchUpInside)
-        continueButton.translatesAutoresizingMaskIntoConstraints = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isHidden = true
+        spinner.configure(with: .white)
+        
+        continueTapButton.translatesAutoresizingMaskIntoConstraints = false
+        continueTapButton.addTarget(self, action: #selector(continueButtonTapped), for: .touchUpInside)
+        
+        continueContainer.addSubview(continueTitleLabel)
+        continueContainer.addSubview(spinner)
+        continueContainer.addSubview(continueTapButton)
+        
+        NSLayoutConstraint.activate([
+            continueTitleLabel.centerXAnchor.constraint(equalTo: continueContainer.centerXAnchor),
+            continueTitleLabel.centerYAnchor.constraint(equalTo: continueContainer.centerYAnchor),
+            continueTitleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: continueContainer.leadingAnchor, constant: 16),
+            continueTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: continueContainer.trailingAnchor, constant: -16),
+            
+            spinner.centerXAnchor.constraint(equalTo: continueContainer.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: continueContainer.centerYAnchor),
+            spinner.heightAnchor.constraint(equalToConstant: 20),
+            spinner.widthAnchor.constraint(equalTo: spinner.heightAnchor),
+            
+            continueTapButton.topAnchor.constraint(equalTo: continueContainer.topAnchor),
+            continueTapButton.leadingAnchor.constraint(equalTo: continueContainer.leadingAnchor),
+            continueTapButton.trailingAnchor.constraint(equalTo: continueContainer.trailingAnchor),
+            continueTapButton.bottomAnchor.constraint(equalTo: continueContainer.bottomAnchor),
+            
+            continueContainer.heightAnchor.constraint(equalToConstant: 36),
+            continueContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 110)
+        ])
+        
+        spinner.transform = CGAffineTransform(translationX: 0, y: 40)
     }
     
     private func setupStackView() {
@@ -137,7 +173,7 @@ class SelectItemsCountView: UIVisualEffectView {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         
         stackView.addArrangedSubview(iconLabelStack)
-        stackView.addArrangedSubview(continueButton)
+        stackView.addArrangedSubview(continueContainer)
         contentView.addSubview(stackView)
     }
     
@@ -163,20 +199,115 @@ class SelectItemsCountView: UIVisualEffectView {
     }
     
     private func updateVisibility() {
-        let shouldShow = count > 0 || (allowsEmptySelection && peakSelectionCount > 0)
+        guard !isLoading else { return }
+        
+        let shouldShow = alwaysShowsContinue || count > 0 || (allowsEmptySelection && peakSelectionCount > 0)
         let targetTransform = shouldShow ? .identity : CGAffineTransform(translationX: 0, y: 100)
 
         let animator = UIViewPropertyAnimator(duration: 0.4, controlPoint1: CGPoint(x: 0.34, y: 1.56), controlPoint2: CGPoint(x: 0.28, y: 0.94), animations: {
             self.transform = targetTransform
+            self.alpha = 1
         })
-
-        // Glass effect is built into the view itself
 
         animator.startAnimation()
     }
-
+    
+    // MARK: - Loading
+    
+    func startLoading() {
+        guard !isLoading else { return }
+        isLoading = true
+        isUserInteractionEnabled = false
+        
+        spinner.isHidden = false
+        spinner.reset()
+        spinner.transform = CGAffineTransform(translationX: 0, y: continueContainer.bounds.height > 0 ? continueContainer.bounds.height : 40)
+        
+        let animator = UIViewPropertyAnimator(
+            duration: 0.45,
+            controlPoint1: CGPoint(x: 0.76, y: 0.0),
+            controlPoint2: CGPoint(x: 0.24, y: 1.0)
+        ) {
+            self.spinner.transform = .identity
+            self.continueTitleLabel.transform = CGAffineTransform(
+                translationX: 0,
+                y: -(self.continueContainer.bounds.height > 0 ? self.continueContainer.bounds.height : 40)
+            )
+        }
+        animator.startAnimation()
+    }
+    
+    /// - Parameter restoreTitle: When false, leaves the spinner/success state visible (e.g. before sliding the bar off).
+    func stopLoading(
+        withSuccess success: Bool? = nil,
+        restoreTitle: Bool = true,
+        completion: (() -> Void)? = nil
+    ) {
+        let finish: () -> Void = { [weak self] in
+            guard let self else {
+                completion?()
+                return
+            }
+            
+            if restoreTitle {
+                self.hideSpinner {
+                    self.isLoading = false
+                    self.isUserInteractionEnabled = true
+                    completion?()
+                }
+            } else {
+                self.isLoading = false
+                self.isUserInteractionEnabled = true
+                completion?()
+            }
+        }
+        
+        if let success {
+            spinner.animateState(success: success) {
+                finish()
+            }
+        } else {
+            finish()
+        }
+    }
+    
+    func animateOff(completion: (() -> Void)? = nil) {
+        // Avoid animating alpha on UIVisualEffectView — it snaps the glass effect off
+        // instead of fading. Match the same spring used when the bar slides in.
+        let offscreenY = max(bounds.height + 40, 120)
+        let animator = UIViewPropertyAnimator(
+            duration: 0.45,
+            controlPoint1: CGPoint(x: 0.34, y: 1.56),
+            controlPoint2: CGPoint(x: 0.28, y: 0.94)
+        ) {
+            self.transform = CGAffineTransform(translationX: 0, y: offscreenY)
+        }
+        animator.addCompletion { _ in
+            completion?()
+        }
+        animator.startAnimation()
+    }
+    
+    private func hideSpinner(completion: (() -> Void)? = nil) {
+        let offset = continueContainer.bounds.height > 0 ? continueContainer.bounds.height : 40
+        let animator = UIViewPropertyAnimator(
+            duration: 0.35,
+            controlPoint1: CGPoint(x: 0.76, y: 0.0),
+            controlPoint2: CGPoint(x: 0.24, y: 1.0)
+        ) {
+            self.spinner.transform = CGAffineTransform(translationX: 0, y: offset)
+            self.continueTitleLabel.transform = .identity
+        }
+        animator.addCompletion { _ in
+            self.spinner.isHidden = true
+            self.spinner.reset()
+            completion?()
+        }
+        animator.startAnimation()
+    }
     
     @objc private func continueButtonTapped() {
+        guard !isLoading else { return }
         onContinueTapped?()
     }
 }

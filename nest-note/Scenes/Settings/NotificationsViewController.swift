@@ -10,6 +10,10 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     private var footerRegistration: UICollectionView.SupplementaryRegistration<NotificationFooterView>!
     
     private var notificationsEnabled: Bool = false
+    #if DEBUG
+    private var adminSignupAlertsEnabled: Bool = false
+    private var adminAlertStatus: AdminSignupAlertStatus?
+    #endif
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -53,31 +57,34 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     }
     
     private func createLayout() -> UICollectionViewLayout {
-        var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
-        config.headerMode = .supplementary
-        config.footerMode = .supplementary
-        
-        return UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
+        UICollectionViewCompositionalLayout { [weak self] sectionIndex, layoutEnvironment in
+            var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            config.headerMode = .supplementary
+
+            let showsDisabledNotificationsFooter = sectionIndex == 0 && !(self?.notificationsEnabled ?? false)
+            config.footerMode = showsDisabledNotificationsFooter ? .supplementary : .none
+
             let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
-            
-            // Standardize header size
+
             let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: headerSize,
                 elementKind: UICollectionView.elementKindSectionHeader,
                 alignment: .top
             )
-            
-            // Footer size
-            let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(20))
-            let footer = NSCollectionLayoutBoundarySupplementaryItem(
-                layoutSize: footerSize,
-                elementKind: UICollectionView.elementKindSectionFooter,
-                alignment: .bottom
-            )
-            
-            section.boundarySupplementaryItems = [header, footer]
-            
+
+            var supplementaryItems = [header]
+            if showsDisabledNotificationsFooter {
+                let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
+                let footer = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: footerSize,
+                    elementKind: UICollectionView.elementKindSectionFooter,
+                    alignment: .bottom
+                )
+                supplementaryItems.append(footer)
+            }
+
+            section.boundarySupplementaryItems = supplementaryItems
             return section
         }
     }
@@ -92,14 +99,12 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
         
         footerRegistration = UICollectionView.SupplementaryRegistration<NotificationFooterView>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { [weak self] (footerView, string, indexPath) in
-            guard let self = self else { return }
-            footerView.configure { [weak self] in
+        ) { (footerView, string, indexPath) in
+            footerView.configure {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)
                 }
             }
-            footerView.isHidden = self.notificationsEnabled
         }
         
         let notificationCellRegistration = UICollectionView.CellRegistration<NotificationCell, Item> { cell, indexPath, item in
@@ -109,18 +114,62 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
             }
         }
         
+        #if DEBUG
         let fcmTokenCellRegistration = UICollectionView.CellRegistration<FCMTokenCell, Item> { cell, indexPath, item in
             if case let .fcmToken(token, uploadDate) = item {
                 cell.configure(token: token, uploadDate: uploadDate)
             }
         }
+        let adminAlertCellRegistration = UICollectionView.CellRegistration<NotificationCell, Item> { cell, indexPath, item in
+            if case let .adminSignupAlerts(isEnabled) = item {
+                cell.configure(
+                    title: "Signup alerts on this device",
+                    description: "Receive a push when someone completes onboarding",
+                    isEnabled: isEnabled
+                )
+                cell.delegate = self
+            }
+        }
+
+        let adminStatusCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case let .adminAlertStatus(statusText) = item {
+                var content = cell.defaultContentConfiguration()
+                content.text = "Admin Alert Status"
+                content.secondaryText = statusText
+                content.secondaryTextProperties.numberOfLines = 0
+                content.directionalLayoutMargins.top = 12
+                content.directionalLayoutMargins.bottom = 12
+                cell.contentConfiguration = content
+            }
+        }
+
+        let adminTestCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            if case .adminTestAlert = item {
+                var content = cell.defaultContentConfiguration()
+                content.text = "Send Test Signup Alert"
+                content.secondaryText = "Verify admin push delivery to this device"
+                content.directionalLayoutMargins.top = 12
+                content.directionalLayoutMargins.bottom = 12
+                cell.contentConfiguration = content
+                cell.accessories = [.disclosureIndicator()]
+            }
+        }
+        #endif
         
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .notification:
                 return collectionView.dequeueConfiguredReusableCell(using: notificationCellRegistration, for: indexPath, item: item)
+            #if DEBUG
             case .fcmToken:
                 return collectionView.dequeueConfiguredReusableCell(using: fcmTokenCellRegistration, for: indexPath, item: item)
+            case .adminSignupAlerts:
+                return collectionView.dequeueConfiguredReusableCell(using: adminAlertCellRegistration, for: indexPath, item: item)
+            case .adminAlertStatus:
+                return collectionView.dequeueConfiguredReusableCell(using: adminStatusCellRegistration, for: indexPath, item: item)
+            case .adminTestAlert:
+                return collectionView.dequeueConfiguredReusableCell(using: adminTestCellRegistration, for: indexPath, item: item)
+            #endif
             }
         }
         
@@ -138,7 +187,7 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         #if DEBUG
-        snapshot.appendSections([.notifications, .fcmTokens])
+        snapshot.appendSections([.notifications, .adminAlerts, .fcmTokens])
         #else
         snapshot.appendSections([.notifications])
         #endif
@@ -169,6 +218,16 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
                 snapshot.appendItems(notificationItems, toSection: .notifications)
                 
                 #if DEBUG
+                let adminStatus = try? await AdminNotificationService.shared.fetchSignupAlertStatus()
+                self.adminAlertStatus = adminStatus
+                self.adminSignupAlertsEnabled = adminStatus?.isEnabled ?? false
+
+                snapshot.appendItems([
+                    .adminSignupAlerts(isEnabled: self.adminSignupAlertsEnabled),
+                    .adminAlertStatus(statusText: self.adminAlertStatusText),
+                    .adminTestAlert
+                ], toSection: .adminAlerts)
+
                 // Fetch FCM tokens from Firestore
                 do {
                     let fcmTokens = try await UserService.shared.fetchStoredFCMTokens()
@@ -230,29 +289,72 @@ class NotificationsViewController: NNViewController, UICollectionViewDelegate {
     
     enum Section: Hashable {
         case notifications
+        #if DEBUG
+        case adminAlerts
         case fcmTokens
+        #endif
         
         var title: String {
             switch self {
             case .notifications: return "Notification Preferences"
+            #if DEBUG
+            case .adminAlerts: return "Admin Alerts"
             case .fcmTokens: return "FCM Tokens"
+            #endif
             }
         }
     }
     
     enum Item: Hashable {
         case notification(title: String, description: String, isEnabled: Bool)
+        #if DEBUG
+        case adminSignupAlerts(isEnabled: Bool)
+        case adminAlertStatus(statusText: String)
+        case adminTestAlert
         case fcmToken(token: String, uploadDate: Date)
+        #endif
     }
+    #if DEBUG
+    private var adminAlertStatusText: String {
+        guard let status = adminAlertStatus else { return "Not registered" }
+        if status.isEnabled {
+            let dateText = status.registeredAt.map {
+                DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short)
+            } ?? "Unknown date"
+            return "Registered • \(status.fcmTokenPrefix ?? "token") • \(dateText)"
+        }
+        return "Disabled"
+    }
+    #endif
     
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        #if DEBUG
+        if let item = dataSource.itemIdentifier(for: indexPath), case .adminTestAlert = item {
+            return true
+        }
+        #endif
         return false
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        #if DEBUG
+        guard let item = dataSource.itemIdentifier(for: indexPath), case .adminTestAlert = item else { return }
+        sendTestAdminAlert()
+        #endif
     }
 }
 
 // MARK: - NotificationCellDelegate
 extension NotificationsViewController: NotificationCellDelegate {
     func notificationCell(_ cell: NotificationCell, didToggleSwitch isOn: Bool) {
+        if cell.titleLabel.text == "Signup alerts on this device" {
+            #if DEBUG
+            handleAdminSignupAlertsToggle(isOn: isOn, cell: cell)
+            #endif
+            return
+        }
+
         guard let user = UserService.shared.currentUser else { return }
 
         // If user is trying to enable notifications, check permissions first
@@ -378,6 +480,78 @@ extension NotificationsViewController: NotificationCellDelegate {
             Logger.log(level: .error, category: .general, message: "Failed to handle notification enable: \(error.localizedDescription)")
         }
     }
+
+    #if DEBUG
+    private func handleAdminSignupAlertsToggle(isOn: Bool, cell: NotificationCell) {
+        Task {
+            do {
+                if isOn {
+                    await handleNotificationEnable()
+                    try await UserService.shared.fetchAndPersistFCMToken()
+                    let token = try await AdminNotificationService.shared.currentFCMToken()
+                    guard let userId = UserService.shared.currentUser?.id else {
+                        throw AdminNotificationError.missingUser
+                    }
+                    try await AdminNotificationService.shared.registerSignupAlerts(fcmToken: token, userId: userId)
+                    await MainActor.run {
+                        showToast(text: "Admin alerts enabled", subtitle: "This device will receive signup notifications", sentiment: .positive)
+                    }
+                } else {
+                    try await AdminNotificationService.shared.unregisterSignupAlerts()
+                    await MainActor.run {
+                        showToast(text: "Admin alerts disabled")
+                    }
+                }
+
+                await MainActor.run {
+                    self.applyInitialSnapshots()
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to update admin signup alerts: \(error.localizedDescription)")
+                await MainActor.run {
+                    cell.resetToggle()
+                    showToast(text: "Failed to update admin alerts")
+                }
+            }
+        }
+    }
+
+    private func sendTestAdminAlert() {
+        Task {
+            do {
+                if AdminNotificationService.shared.isLocallyEnabled,
+                   let userId = UserService.shared.currentUser?.id {
+                    try await UserService.shared.fetchAndPersistFCMToken()
+                    let token = try await AdminNotificationService.shared.currentFCMToken()
+                    try await AdminNotificationService.shared.registerSignupAlerts(fcmToken: token, userId: userId)
+                }
+                try await AdminNotificationService.shared.sendTestSignupAlert()
+                await MainActor.run {
+                    showToast(text: "Test alert sent", subtitle: "Check your notification center", sentiment: .positive)
+                }
+            } catch {
+                Logger.log(level: .error, category: .general, message: "Failed to send test admin alert: \(error.localizedDescription)")
+                await MainActor.run {
+                    showToast(text: "Failed to send test alert", subtitle: error.localizedDescription)
+                }
+            }
+        }
+    }
+    #endif
+}
+
+private enum AdminNotificationError: LocalizedError {
+    case missingUser
+    case missingToken
+
+    var errorDescription: String? {
+        switch self {
+        case .missingUser:
+            return "No signed-in user available for admin alert registration"
+        case .missingToken:
+            return "No FCM token available for admin alert registration"
+        }
+    }
 }
 
 // MARK: - NotificationCell
@@ -486,8 +660,8 @@ class NotificationFooterView: UICollectionReusableView {
         NSLayoutConstraint.activate([
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24)
+            messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
         ])
         
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))

@@ -1295,19 +1295,6 @@ class PDFExportService {
         let bottomMargin: CGFloat = 60
         guard !contacts.isEmpty else { return y }
 
-        let titleFont = UIFont.systemFont(ofSize: 22, weight: .bold)
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: titleFont,
-            .foregroundColor: UIColor.black
-        ]
-        let titleHeight = "Contacts".size(withAttributes: titleAttributes).height + 20
-        if y + titleHeight > pageSize.height - bottomMargin {
-            context.beginPage()
-            y = 60
-        }
-        "Contacts".draw(at: CGPoint(x: leftMargin, y: y), withAttributes: titleAttributes)
-        y += titleHeight
-
         let byCategory = Dictionary(grouping: contacts) { $0.category }
         for categoryName in byCategory.keys.sorted() {
             let categoryContacts = byCategory[categoryName] ?? []
@@ -1341,12 +1328,12 @@ class PDFExportService {
     ) -> CGFloat {
         var y = currentY
 
-        let categoryFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        let categoryFont = UIFont.systemFont(ofSize: 22, weight: .bold)
         let categoryAttributes: [NSAttributedString.Key: Any] = [
             .font: categoryFont,
             .foregroundColor: UIColor.black
         ]
-        let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 12
+        let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 20
         if y + categoryHeight > pageSize.height - bottomMargin {
             context.beginPage()
             y = 60
@@ -1357,28 +1344,71 @@ class PDFExportService {
         let sortedContacts = contacts.sorted {
             $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }
-        let nameLabelFont = UIFont.systemFont(ofSize: 14, weight: .medium)
-        let nameLabelAttrs: [NSAttributedString.Key: Any] = [
-            .font: nameLabelFont,
+
+        y = drawContactsGridWithPageBreaks(
+            context: context,
+            contacts: sortedContacts,
+            currentY: y,
+            leftMargin: leftMargin,
+            contentWidth: contentWidth,
+            pageSize: pageSize,
+            bottomMargin: bottomMargin
+        )
+
+        return y
+    }
+
+    private static func drawContactsGridWithPageBreaks(
+        context: UIGraphicsPDFRendererContext,
+        contacts: [ContactItem],
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
+        let columnsPerRow = 3
+        let rowHeight: CGFloat = 70
+        let columnWidth = contentWidth / CGFloat(columnsPerRow)
+        let itemSpacing: CGFloat = 8
+
+        var y = currentY
+        var currentRowItems: [ContactItem] = []
+
+        let titleFont = UIFont.systemFont(ofSize: 12, weight: .medium)
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
             .foregroundColor: UIColor.gray
         ]
         let phoneFont = UIFont.systemFont(ofSize: 14, weight: .regular)
-        let phoneAttrs: [NSAttributedString.Key: Any] = [
+        let phoneAttributes: [NSAttributedString.Key: Any] = [
             .font: phoneFont,
             .foregroundColor: UIColor.black
         ]
 
-        for contact in sortedContacts {
-            let titleLine = contact.title.uppercased()
-            let titleH = titleLine.size(withAttributes: nameLabelAttrs).height
-            if y + titleH + phoneFont.lineHeight > pageSize.height - bottomMargin {
-                context.beginPage()
-                y = 60
+        for (index, contact) in contacts.enumerated() {
+            currentRowItems.append(contact)
+
+            if currentRowItems.count == columnsPerRow || index == contacts.count - 1 {
+                if y + rowHeight > pageSize.height - bottomMargin {
+                    context.beginPage()
+                    y = 60
+                }
+
+                for (columnIndex, contact) in currentRowItems.enumerated() {
+                    let x = leftMargin + CGFloat(columnIndex) * columnWidth
+                    let availableWidth = columnWidth - (columnIndex < columnsPerRow - 1 ? itemSpacing : 0)
+
+                    let titleRect = CGRect(x: x, y: y + 8, width: availableWidth, height: 16)
+                    contact.title.uppercased().draw(in: titleRect, withAttributes: titleAttributes)
+
+                    let phoneRect = CGRect(x: x, y: y + 32, width: availableWidth, height: 30)
+                    contact.phoneNumber.draw(in: phoneRect, withAttributes: phoneAttributes)
+                }
+
+                y += rowHeight
+                currentRowItems.removeAll()
             }
-            titleLine.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: nameLabelAttrs)
-            y += titleH + 4
-            contact.phoneNumber.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: phoneAttrs)
-            y += phoneFont.lineHeight + 10
         }
 
         return y

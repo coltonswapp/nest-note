@@ -8,6 +8,8 @@ class SurveyDashboardViewController: NNViewController {
     private var survey30DayCounts: [SurveyResponse.SurveyType: Int] = [:]
     private var featureMetrics: [SurveyService.Feature: FeatureMetrics] = [:]
     private var feedbackMetrics: FeedbackMetrics?
+    private var todaySignupStats: SignupPeriodStats = .empty
+    private var weekSignupStats: SignupPeriodStats = .empty
     
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -159,7 +161,7 @@ class SurveyDashboardViewController: NNViewController {
             if case .recentSurveysView = item {
                 var content = cell.defaultContentConfiguration()
                 content.text = "View Recent Surveys"
-                content.secondaryText = "See the 25 most recent survey responses"
+                content.secondaryText = "Browse recent survey responses"
 
                 // Set layout margins
                 content.directionalLayoutMargins.top = 16
@@ -167,6 +169,12 @@ class SurveyDashboardViewController: NNViewController {
 
                 cell.contentConfiguration = content
                 cell.accessories = [.disclosureIndicator()]
+            }
+        }
+
+        let signupSummaryCellRegistration = UICollectionView.CellRegistration<SignupSummaryCell, Item> { cell, indexPath, item in
+            if case let .signupSummary(today, week) = item {
+                cell.configure(today: today, week: week)
             }
         }
         
@@ -180,6 +188,8 @@ class SurveyDashboardViewController: NNViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: feedbackCellRegistration, for: indexPath, item: item)
             case .recentSurveysView:
                 return collectionView.dequeueConfiguredReusableCell(using: recentSurveysCellRegistration, for: indexPath, item: item)
+            case .signupSummary:
+                return collectionView.dequeueConfiguredReusableCell(using: signupSummaryCellRegistration, for: indexPath, item: item)
             }
         }
         
@@ -190,7 +200,9 @@ class SurveyDashboardViewController: NNViewController {
     
     private func applyInitialSnapshots() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.surveyResults, .featureVotes, .feedback, .recentSurveys])
+        snapshot.appendSections([.signUps, .surveyResults, .featureVotes, .feedback, .recentSurveys])
+
+        snapshot.appendItems([.signupSummary(today: todaySignupStats, week: weekSignupStats)], toSection: .signUps)
 
         // Add survey results
         let surveyItems = surveyMetrics.map { Item.surveyResult(type: $0.key, metrics: $0.value) }
@@ -236,6 +248,9 @@ class SurveyDashboardViewController: NNViewController {
             // Fetch feedback metrics
             let feedbackMetrics = try await surveyService.getFeedbackMetrics()
 
+            let todayStats = try await surveyService.getSignupStats(period: .today)
+            let weekStats = try await surveyService.getSignupStats(period: .thisWeek)
+
             await MainActor.run {
                 // Update survey metrics
                 surveyMetrics[.parentSurvey] = parentMetrics
@@ -251,6 +266,9 @@ class SurveyDashboardViewController: NNViewController {
                 // Update feedback metrics
                 self.feedbackMetrics = feedbackMetrics
 
+                self.todaySignupStats = todayStats
+                self.weekSignupStats = weekStats
+
                 // Apply new snapshot
                 applyInitialSnapshots()
             }
@@ -265,10 +283,19 @@ class SurveyDashboardViewController: NNViewController {
 
 // MARK: - UICollectionViewDelegate
 extension SurveyDashboardViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return true }
+        if case .signupSummary = item { return false }
+        return true
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         switch item {
+        case .signupSummary:
+            break
+
         case .surveyResult(let type, let metrics):
             let vc = SurveyDetailViewController(surveyType: type, metrics: metrics)
             navigationController?.pushViewController(vc, animated: true)
@@ -293,6 +320,7 @@ extension SurveyDashboardViewController: UICollectionViewDelegate {
 // MARK: - Types
 extension SurveyDashboardViewController {
     enum Section: Hashable {
+        case signUps
         case surveyResults
         case featureVotes
         case feedback
@@ -300,6 +328,7 @@ extension SurveyDashboardViewController {
 
         var title: String {
             switch self {
+            case .signUps: return "Sign Ups"
             case .surveyResults: return "Survey Results"
             case .featureVotes: return "Feature Votes"
             case .feedback: return "User Feedback"
@@ -309,6 +338,7 @@ extension SurveyDashboardViewController {
     }
     
     enum Item: Hashable {
+        case signupSummary(today: SignupPeriodStats, week: SignupPeriodStats)
         case surveyResult(type: SurveyResponse.SurveyType, metrics: SurveyMetrics)
         case featureVote(feature: SurveyService.Feature, metrics: FeatureMetrics)
         case feedback(metrics: FeedbackMetrics)
@@ -316,6 +346,10 @@ extension SurveyDashboardViewController {
         
         func hash(into hasher: inout Hasher) {
             switch self {
+            case .signupSummary(let today, let week):
+                hasher.combine(-1)
+                hasher.combine(today)
+                hasher.combine(week)
             case .surveyResult(let type, let metrics):
                 hasher.combine(0) // Discriminator for surveyResult case
                 hasher.combine(type)
@@ -334,6 +368,8 @@ extension SurveyDashboardViewController {
         
         static func == (lhs: Item, rhs: Item) -> Bool {
             switch (lhs, rhs) {
+            case let (.signupSummary(today1, week1), .signupSummary(today2, week2)):
+                return today1 == today2 && week1 == week2
             case let (.surveyResult(type1, metrics1), .surveyResult(type2, metrics2)):
                 return type1 == type2 && metrics1 == metrics2
             case let (.featureVote(feature1, metrics1), .featureVote(feature2, metrics2)):
@@ -436,4 +472,122 @@ private class FeatureCell: UICollectionViewListCell {
         dateFormatter.timeStyle = .short
         lastUpdatedLabel.text = "Updated \(dateFormatter.string(from: metrics.lastUpdated))"
     }
-} 
+}
+
+private class SignupSummaryCell: UICollectionViewListCell {
+    private let todayColumn = SignupPeriodColumnView(title: "Today")
+    private let weekColumn = SignupPeriodColumnView(title: "This Week")
+
+    private let divider: UIView = {
+        let view = UIView()
+        view.backgroundColor = .separator
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        var background = UIBackgroundConfiguration.listGroupedCell()
+        background.backgroundColor = .secondarySystemGroupedBackground
+        backgroundConfiguration = background
+
+        let columnsStack = UIStackView(arrangedSubviews: [todayColumn, weekColumn])
+        columnsStack.axis = .horizontal
+        columnsStack.spacing = 16
+        columnsStack.distribution = .fillEqually
+        columnsStack.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(columnsStack)
+        contentView.addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            columnsStack.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 12),
+            columnsStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            columnsStack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            columnsStack.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -12),
+
+            divider.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            divider.topAnchor.constraint(equalTo: columnsStack.topAnchor, constant: 4),
+            divider.bottomAnchor.constraint(equalTo: columnsStack.bottomAnchor, constant: -4),
+            divider.widthAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale)
+        ])
+    }
+
+    func configure(today: SignupPeriodStats, week: SignupPeriodStats) {
+        todayColumn.configure(stats: today)
+        weekColumn.configure(stats: week)
+    }
+}
+
+private final class SignupPeriodColumnView: UIView {
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyM
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let totalLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 34, weight: .bold)
+        label.textColor = .label
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let breakdownLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        return label
+    }()
+
+    init(title: String) {
+        super.init(frame: .zero)
+        titleLabel.text = title
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        let stack = UIStackView(arrangedSubviews: [titleLabel, totalLabel, breakdownLabel])
+        stack.axis = .vertical
+        stack.spacing = 4
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    func configure(stats: SignupPeriodStats) {
+        totalLabel.text = "\(stats.total)"
+
+        let parentText = String(AttributedString(
+            localized: "^[\(stats.parent) \("parent")](inflect: true)"
+        ).characters)
+        let sitterText = String(AttributedString(
+            localized: "^[\(stats.sitter) \("sitter")](inflect: true)"
+        ).characters)
+        breakdownLabel.text = "\(parentText) · \(sitterText)"
+    }
+}

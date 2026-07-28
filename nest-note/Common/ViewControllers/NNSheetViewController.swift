@@ -4,58 +4,42 @@ protocol NNSheetViewControllerDelegate: AnyObject {
     func sheetViewController(_ controller: NNSheetViewController, didDismissWithResult result: Any?)
 }
 
-// MARK: - Internal Protocol for Scroll-based Dismissal
-internal protocol ScrollViewDismissalProvider {
-    var dismissalHandlingScrollView: UIScrollView? { get }
-    var shouldDisableScrollDismissalForEditMode: Bool { get }
-}
-
-extension ScrollViewDismissalProvider {
-    var dismissalHandlingScrollView: UIScrollView? { nil }
-    var shouldDisableScrollDismissalForEditMode: Bool { false }
-}
-
 class NNSheetViewController: NNViewController {
+    
+    static let ctaBottomPadding: CGFloat = 24
+    private static let navigationBarHeight: CGFloat = 44
+    private static let navigationBarTopInset: CGFloat = 12
     
     // MARK: - Properties
     weak var delegate: NNSheetViewControllerDelegate?
-    private let customTransitioningDelegate: NNSheetTransitioningDelegate?
     
     let containerView: UIView = {
         let view = UIView()
         view.backgroundColor = NNColors.groupedBackground
-        view.layer.cornerRadius = 34
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
+
+    private(set) lazy var navigationBar: UINavigationBar = {
+        let bar = UINavigationBar()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.prefersLargeTitles = false
+        bar.tintColor = .label
+        return bar
+    }()
     
+    /// Hidden compatibility shim — subclasses set `.text`; synced to `navigationItem.title`.
     let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .h3
-        label.textAlignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
+        label.isHidden = true
         return label
     }()
     
-    let closeButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "xmark"), for: .normal)
-        button.tintColor = .secondaryLabel
-        button.backgroundColor = .clear
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-    
-    let infoButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        let image = UIImage(systemName: "ellipsis", withConfiguration: config)
-        button.setImage(image, for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.isHidden = true // Hidden by default, subclasses enable if needed
-        return button
-    }()
+    private(set) var showsLeadingBarButton = false
+    private var leadingBarButtonMenu: UIMenu?
+    private var leadingDoneBarButtonTitle: String?
+    private weak var leadingDoneTarget: AnyObject?
+    private var leadingDoneAction: Selector?
     
     let titleField: UITextField = {
         let field = UITextField()
@@ -72,31 +56,16 @@ class NNSheetViewController: NNViewController {
         return view
     }()
     
-    let gripView: UIGrabberView = {
-        let view = UIGrabberView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-    
     // MARK: - Protected Properties (for subclasses)
     var containerBottomConstraint: NSLayoutConstraint?
+    var containerTopConstraint: NSLayoutConstraint?
     var itemsHiddenDuringTransition: [UIView] = []
-    
-    // MARK: - Private Properties
-    private var panGestureRecognizer: UIPanGestureRecognizer!
-    private var initialContainerViewOrigin: CGPoint = .zero
-    private let dragThreshold: CGFloat = 100.0
-    private var hasFiredHaptic = false
-    private let sourceFrame: CGRect?
     
     // MARK: - Initialization
     init(sourceFrame: CGRect? = nil) {
-        self.sourceFrame = sourceFrame
-        self.customTransitioningDelegate = NNSheetTransitioningDelegate(sourceFrame: sourceFrame)
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .custom
-        transitioningDelegate = customTransitioningDelegate
-        view.backgroundColor = .black
+        modalPresentationStyle = .pageSheet
+        view.backgroundColor = NNColors.groupedBackground
     }
     
     required init?(coder: NSCoder) {
@@ -106,66 +75,49 @@ class NNSheetViewController: NNViewController {
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black.withAlphaComponent(0.5)
-        setupPanGestureRecognizer()
+        view.backgroundColor = NNColors.groupedBackground
+        configureSheetPresentationIfNeeded()
         setupKeyboardObservers()
         setupInfoButton()
+        refreshNavigationBarItems()
     }
-    
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        
-        // Re-run scroll view setup in case the view hierarchy changed after viewDidLoad
-        // This ensures we catch scroll views that were added in addContentToContainer
-        setupScrollViewGestureIfNeeded()
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        refreshNavigationBarItems()
     }
     
     // MARK: - Setup Methods
-    override func setup() {
-        super.setup()
-        closeButton.addTarget(self, action: #selector(dismissViewController), for: .touchUpInside)
-    }
-    
     override func addSubviews() {
         view.addSubview(containerView)
-        containerView.addSubview(gripView)
-        containerView.addSubview(titleLabel)
-        containerView.addSubview(closeButton)
-        containerView.addSubview(infoButton)
+        containerView.addSubview(navigationBar)
         containerView.addSubview(titleField)
         containerView.addSubview(dividerView)
         
-        // Allow subclasses to add their content
         addContentToContainer()
     }
     
     override func constrainSubviews() {
-        containerBottomConstraint = containerView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
-        
+        setupNavigationBar()
+
+        containerTopConstraint = containerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+        containerBottomConstraint = containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+
         NSLayoutConstraint.activate([
-            containerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            containerTopConstraint!,
             containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             containerBottomConstraint!,
+
+            navigationBar.topAnchor.constraint(
+                equalTo: containerView.topAnchor,
+                constant: Self.navigationBarTopInset
+            ),
+            navigationBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            navigationBar.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            navigationBar.heightAnchor.constraint(equalToConstant: Self.navigationBarHeight),
             
-            gripView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
-            gripView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            
-            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20),
-            titleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            
-            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36),
-            
-            infoButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            infoButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            infoButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
-            infoButton.heightAnchor.constraint(equalToConstant: 36),
-            
-            titleField.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
-//            titleField.topAnchor.constraint(greaterThanOrEqualTo: titleLabel.bottomAnchor, constant: 16),
+            titleField.topAnchor.constraint(equalTo: navigationBar.bottomAnchor, constant: 16),
             titleField.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             titleField.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
@@ -175,6 +127,75 @@ class NNSheetViewController: NNViewController {
             dividerView.heightAnchor.constraint(equalToConstant: 1)
         ])
     }
+
+    private func setupNavigationBar() {
+        navigationBar.setItems([navigationItem], animated: false)
+
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.backgroundColor = NNColors.groupedBackground
+        appearance.shadowColor = .clear
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+    }
+
+    func setLeadingBarButtonHidden(_ hidden: Bool) {
+        showsLeadingBarButton = !hidden
+        refreshNavigationBarItems()
+    }
+
+    func setLeadingBarButtonMenu(_ menu: UIMenu?) {
+        leadingBarButtonMenu = menu
+        leadingDoneBarButtonTitle = nil
+        leadingDoneTarget = nil
+        leadingDoneAction = nil
+        refreshNavigationBarItems()
+    }
+
+    func setLeadingDoneBarButton(title: String, target: Any, action: Selector) {
+        leadingDoneBarButtonTitle = title
+        leadingDoneTarget = target as AnyObject
+        leadingDoneAction = action
+        leadingBarButtonMenu = nil
+        refreshNavigationBarItems()
+    }
+
+    func refreshNavigationBarItems() {
+        navigationItem.title = titleLabel.text
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .close,
+            target: self,
+            action: #selector(dismissViewController)
+        )
+
+        if !showsLeadingBarButton {
+            navigationItem.leftBarButtonItem = nil
+        } else if let title = leadingDoneBarButtonTitle,
+                  let target = leadingDoneTarget,
+                  let action = leadingDoneAction {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                title: title,
+                style: .done,
+                target: target,
+                action: action
+            )
+        } else if let menu = leadingBarButtonMenu {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                image: UIImage(systemName: "ellipsis"),
+                menu: menu
+            )
+        } else {
+            navigationItem.leftBarButtonItem = nil
+        }
+
+        navigationBar.setItems([navigationItem], animated: false)
+    }
+    
+    func setInfoButtonWidth(_ width: CGFloat) {
+        // No-op: retained for subclass compatibility.
+    }
     
     // MARK: - Methods for Subclasses to Override
     func addContentToContainer() {
@@ -182,131 +203,85 @@ class NNSheetViewController: NNViewController {
     }
     
     func setupInfoButton() {
-        // Subclasses should override this to configure the info button
-        // By default, the info button is hidden
-        infoButton.isHidden = true
+        setLeadingBarButtonHidden(true)
     }
     
     func handleDismissalResult() -> Any? {
-        // Subclasses should override this to provide a result when dismissed
         return nil
     }
     
     // MARK: - Private Methods
-    private func setupPanGestureRecognizer() {
-        panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
-        containerView.addGestureRecognizer(panGestureRecognizer)
-        
-        // Setup scroll-based dismissal if the view controller supports it
-        setupScrollViewGestureIfNeeded()
-    }
-    
-    private func setupScrollViewGestureIfNeeded() {
-        // First check if the subclass explicitly provides a scroll view
-        if let provider = self as? ScrollViewDismissalProvider,
-           let scrollView = provider.dismissalHandlingScrollView {
-            setupGestureForScrollView(scrollView)
-            return
+    private func configureSheetPresentationIfNeeded() {
+        containerView.layer.cornerRadius = 0
+
+        if let sheet = sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = false
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
         }
-        
-        // Auto-discover scroll views in the container view
-        let scrollViews = findScrollViewsInContainer()
-        
-        // Set up gesture for the first scroll view found (most common case)
-        // In the future, we could be smarter about which scroll view to choose
-        if let scrollView = scrollViews.first {
-            setupGestureForScrollView(scrollView)
-        }
-    }
-    
-    private func findScrollViewsInContainer() -> [UIScrollView] {
-        var scrollViews: [UIScrollView] = []
-        
-        func searchForScrollViews(in view: UIView) {
-            for subview in view.subviews {
-                if let scrollView = subview as? UIScrollView {
-                    scrollViews.append(scrollView)
-                }
-                // Recursively search subviews
-                searchForScrollViews(in: subview)
-            }
-        }
-        
-        searchForScrollViews(in: containerView)
-        return scrollViews
-    }
-    
-    private func setupGestureForScrollView(_ scrollView: UIScrollView) {
-        // Check if we already have a OneWayPanGestureRecognizer on this scroll view
-        let existingGesture = scrollView.gestureRecognizers?.first { $0 is OneWayPanGestureRecognizer }
-        if existingGesture != nil { return }
-        
-        let scrollGestureRecognizer = OneWayPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
-        scrollGestureRecognizer.direction = .down
-        scrollGestureRecognizer.delegate = self
-        
-        scrollView.addGestureRecognizer(scrollGestureRecognizer)
-        scrollView.panGestureRecognizer.require(toFail: scrollGestureRecognizer)
     }
     
     private func setupKeyboardObservers() {
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
     }
-    
-    @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
-        let translation = gesture.translation(in: view)
-        
-        switch gesture.state {
-        case .began:
-            initialContainerViewOrigin = containerView.frame.origin
-            hasFiredHaptic = false
-            itemsHiddenDuringTransition.forEach { $0.alpha = 0 }
-            view.endEditing(true)
-            
-        case .changed:
-            let newY = max(0, translation.y)
-            let maxTranslation: CGFloat = 500
-            let scale = max(0.8, 1 - (newY / maxTranslation) * 0.2)
-            containerView.transform = CGAffineTransform(scaleX: scale, y: scale)
-            
-            if newY > dragThreshold && !hasFiredHaptic {
-                HapticsHelper.lightHaptic()
-                hasFiredHaptic = true
-            }
-            
-        case .ended, .cancelled:
-            if translation.y > dragThreshold {
-                dismissViewController()
-            } else {
-                UIView.animate(withDuration: 0.2) {
-                    self.containerView.transform = .identity
-                    self.containerView.frame.origin = self.initialContainerViewOrigin
-                } completion: { _ in
-                    UIView.animate(withDuration: 0.15) {
-                        self.itemsHiddenDuringTransition.forEach { $0.alpha = 1 }
-                    }
-                }
-            }
-            
-        default:
-            break
-        }
+
+    private var containerBottomReferenceInset: CGFloat {
+        view.bounds.maxY - view.safeAreaLayoutGuide.layoutFrame.maxY
     }
-    
+
+    private func keyboardOverlap(from notification: NSNotification) -> CGFloat {
+        guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+            return 0
+        }
+        let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
+        return max(0, view.bounds.maxY - keyboardFrameInView.minY)
+    }
+
+    private func desiredKeyboardShift(for overlap: CGFloat) -> CGFloat {
+        max(0, overlap - containerBottomReferenceInset - Self.ctaBottomPadding)
+    }
+
+    private func availableContainerTopTranslation() -> CGFloat {
+        view.layoutIfNeeded()
+        let topSlack = containerView.frame.minY - view.safeAreaLayoutGuide.layoutFrame.minY
+        return max(0, topSlack)
+    }
+
+    private func keyboardAnimationOptions(from notification: NSNotification) -> UIView.AnimationOptions {
+        let curveValue = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 0
+        return UIView.AnimationOptions(rawValue: curveValue << 16)
+    }
+
     @objc private func keyboardWillShow(_ notification: NSNotification) {
-        guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-        
-        UIView.animate(withDuration: 0.3) {
-            self.containerBottomConstraint?.constant = -keyboardFrame.height + 24
+        guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+
+        let overlap = keyboardOverlap(from: notification)
+        let desiredShift = desiredKeyboardShift(for: overlap)
+        let topTranslation = min(desiredShift, availableContainerTopTranslation())
+
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [keyboardAnimationOptions(from: notification), .beginFromCurrentState]
+        ) {
+            self.containerBottomConstraint?.constant = -desiredShift
+            self.containerTopConstraint?.constant = -topTranslation
             self.onKeyboardShow()
             self.view.layoutIfNeeded()
         }
     }
-    
+
     @objc private func keyboardWillHide(_ notification: NSNotification) {
-        UIView.animate(withDuration: 0.3) {
+        guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [keyboardAnimationOptions(from: notification), .beginFromCurrentState]
+        ) {
             self.containerBottomConstraint?.constant = 0
+            self.containerTopConstraint?.constant = 0
             self.onKeyboardHide()
             self.view.layoutIfNeeded()
         }
@@ -333,29 +308,5 @@ class NNSheetViewController: NNViewController {
         animation.values = [-20.0, 20.0, -20.0, 20.0, -10.0, 10.0, -5.0, 5.0, 0.0]
         containerView.layer.add(animation, forKey: "shake")
         HapticsHelper.mediumHaptic()
-    }
-}
-
-// MARK: - UIGestureRecognizerDelegate
-extension NNSheetViewController: UIGestureRecognizerDelegate {
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Only apply scroll-based logic to OneWayPanGestureRecognizer
-        guard gestureRecognizer is OneWayPanGestureRecognizer else {
-            return true
-        }
-        
-        // Find the scroll view that this gesture is attached to
-        guard let scrollView = gestureRecognizer.view as? UIScrollView else {
-            return true
-        }
-        
-        // Check if subclass wants to disable scroll dismissal (e.g., during edit mode)
-        if let provider = self as? ScrollViewDismissalProvider,
-           provider.shouldDisableScrollDismissalForEditMode {
-            return false
-        }
-        
-        // Allow dismissal gesture only when scroll view is at the top
-        return scrollView.contentOffset.y <= 0
     }
 }

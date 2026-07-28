@@ -13,7 +13,7 @@ protocol RoutineDetailViewControllerDelegate: AnyObject {
     func routineDetailViewController(didDeleteRoutine routine: RoutineItem)
 }
 
-final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismissalProvider {
+final class RoutineDetailViewController: NNSheetViewController {
     
     // MARK: - Properties
     weak var routineDelegate: RoutineDetailViewControllerDelegate?
@@ -75,16 +75,6 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     private var routineActions: [String] = []
     private let stateManager = RoutineStateManager.shared
     private var isTableViewInEditMode: Bool = false
-    private var infoButtonWidthConstraint: NSLayoutConstraint?
-    
-    // MARK: - ScrollViewDismissalProvider Properties
-    var dismissalHandlingScrollView: UIScrollView? {
-        return routineTableView
-    }
-    
-    var shouldDisableScrollDismissalForEditMode: Bool {
-        return isTableViewInEditMode
-    }
     
     // MARK: - Initialization
     init(category: String, routine: RoutineItem? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
@@ -187,7 +177,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                 
                 ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
                 ctaStack.heightAnchor.constraint(equalToConstant: 46),
                 
                 frequencyButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: isReadOnly ? 1.0 : 0.6),
@@ -200,7 +190,7 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
                 routineTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
                 
                 // Folder label floats over the table view
-                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16).with(priority: .defaultHigh),
+                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
             ])
         }
         
@@ -296,59 +286,19 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
     }
     
     override func setupInfoButton() {
-        // Configure the base class info button 
-        infoButton.isHidden = isReadOnly
+        setLeadingBarButtonHidden(isReadOnly)
         updateInfoButtonAppearance()
     }
     
     
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        
-        // Find the width constraint after the view is set up
-        if let containerView = infoButton.superview {
-            for constraint in containerView.constraints {
-                if (constraint.firstItem as? UIButton) == infoButton && 
-                   constraint.firstAttribute == .width && 
-                   constraint.constant == 36 {
-                    infoButtonWidthConstraint = constraint
-                    break
-                }
-            }
-        }
-    }
-    
     private func updateInfoButtonAppearance() {
         if isTableViewInEditMode {
-            // In edit mode, show "Done" button
-            infoButton.setTitle("Done", for: .normal)
-            infoButton.setTitleColor(.systemBlue, for: .normal)
-            infoButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .regular)
-            infoButton.setImage(nil, for: .normal)
-            infoButton.menu = nil
-            infoButton.showsMenuAsPrimaryAction = false
-            infoButton.removeTarget(nil, action: nil, for: .allEvents)
-            infoButton.addTarget(self, action: #selector(doneButtonTapped), for: .touchUpInside)
-            
-            // Adjust button width to fit the text properly
-            infoButtonWidthConstraint?.constant = 50 // Wider to fit "Done" text
-            infoButton.contentHorizontalAlignment = .center
+            setLeadingDoneBarButton(title: "Done", target: self, action: #selector(doneButtonTapped))
         } else {
-            // In normal mode, show ellipsis menu
-            infoButton.setTitle(nil, for: .normal)
-            infoButton.setTitleColor(.tertiaryLabel, for: .normal)
-            let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-            let image = UIImage(systemName: "ellipsis", withConfiguration: config)
-            infoButton.setImage(image, for: .normal)
-            infoButton.tintColor = .tertiaryLabel
-            infoButton.menu = createMenu()
-            infoButton.showsMenuAsPrimaryAction = true
-            infoButton.removeTarget(nil, action: nil, for: .allEvents)
-            
-            // Reset button width to original size
-            infoButtonWidthConstraint?.constant = 36
-            infoButton.contentHorizontalAlignment = .center
+            setLeadingBarButtonMenu(createMenu())
         }
+
+        refreshNavigationBarItems()
     }
     
     @objc private func doneButtonTapped() {
@@ -464,8 +414,6 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
         updateInfoButtonAppearance()
         
         // Enable/disable drag-to-dismiss based on edit mode
-        updateDragToDismissGesture()
-        
         // Handle showing/hiding the "Add Action" cell
         if !isReadOnly && routineActions.count < 10 {
             let addCellIndexPath = IndexPath(row: routineActions.count, section: 0)
@@ -491,15 +439,6 @@ final class RoutineDetailViewController: NNSheetViewController, ScrollViewDismis
             }
         }
         
-    }
-    
-    private func updateDragToDismissGesture() {
-        // Disable container gesture during edit mode
-        if let panGesture = containerView.gestureRecognizers?.first(where: { $0 is UIPanGestureRecognizer }) as? UIPanGestureRecognizer {
-            panGesture.isEnabled = !isTableViewInEditMode
-        }
-        
-        // The scroll view dismissal is automatically handled by shouldDisableScrollDismissalForEditMode
     }
     
     @objc private func frequencyButtonTapped() {

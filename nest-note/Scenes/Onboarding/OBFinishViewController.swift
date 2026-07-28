@@ -128,6 +128,9 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     private var carouselCenterYConstraint: NSLayoutConstraint?
     private var hasStartedSlideAnimation = false
     private var hasStartedCardAnimation = false
+    private var hasStartedInitialSetup = false
+    private var isSetupInProgress = false
+    private var setupTask: Task<Void, Never>?
     private var lastSetupError: Error?
 
     private var isSitterFinish: Bool {
@@ -158,6 +161,8 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         navigationController?.interactivePopGestureRecognizer?.isEnabled = false
+        guard !hasStartedInitialSetup else { return }
+        hasStartedInitialSetup = true
         beginFinishFlow()
     }
 
@@ -167,17 +172,28 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
     }
     
     private func beginFinishFlow() {
+        guard !isSetupInProgress else { return }
+        isSetupInProgress = true
         activityIndicator.reset()
-        
-        Task {
+
+        setupTask?.cancel()
+        setupTask = Task {
+            defer { self.isSetupInProgress = false }
+
             do {
                 try await (coordinator as? OnboardingCoordinator)?.finishSetup()
 
-                activityIndicator.animateState(success: true) {
-                    (self.coordinator as? OnboardingCoordinator)?.updateProgressTo(1.0)
-                    self.playSuccessTransition()
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    self.activityIndicator.animateState(success: true) {
+                        (self.coordinator as? OnboardingCoordinator)?.updateProgressTo(1.0)
+                        self.playSuccessTransition()
+                    }
                 }
             } catch {
+                guard !Task.isCancelled else { return }
+
                 await MainActor.run {
                     self.handleSetupFailure(error)
                 }
@@ -215,7 +231,6 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
                 canRetry: true,
                 error: underlyingError
             )
-            Tracker.shared.track(.userProfileCreationFailed, error: underlyingError.localizedDescription)
 
         case "referral_recording":
             showWarningAndContinue(
@@ -522,7 +537,7 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
 
         if isSitterFinish {
             self.titleLabel.text = "You're ready to sit!"
-            self.subtitleLabel.text = "Join sessions and watch over nests when families invite you."
+            self.subtitleLabel.text = "Join sessions with an invite code—or send a session request to a family."
             self.slideToEnterView.slideTitle = "Slide to Get Started"
         } else {
             self.titleLabel.text = "Your nest has been created!"
@@ -572,7 +587,13 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
                 self.dismiss(animated: true)
             } else {
                 (self.coordinator as? OnboardingCoordinator)?.completeOnboarding()
+                #if DEBUG
+                if (self.coordinator as? OnboardingCoordinator)?.isPreviewMode != true {
+                    RatingManager.shared.trackOnboardingComplete()
+                }
+                #else
                 RatingManager.shared.trackOnboardingComplete()
+                #endif
             }
         }
     }

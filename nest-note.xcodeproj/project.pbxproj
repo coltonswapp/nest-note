@@ -10,6 +10,7 @@
 		F62DB7EB2D6EC32800712D4B /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = F62DB7EA2D6EC32800712D4B /* FirebaseFunctions */; };
 		F646715F2F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */; };
 		F64671602F7EE778004E8EA3 /* TikTokBusinessSDK.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F646715D2F7EE75E004E8EA3 /* TikTokBusinessSDK.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F65E793C300AAA9A0081F120 /* NNKit in Frameworks */ = {isa = PBXBuildFile; productRef = F65E793B300AAA9A0081F120 /* NNKit */; };
 		F66E29242CD077E900B90ABC /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29232CD077E900B90ABC /* FirebaseAnalytics */; };
 		F66E29262CD077E900B90ABC /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29252CD077E900B90ABC /* FirebaseAuth */; };
 		F66E29282CD077E900B90ABC /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F66E29272CD077E900B90ABC /* FirebaseCore */; };
@@ -22,7 +23,6 @@
 		F67037812DFCA5DD000D897E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = F67037802DFCA5DD000D897E /* RevenueCatUI */; };
 		F67037832DFCA686000D897E /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F67037822DFCA686000D897E /* StoreKit.framework */; };
 		F670378D2DFCEA8E000D897E /* nn-storekit-config.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */; };
-		F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */ = {isa = PBXBuildFile; fileRef = F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */; };
 		F6A81B902E56524600D24D95 /* QRCode in Frameworks */ = {isa = PBXBuildFile; productRef = F6A81B8F2E56524600D24D95 /* QRCode */; };
 		F6B6782A2CDDED5700FDCAE4 /* Toast in Frameworks */ = {isa = PBXBuildFile; productRef = F6B678292CDDED5700FDCAE4 /* Toast */; };
 		F6C1A0B02E50000100D24D95 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = F6C1A0B12E50000100D24D95 /* MarkdownUI */; };
@@ -48,7 +48,6 @@
 		F64DE3E92CB1C893006D21FC /* nest-note.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nest-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F67037822DFCA686000D897E /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "nn-storekit-config.storekit"; sourceTree = "<group>"; };
-		F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */ = {isa = PBXFileReference; lastKnownFileType = file; name = StoreKitTestCertificate.cer; path = ../Downloads/StoreKitTestCertificate.cer; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -77,6 +76,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F65E793C300AAA9A0081F120 /* NNKit in Frameworks */,
 				F66E292C2CD077E900B90ABC /* FirebaseDatabase in Frameworks */,
 				F67037832DFCA686000D897E /* StoreKit.framework in Frameworks */,
 				F67037812DFCA5DD000D897E /* RevenueCatUI in Frameworks */,
@@ -113,7 +113,6 @@
 			isa = PBXGroup;
 			children = (
 				F670378C2DFCEA8E000D897E /* nn-storekit-config.storekit */,
-				F670378E2DFCEBC9000D897E /* StoreKitTestCertificate.cer */,
 				F64DE3EB2CB1C893006D21FC /* nest-note */,
 				F62DB7E92D6EC32800712D4B /* Frameworks */,
 				F64DE3EA2CB1C893006D21FC /* Products */,
@@ -165,6 +164,7 @@
 				F67037802DFCA5DD000D897E /* RevenueCatUI */,
 				F6A81B8F2E56524600D24D95 /* QRCode */,
 				F6C1A0B12E50000100D24D95 /* MarkdownUI */,
+				F65E793B300AAA9A0081F120 /* NNKit */,
 			);
 			productName = "nest-note";
 			productReference = F64DE3E92CB1C893006D21FC /* nest-note.app */;
@@ -200,6 +200,7 @@
 				F670377D2DFCA5DD000D897E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 				F6A81B8E2E56524600D24D95 /* XCRemoteSwiftPackageReference "qrcode" */,
 				F6C1A0B22E50000100D24D95 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				F65E793A300AAA9A0081F120 /* XCLocalSwiftPackageReference "../cs-ios-style-guide" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F64DE3EA2CB1C893006D21FC /* Products */;
@@ -216,7 +217,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F670378F2DFCEBC9000D897E /* StoreKitTestCertificate.cer in Resources */,
 				F670378D2DFCEA8E000D897E /* nn-storekit-config.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -266,7 +266,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "nest-note/nest-note.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -281,7 +281,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.8;
+				MARKETING_VERSION = 1.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -307,7 +307,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "nest-note/nest-note.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X89M6X46Y8;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -322,7 +322,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.8;
+				MARKETING_VERSION = 1.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -481,6 +481,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		F65E793A300AAA9A0081F120 /* XCLocalSwiftPackageReference "../cs-ios-style-guide" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../cs-ios-style-guide";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -529,6 +536,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F66E29222CD077E900B90ABC /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFunctions;
+		};
+		F65E793B300AAA9A0081F120 /* NNKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F65E793A300AAA9A0081F120 /* XCLocalSwiftPackageReference "../cs-ios-style-guide" */;
+			productName = NNKit;
 		};
 		F66E29232CD077E900B90ABC /* FirebaseAnalytics */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -121,6 +121,15 @@ final class LaunchCoordinator {
     }
     
     // MARK: - Public Methods
+    func installLoadingPlaceholder() {
+        guard navigationController == nil else { return }
+
+        let navigationController = UINavigationController(rootViewController: LoadingViewController())
+        self.navigationController = navigationController
+        window?.rootViewController = navigationController
+        window?.makeKeyAndVisible()
+    }
+
     func start() async throws {
         Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Starting app launch sequence")
 
@@ -140,10 +149,7 @@ final class LaunchCoordinator {
 
             // If service configuration fails, force user to re-authenticate
             await MainActor.run {
-                let navigationController = UINavigationController(rootViewController: LoadingViewController())
-                self.navigationController = navigationController
-                window?.rootViewController = navigationController
-                window?.makeKeyAndVisible()
+                installLoadingPlaceholder()
 
                 // Force show auth flow on configuration failure
                 showAuthenticationFlow()
@@ -152,13 +158,7 @@ final class LaunchCoordinator {
         }
 
         await MainActor.run {
-            // Create initial navigation controller with loading placeholder
-            let navigationController = UINavigationController(rootViewController: LoadingViewController())
-            self.navigationController = navigationController
-
-            // Set as root and make visible
-            window?.rootViewController = navigationController
-            window?.makeKeyAndVisible()
+            installLoadingPlaceholder()
 
             Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: Determining user state...")
             Logger.log(level: .info, category: .launcher, message: "🚀 LAUNCH: UserService.isSignedIn = \(UserService.shared.isSignedIn)")

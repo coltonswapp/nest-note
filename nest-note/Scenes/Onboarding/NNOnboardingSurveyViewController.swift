@@ -178,8 +178,13 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
             pendingConfiguration = nil
         }
         
-        // Add Next button with blur
-        nextButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        // Add Next button; scroll edge effect on iOS 26+, variable blur fallback below
+        if #available(iOS 26.0, *) {
+            pinButtonToBottomEdgeContainer(nextButton)
+            installScrollEdgeInteractions(for: collectionView)
+        } else {
+            nextButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        }
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -189,7 +194,25 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-//        updateScrollingBehavior()
+        if #available(iOS 26.0, *) {
+            updateTopContentInset()
+        }
+    }
+
+    /// Keeps the collection view's resting position below the header, which changes height
+    /// when the title/subtitle are configured after viewDidLoad.
+    @available(iOS 26.0, *)
+    private func updateTopContentInset() {
+        let headerBottom = headerContainerView.convert(labelStack.frame, to: view).maxY
+        let target = headerBottom + 24 - collectionView.safeAreaInsets.top
+        guard abs(collectionView.contentInset.top - target) > 0.5 else { return }
+
+        let wasAtTop = collectionView.contentOffset.y <= -(collectionView.adjustedContentInset.top) + 1
+        collectionView.contentInset.top = target
+        collectionView.verticalScrollIndicatorInsets.top = target
+        if wasAtTop, !collectionView.isDragging, !collectionView.isDecelerating {
+            collectionView.contentOffset.y = -collectionView.adjustedContentInset.top
+        }
     }
     
     override func setupOnboarding(title: String, subtitle: String? = nil) {
@@ -216,9 +239,18 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         // Add bottom inset to accommodate the pinned button
         collectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 100, right: 0)
         collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: 100, right: 0)
-        
+
+        let topConstraint: NSLayoutConstraint
+        if #available(iOS 26.0, *) {
+            // Extend under the header so content can scroll beneath the title/subtitle;
+            // contentInset.top is managed in viewDidLayoutSubviews (header height is dynamic)
+            topConstraint = collectionView.topAnchor.constraint(equalTo: view.topAnchor)
+        } else {
+            topConstraint = collectionView.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 24)
+        }
+
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 24),
+            topConstraint,
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -285,11 +317,12 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     private func updateScrollingBehavior() {
         // Calculate if content fits without scrolling
         let contentHeight = collectionView.collectionViewLayout.collectionViewContentSize.height
-        let frameHeight = collectionView.frame.height
-        let bottomInset = collectionView.adjustedContentInset.bottom
-        
-        // Disable scrolling if content fits within the frame, accounting for the bottom inset
-        collectionView.isScrollEnabled = contentHeight > (frameHeight - bottomInset)
+        let availableHeight = collectionView.frame.height
+            - collectionView.adjustedContentInset.top
+            - collectionView.adjustedContentInset.bottom
+
+        // Disable scrolling if content fits within the available area
+        collectionView.isScrollEnabled = contentHeight > availableHeight
     }
     
     @objc private func nextButtonTapped() {

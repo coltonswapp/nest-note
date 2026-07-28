@@ -87,19 +87,38 @@ class InviteDetailViewController: NNViewController {
     }
 
     struct SessionPaymentContext {
+        let sessionId: String
+        let nestId: String
         let title: String
         let startDate: Date
+        let endDate: Date
+        let sessionStatus: SessionStatus
         let sitterName: String
         let venmoUsername: String?
+        let hourlyRateCents: Int?
+
+        var paymentConfiguration: SessionPaymentViewController.Configuration {
+            SessionPaymentViewController.Configuration(
+                sessionId: sessionId,
+                nestId: nestId,
+                sessionTitle: title,
+                startDate: startDate,
+                scheduledHours: max(0, endDate.timeIntervalSince(startDate) / 3600),
+                defaultHourlyRateCents: hourlyRateCents,
+                venmoUsername: venmoUsername,
+                sitterName: sitterName
+            )
+        }
     }
 
-    private var canPaySitterWithVenmo: Bool {
+    private var canShowSessionPaymentCalculator: Bool {
         guard !isSitterInitiated,
-              let venmoUsername = sessionPaymentContext?.venmoUsername,
-              !venmoUsername.isEmpty else { return false }
-        return true
+              sessionPaymentContext?.sessionStatus == .extended || sessionPaymentContext?.sessionStatus == .completed else {
+            return false
+        }
+        return sessionPaymentContext != nil
     }
-    
+
     init(sitter: SitterItem? = nil, sessionID: String? = nil) {
         self.selectedSitter = sitter
         self.sessionID = sessionID
@@ -428,11 +447,18 @@ class InviteDetailViewController: NNViewController {
     }
 
     func configureSessionPayment(from session: SessionItem) {
+        guard let nestId = NestService.shared.currentNest?.id else { return }
+
         sessionPaymentContext = SessionPaymentContext(
+            sessionId: session.id,
+            nestId: nestId,
             title: session.title,
             startDate: session.startDate,
+            endDate: session.endDate,
+            sessionStatus: session.status,
             sitterName: session.assignedSitter?.name ?? selectedSitter?.name ?? "Sitter",
-            venmoUsername: session.assignedSitter?.venmoUsername
+            venmoUsername: session.assignedSitter?.venmoUsername,
+            hourlyRateCents: session.assignedSitter?.hourlyRateCents
         )
         if isViewLoaded {
             applySnapshot()
@@ -485,8 +511,8 @@ class InviteDetailViewController: NNViewController {
         ) { [weak self] (footerView, string, indexPath) in
             guard let self else { return }
             guard let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            if section == .sitter && canPaySitterWithVenmo {
-                footerView.configure(text: "Opens Venmo so you can send payment to your sitter.")
+            if section == .sitter && canShowSessionPaymentCalculator {
+                footerView.configure(text: "Adjust the payment before opening Venmo.")
             } else if section == .code {
                 if isSitterInitiated {
                     footerView.configure(text: "Share this code with the Nest Owner. They'll use it to accept your session request and can adjust the dates if needed.")
@@ -514,7 +540,7 @@ class InviteDetailViewController: NNViewController {
                 ) as? VenmoPayCell else {
                     fatalError("Could not create VenmoPayCell")
                 }
-                cell.configure(sitterName: venmoItem.sitterName)
+                cell.configure()
                 return cell
             } else if let codeItem = item as? CodeCellItem {
                 guard let cell = collectionView.dequeueReusableCell(
@@ -565,7 +591,7 @@ class InviteDetailViewController: NNViewController {
                 let placeholderSitter = SitterItem(id: "placeholder", name: "Invite a Sitter", email: "")
                 sitterItems.append(SitterCellItem(sitter: placeholderSitter))
             }
-            if canPaySitterWithVenmo, let context = sessionPaymentContext {
+            if canShowSessionPaymentCalculator, let context = sessionPaymentContext {
                 sitterItems.append(VenmoPayCellItem(sitterName: context.sitterName))
             }
             snapshot.appendItems(sitterItems, toSection: .sitter)
@@ -581,16 +607,11 @@ class InviteDetailViewController: NNViewController {
     }
 
     private func payWithVenmoButtonTapped() {
-        guard let context = sessionPaymentContext,
-              let venmoUsername = context.venmoUsername,
-              !venmoUsername.isEmpty else { return }
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        let dateString = dateFormatter.string(from: context.startDate)
-        let note = "NestNote: \(context.title) – \(dateString)"
-
-        VenmoPaymentHandler.payWithVenmo(username: venmoUsername, note: note)
+        guard let context = sessionPaymentContext else { return }
+        SessionPaymentCalculator.presentPaymentCalculator(
+            from: self,
+            configuration: context.paymentConfiguration
+        )
     }
     
     // MARK: - Email Functions
@@ -741,7 +762,6 @@ struct VenmoPayCellItem: Hashable {
         lhs.id == rhs.id
     }
 }
-
 
 // MARK: - SitterCellDelegate
 extension InviteDetailViewController: SitterCellDelegate {
@@ -957,68 +977,16 @@ extension InviteDetailViewController {
 class VenmoPayCell: UICollectionViewListCell {
     static let reuseIdentifier = "VenmoPayCell"
 
-    private let iconImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.contentMode = .scaleAspectFit
-        imageView.image = UIImage(named: "venmo-icon")
-        imageView.layer.cornerRadius = 4
-        imageView.clipsToBounds = true
-        return imageView
-    }()
-
-    private let titleLabel: UILabel = {
-        let label = UILabel()
-        label.font = .bodyL
-        label.textColor = .label
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-
-    private let chevronImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.image = UIImage(systemName: "chevron.right")
-        imageView.tintColor = .tertiaryLabel
-        imageView.contentMode = .scaleAspectFit
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        return imageView
-    }()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupViews()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private func setupViews() {
-        contentView.addSubview(iconImageView)
-        contentView.addSubview(titleLabel)
-        contentView.addSubview(chevronImageView)
-
-        NSLayoutConstraint.activate([
-            iconImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            iconImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            iconImageView.widthAnchor.constraint(equalToConstant: 24),
-            iconImageView.heightAnchor.constraint(equalToConstant: 24),
-
-            titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 8),
-            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevronImageView.leadingAnchor, constant: -8),
-
-            chevronImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            chevronImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            chevronImageView.widthAnchor.constraint(equalToConstant: 14),
-            chevronImageView.heightAnchor.constraint(equalToConstant: 14),
-
-            contentView.heightAnchor.constraint(equalToConstant: 56)
-        ])
-    }
-
-    func configure(sitterName: String) {
-        titleLabel.text = "Pay with Venmo"
+    func configure() {
+        var content = defaultContentConfiguration()
+        content.text = "Pay Via Venmo"
+        content.image = UIImage(named: "venmo-icon")
+        content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+        content.imageProperties.cornerRadius = 12
+        content.imageToTextPadding = 8
+        content.textProperties.font = .preferredFont(forTextStyle: .body)
+        accessories = [.disclosureIndicator()]
+        contentConfiguration = content
     }
 }
 
@@ -1154,8 +1122,10 @@ class SectionFooterView: UICollectionReusableView {
         ])
     }
     
-    func configure(text: String) {
+    func configure(text: String, isLink: Bool = false) {
         textLabel.text = text
+        textLabel.textColor = isLink ? NNColors.primary : .tertiaryLabel
+        textLabel.textAlignment = isLink ? .natural : .center
         isHidden = text.isEmpty
     }
 }

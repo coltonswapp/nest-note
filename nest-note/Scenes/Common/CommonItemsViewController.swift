@@ -24,6 +24,11 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     private var instructionLabel: BlurBackgroundLabel!
     weak var delegate: CommonItemsViewControllerDelegate?
 
+    private var waterfallLayout: WaterfallCollectionLayout?
+    private var waterfallHeightCache: [IndexPath: CGFloat] = [:]
+    private lazy var waterfallSizingCell = WaterfallGridCell(frame: .zero)
+    private var sectionOrder: [Section] = []
+
     // Context for creation flows
     private let category: String
     private let entryRepository: EntryRepository
@@ -111,6 +116,14 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         CommonRoutine(name: "Emergency Protocol", icon: "exclamationmark.triangle.fill"),
         CommonRoutine(name: "Quiet Time", icon: "book.closed.fill")
     ]
+
+    private static let sampleRoutineActions = [
+        "Check all doors",
+        "Turn off lights",
+        "Set thermostat",
+        "Lock windows",
+        "Arm security system"
+    ]
     
     private var enabledSections: Set<Section> = [.codes, .other] {
         didSet {
@@ -134,7 +147,7 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         super.viewDidLoad()
         setupUI()
         setupCollectionView()
-        configureDataSource() // Ensure dataSource exists before filterView may emit delegate events
+        configureDataSource()
         setupFilterView()
         applySnapshot()
         setupInstructionLabel()
@@ -152,7 +165,7 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     }
     
     private func setupUI() {
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .systemGroupedBackground
     }
 
     private func setupInstructionLabel() {
@@ -175,7 +188,6 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         filterView.delegate = self
         filterView.frame.size.height = 55
 
-        // Configure available sections (Entries, Places, Routines)
         let availableSections: [Section] = [.codes, .places, .routines]
         filterView.configure(
             with: availableSections,
@@ -190,279 +202,53 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     private func setupCollectionView() {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.backgroundColor = .systemBackground
+        collectionView.backgroundColor = .systemGroupedBackground
+        collectionView.contentInset.top = 8
+        collectionView.verticalScrollIndicatorInsets.top = 8
         collectionView.contentInset.bottom = 50
         collectionView.verticalScrollIndicatorInsets.bottom = 50
         
         view.addSubview(collectionView)
         
-        // Register cells (reusing existing cells from NestCategoryViewController)
-        collectionView.register(HalfWidthCell.self, forCellWithReuseIdentifier: HalfWidthCell.reuseIdentifier)
-        collectionView.register(FullWidthCell.self, forCellWithReuseIdentifier: FullWidthCell.reuseIdentifier)
-        collectionView.register(PlaceCell.self, forCellWithReuseIdentifier: PlaceCell.reuseIdentifier)
-        collectionView.register(RoutineCell.self, forCellWithReuseIdentifier: RoutineCell.reuseIdentifier)
-        
-        // Register section headers
-        collectionView.register(UICollectionReusableView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "SectionHeader")
+        collectionView.register(
+            WaterfallGridCell.self,
+            forCellWithReuseIdentifier: WaterfallGridCell.reuseIdentifier
+        )
+        collectionView.register(
+            UICollectionReusableView.self,
+            forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+            withReuseIdentifier: "SectionHeader"
+        )
     }
     
     // MARK: - Layout
     
     private func createLayout() -> UICollectionViewLayout {
-        let layout = UICollectionViewCompositionalLayout { [weak self] (sectionIndex, layoutEnvironment) -> NSCollectionLayoutSection? in
-            guard let self = self else { return nil }
-            
-            let enabledSectionsArray = Array(self.enabledSections).sorted { $0.rawValue < $1.rawValue }
-            guard sectionIndex < enabledSectionsArray.count else { return nil }
-            
-            let section = enabledSectionsArray[sectionIndex]
-            
-            switch section {
-            case .codes:
-                return self.createHalfWidthSectionWithHeader(needsBottomPadding: !self.enabledSections.contains(.other))
-            case .other:
-                let hasCodesSection = self.enabledSections.contains(.codes)
-                return hasCodesSection ? self.createFullWidthSection() : self.createFullWidthSectionWithHeader()
-            case .places:
-                return self.createPlacesSection()
-            case .routines:
-                return self.createRoutinesSection()
-            }
-        }
+        let layout = WaterfallCollectionLayout()
+        layout.delegate = self
+        waterfallLayout = layout
         return layout
-    }
-    
-    private static let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
-    
-    private func createHalfWidthSectionWithHeader(needsBottomPadding: Bool = false) -> NSCollectionLayoutSection {
-        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(90))
-        let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
-        let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(90))
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, repeatingSubitem: item, count: 2)
-        let section = NSCollectionLayoutSection(group: group)
-        
-        let bottomPadding: CGFloat = needsBottomPadding ? 30 : 4
-        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: bottomPadding, trailing: 4)
-        
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: CommonItemsViewController.headerSize,
-            elementKind: UICollectionView.elementKindSectionHeader,
-            alignment: .top
-        )
-        section.boundarySupplementaryItems = [header]
-        
-        return section
-    }
-    
-    private func createFullWidthSection() -> NSCollectionLayoutSection {
-        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
-        let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
-        let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
-        section.interGroupSpacing = 8
-        return section
-    }
-    
-    private func createFullWidthSectionWithHeader() -> NSCollectionLayoutSection {
-        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(44))
-        let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
-        let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 30, trailing: 12)
-        section.interGroupSpacing = 8
-        
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: CommonItemsViewController.headerSize,
-            elementKind: UICollectionView.elementKindSectionHeader,
-            alignment: .top
-        )
-        section.boundarySupplementaryItems = [header]
-        
-        return section
-    }
-    
-    private func createPlacesSection() -> NSCollectionLayoutSection {
-        let itemSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(0.5),
-            heightDimension: .fractionalWidth(0.6)
-        )
-        
-        let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        item.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-        
-        let groupSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(1.0),
-            heightDimension: .fractionalWidth(0.6)
-        )
-        
-        let group = NSCollectionLayoutGroup.horizontal(
-            layoutSize: groupSize,
-            subitems: [item, item]
-        )
-        
-        let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 40, trailing: 8)
-        
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: CommonItemsViewController.headerSize,
-            elementKind: UICollectionView.elementKindSectionHeader,
-            alignment: .top
-        )
-        section.boundarySupplementaryItems = [header]
-        
-        return section
-    }
-    
-    private func createRoutinesSection() -> NSCollectionLayoutSection {
-        let itemSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(0.5),
-            heightDimension: .absolute(140)
-        )
-        
-        let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        item.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-        
-        let groupSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(1.0),
-            heightDimension: .absolute(140)
-        )
-        
-        let group = NSCollectionLayoutGroup.horizontal(
-            layoutSize: groupSize,
-            subitems: [item, item]
-        )
-        
-        let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 40, trailing: 8)
-        
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: CommonItemsViewController.headerSize,
-            elementKind: UICollectionView.elementKindSectionHeader,
-            alignment: .top
-        )
-        section.boundarySupplementaryItems = [header]
-        
-        return section
     }
     
     // MARK: - Data Source
     
     private func configureDataSource() {
-        dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) { [weak self] (collectionView, indexPath, item) -> UICollectionViewCell? in
-            guard let self = self else { return nil }
-            
-            let enabledSectionsArray = Array(self.enabledSections).sorted { $0.rawValue < $1.rawValue }
-            let section = enabledSectionsArray[indexPath.section]
-            
-            switch section {
-            case .codes:
-                if let entry = item as? CommonEntry {
-                    let cell = collectionView.dequeueReusableCell(withReuseIdentifier: HalfWidthCell.reuseIdentifier, for: indexPath) as! HalfWidthCell
-                    // Style as placeholders/suggestions
-                    cell.valueContainerBackgroundColor = NNColors.NNSystemBackground6
-                    cell.valueLabelBackgroundColor = .tertiaryLabel
-                    cell.configure(
-                        key: entry.title,
-                        value: entry.content,
-                        isNestOwner: true,
-                        isEditMode: false,
-                        isSelected: false,
-                        isModalInPresentation: true
-                    )
-                    return cell
-                }
-            case .other:
-                if let entry = item as? CommonEntry {
-                    let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FullWidthCell.reuseIdentifier, for: indexPath) as! FullWidthCell
-                    // Style as placeholders/suggestions
-                    cell.valueContainerBackgroundColor = NNColors.NNSystemBackground6
-                    cell.valueLabelBackgroundColor = .tertiaryLabel
-                    cell.configure(
-                        key: entry.title,
-                        value: entry.content,
-                        isNestOwner: true,
-                        isEditMode: false,
-                        isSelected: false,
-                        isModalInPresentation: true
-                    )
-                    return cell
-                }
-            case .places:
-                if let place = item as? CommonPlace {
-                    let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PlaceCell.reuseIdentifier, for: indexPath) as! PlaceCell
-                    
-                    // Create PlaceItem from CommonPlace
-                    let placeItem = PlaceItem(
-                        nestId: "common",
-                        category: "Common",
-                        title: place.name,
-                        alias: place.name,
-                        address: "Sample Address",
-                        coordinate: CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0),
-                        isTemporary: false
-                    )
-                    
-                    cell.configure(
-                        with: placeItem,
-                        isGridLayout: true,
-                        isEditMode: false,
-                        isSelected: false,
-                        shouldLoadThumbnail: false
-                    )
-                    
-                    // Set our placeholder image immediately
-                    let randomImageNumber = Int.random(in: 1...5)
-                    let placeholderImage = UIImage(named: "map-placeholder\(randomImageNumber)")
-                    cell.thumbnailImageView.image = placeholderImage ?? UIImage(systemName: "mappin.circle")
-                    
-                    return cell
-                }
-            case .routines:
-                if let routine = item as? CommonRoutine {
-                    let cell = collectionView.dequeueReusableCell(withReuseIdentifier: RoutineCell.reuseIdentifier, for: indexPath) as! RoutineCell
-                    
-                    // Create RoutineItem from CommonRoutine
-                    let routineItem = RoutineItem(
-                        title: routine.name,
-                        category: "Common",
-                        routineActions: ["Sample action 1", "Sample action 2", "Sample action 3"]
-                    )
-                    
-                    cell.configure(
-                        with: routineItem,
-                        isEditMode: false,
-                        isSelected: false
-                    )
-                    return cell
-                }
-            }
-            
-            return nil
+        dataSource = UICollectionViewDiffableDataSource<Section, AnyHashable>(collectionView: collectionView) {
+            [weak self] (collectionView, indexPath, item) -> UICollectionViewCell? in
+            guard let self else { return nil }
+            guard indexPath.section < self.sectionOrder.count else { return nil }
+
+            let section = self.sectionOrder[indexPath.section]
+            return self.dequeueWaterfallCell(in: collectionView, for: item, section: section, at: indexPath)
         }
         
-        // Configure supplementary view provider for section headers
         dataSource.supplementaryViewProvider = { [weak self] (collectionView, kind, indexPath) -> UICollectionReusableView? in
-            guard let self = self,
-                  kind == UICollectionView.elementKindSectionHeader else { return nil }
-            
-            let enabledSectionsArray = Array(self.enabledSections).sorted { $0.rawValue < $1.rawValue }
-            let section = enabledSectionsArray[indexPath.section]
-            
-            let shouldShowHeader: Bool
-            switch section {
-            case .codes:
-                shouldShowHeader = true
-            case .other:
-                shouldShowHeader = !self.enabledSections.contains(.codes)
-            default:
-                shouldShowHeader = true
-            }
-            
-            if !shouldShowHeader {
-                return nil
-            }
+            guard let self,
+                  kind == UICollectionView.elementKindSectionHeader,
+                  indexPath.section < self.sectionOrder.count else { return nil }
+
+            let section = self.sectionOrder[indexPath.section]
+            guard self.shouldShowWaterfallHeader(for: section) else { return nil }
             
             let header = collectionView.dequeueReusableSupplementaryView(
                 ofKind: kind,
@@ -470,28 +256,24 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
                 for: indexPath
             )
             
-            let title: String
-            switch section {
-            case .codes, .other:
-                title = "ENTRIES"
-            case .places:
-                title = "PLACES"
-            case .routines:
-                title = "ROUTINES"
-            }
-            
             header.subviews.forEach { $0.removeFromSuperview() }
             
             let label = UILabel()
-            label.text = title
+            label.text = self.waterfallHeaderTitle(for: section)
             label.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
             label.textColor = UIColor.secondaryLabel
             label.translatesAutoresizingMaskIntoConstraints = false
             
             header.addSubview(label)
             NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
-                label.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -8)
+                label.leadingAnchor.constraint(
+                    equalTo: header.leadingAnchor,
+                    constant: NestCategoryViewController.waterfallSectionHeaderLeadingInset
+                ),
+                label.bottomAnchor.constraint(
+                    equalTo: header.bottomAnchor,
+                    constant: -NestCategoryViewController.sectionHeaderLabelBottomInset
+                )
             ])
             
             return header
@@ -500,39 +282,55 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     
     private func applySnapshot(animated: Bool = false) {
         guard dataSource != nil else { return }
+
+        waterfallHeightCache.removeAll()
         var snapshot = NSDiffableDataSourceSnapshot<Section, AnyHashable>()
+        var order: [Section] = []
         
         let enabledSectionsArray = Array(enabledSections).sorted { $0.rawValue < $1.rawValue }
+        var didAddEntries = false
         
         for section in enabledSectionsArray {
-            snapshot.appendSections([section])
-            
             switch section {
-            case .codes:
-                let codesEntries = commonEntries.filter { $0.shouldUseHalfWidthCell }
-                    .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                snapshot.appendItems(codesEntries, toSection: section)
-            case .other:
-                let otherEntries = commonEntries.filter { !$0.shouldUseHalfWidthCell }
-                    .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                snapshot.appendItems(otherEntries, toSection: section)
+            case .codes, .other:
+                guard !didAddEntries else { continue }
+                let sortedEntries = commonEntries.sorted {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                guard !sortedEntries.isEmpty else { continue }
+                snapshot.appendSections([.codes])
+                snapshot.appendItems(sortedEntries, toSection: .codes)
+                order.append(.codes)
+                didAddEntries = true
             case .places:
-                let sortedPlaces = commonPlaces.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                snapshot.appendItems(sortedPlaces, toSection: section)
+                let sortedPlaces = commonPlaces.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                }
+                guard !sortedPlaces.isEmpty else { continue }
+                snapshot.appendSections([.places])
+                snapshot.appendItems(sortedPlaces, toSection: .places)
+                order.append(.places)
             case .routines:
-                let sortedRoutines = commonRoutines.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                snapshot.appendItems(sortedRoutines, toSection: section)
+                let sortedRoutines = commonRoutines.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                }
+                guard !sortedRoutines.isEmpty else { continue }
+                snapshot.appendSections([.routines])
+                snapshot.appendItems(sortedRoutines, toSection: .routines)
+                order.append(.routines)
             }
         }
-        
-        dataSource.apply(snapshot, animatingDifferences: animated)
+
+        sectionOrder = order
+        dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
+            self?.waterfallLayout?.invalidateLayout()
+        }
     }
     
     // MARK: - NNCategoryFilterViewDelegate
     func categoryFilterView(_ filterView: NNCategoryFilterView, didUpdateSelection selection: NNCategoryFilterView.Selection) {
         switch selection {
         case .all:
-            // Not used in single-select; default to entries
             enabledSections = [.codes, .other]
         case .specific(let ids):
             if ids.contains(Section.codes) {
@@ -544,10 +342,160 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
             }
         }
 
-        self.applySnapshot(animated: true)
+        applySnapshot(animated: true)
         DispatchQueue.main.async {
             filterView.updateDisplayedState()
         }
+    }
+}
+
+// MARK: - Waterfall Grid
+
+private extension CommonItemsViewController {
+    func dequeueWaterfallCell(
+        in collectionView: UICollectionView,
+        for item: AnyHashable,
+        section: Section,
+        at indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: WaterfallGridCell.reuseIdentifier,
+            for: indexPath
+        ) as! WaterfallGridCell
+
+        switch section {
+        case .codes, .other:
+            if let entry = item as? CommonEntry {
+                cell.configure(
+                    title: entry.title,
+                    content: entry.content,
+                    contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                )
+            }
+        case .places:
+            if let place = item as? CommonPlace {
+                let imageNumber = (abs(place.name.hashValue) % 5) + 1
+                let placeholderImage = UIImage(named: "map-placeholder\(imageNumber)")
+                    ?? UIImage(systemName: "mappin.circle")
+                cell.configure(
+                    title: place.name,
+                    content: "Sample Address",
+                    thumbnail: placeholderImage,
+                    layoutStyle: .place,
+                    showsPlaceThumbnail: true
+                )
+            }
+        case .routines:
+            if let routine = item as? CommonRoutine {
+                cell.configure(
+                    title: routine.name,
+                    content: WaterfallGridCell.routinePreviewText(for: Self.sampleRoutineActions)
+                )
+            }
+        }
+
+        return cell
+    }
+
+    func configureWaterfallSizingCell(for item: AnyHashable, section: Section, columnWidth: CGFloat) {
+        waterfallSizingCell.prepareForReuse()
+
+        switch section {
+        case .codes, .other:
+            if let entry = item as? CommonEntry {
+                waterfallSizingCell.configure(
+                    title: entry.title,
+                    content: entry.content,
+                    contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                )
+            }
+        case .places:
+            if let place = item as? CommonPlace {
+                waterfallSizingCell.configure(
+                    title: place.name,
+                    content: "Sample Address",
+                    thumbnail: UIImage(),
+                    layoutStyle: .place,
+                    showsPlaceThumbnail: true
+                )
+            }
+        case .routines:
+            if let routine = item as? CommonRoutine {
+                waterfallSizingCell.configure(
+                    title: routine.name,
+                    content: WaterfallGridCell.routinePreviewText(for: Self.sampleRoutineActions)
+                )
+            }
+        }
+
+        waterfallSizingCell.updateThumbnailHeight(forColumnWidth: columnWidth)
+    }
+
+    func measuredWaterfallHeight(for indexPath: IndexPath, columnWidth: CGFloat) -> CGFloat {
+        if let cached = waterfallHeightCache[indexPath] {
+            return cached
+        }
+
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              indexPath.section < sectionOrder.count else {
+            return 120
+        }
+
+        let section = sectionOrder[indexPath.section]
+        configureWaterfallSizingCell(for: item, section: section, columnWidth: columnWidth)
+
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        attributes.size = CGSize(width: columnWidth, height: 0)
+        let fitted = waterfallSizingCell.preferredLayoutAttributesFitting(attributes)
+        waterfallHeightCache[indexPath] = fitted.size.height
+        return fitted.size.height
+    }
+
+    func shouldShowWaterfallHeader(for section: Section) -> Bool {
+        switch section {
+        case .codes:
+            return true
+        case .other:
+            return !sectionOrder.contains(.codes)
+        default:
+            return true
+        }
+    }
+
+    func waterfallHeaderTitle(for section: Section) -> String {
+        switch section {
+        case .codes, .other: return "ENTRIES"
+        case .places: return "PLACES"
+        case .routines: return "ROUTINES"
+        }
+    }
+}
+
+extension CommonItemsViewController: WaterfallCollectionLayoutDelegate {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        heightForItemAt indexPath: IndexPath,
+        columnWidth: CGFloat
+    ) -> CGFloat {
+        measuredWaterfallHeight(for: indexPath, columnWidth: columnWidth)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        shouldShowHeaderForSection section: Int
+    ) -> Bool {
+        guard section < sectionOrder.count else { return false }
+        return shouldShowWaterfallHeader(for: sectionOrder[section])
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout: WaterfallCollectionLayout,
+        heightForHeaderInSection section: Int
+    ) -> CGFloat {
+        NestCategoryViewController.waterfallSectionHeaderHeight
     }
 }
 
@@ -579,9 +527,8 @@ extension CommonItemsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
 
-        let enabledSectionsArray = Array(self.enabledSections).sorted { $0.rawValue < $1.rawValue }
-        guard indexPath.section < enabledSectionsArray.count else { return }
-        let section = enabledSectionsArray[indexPath.section]
+        guard indexPath.section < sectionOrder.count else { return }
+        let section = sectionOrder[indexPath.section]
 
         switch section {
         case .codes, .other:

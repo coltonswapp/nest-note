@@ -38,12 +38,17 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     /// When true, Continue stays available after clearing all items (session edit flow).
     var allowsEmptySelection = false
     
+    /// When true, shows an instructional title/subtitle and keeps Continue always visible (session creation step).
+    var showsCreationHeader = false
+    
     private var currentSelectedIds: [String] = []
     private var allSelectableItemIds: [String] = []
     private var initialPeakSelectionCount = 0
     
     private var selectionLimit: Int? = nil
     private var isProUser: Bool = false
+    
+    private static let creationHeaderElementKind = "SelectEntriesCreationHeader"
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -144,6 +149,63 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         }
     }
     
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if isPushedOntoExistingNavigationStack {
+            navigationController?.setNavigationBarHidden(false, animated: animated)
+        }
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        
+        if isMovingFromParent || isBeingDismissed {
+            removeSelectionCounterView()
+        }
+        
+        guard isPushedOntoExistingNavigationStack, isMovingFromParent else { return }
+        navigationController?.setNavigationBarHidden(true, animated: animated)
+    }
+    
+    deinit {
+        removeSelectionCounterView()
+    }
+    
+    private var isPushedOntoExistingNavigationStack: Bool {
+        guard let navigationController else { return false }
+        return navigationController.viewControllers.first != self
+    }
+    
+    // MARK: - Continue Loading
+    
+    func startContinueLoading() {
+        selectionCounterView?.startLoading()
+    }
+    
+    func stopContinueLoading(
+        withSuccess success: Bool? = nil,
+        restoreTitle: Bool = true,
+        completion: (() -> Void)? = nil
+    ) {
+        selectionCounterView?.stopLoading(
+            withSuccess: success,
+            restoreTitle: restoreTitle,
+            completion: completion
+        )
+    }
+    
+    func animateContinueOff(completion: (() -> Void)? = nil) {
+        guard let selectionCounterView else {
+            completion?()
+            return
+        }
+        
+        selectionCounterView.animateOff { [weak self] in
+            self?.removeSelectionCounterView()
+            completion?()
+        }
+    }
+    
     // Cache for item-to-folder mapping to avoid repeated fetches
     private var itemFolderMapping: [String: String] = [:]
     
@@ -155,7 +217,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     // Check user's pro status and set selection limit
     private func checkProStatusAndSetLimit() async {
         // Use the same pro status checking as other features for consistency
-        isProUser = await SubscriptionService.shared.isFeatureAvailable(.unlimitedEntries)
+        isProUser = await SubscriptionService.shared.canUseFullFeatures()
         selectionLimit = isProUser ? nil : FeatureFlagService.shared.getFreeUserSelectionLimit()
         
         await MainActor.run {
@@ -343,6 +405,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     private func setupSelectionCounterView() {
         selectionCounterView = SelectItemsCountView()
         selectionCounterView.allowsEmptySelection = allowsEmptySelection
+        selectionCounterView.alwaysShowsContinue = showsCreationHeader
         selectionCounterView.peakSelectionCount = initialPeakSelectionCount
         selectionCounterView.selectionLimit = selectionLimit
         selectionCounterView.onContinueTapped = { [weak self] in
@@ -365,10 +428,22 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         updateSelectionCounter()
     }
     
+    private func removeSelectionCounterView() {
+        selectionCounterView?.removeFromSuperview()
+        selectionCounterView = nil
+    }
+    
     private func setupNavigationItems() {
+        // Creation flow already has a Cancel-free back button; keep Select All on the right.
+        // Edit sheet may already have a Cancel button — place Select All beside it when present.
         let button = UIBarButtonItem(title: "Select All", style: .plain, target: self, action: #selector(didTapSelectAll))
         selectAllBarButtonItem = button
-        navigationItem.rightBarButtonItem = button
+        
+        if let existingRight = navigationItem.rightBarButtonItem {
+            navigationItem.rightBarButtonItems = [existingRight, button]
+        } else {
+            navigationItem.rightBarButtonItem = button
+        }
         updateSelectAllButtonTitle()
     }
     
@@ -503,7 +578,14 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         segmentedControl = UISegmentedControl(items: ["Folders", "Selected (0)"])
         segmentedControl.selectedSegmentIndex = 0
         segmentedControl.addTarget(self, action: #selector(segmentChanged(_:)), for: .valueChanged)
-        navigationItem.titleView = segmentedControl
+        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        
+        if showsCreationHeader {
+            navigationItem.title = nil
+            navigationItem.titleView = nil
+        } else {
+            navigationItem.titleView = segmentedControl
+        }
     }
     
     @objc private func segmentChanged(_ sender: UISegmentedControl) {
@@ -519,24 +601,52 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             updateSelectAllButtonTitle()
             applySnapshot()
         }
+        
+        reattachSegmentedControlToVisibleCollection()
+    }
+    
+    private func reattachSegmentedControlToVisibleCollection() {
+        guard showsCreationHeader else { return }
+        
+        let visibleCollection = segmentedControl.selectedSegmentIndex == 1
+            ? selectedItemsCollectionView
+            : collectionView
+        
+        visibleCollection?.layoutIfNeeded()
+        
+        if let header = visibleCollection?
+            .visibleSupplementaryViews(ofKind: Self.creationHeaderElementKind)
+            .first as? SelectEntriesCreationHeaderView {
+            configureCreationHeaderView(header)
+        } else {
+            // Header may not be visible yet; reload so the provider embeds the control.
+            visibleCollection?.reloadData()
+        }
     }
     
     private func setupCollectionView() {
-        collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: createLayout())
-        collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: createFoldersLayout())
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .systemBackground
         
         view.addSubview(collectionView)
         
-        // Use automatic content inset adjustment for proper navigation bar handling
-        let buttonHeight: CGFloat = 50
-        let buttonPadding: CGFloat = 24
-        let totalInset = buttonHeight + buttonPadding * 2
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
         collectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 90, right: 0)
         collectionView.verticalScrollIndicatorInsets = collectionView.contentInset
         
-        // Register the FolderCollectionViewCell
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
+        collectionView.register(
+            SelectEntriesCreationHeaderView.self,
+            forSupplementaryViewOfKind: Self.creationHeaderElementKind,
+            withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier
+        )
         
         collectionView.allowsSelection = true
     }
@@ -556,18 +666,49 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             return UISwipeActionsConfiguration(actions: [deleteAction])
         }
         listConfig.headerMode = .supplementary
+        
         let layout = UICollectionViewCompositionalLayout.list(using: listConfig)
         
-        selectedItemsCollectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
-        selectedItemsCollectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if showsCreationHeader {
+            var configuration = layout.configuration
+            configuration.boundarySupplementaryItems = [makeCreationHeaderBoundaryItem()]
+            layout.configuration = configuration
+        }
+        
+        selectedItemsCollectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        selectedItemsCollectionView.translatesAutoresizingMaskIntoConstraints = false
         selectedItemsCollectionView.backgroundColor = .systemGroupedBackground
         selectedItemsCollectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 90, right: 0)
         selectedItemsCollectionView.isHidden = true
         view.addSubview(selectedItemsCollectionView)
+        
+        NSLayoutConstraint.activate([
+            selectedItemsCollectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            selectedItemsCollectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            selectedItemsCollectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            selectedItemsCollectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        selectedItemsCollectionView.register(
+            SelectEntriesCreationHeaderView.self,
+            forSupplementaryViewOfKind: Self.creationHeaderElementKind,
+            withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier
+        )
     }
     
-    private func createLayout() -> UICollectionViewLayout {
-        // Use the same 2-item grid layout as NestCategoryViewController's folders section
+    private func makeCreationHeaderBoundaryItem() -> NSCollectionLayoutBoundarySupplementaryItem {
+        let headerSize = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1.0),
+            heightDimension: .estimated(140)
+        )
+        return NSCollectionLayoutBoundarySupplementaryItem(
+            layoutSize: headerSize,
+            elementKind: Self.creationHeaderElementKind,
+            alignment: .top
+        )
+    }
+    
+    private func createFoldersLayout() -> UICollectionViewLayout {
         let itemSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(0.5),
             heightDimension: .fractionalHeight(1.0)
@@ -577,12 +718,12 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         
         let groupSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1.0),
-            heightDimension: .absolute(144) // Height for folder cells (20% smaller than original 180)
+            heightDimension: .absolute(144)
         )
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item, item])
         
         let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = 16 // Add vertical spacing between rows
+        section.interGroupSpacing = 16
         section.contentInsets = NSDirectionalEdgeInsets(
             top: 8,
             leading: 10,
@@ -591,7 +732,22 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         )
         
         let layout = UICollectionViewCompositionalLayout(section: section)
+        
+        if showsCreationHeader {
+            var configuration = layout.configuration
+            configuration.boundarySupplementaryItems = [makeCreationHeaderBoundaryItem()]
+            layout.configuration = configuration
+        }
+        
         return layout
+    }
+    
+    private func configureCreationHeaderView(_ headerView: SelectEntriesCreationHeaderView) {
+        headerView.configure(
+            title: "Share with your sitter",
+            subtitle: "Choose which nest items sitters can see during this session."
+        )
+        headerView.embedSegmentedControl(segmentedControl)
     }
     
     private func configureDataSource() {
@@ -615,6 +771,17 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             // Configure the cell with custom subtitle format for selection flow
             self.configureSelectEntriesCell(cell, with: folderData, selectedCount: item.selectedCount, totalCount: item.totalItemCount)
             return cell
+        }
+        
+        dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
+            guard let self, kind == Self.creationHeaderElementKind else { return nil }
+            let header = collectionView.dequeueReusableSupplementaryView(
+                ofKind: kind,
+                withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier,
+                for: indexPath
+            ) as! SelectEntriesCreationHeaderView
+            self.configureCreationHeaderView(header)
+            return header
         }
     }
     
@@ -644,13 +811,16 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: item)
         }
         
-        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionReusableView>(
+        let sectionHeaderRegistration = UICollectionView.SupplementaryRegistration<UICollectionReusableView>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] headerView, elementKind, indexPath in
             guard let self,
                   let section = self.selectedItemsDataSource.sectionIdentifier(for: indexPath.section) else { return }
             
             headerView.subviews.forEach { $0.removeFromSuperview() }
+            
+            let itemCount = self.selectedItemsDataSource.snapshot().numberOfItems(inSection: section)
+            guard itemCount > 0 else { return }
             
             let label = UILabel()
             label.text = section.nestStyleHeaderTitle
@@ -667,8 +837,23 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             ])
         }
         
-        selectedItemsDataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+        selectedItemsDataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
+            guard let self else { return nil }
+            
+            if kind == Self.creationHeaderElementKind {
+                let header = collectionView.dequeueReusableSupplementaryView(
+                    ofKind: kind,
+                    withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier,
+                    for: indexPath
+                ) as! SelectEntriesCreationHeaderView
+                self.configureCreationHeaderView(header)
+                return header
+            }
+            
+            return collectionView.dequeueConfiguredReusableSupplementary(
+                using: sectionHeaderRegistration,
+                for: indexPath
+            )
         }
     }
     
@@ -703,6 +888,11 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             snapshot.appendSections([section])
             let sorted = items.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
             snapshot.appendItems(sorted, toSection: section)
+        }
+        
+        // Keep at least one section so the scrolling creation header can layout when empty.
+        if snapshot.sectionIdentifiers.isEmpty && showsCreationHeader {
+            snapshot.appendSections([.entries])
         }
         
         selectedItemsDataSource.apply(snapshot, animatingDifferences: true)
@@ -905,5 +1095,79 @@ extension ModifiedSelectFolderViewController {
     
     func paywallViewController(_ controller: PaywallViewController, didFailRestoringWith error: Error) {
         Logger.log(level: .error, category: .purchases, message: "Subscription restore failed: \(error.localizedDescription)")
+    }
+}
+
+// MARK: - Creation Header
+
+private final class SelectEntriesCreationHeaderView: UICollectionReusableView {
+    static let reuseIdentifier = "SelectEntriesCreationHeaderView"
+    
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    private let stackView = UIStackView()
+    private var embeddedControl: UIView?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setup() {
+        titleLabel.font = .h2
+        titleLabel.textColor = .label
+        titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 0
+        
+        subtitleLabel.font = .bodyM
+        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.textAlignment = .center
+        subtitleLabel.numberOfLines = 0
+        
+        stackView.axis = .vertical
+        stackView.alignment = .fill
+        stackView.spacing = 8
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.addArrangedSubview(titleLabel)
+        stackView.addArrangedSubview(subtitleLabel)
+        stackView.setCustomSpacing(16, after: subtitleLabel)
+        
+        addSubview(stackView)
+        
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
+        ])
+    }
+    
+    func configure(title: String, subtitle: String) {
+        titleLabel.text = title
+        subtitleLabel.text = subtitle
+    }
+    
+    func embedSegmentedControl(_ control: UISegmentedControl) {
+        if embeddedControl === control, control.superview === stackView {
+            return
+        }
+        
+        embeddedControl?.removeFromSuperview()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        stackView.addArrangedSubview(control)
+        control.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        embeddedControl = control
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // Keep the shared segmented control if it's still ours; otherwise clear the slot.
+        if let embeddedControl, embeddedControl.superview !== stackView {
+            self.embeddedControl = nil
+        }
     }
 }

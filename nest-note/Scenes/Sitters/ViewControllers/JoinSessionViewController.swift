@@ -15,6 +15,11 @@ protocol JoinSessionViewControllerDelegate: AnyObject {
 
 class JoinSessionViewController: NNViewController {
 
+    private enum InviteCardMetrics {
+        static let width: CGFloat = 280
+        static let height: CGFloat = 350
+    }
+
     weak var delegate: JoinSessionViewControllerDelegate?
     private var isDebugMode: Bool = false
     
@@ -102,13 +107,53 @@ class JoinSessionViewController: NNViewController {
     private var buttonStack: UIStackView!
     
     private let inviteCardView: SessionInviteCardView = {
-        let view = SessionInviteCardView()
+        let view = SessionInviteCardView(displayStyle: .standard)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.alpha = 0 // Start hidden
         return view
     }()
 
-    private var inviteCardBottomConstraint: NSLayoutConstraint?
+    private lazy var glowView: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = .clear
+        view.alpha = 0
+        view.layer.shadowColor = NNColors.primary.cgColor
+        view.layer.shadowOffset = .zero
+        view.layer.shadowRadius = 40
+        view.layer.shadowOpacity = 0.8
+        view.layer.masksToBounds = false
+        return view
+    }()
+
+    private lazy var glowView2: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = .clear
+        view.alpha = 0
+        view.layer.shadowColor = NNColors.primary.cgColor
+        view.layer.shadowOffset = .zero
+        view.layer.shadowRadius = 80
+        view.layer.shadowOpacity = 0.6
+        view.layer.masksToBounds = false
+        return view
+    }()
+
+    private lazy var glowView3: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = .clear
+        view.alpha = 0
+        view.layer.shadowColor = NNColors.primary.cgColor
+        view.layer.shadowOffset = .zero
+        view.layer.shadowRadius = 120
+        view.layer.shadowOpacity = 0.4
+        view.layer.masksToBounds = false
+        return view
+    }()
+
+    private var inviteCardCenterYConstraint: NSLayoutConstraint?
+    private var hasAnimatedInviteCard = false
     
     private var currentInviteCode: String?
     private var currentSession: SessionItem?
@@ -214,17 +259,33 @@ class JoinSessionViewController: NNViewController {
     }
     
     private func setupInviteCard() {
-        // Add invite card view
+        view.addSubview(glowView3)
+        view.addSubview(glowView2)
+        view.addSubview(glowView)
         view.addSubview(inviteCardView)
-        
-        // Add invite card constraints - start offscreen
-        inviteCardBottomConstraint = inviteCardView.topAnchor.constraint(equalTo: view.bottomAnchor)
-        
+
+        inviteCardCenterYConstraint = inviteCardView.centerYAnchor.constraint(equalTo: view.bottomAnchor, constant: 200)
+
         NSLayoutConstraint.activate([
-            inviteCardView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            inviteCardView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            inviteCardView.heightAnchor.constraint(equalToConstant: view.frame.height * 0.5),
-            inviteCardBottomConstraint!
+            inviteCardView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            inviteCardView.widthAnchor.constraint(equalToConstant: InviteCardMetrics.width),
+            inviteCardView.heightAnchor.constraint(equalToConstant: InviteCardMetrics.height),
+            inviteCardCenterYConstraint!,
+
+            glowView.centerXAnchor.constraint(equalTo: inviteCardView.centerXAnchor),
+            glowView.centerYAnchor.constraint(equalTo: inviteCardView.centerYAnchor),
+            glowView.widthAnchor.constraint(equalTo: inviteCardView.widthAnchor, multiplier: 1.05),
+            glowView.heightAnchor.constraint(equalTo: inviteCardView.heightAnchor, multiplier: 0.6),
+
+            glowView2.centerXAnchor.constraint(equalTo: inviteCardView.centerXAnchor),
+            glowView2.centerYAnchor.constraint(equalTo: inviteCardView.centerYAnchor),
+            glowView2.widthAnchor.constraint(equalTo: inviteCardView.widthAnchor, multiplier: 1.1),
+            glowView2.heightAnchor.constraint(equalTo: inviteCardView.heightAnchor, multiplier: 0.7),
+
+            glowView3.centerXAnchor.constraint(equalTo: inviteCardView.centerXAnchor),
+            glowView3.centerYAnchor.constraint(equalTo: inviteCardView.centerYAnchor),
+            glowView3.widthAnchor.constraint(equalTo: inviteCardView.widthAnchor, multiplier: 1.15),
+            glowView3.heightAnchor.constraint(equalTo: inviteCardView.heightAnchor, multiplier: 0.8),
         ])
     }
     
@@ -329,12 +390,8 @@ class JoinSessionViewController: NNViewController {
 
                         // Configure and show the invite card
                         self.inviteCardView.configure(with: session, invite: invite)
-                        self.animateInviteCard()
-
-                        // Hide the code entry field
-                        UIView.animate(withDuration: 0.3) {
-                            self.codeStack.alpha = 0
-                        }
+                        self.updateGlowTint(NNColors.primary)
+                        self.playSessionFoundTransition()
 
                         // Update button
                         self.findSessionButton.stopLoading(withSuccess: true)
@@ -359,12 +416,6 @@ class JoinSessionViewController: NNViewController {
 
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
-
-                    // Trigger explosion when invite is accepted
-                    let buttonFrame = self.findSessionButton.frame
-                    let centerPoint = CGPoint(x: buttonFrame.midX, y: buttonFrame.midY)
-                    let pointInView = self.view.convert(centerPoint, to: self.view)
-                    ExplosionManager.trigger(.medium, at: pointInView)
 
                     SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
                         Task { @MainActor in
@@ -393,12 +444,8 @@ class JoinSessionViewController: NNViewController {
 
                 // Configure and show the invite card
                 self.inviteCardView.configure(with: placeholder, invite: invite)
-                self.animateInviteCard()
-
-                // Hide the code entry field
-                UIView.animate(withDuration: 0.3) {
-                    self.codeStack.alpha = 0
-                }
+                self.updateGlowTint(NNColors.primary)
+                self.playSessionFoundTransition()
 
                 // Update button
                 self.findSessionButton.stopLoading(withSuccess: true)
@@ -459,21 +506,70 @@ class JoinSessionViewController: NNViewController {
         RatingManager.shared.trackSessionJoined()
     }
     
+    private func playSessionFoundTransition() {
+        UIView.animate(withDuration: 0.3) {
+            self.codeStack.alpha = 0
+            self.titleStack.alpha = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.animateInviteCard()
+
+            UIView.animate(withDuration: 0.3, delay: 0.1) {
+                self?.titleStack.alpha = 1
+            }
+        }
+    }
+
+    private func configureGlowShadowPaths() {
+        let cardWidth = InviteCardMetrics.width
+        let cardHeight = InviteCardMetrics.height
+        let glowLayers: [(UIView, CGFloat, CGFloat)] = [
+            (glowView, 1.05, 0.6),
+            (glowView2, 1.1, 0.7),
+            (glowView3, 1.15, 0.8),
+        ]
+
+        for (glowLayer, widthMultiplier, heightMultiplier) in glowLayers {
+            let width = cardWidth * widthMultiplier
+            let height = cardHeight * heightMultiplier
+            glowLayer.layer.shadowPath = UIBezierPath(
+                ovalIn: CGRect(x: 0, y: 0, width: width, height: height)
+            ).cgPath
+        }
+    }
+
+    private func updateGlowTint(_ color: UIColor) {
+        [glowView, glowView2, glowView3].forEach { view in
+            view.layer.removeAnimation(forKey: "shadowColor")
+            view.layer.shadowColor = color.cgColor
+        }
+    }
+
     private func animateInviteCard() {
-        // First make it visible
+        guard !hasAnimatedInviteCard else { return }
+        hasAnimatedInviteCard = true
+
+        configureGlowShadowPaths()
+
         inviteCardView.alpha = 1
-        
-        // Remove current constraint and add new one
-        inviteCardBottomConstraint?.isActive = false
-        inviteCardBottomConstraint = inviteCardView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 0)
-        inviteCardBottomConstraint?.isActive = true
-        
-        // Animate it up from the bottom with spring effect
-        UIView.animate(withDuration: 0.6, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
+        glowView.alpha = 1
+        glowView2.alpha = 1
+        glowView3.alpha = 1
+
+        inviteCardCenterYConstraint?.isActive = false
+        inviteCardCenterYConstraint = inviteCardView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 20)
+        inviteCardCenterYConstraint?.isActive = true
+
+        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
             self.view.layoutIfNeeded()
         }
-        
-        HapticsHelper.successHaptic()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self else { return }
+            ExplosionManager.trigger(.atomic, at: CGPoint(x: view.center.x, y: view.frame.maxY))
+            HapticsHelper.lightHaptic()
+        }
     }
     
     @MainActor
@@ -601,7 +697,8 @@ class JoinSessionViewController: NNViewController {
         )
         
         inviteCardView.configure(with: mockSession, invite: mockInvite)
-        animateInviteCard()
+        updateGlowTint(NNColors.primary)
+        playSessionFoundTransition()
         
         // Hide the code entry field
         UIView.animate(withDuration: 0.3) {

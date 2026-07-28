@@ -2,21 +2,45 @@ import UIKit
 
 class OnboardingMissingInfoViewController: NNOnboardingViewController {
 
-    private let scrollView = UIScrollView()
-    private let contentView = UIView()
-    private let statCardView = UIView()
-    private let statLabel = UILabel()
-    private let stackView = UIStackView()
-
-    private var itemViews: [UIView] = []
-
-    private let missingItems = [
+    private static let defaultTitle = "You're not giving your sitters\nwhat they need to succeed."
+    private static let defaultStatText = "74% of parents fail to share\nhousehold codes & systems"
+    private static let defaultSubtitle = "which means the sitter is potentially\nmissing the following:"
+    private static let defaultItems = [
         "Garage Codes",
         "Wifi Password",
         "Screen Time rules",
         "Appliance Guides"
     ]
+    private static let defaultCtaText = "Continue"
 
+    private let scrollView = UIScrollView()
+    private let contentView = UIView()
+    private let statCardView = UIView()
+    private let statCardContentView = UIView()
+    private let statLabel = UILabel()
+    private let stackView = UIStackView()
+    private let statCardBackgroundGradient = CAGradientLayer()
+
+    private var itemViews: [UIView] = []
+    private var configuredTitle = defaultTitle
+    private var configuredStatText = defaultStatText
+    private var configuredSubtitle = defaultSubtitle
+    private var configuredItems = defaultItems
+    private var configuredCtaText = defaultCtaText
+
+    func configure(
+        title: String? = nil,
+        statText: String? = nil,
+        subtitle: String? = nil,
+        items: [String]? = nil,
+        ctaText: String? = nil
+    ) {
+        if let title { configuredTitle = title }
+        if let statText { configuredStatText = statText }
+        if let subtitle { configuredSubtitle = subtitle }
+        if let items { configuredItems = items }
+        if let ctaText { configuredCtaText = ctaText }
+    }
 
     @objc private func continueButtonTapped() {
         (coordinator as? OnboardingCoordinator)?.next()
@@ -24,71 +48,147 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        // Custom layout for this VC - add statCardView to labelStack
-        view.addSubview(labelStack)
-        labelStack.addArrangedSubview(titleLabel)
-        labelStack.addArrangedSubview(statCardView)
-        labelStack.addArrangedSubview(subtitleLabel)
 
+        labelStack.insertArrangedSubview(statCardView, at: 1)
         labelStack.setCustomSpacing(32, after: titleLabel)
         labelStack.setCustomSpacing(24, after: statCardView)
 
+        statCardView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            labelStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
-            labelStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 36),
-            labelStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -36),
-
-            statCardView.heightAnchor.constraint(lessThanOrEqualToConstant: 100)
+            statCardView.widthAnchor.constraint(equalTo: labelStack.widthAnchor)
         ])
-        
+
         setupOnboarding(
-            title: "You're not giving your sitters\nwhat they need to succeed.",
-            subtitle: "which means the sitter is potentially\nmissing the following:"
+            title: configuredTitle,
+            subtitle: configuredSubtitle
         )
         setupContent()
-        addCTAButton(title: "Continue")
+        addCTAButton(title: configuredCtaText)
         ctaButton?.addTarget(self, action: #selector(continueButtonTapped), for: .touchUpInside)
+        installScrollEdgeInteractions(for: scrollView)
     }
 
     override func setupContent() {
-        setupLayout()
+        setupListScrollView()
         setupStackView()
         setupStatCard()
         createMissingItemViews()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // By viewWillAppear the view is guaranteed to be attached to its window, so this is the
+        // earliest point where `traitCollection` reliably reflects the real current appearance.
+        updateStatCardColors()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        updateStatCardColors()
         animateItems()
     }
 
-    private func setupLayout() {
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        // Re-resolve every layout pass too: cheap and idempotent, and covers cases where this
+        // screen is inserted into a custom container that lays out children before they're
+        // attached to a window (viewWillAppear/viewDidAppear act as a safety net above).
+        updateStatCardColors()
+        statCardBackgroundGradient.frame = statCardContentView.bounds
+        statCardView.layer.shadowPath = UIBezierPath(roundedRect: statCardView.bounds, cornerRadius: 16).cgPath
+
+        if #available(iOS 26.0, *) {
+            updateScrollViewInsets()
+        }
+    }
+
+    /// Keeps the scroll view's resting position between the header and CTA now that its frame
+    /// extends under both (header height changes with configured text).
+    @available(iOS 26.0, *)
+    private func updateScrollViewInsets() {
+        let headerBottom = headerContainerView.convert(labelStack.frame, to: view).maxY
+        let topTarget = headerBottom + 12 - scrollView.safeAreaInsets.top
+
+        var bottomTarget: CGFloat = 0
+        if let ctaButton {
+            let buttonTop = ctaButton.convert(ctaButton.bounds, to: view).minY
+            bottomTarget = max(0, view.bounds.height - buttonTop + 16 - scrollView.safeAreaInsets.bottom)
+        }
+
+        guard abs(scrollView.contentInset.top - topTarget) > 0.5
+                || abs(scrollView.contentInset.bottom - bottomTarget) > 0.5 else { return }
+
+        let wasAtTop = scrollView.contentOffset.y <= -(scrollView.adjustedContentInset.top) + 1
+        scrollView.contentInset.top = topTarget
+        scrollView.contentInset.bottom = bottomTarget
+        if wasAtTop, !scrollView.isDragging, !scrollView.isDecelerating {
+            scrollView.contentOffset.y = -scrollView.adjustedContentInset.top
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            updateStatCardColors()
+        }
+    }
+
+    private func updateStatCardColors() {
+        let backgroundColor = UIColor.systemBackground.resolvedColor(with: traitCollection)
+        let tintColor = UIColor.systemRed.resolvedColor(with: traitCollection)
+
+        statCardContentView.backgroundColor = backgroundColor
+        statCardBackgroundGradient.colors = [
+            tintColor.withAlphaComponent(0.05).cgColor,
+            backgroundColor.cgColor
+        ]
+        statCardBackgroundGradient.locations = [0, 1]
+        statCardBackgroundGradient.startPoint = CGPoint(x: 0.5, y: -5)
+        statCardBackgroundGradient.endPoint = CGPoint(x: 0.5, y: 0.8)
+    }
+
+    private func setupListScrollView() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.alwaysBounceVertical = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.keyboardDismissMode = .onDrag
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
         view.addSubview(scrollView)
         scrollView.addSubview(contentView)
-
         contentView.addSubview(stackView)
         stackView.translatesAutoresizingMaskIntoConstraints = false
 
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.translatesAutoresizingMaskIntoConstraints = false
+        let topConstraint: NSLayoutConstraint
+        let bottomConstraint: NSLayoutConstraint
+        if #available(iOS 26.0, *) {
+            // Extend under the header and CTA so content can scroll beneath them;
+            // insets are managed in viewDidLayoutSubviews
+            topConstraint = scrollView.topAnchor.constraint(equalTo: view.topAnchor)
+            bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        } else {
+            topConstraint = scrollView.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 12)
+            bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: ctaButton?.topAnchor ?? view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+        }
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 20),
+            topConstraint,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: ctaButton?.topAnchor ?? view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            bottomConstraint,
 
-            contentView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            contentView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            contentView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            contentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            contentView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            contentView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            contentView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
 
-            stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
+            stackView.topAnchor.constraint(equalTo: contentView.topAnchor),
             stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 36),
             stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -36),
-            stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
+            stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8)
         ])
     }
 
@@ -99,58 +199,53 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
     }
 
     private func setupStatCard() {
-        statCardView.backgroundColor = .systemBackground
+        statCardView.backgroundColor = .clear
         statCardView.layer.cornerRadius = 16
-
         statCardView.layer.shadowColor = UIColor.black.cgColor
         statCardView.layer.shadowOffset = CGSize(width: 0, height: 4)
         statCardView.layer.shadowOpacity = 0.15
         statCardView.layer.shadowRadius = 8
 
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.colors = [
-            UIColor.systemRed.withAlphaComponent(0.05).cgColor,
-            UIColor.systemBackground.cgColor
-        ]
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: -5)
-        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0.8)
-        gradientLayer.cornerRadius = 16
-        statCardView.layer.insertSublayer(gradientLayer, at: 0)
+        statCardContentView.translatesAutoresizingMaskIntoConstraints = false
+        statCardContentView.layer.cornerRadius = 16
+        statCardContentView.clipsToBounds = true
+        statCardView.addSubview(statCardContentView)
 
-        statCardView.addSubview(statLabel)
+        statCardBackgroundGradient.cornerRadius = 16
+        statCardContentView.layer.insertSublayer(statCardBackgroundGradient, at: 0)
+        updateStatCardColors()
+
         statLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        statLabel.text = "74% of parents fail to share\nhousehold codes & systems"
+        statLabel.text = configuredStatText
         statLabel.font = UIFont.systemFont(ofSize: 20, weight: .bold)
         statLabel.textColor = .systemRed
         statLabel.textAlignment = .center
         statLabel.numberOfLines = 0
 
-        statLabel.addShimmerEffect()
-        statLabel.startShimmer()
+        statCardContentView.addSubview(statLabel)
 
         NSLayoutConstraint.activate([
-            statLabel.centerXAnchor.constraint(equalTo: statCardView.centerXAnchor),
-            statLabel.centerYAnchor.constraint(equalTo: statCardView.centerYAnchor),
-            statLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statCardView.leadingAnchor, constant: 24),
-            statLabel.trailingAnchor.constraint(lessThanOrEqualTo: statCardView.trailingAnchor, constant: -24),
-            statLabel.topAnchor.constraint(greaterThanOrEqualTo: statCardView.topAnchor, constant: 24),
-            statLabel.bottomAnchor.constraint(lessThanOrEqualTo: statCardView.bottomAnchor, constant: -24)
+            statCardContentView.topAnchor.constraint(equalTo: statCardView.topAnchor),
+            statCardContentView.leadingAnchor.constraint(equalTo: statCardView.leadingAnchor),
+            statCardContentView.trailingAnchor.constraint(equalTo: statCardView.trailingAnchor),
+            statCardContentView.bottomAnchor.constraint(equalTo: statCardView.bottomAnchor),
+
+            statLabel.topAnchor.constraint(equalTo: statCardContentView.topAnchor, constant: 24),
+            statLabel.leadingAnchor.constraint(equalTo: statCardContentView.leadingAnchor, constant: 24),
+            statLabel.trailingAnchor.constraint(equalTo: statCardContentView.trailingAnchor, constant: -24),
+            statLabel.bottomAnchor.constraint(equalTo: statCardContentView.bottomAnchor, constant: -24)
         ])
 
-        statCardView.layoutIfNeeded()
-        gradientLayer.frame = statCardView.bounds
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        if let gradientLayer = statCardView.layer.sublayers?.first as? CAGradientLayer {
-            gradientLayer.frame = statCardView.bounds
-        }
+        // Add immediately rather than waiting on a bounds check in viewDidLayoutSubviews: the
+        // shimmer view's own constraints are pinned to statLabel, so it naturally gets a correct
+        // frame (and re-runs its layoutSubviews/updateTextMask) as part of the same Auto Layout
+        // pass that first sizes the label, with no dependence on how many times the parent view
+        // controller's viewDidLayoutSubviews happens to fire.
+        statLabel.addShimmerEffect()
     }
 
     private func createMissingItemViews() {
-        for item in missingItems {
+        for item in configuredItems {
             let itemView = createMissingItemView(title: item)
 
             itemView.alpha = 0
@@ -172,6 +267,7 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
         titleLabel.text = title
         titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         titleLabel.textColor = .label
+        titleLabel.numberOfLines = 0
 
         let xmarkImageView = UIImageView()
         let xmarkConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
@@ -192,10 +288,11 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
         xmarkContainer.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
-            containerView.heightAnchor.constraint(equalToConstant: 56),
+            containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
 
             titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            titleLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 16),
+            titleLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: xmarkContainer.leadingAnchor, constant: -12),
 
             xmarkContainer.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
@@ -212,7 +309,6 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
         return containerView
     }
 
-    // MARK: - Animation
     private func animateItems() {
         for (index, itemView) in itemViews.enumerated() {
             let delay = Double(index) * 0.3

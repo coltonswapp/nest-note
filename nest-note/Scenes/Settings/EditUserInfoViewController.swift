@@ -6,6 +6,7 @@ enum EditUserInfoType: String {
     case nestName = "Nest Name"
     case nestAddress = "Nest Address"
     case venmoUsername = "Venmo Username"
+    case hourlyRate = "Hourly Rate"
     
     var title: String {
         switch self {
@@ -14,6 +15,7 @@ enum EditUserInfoType: String {
         case .nestName: return "Edit Nest Name"
         case .nestAddress: return "Edit Nest Address"
         case .venmoUsername: return "Edit Venmo Username"
+        case .hourlyRate: return "Edit Hourly Rate"
         }
     }
     
@@ -24,6 +26,7 @@ enum EditUserInfoType: String {
         case .nestName: return "Changes will be reflected in new sessions going forward."
         case .nestAddress: return "It's important that your sitter have access to your address for emergencies & directions."
         case .venmoUsername: return "Parents can pay you through Venmo after a session ends. Your username is only visible to families you sit for."
+        case .hourlyRate: return "Families see this rate when calculating payment after a session. You can change it anytime."
         }
     }
     
@@ -34,6 +37,7 @@ enum EditUserInfoType: String {
         case .nestName: return "Enter nest name"
         case .nestAddress: return "Enter nest address"
         case .venmoUsername: return "username"
+        case .hourlyRate: return "18"
         }
     }
     
@@ -49,22 +53,26 @@ enum EditUserInfoType: String {
             return NestService.shared.currentNest?.address ?? ""
         case .venmoUsername:
             return UserService.shared.currentUser?.personalInfo.venmoUsername ?? ""
+        case .hourlyRate:
+            return SessionPaymentCalculator.formatHourlyRateInput(UserService.shared.currentUser?.personalInfo.hourlyRateCents)
         }
     }
     
-    var textContentType: UITextContentType {
+    var textContentType: UITextContentType? {
         switch self {
         case .name: return .name
         case .phone: return .telephoneNumber
         case .nestAddress: return .fullStreetAddress
         case .nestName: return .familyName
-        case .venmoUsername: return .username
+        case .venmoUsername: return .nickname
+        case .hourlyRate: return nil
         }
     }
     
     var keyboardType: UIKeyboardType {
         switch self {
         case .phone: return .phonePad
+        case .hourlyRate: return .decimalPad
         default: return .default
         }
     }
@@ -118,8 +126,8 @@ class EditUserInfoViewController: NNViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Invite Code".uppercased()
-        label.font = .bodyM
-        label.textColor = .lightGray
+        label.font = .captionBoldS
+        label.textColor = .secondaryLabel
         return label
     }()
     
@@ -146,6 +154,21 @@ class EditUserInfoViewController: NNViewController {
         button.isEnabled = false // Disabled by default
         return button
     }()
+
+    private var selectedHourlyRateCents = SessionPaymentCalculator.defaultHourlyRateCents
+
+    private lazy var hourlyRateSelector: HourlyRateSelectorView = {
+        let selector = HourlyRateSelectorView(cents: selectedHourlyRateCents)
+        selector.onValueChanged = { [weak self] cents in
+            self?.selectedHourlyRateCents = cents
+            self?.updateSaveButtonState()
+        }
+        return selector
+    }()
+
+    private var storedHourlyRateCents: Int? {
+        UserService.shared.currentUser?.personalInfo.hourlyRateCents
+    }
     
     private let stackView: UIStackView = {
         let stack = UIStackView()
@@ -191,16 +214,23 @@ class EditUserInfoViewController: NNViewController {
         titleLabel.text = type.title
         descriptionLabel.text = type.description
         fieldLabel.text = type.rawValue.uppercased()
-        textField.placeholder = type.placeholder
-        textField.text = type.currentValue
-        textField.textContentType = type.textContentType
-        textField.autocapitalizationType = type.autocapitalizationType
-        textField.keyboardType = type.keyboardType
-        if type == .venmoUsername {
-            textField.autocorrectionType = .no
-            VenmoPaymentHandler.applyUsernamePrefix(to: textField)
+
+        if type == .hourlyRate {
+            selectedHourlyRateCents = SessionPaymentCalculator.resolvedHourlyRateCents(storedHourlyRateCents)
+            hourlyRateSelector.applyFilledFieldStyle()
+            hourlyRateSelector.configure(cents: selectedHourlyRateCents)
+        } else {
+            textField.placeholder = type.placeholder
+            textField.text = type.currentValue
+            textField.textContentType = type.textContentType
+            textField.autocapitalizationType = type.autocapitalizationType
+            textField.keyboardType = type.keyboardType
+            if type == .venmoUsername {
+                textField.autocorrectionType = .no
+                VenmoPaymentHandler.applyUsernamePrefix(to: textField)
+            }
         }
-        
+
         // Configure sheet presentation
         if let sheet = sheetPresentationController {
             sheet.detents = [.medium()]
@@ -215,7 +245,11 @@ class EditUserInfoViewController: NNViewController {
         titleStack.addArrangedSubview(descriptionLabel)
         stackView.addArrangedSubview(titleStack)
         fieldStack.addArrangedSubview(fieldLabel)
-        fieldStack.addArrangedSubview(textField)
+        if type == .hourlyRate {
+            fieldStack.addArrangedSubview(hourlyRateSelector)
+        } else {
+            fieldStack.addArrangedSubview(textField)
+        }
         stackView.addArrangedSubview(fieldStack)
         view.addSubview(saveButton)
     }
@@ -228,14 +262,22 @@ class EditUserInfoViewController: NNViewController {
             stackView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
             stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            
-            textField.heightAnchor.constraint(equalToConstant: 55),
-            textField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
-            
+
             saveButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             saveButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             saveButton.heightAnchor.constraint(equalToConstant: 55)
         ])
+
+        if type == .hourlyRate {
+            NSLayoutConstraint.activate([
+                hourlyRateSelector.widthAnchor.constraint(equalTo: stackView.widthAnchor)
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                textField.heightAnchor.constraint(equalToConstant: 55),
+                textField.widthAnchor.constraint(equalTo: stackView.widthAnchor)
+            ])
+        }
     }
     
     @objc private func textFieldDidChange() {
@@ -263,6 +305,9 @@ class EditUserInfoViewController: NNViewController {
             let isChanged = newValue != currentValue
             let isValid = newValue.isEmpty || VenmoPaymentHandler.isValidInput(newValue)
             saveButton.isEnabled = isChanged && isValid
+        case .hourlyRate:
+            let isChanged = selectedHourlyRateCents != storedHourlyRateCents
+            saveButton.isEnabled = isChanged
         default:
             saveButton.isEnabled = !newValue.isEmpty && newValue != currentValue
         }
@@ -271,7 +316,7 @@ class EditUserInfoViewController: NNViewController {
     @objc private func saveButtonTapped() {
         let newValue = textField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
-        if type != .venmoUsername && type != .phone && newValue.isEmpty {
+        if type != .venmoUsername && type != .phone && type != .hourlyRate && newValue.isEmpty {
             return
         }
         
@@ -294,6 +339,8 @@ class EditUserInfoViewController: NNViewController {
                     }
                 case .venmoUsername:
                     try await UserService.shared.updateVenmoUsername(newValue)
+                case .hourlyRate:
+                    try await UserService.shared.updateHourlyRate(selectedHourlyRateCents)
                 }
                 
                 try await Task.sleep(for: .seconds(1))
@@ -320,9 +367,13 @@ extension EditUserInfoViewController: UITextFieldDelegate {
     }
     
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-        guard type == .venmoUsername else { return true }
-        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-        let characterSet = CharacterSet(charactersIn: string)
-        return allowedCharacters.isSuperset(of: characterSet)
+        switch type {
+        case .venmoUsername:
+            let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+            let characterSet = CharacterSet(charactersIn: string)
+            return allowedCharacters.isSuperset(of: characterSet)
+        default:
+            return true
+        }
     }
 }

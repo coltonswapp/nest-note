@@ -18,7 +18,8 @@ final class CarouselFeaturePaywallViewController: NNViewController {
     private static let checkoutCardToScreenRatio: CGFloat = 0.22
 
     /// When set, the paywall runs in onboarding mode and calls back instead of dismissing modally.
-    var onPaywallFinished: ((Bool) -> Void)? {
+    /// Parameters: subscribed, startedTrial (meaningful only when subscribed is true).
+    var onPaywallFinished: ((_ subscribed: Bool, _ startedTrial: Bool) -> Void)? {
         didSet {
             showsDelayedCloseButton = onPaywallFinished != nil
         }
@@ -1252,7 +1253,7 @@ final class CarouselFeaturePaywallViewController: NNViewController {
 
         Task {
             do {
-                _ = try await SubscriptionService.shared.purchase(
+                let customerInfo = try await SubscriptionService.shared.purchase(
                     package: selectedPackage,
                     referralCode: appliedReferralCode,
                     referralCodeType: appliedReferralCodeType
@@ -1260,7 +1261,10 @@ final class CarouselFeaturePaywallViewController: NNViewController {
                 await MainActor.run {
                     setLoading(false)
                     TikTokTracker.shared.trackSubscribe()
-                    dismissPaywall(showing: "Subscription activated!")
+                    dismissPaywall(
+                        showing: "Subscription activated!",
+                        customerInfo: customerInfo
+                    )
                 }
             } catch SubscriptionError.purchaseCancelled {
                 await MainActor.run {
@@ -1286,7 +1290,10 @@ final class CarouselFeaturePaywallViewController: NNViewController {
                     setLoading(false)
                     if customerInfo.entitlements.active["Pro"] != nil {
                         TikTokTracker.shared.trackSubscribe()
-                        dismissPaywall(showing: "Subscription restored!")
+                        dismissPaywall(
+                            showing: "Subscription restored!",
+                            customerInfo: customerInfo
+                        )
                     } else {
                         showToast(text: "No active subscription found.")
                     }
@@ -1331,18 +1338,19 @@ final class CarouselFeaturePaywallViewController: NNViewController {
         present(SFSafariViewController(url: url), animated: true)
     }
 
-    private func dismissPaywall(showing message: String) {
+    private func dismissPaywall(showing message: String, customerInfo: CustomerInfo) {
         Task {
             await SubscriptionService.shared.refreshCustomerInfo()
             await MainActor.run {
-                finishPaywall(subscribed: true, successMessage: message)
+                let startedTrial = SubscriptionService.shared.isInTrialPeriod(customerInfo)
+                finishPaywall(subscribed: true, startedTrial: startedTrial, successMessage: message)
             }
         }
     }
 
-    private func finishPaywall(subscribed: Bool, successMessage: String? = nil) {
+    private func finishPaywall(subscribed: Bool, startedTrial: Bool = false, successMessage: String? = nil) {
         if let onPaywallFinished {
-            onPaywallFinished(subscribed)
+            onPaywallFinished(subscribed, startedTrial)
             return
         }
 

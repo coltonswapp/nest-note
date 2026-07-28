@@ -73,6 +73,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Properties for select entries flow
     private var currentSelectEntriesNavController: UINavigationController?
+    private var hasCreatedSessionInFlow = false
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -87,6 +88,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var sessionEvents: [SessionEvent] = []
     private var pdfURL: URL?
+    private var isGeneratingPDF = false
+    private var pdfGenerationOverlay: UIView?
     private let maxVisibleEvents = 4
     
     // Add property to track if completing a sitter-initiated request
@@ -97,7 +100,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let buttonTitle: String
         if isCompletingRequest {
             buttonTitle = "Create Session"
-        } else if isEditingSession {
+        } else if isSessionPersisted {
             buttonTitle = "Save Changes"
         } else {
             buttonTitle = "Next"
@@ -128,6 +131,14 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private let isEditingSession: Bool
+    
+    private var isSessionPersisted: Bool {
+        isEditingSession || hasCreatedSessionInFlow
+    }
+    
+    private var shouldShowSelectEntriesSection: Bool {
+        isEditingSession || hasCreatedSessionInFlow || isCompletingRequest
+    }
     
     // Computed properties to access current date values
     private var currentDateSelection: (startDate: Date, endDate: Date, isMultiDay: Bool)? {
@@ -173,7 +184,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Add property to track pending status change when date update is required
     private var pendingStatusChange: SessionStatus?
-    
+
     // Update init to handle single vs multi-day
     init(sessionItem: SessionItem = SessionItem()) {
         self.sessionItem = sessionItem
@@ -262,6 +273,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             name: .sessionStatusDidChange,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionPDFDidUpdate),
+            name: .sessionPDFDidUpdate,
+            object: nil
+        )
         
         // Restore selected entries if editing an existing session
         restoreSelectedEntriesFromSession()
@@ -324,7 +342,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // If completing a request with multi-day, validate subscription and disable if needed
         if isCompletingRequest && sessionItem.isMultiDay {
             Task {
-                let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                let hasMultiDaySessions = await SubscriptionService.shared.canUseFullFeatures()
                 if !hasMultiDaySessions {
                     await MainActor.run {
                         // Force to single-day: sync end date to same day as start date
@@ -669,62 +687,168 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     @objc private func shareButtonTapped() {
-        // Create alert with PDF export warning
+        exportPDFButtonTapped()
+    }
+
+    private func effectiveSelectedItemIds() -> [String] {
+        if !selectedItemIds.isEmpty {
+            return selectedItemIds
+        }
+        return sessionItem.entryIds ?? []
+    }
+
+    private func hasGeneratedSessionPDF() -> Bool {
+        SessionPDFService.shared.localPDFFileExists(nestID: sessionItem.nestID, sessionID: sessionItem.id)
+    }
+
+    private func refreshExportPDFCell() {
+        guard isEditingSession, sessionItem.status != .archived else { return }
+        var snapshot = dataSource.snapshot()
+        guard snapshot.sectionIdentifiers.contains(.exportPDF) else { return }
+        snapshot.reconfigureItems([.exportPDF])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    @MainActor
+    private func setPDFGenerationLoading(_ isLoading: Bool) {
+        isGeneratingPDF = isLoading
+        refreshExportPDFCell()
+
+        if isLoading {
+            guard pdfGenerationOverlay == nil else { return }
+
+            let overlay = UIView()
+            overlay.backgroundColor = UIColor.black.withAlphaComponent(0.25)
+            overlay.translatesAutoresizingMaskIntoConstraints = false
+
+            let container = UIView()
+            container.backgroundColor = .secondarySystemGroupedBackground
+            container.layer.cornerRadius = 14
+            container.layer.cornerCurve = .continuous
+            container.translatesAutoresizingMaskIntoConstraints = false
+
+            let spinner = UIActivityIndicatorView(style: .large)
+            spinner.startAnimating()
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+
+            let label = UILabel()
+            label.text = "Generating PDF…"
+            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.textColor = .label
+            label.textAlignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            container.addSubview(spinner)
+            container.addSubview(label)
+            overlay.addSubview(container)
+            view.addSubview(overlay)
+
+            NSLayoutConstraint.activate([
+                overlay.topAnchor.constraint(equalTo: view.topAnchor),
+                overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+                container.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                container.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+                container.widthAnchor.constraint(equalToConstant: 180),
+
+                spinner.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
+                spinner.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+
+                label.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 12),
+                label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+                label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -20)
+            ])
+
+            pdfGenerationOverlay = overlay
+        } else {
+            pdfGenerationOverlay?.removeFromSuperview()
+            pdfGenerationOverlay = nil
+        }
+    }
+
+    private func generateCachedPDF() async throws -> URL {
+        try await SessionPDFService.shared.generateAndCache(
+            session: sessionItem,
+            events: sessionEvents,
+            selectedItemIds: effectiveSelectedItemIds()
+        )
+    }
+
+    private func generateAndPresentPDF() {
+        Task {
+            await setPDFGenerationLoading(true)
+
+            do {
+                pdfURL = try await generateCachedPDF()
+
+                await MainActor.run {
+                    refreshExportPDFCell()
+                    let previewController = QLPreviewController()
+                    previewController.dataSource = self
+                    present(previewController, animated: true)
+                }
+            } catch {
+                await showError(message: "Failed to export PDF: \(error.localizedDescription)")
+            }
+
+            await setPDFGenerationLoading(false)
+        }
+    }
+
+    private func regeneratePDFManually() {
+        guard !isGeneratingPDF,
+              !SessionPDFService.shared.isRegenerating(sessionID: sessionItem.id) else {
+            return
+        }
+
+        Task {
+            guard await SubscriptionService.shared.canUseFullFeatures() else {
+                await MainActor.run {
+                    showUpgradePrompt(for: .sessionPDFExport)
+                }
+                return
+            }
+
+            await setPDFGenerationLoading(true)
+
+            do {
+                pdfURL = try await generateCachedPDF()
+                await MainActor.run {
+                    refreshExportPDFCell()
+                    showToast(text: "PDF updated", sentiment: .positive)
+                }
+            } catch {
+                await showError(message: "Failed to regenerate PDF: \(error.localizedDescription)")
+            }
+
+            await setPDFGenerationLoading(false)
+        }
+    }
+
+    private func presentGeneratePDFConfirmation() {
         let alert = UIAlertController(
             title: "Export Session as PDF",
             message: "Selected entries and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
-        
-        alert.addAction(UIAlertAction(title: "Export PDF", style: .default) { [weak self] _ in
-            self?.exportToPDF()
+
+        alert.addAction(UIAlertAction(title: "Generate PDF", style: .default) { [weak self] _ in
+            self?.generateAndPresentPDF()
         })
-        
+
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
+
         present(alert, animated: true)
     }
-    
-    private func exportToPDF() {
-        Task {
-            do {
-                // Get the current nest
-                guard let nest = NestService.shared.currentNest else {
-                    await showError(message: "Unable to access nest data")
-                    return
-                }
-                
-                // Generate PDF
-                guard let pdfData = await PDFExportService.generateSessionPDF(
-                    session: sessionItem,
-                    nestItem: nest,
-                    events: sessionEvents,
-                    selectedItemIds: (self.selectedItemIds.isEmpty ? (self.sessionItem.entryIds ?? []) : self.selectedItemIds)
-                ) else {
-                    await showError(message: "Failed to generate PDF")
-                    return
-                }
-                
-                // Create temporary file
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(sessionItem.title)_session_details.pdf")
-                
-                try pdfData.write(to: tempURL)
-                
-                // Store PDF URL for QuickLook
-                self.pdfURL = tempURL
-                
-                // Present QuickLook preview
-                await MainActor.run {
-                    let previewController = QLPreviewController()
-                    previewController.dataSource = self
-                    present(previewController, animated: true)
-                }
-                
-            } catch {
-                await showError(message: "Failed to export PDF: \(error.localizedDescription)")
-            }
-        }
+
+    private func viewCachedPDF() {
+        pdfURL = SessionPDFService.shared.localPDFURL(nestID: sessionItem.nestID, sessionID: sessionItem.id)
+        let previewController = QLPreviewController()
+        previewController.dataSource = self
+        present(previewController, animated: true)
     }
     
     @MainActor
@@ -766,9 +890,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     return
                 }
                 
-                // Validate multi-day subscription requirement
-                if isMultiDay {
-                    let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                // Validate multi-day subscription requirement (only when newly enabling multi-day)
+                if isMultiDay && !originalSession.isMultiDay {
+                    let hasMultiDaySessions = await SubscriptionService.shared.canUseFullFeatures()
                     if !hasMultiDaySessions {
                         await MainActor.run {
                             self.showMultiDayUpgradePrompt()
@@ -819,7 +943,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     return
                 }
 
-                if isEditingSession {
+                if isSessionPersisted {
                     try await updateSession()
                 } else {
                     
@@ -839,21 +963,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     // Notify sessions list to reload now that a new session exists
                     delegate?.editSessionViewController(self, didCreateSession: newSession)
 
-                    // Auto-create an open invite and pass it to the InviteDetailViewController
-                    Task { [weak self] in
-                        guard let self = self else { return }
-                        do {
-                            let invite = try await SessionService.shared.createOpenInvite(sessionID: newSession.id)
-                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
-                            inviteDetailVC.delegate = self
-                            inviteDetailVC.configure(with: invite.code, sessionID: newSession.id, sitter: nil)
-                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
-                        } catch {
-                            // If open invite creation fails, still navigate and allow manual creation
-                            let inviteDetailVC = InviteDetailViewController(sitter: nil, sessionID: newSession.id)
-                            inviteDetailVC.delegate = self
-                            self.navigationController?.pushViewController(inviteDetailVC, animated: true)
-                        }
+                    await MainActor.run {
+                        self.transitionToPostCreateState()
+                        self.pushSelectEntriesCreationStep()
                     }
                     return
                 }
@@ -863,7 +975,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             } catch ServiceError.noCurrentNest {
                 showToast(text: "Something went wrong", sentiment: .negative)
             } catch {
-                showToast(text: "Failed to \(isEditingSession ? "update" : "create") session")
+                showToast(text: "Failed to \(isSessionPersisted ? "update" : "create") session")
                 Logger.log(level: .error, category: .sessionService, message: "Error saving session: \(error.localizedDescription)")
             }
         }
@@ -997,39 +1109,18 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             cell.contentConfiguration = content
         }
         
-        let exportPDFRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
-            
+        let exportPDFRegistration = UICollectionView.CellRegistration<SessionPDFExportCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
-            
-            var content = cell.defaultContentConfiguration()
-            
+
             switch item {
             case .exportPDF:
-                content.text = "Export Session Info"
-                let symbolConfiguration = UIImage.SymbolConfiguration(weight: .semibold)
-                let image = UIImage(systemName: "document.badge.arrow.up.fill", withConfiguration: symbolConfiguration)?
-                    .withTintColor(NNColors.primary, renderingMode: .alwaysOriginal)
-                content.image = image
-                
-                content.imageProperties.tintColor = NNColors.primary
-                content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-                content.imageToTextPadding = 8
-                
-                content.directionalLayoutMargins.top = 17
-                content.directionalLayoutMargins.bottom = 17
-                
-                content.textProperties.font = .preferredFont(forTextStyle: .body)
-                
-                // Set secondary text color to secondaryLabel
-                content.secondaryTextProperties.font = .bodyM
-                content.secondaryTextProperties.color = .secondaryLabel
-                
-                cell.accessories = [.disclosureIndicator()]
+                cell.configure(
+                    hasGeneratedPDF: hasGeneratedSessionPDF(),
+                    isGenerating: isGeneratingPDF || SessionPDFService.shared.isRegenerating(sessionID: sessionItem.id)
+                )
             default:
                 break
             }
-            
-            cell.contentConfiguration = content
         }
 
         let endSessionRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, indexPath, item in
@@ -1067,6 +1158,21 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 break
             }
 
+            cell.contentConfiguration = content
+        }
+
+        let payWithVenmoRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
+            guard case .payWithVenmo = item else { return }
+
+            var content = cell.defaultContentConfiguration()
+            content.text = "Pay Via Venmo"
+            content.image = UIImage(named: "venmo-icon")
+            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+            content.imageProperties.cornerRadius = 12
+            content.imageToTextPadding = 8
+            content.textProperties.font = .preferredFont(forTextStyle: .body)
+
+            cell.accessories = [.disclosureIndicator()]
             cell.contentConfiguration = content
         }
 
@@ -1202,6 +1308,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     configuration.text = "This session has been archived, as such, it cannot be edited."
                     configuration.textProperties.numberOfLines = 0
                 }
+            case .sessionPayment:
+                configuration.text = "Adjust the payment before opening Venmo."
+                configuration.textProperties.numberOfLines = 0
             default:
                 break
             }
@@ -1239,6 +1348,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 return collectionView.dequeueConfiguredReusableCell(using: selectedEntriesSummaryRegistration, for: indexPath, item: item)
             case .endSession:
                 return collectionView.dequeueConfiguredReusableCell(using: endSessionRegistration, for: indexPath, item: item)
+            case .payWithVenmo:
+                return collectionView.dequeueConfiguredReusableCell(using: payWithVenmoRegistration, for: indexPath, item: item)
             }
         }
         
@@ -1255,7 +1366,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         
         if !isArchivedSession {
-            var sections: [Section] = [.date, .status, .selectEntries, .events]
+            var sections: [Section] = [.date, .status]
+            if shouldShowSelectEntriesSection {
+                sections.append(.selectEntries)
+            }
+            sections.append(.events)
             
             // Only show expenses section if user hasn't voted on the feature
             if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
@@ -1272,7 +1387,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
+            if shouldShowSelectEntriesSection {
+                snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
+            }
             
             // Only add expenses item if section exists
             if sections.contains(.expenses) {
@@ -1291,6 +1408,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 snapshot.appendSections([.endSession])
                 snapshot.appendItems([.endSession], toSection: .endSession)
             }
+
+            appendSessionPaymentSection(to: &snapshot)
 
             // We'll add the nest review section later after checking if entries need review
         } else {
@@ -1314,6 +1433,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(eventVC, animated: true)
     }
     
+    private var shouldShowSessionPaymentSection: Bool {
+        isEditingSession && !isArchivedSession && sessionItem.isPaymentMoment && sessionItem.assignedSitter != nil
+    }
+
+    private func appendSessionPaymentSection(to snapshot: inout NSDiffableDataSourceSnapshot<Section, Item>) {
+        guard shouldShowSessionPaymentSection else { return }
+
+        snapshot.appendSections([.sessionPayment])
+        snapshot.appendItems([.payWithVenmo], toSection: .sessionPayment)
+    }
+
+    private func presentSessionPaymentCalculator() {
+        guard let configuration = SessionPaymentViewController.Configuration.from(session: sessionItem) else {
+            showToast(text: "Unable to open payment calculator")
+            return
+        }
+
+        let paymentVC = SessionPaymentViewController(configuration: configuration)
+        let nav = UINavigationController(rootViewController: paymentVC)
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+
+        present(nav, animated: true)
+    }
+
+    private func paySessionWithVenmo() {
+        presentSessionPaymentCalculator()
+    }
+
     private func inviteSitterButtonTapped() {
         // Always navigate to InviteDetailViewController where users can manage sitters and invites
         let displaySitter = sessionItem.assignedSitter?.asSitterItem()
@@ -1373,20 +1523,28 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
 
     private func exportPDFButtonTapped() {
-        // Create alert with PDF export warning
-        let alert = UIAlertController(
-            title: "Export Session as PDF",
-            message: "Selected entries and session events will be included in the PDF export.",
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Export PDF", style: .default) { [weak self] _ in
-            self?.exportToPDF()
-        })
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
-        present(alert, animated: true)
+        guard !isGeneratingPDF,
+              !SessionPDFService.shared.isRegenerating(sessionID: sessionItem.id) else {
+            return
+        }
+
+        if SessionPDFService.shared.localPDFFileExists(nestID: sessionItem.nestID, sessionID: sessionItem.id) {
+            viewCachedPDF()
+            return
+        }
+
+        Task {
+            guard await SubscriptionService.shared.canUseFullFeatures() else {
+                await MainActor.run {
+                    showUpgradePrompt(for: .sessionPDFExport)
+                }
+                return
+            }
+
+            await MainActor.run {
+                presentGeneratePDFConfirmation()
+            }
+        }
     }
     
     
@@ -1474,22 +1632,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func presentSelectEntriesFlow(showSelectedTab: Bool = false) {
         guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
         
-        // Create the folder view controller directly
-        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
-        folderVC.showsSelectedTabInitially = showSelectedTab
-        folderVC.allowsEmptySelection = true
-        folderVC.title = "Select Items"
-        folderVC.delegate = self
-        
-        // Pass current selected item IDs to restore selection state
-        folderVC.setInitialSelectedItemIds(selectedItemIds)
-        
-        // Add cancel button
-        folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel,
-            target: self,
-            action: #selector(selectEntriesDidCancel)
+        let folderVC = makeSelectEntriesFolderViewController(
+            entryRepository: entryRepository,
+            showsSelectedTabInitially: showSelectedTab,
+            includeCancelButton: true
         )
+        
+        folderVC.onContinueTapped = { [weak self] selectedIds in
+            self?.selectEntriesDidFinish(with: selectedIds)
+        }
         
         // Create navigation controller and present normally
         let navController = UINavigationController(rootViewController: folderVC)
@@ -1500,12 +1651,79 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Store reference for later use
         currentSelectEntriesNavController = navController
         
-        // Set up continue callback to receive selected IDs
-        folderVC.onContinueTapped = { [weak self] selectedIds in
-            self?.selectEntriesDidFinish(with: selectedIds)
+        present(navController, animated: true)
+    }
+    
+    private func pushSelectEntriesCreationStep() {
+        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+        
+        let folderVC = makeSelectEntriesFolderViewController(
+            entryRepository: entryRepository,
+            showsSelectedTabInitially: false,
+            includeCancelButton: false,
+            showsCreationHeader: true
+        )
+        
+        folderVC.onContinueTapped = { [weak self, weak folderVC] selectedIds in
+            guard let self, let folderVC else { return }
+            self.selectEntriesCreationDidFinish(with: selectedIds, from: folderVC)
         }
         
-        present(navController, animated: true)
+        navigationController?.pushViewController(folderVC, animated: true)
+    }
+    
+    private func makeSelectEntriesFolderViewController(
+        entryRepository: EntryRepository,
+        showsSelectedTabInitially: Bool,
+        includeCancelButton: Bool,
+        showsCreationHeader: Bool = false
+    ) -> ModifiedSelectFolderViewController {
+        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
+        folderVC.showsSelectedTabInitially = showsSelectedTabInitially
+        folderVC.allowsEmptySelection = true
+        folderVC.showsCreationHeader = showsCreationHeader
+        folderVC.title = showsCreationHeader ? nil : "Select Items"
+        folderVC.delegate = self
+        folderVC.setInitialSelectedItemIds(selectedItemIds)
+        
+        if includeCancelButton {
+            folderVC.navigationItem.rightBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .cancel,
+                target: self,
+                action: #selector(selectEntriesDidCancel)
+            )
+        }
+        
+        return folderVC
+    }
+    
+    private func transitionToPostCreateState() {
+        hasCreatedSessionInFlow = true
+        syncOriginalSessionFromCurrent()
+        addSelectEntriesSectionIfNeeded()
+        updateSaveButtonState()
+    }
+    
+    private func addSelectEntriesSectionIfNeeded() {
+        guard shouldShowSelectEntriesSection else { return }
+        
+        var snapshot = dataSource.snapshot()
+        guard !snapshot.sectionIdentifiers.contains(.selectEntries) else {
+            updateSelectEntriesSection()
+            return
+        }
+        
+        if let eventsSection = snapshot.sectionIdentifiers.first(where: { $0 == .events || $0 == .expenses }) {
+            snapshot.insertSections([.selectEntries], beforeSection: eventsSection)
+        } else {
+            snapshot.appendSections([.selectEntries])
+        }
+        
+        snapshot.appendItems(
+            [.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(),
+            toSection: .selectEntries
+        )
+        dataSource.apply(snapshot, animatingDifferences: true)
     }
     
     @objc private func selectEntriesDidCancel() {
@@ -1514,6 +1732,60 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func selectEntriesDidFinish(with selectedIds: [String]) {
+        let alert = makeSelectEntriesConfirmationAlert(selectedIds: selectedIds) { [weak self] in
+            guard let self else { return }
+            self.selectedItemIds = selectedIds
+            self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
+            self.currentSelectEntriesNavController?.dismiss(animated: true)
+            self.currentSelectEntriesNavController = nil
+            self.fetchSelectedItemPreviews()
+            self.checkForChanges()
+        }
+        
+        currentSelectEntriesNavController?.present(alert, animated: true)
+    }
+    
+    private func selectEntriesCreationDidFinish(
+        with selectedIds: [String],
+        from folderVC: ModifiedSelectFolderViewController
+    ) {
+        selectedItemIds = selectedIds
+        sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
+        
+        folderVC.startContinueLoading()
+        
+        Task {
+            do {
+                // Persist entries and create the invite in parallel so InviteDetail is ready sooner.
+                async let updateTask: Void = SessionService.shared.updateSession(sessionItem)
+                async let inviteTask = SessionService.shared.createOpenInvite(sessionID: sessionItem.id)
+                
+                try await updateTask
+                let invite = try? await inviteTask
+                
+                await MainActor.run {
+                    self.syncOriginalSessionFromCurrent()
+                    self.fetchSelectedItemPreviews()
+                    self.delegate?.editSessionViewController(self, didUpdateSession: self.sessionItem)
+                    
+                    folderVC.animateContinueOff {
+                        self.pushInviteYourSitter(for: self.sessionItem, inviteCode: invite?.code)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    folderVC.stopContinueLoading(withSuccess: false) {
+                        folderVC.showToast(text: "Failed to save selected items", sentiment: .negative)
+                    }
+                }
+            }
+        }
+    }
+    
+    private func makeSelectEntriesConfirmationAlert(
+        selectedIds: [String],
+        confirmHandler: @escaping () -> Void
+    ) -> UIAlertController {
         let totalCount = selectedIds.count
         
         let alert: UIAlertController
@@ -1532,20 +1804,28 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             )
         }
         
-        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
-        let confirmAction = UIAlertAction(title: "Continue", style: .default) { _ in
-            self.selectedItemIds = selectedIds
-            self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
-            self.currentSelectEntriesNavController?.dismiss(animated: true)
-            self.currentSelectEntriesNavController = nil
-            self.fetchSelectedItemPreviews()
-            self.checkForChanges()
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Continue", style: .default) { _ in
+            confirmHandler()
+        })
+        
+        return alert
+    }
+    
+    private func navigateToInviteDetail(for session: SessionItem) {
+        Task { [weak self] in
+            guard let self else { return }
+            let invite = try? await SessionService.shared.createOpenInvite(sessionID: session.id)
+            await MainActor.run {
+                self.pushInviteYourSitter(for: session, inviteCode: invite?.code)
+            }
         }
-        
-        alert.addAction(cancelAction)
-        alert.addAction(confirmAction)
-        
-        currentSelectEntriesNavController?.present(alert, animated: true)
+    }
+    
+    private func pushInviteYourSitter(for session: SessionItem, inviteCode: String?) {
+        let code = inviteCode ?? "000000"
+        let inviteVC = InviteYourSitterViewController(inviteCode: code, session: session)
+        navigationController?.pushViewController(inviteVC, animated: true)
     }
     
     /// When contacts or entries are selected, those are spelled out and places, routines, and other types roll into "N more".
@@ -1628,17 +1908,24 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     private func updateSaveButtonState() {
-        saveButton.isEnabled = !isEditingSession || hasUnsavedChanges
+        saveButton.isEnabled = isCompletingRequest || !isSessionPersisted || hasUnsavedChanges
         
         // Debug logging for save button state
         Logger.log(level: .debug, category: .sessionService, message: "=== Save Button State Debug ===")
-        Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
+        Logger.log(level: .debug, category: .sessionService, message: "isSessionPersisted: \(isSessionPersisted)")
         Logger.log(level: .debug, category: .sessionService, message: "hasUnsavedChanges: \(hasUnsavedChanges)")
         Logger.log(level: .debug, category: .sessionService, message: "saveButton.isEnabled: \(saveButton.isEnabled)")
         Logger.log(level: .debug, category: .sessionService, message: "=== End Save Button Debug ===")
         
         // Update button title to show state
-        let baseTitle = isEditingSession ? "Save Changes" : "Next"
+        let baseTitle: String
+        if isCompletingRequest {
+            baseTitle = "Create Session"
+        } else if isSessionPersisted {
+            baseTitle = "Save Changes"
+        } else {
+            baseTitle = "Next"
+        }
         saveButton.titleLabel.text = baseTitle
         
         // Optionally animate the button if there are changes
@@ -1687,6 +1974,25 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let hasChanges = titleChanged || sitterChanged || startDateChanged || endDateChanged || multiDayChanged || itemsChanged || statusChanged || earlyAccessChanged || eventsChanged
         
         hasUnsavedChanges = hasChanges
+    }
+
+    /// Aligns the saved baseline with the current form state after a successful write.
+    private func syncOriginalSessionFromCurrent() {
+        originalSession.title = sessionItem.title
+        originalSession.startDate = sessionItem.startDate
+        originalSession.endDate = sessionItem.endDate
+        originalSession.isMultiDay = sessionItem.isMultiDay
+        originalSession.status = sessionItem.status
+        originalSession.entryIds = sessionItem.entryIds
+        originalSession.assignedSitter = sessionItem.assignedSitter
+        originalSession.earlyAccessDuration = sessionItem.earlyAccessDuration
+        originalSession.events = sessionEvents
+        checkForChanges()
+    }
+
+    private func finalizeCompletedSessionIfNeeded() async {
+        guard sessionItem.status == .completed else { return }
+        try? await UserService.shared.markFreeSessionUsed()
     }
     
     // Helper method to compare session events for changes
@@ -1929,6 +2235,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendSections([.endSession])
             snapshot.appendItems([.endSession], toSection: .endSession)
         }
+
+        if snapshot.sectionIdentifiers.contains(.sessionPayment) {
+            snapshot.deleteSections([.sessionPayment])
+        }
+        appendSessionPaymentSection(to: &snapshot)
         
         dataSource.apply(snapshot, animatingDifferences: true)
         
@@ -2026,6 +2337,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Update session in Firestore
         try await SessionService.shared.updateSession(sessionItem)
+        syncOriginalSessionFromCurrent()
 
         if sessionItem.status == .completed {
             RatingManager.shared.trackSessionCompleted()
@@ -2047,10 +2359,32 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Call delegate BEFORE dismissing to ensure the update is received
         delegate?.editSessionViewController(self, didUpdateSession: sessionItem)
-        
+
+        SessionPDFService.shared.regenerateIfNeededAfterSave(
+            session: sessionItem,
+            events: sessionEvents,
+            selectedItemIds: effectiveSelectedItemIds()
+        )
+
+        await finalizeCompletedSessionIfNeeded()
+
+        if shouldShowSessionPaymentSection {
+            return
+        }
+
         dismiss(animated: true)
     }
-    
+
+    @objc private func handleSessionPDFDidUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let sessionId = userInfo["sessionId"] as? String,
+              sessionId == sessionItem.id else {
+            return
+        }
+
+        refreshExportPDFCell()
+    }
+
     @objc private func handleSessionStatusChange(_ notification: Notification) {
         // Extract session ID and new status from notification
         guard let userInfo = notification.userInfo,
@@ -2218,6 +2552,7 @@ extension EditSessionViewController {
         case time
         case notes
         case endSession
+        case sessionPayment
     }
     
     enum Item: Hashable {
@@ -2233,6 +2568,7 @@ extension EditSessionViewController {
         case moreEvents(Int)
         case selectedEntriesSummary(summary: String)
         case endSession
+        case payWithVenmo
         
         func hash(into hasher: inout Hasher) {
             switch self {
@@ -2269,6 +2605,8 @@ extension EditSessionViewController {
                 hasher.combine(summary)
             case .endSession:
                 hasher.combine(14)
+            case .payWithVenmo:
+                hasher.combine(16)
             }
         }
         
@@ -2278,7 +2616,8 @@ extension EditSessionViewController {
                  (.expenses, .expenses),
                  (.exportPDF, .exportPDF),
                  (.events, .events),
-                 (.endSession, .endSession):
+                 (.endSession, .endSession),
+                 (.payWithVenmo, .payWithVenmo):
                 return true
             case let (.selectEntries(c1), .selectEntries(c2)):
                 return c1 == c2
@@ -2311,10 +2650,33 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .events, .moreEvents:
             // Don't allow highlighting events if they are currently loading
             return !isLoadingEvents
-        case .expenses, .exportPDF, .sessionEvent, .endSession, .selectedEntriesSummary:
+        case .expenses, .exportPDF, .sessionEvent, .endSession, .selectedEntriesSummary, .payWithVenmo:
             return true
         default:
             return false
+        }
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              case .exportPDF = item,
+              hasGeneratedSessionPDF() else {
+            return nil
+        }
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            let regenerate = UIAction(
+                title: "Regenerate PDF",
+                image: UIImage(systemName: "arrow.clockwise")
+            ) { _ in
+                self?.regeneratePDFManually()
+            }
+
+            return UIMenu(children: [regenerate])
         }
     }
     
@@ -2359,7 +2721,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
             
             // Check if user has session events feature (Pro subscription)
             Task {
-                let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+                let hasSessionEvents = await SubscriptionService.shared.canUseFullFeatures()
                 if !hasSessionEvents {
                     await MainActor.run {
                         self.showSessionEventsUpgradePrompt()
@@ -2377,7 +2739,7 @@ extension EditSessionViewController: UICollectionViewDelegate {
         case .sessionEvent(let event):
             // Check if user has session events feature (Pro subscription)
             Task {
-                let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+                let hasSessionEvents = await SubscriptionService.shared.canUseFullFeatures()
                 if !hasSessionEvents {
                     await MainActor.run {
                         self.showSessionEventsUpgradePrompt()
@@ -2396,6 +2758,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
             presentSelectEntriesFlow(showSelectedTab: true)
         case .endSession:
             endSessionButtonTapped()
+        case .payWithVenmo:
+            paySessionWithVenmo()
         }
 
         collectionView.deselectItem(at: indexPath, animated: true)
@@ -2448,7 +2812,7 @@ extension EditSessionViewController: DatePresentationDelegate {
         // If user is trying to enable multi-day, check if they have pro subscription
         if isMultiDay {
             Task {
-                let hasMultiDaySessions = await SubscriptionService.shared.isFeatureAvailable(.multiDaySessions)
+                let hasMultiDaySessions = await SubscriptionService.shared.canUseFullFeatures()
                 if !hasMultiDaySessions {
                     await MainActor.run {
                         // Revert the switch state in the DateCell
@@ -2915,7 +3279,7 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
         }
         
         currentSelectEntriesNavController?.pushViewController(categoryVC, animated: true)
-        
+            ?? controller.navigationController?.pushViewController(categoryVC, animated: true)
     }
 }
 
@@ -3025,7 +3389,7 @@ extension EditSessionViewController: EventsCellDelegate {
     func eventsCellDidTapPlusButton(_ cell: EventsCell) {
         // Check if user has session events feature (Pro subscription)
         Task {
-            let hasSessionEvents = await SubscriptionService.shared.isFeatureAvailable(.sessionEvents)
+            let hasSessionEvents = await SubscriptionService.shared.canUseFullFeatures()
             if !hasSessionEvents {
                 await MainActor.run {
                     self.showSessionEventsUpgradePrompt()

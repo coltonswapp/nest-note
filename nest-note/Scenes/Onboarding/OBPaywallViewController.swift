@@ -11,6 +11,7 @@ import FirebaseAnalytics
 final class OBPaywallViewController: NNOnboardingViewController {
 
     private var presentedPaywall: FeatureInfoPaywallViewController?
+    private var presentedFreeSessionInfo: FreeSessionInfoViewController?
     private var hasCompletedPaywall = false
     private var paywallPresentedAt: Date?
     private var dwellRecorded = false
@@ -37,10 +38,16 @@ final class OBPaywallViewController: NNOnboardingViewController {
                 paywall.pendingReferralSource = ReferralApplicationSource(rawValue: source) ?? .deepLink
             }
         }
-        paywall.onPaywallFinished = { [weak self] subscribed in
+        paywall.onPaywallFinished = { [weak self] subscribed, startedTrial in
             let referralCode = paywall.currentReferralCode
+            let referralCodeType = paywall.currentReferralCodeType
             self?.dismissPresentedPaywall {
-                self?.completePaywall(subscribed: subscribed, referralCode: referralCode)
+                self?.completePaywall(
+                    subscribed: subscribed,
+                    startedTrial: startedTrial,
+                    referralCode: referralCode,
+                    referralCodeType: referralCodeType
+                )
             }
         }
 
@@ -54,6 +61,12 @@ final class OBPaywallViewController: NNOnboardingViewController {
         paywallPresentedAt = Date()
 
         present(paywall, animated: true)
+
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            return
+        }
+        #endif
 
         Analytics.logEvent("paywall_presented", parameters: [
             "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
@@ -80,6 +93,13 @@ final class OBPaywallViewController: NNOnboardingViewController {
 
     private func recordDwellTimeIfNeeded() {
         guard !dwellRecorded, let start = paywallPresentedAt else { return }
+        #if DEBUG
+        if (coordinator as? OnboardingCoordinator)?.isPreviewMode == true {
+            dwellRecorded = true
+            paywallPresentedAt = nil
+            return
+        }
+        #endif
         dwellRecorded = true
         paywallPresentedAt = nil
         let seconds = Date().timeIntervalSince(start)
@@ -87,18 +107,33 @@ final class OBPaywallViewController: NNOnboardingViewController {
         (coordinator as? OnboardingCoordinator)?.addPaywallDwellTime(seconds)
     }
 
-    private func completePaywall(subscribed: Bool, referralCode: String?) {
+    private func completePaywall(
+        subscribed: Bool,
+        startedTrial: Bool = false,
+        referralCode: String?,
+        referralCodeType: ReferralCodeType? = nil
+    ) {
         guard !hasCompletedPaywall else { return }
         hasCompletedPaywall = true
 
         if let referralCode {
-            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode)
+            (coordinator as? OnboardingCoordinator)?.updateReferralCode(referralCode, type: referralCodeType)
         }
 
         let dwellSeconds = secondsOnPaywall()
         recordDwellTimeIfNeeded()
+        (coordinator as? OnboardingCoordinator)?.recordPaywallOutcome(
+            subscribed: subscribed,
+            startedTrial: startedTrial
+        )
 
-        if subscribed {
+        #if DEBUG
+        let isPreviewMode = (coordinator as? OnboardingCoordinator)?.isPreviewMode == true
+        #else
+        let isPreviewMode = false
+        #endif
+
+        if subscribed, !isPreviewMode {
             OnboardingAnalyticsService.shared.recordConversion(type: "purchase", productId: "feature_info_paywall")
             Analytics.logEvent("paywall_conversion", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
@@ -107,16 +142,48 @@ final class OBPaywallViewController: NNOnboardingViewController {
                 "paywall_type": "feature_info"
             ])
             Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Feature info paywall conversion completed")
-        } else {
+        } else if !subscribed, !isPreviewMode {
             Analytics.logEvent("paywall_declined", parameters: [
                 "offering_id": (coordinator as? OnboardingCoordinator)?.paywallOfferingId ?? "default",
                 "dwell_seconds": dwellSeconds,
                 "paywall_type": "feature_info"
             ])
-            Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Feature info paywall declined, continuing onboarding")
+            Logger.log(level: .info, category: .paywall, message: "🎯 PAYWALL: Feature info paywall declined, presenting free session offer")
+            presentFreeSessionInfoIfNeeded()
+        }
+    }
+
+    private func presentFreeSessionInfoIfNeeded() {
+        guard presentedFreeSessionInfo == nil, presentedViewController == nil else { return }
+
+        let freeSessionVC = FreeSessionInfoViewController()
+        freeSessionVC.onContinue = { [weak self] in
+            self?.dismissPresentedFreeSessionInfo {
+                (self?.coordinator as? OnboardingCoordinator)?.next()
+            }
         }
 
-        (coordinator as? OnboardingCoordinator)?.next()
+        freeSessionVC.modalPresentationStyle = .pageSheet
+        if let sheet = freeSessionVC.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        freeSessionVC.presentationController?.delegate = self
+
+        presentedFreeSessionInfo = freeSessionVC
+        present(freeSessionVC, animated: true)
+    }
+
+    private func dismissPresentedFreeSessionInfo(completion: @escaping () -> Void) {
+        guard let presentedFreeSessionInfo else {
+            completion()
+            return
+        }
+
+        presentedFreeSessionInfo.dismiss(animated: true) { [weak self] in
+            self?.presentedFreeSessionInfo = nil
+            completion()
+        }
     }
 
     override func reset() {
@@ -125,16 +192,31 @@ final class OBPaywallViewController: NNOnboardingViewController {
         paywallPresentedAt = nil
         dwellRecorded = false
         presentedPaywall = nil
+        presentedFreeSessionInfo = nil
     }
 }
 
 extension OBPaywallViewController: UIAdaptivePresentationControllerDelegate {
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        // Swiping away the free-session offer counts as accepting it; continue onboarding.
+        if presentationController.presentedViewController is FreeSessionInfoViewController {
+            presentedFreeSessionInfo = nil
+            Analytics.logEvent("free_session_offer_dismissed", parameters: [
+                "source": "onboarding_paywall_decline"
+            ])
+            (coordinator as? OnboardingCoordinator)?.next()
+            return
+        }
+
         guard let paywall = presentationController.presentedViewController as? FeatureInfoPaywallViewController else {
             return
         }
 
         presentedPaywall = nil
-        completePaywall(subscribed: false, referralCode: paywall.currentReferralCode)
+        completePaywall(
+            subscribed: false,
+            referralCode: paywall.currentReferralCode,
+            referralCodeType: paywall.currentReferralCodeType
+        )
     }
 }

@@ -15,8 +15,9 @@ extension UITextView {
         let two: String = "Attributed"
         let three: String = "Placeholder:"
         let final: String = [one, two, three].joined()
-        
-        self.perform(NSSelectorFromString(final), with: NSAttributedString(string: placeholder))
+        let selector = NSSelectorFromString(final)
+        guard responds(to: selector) else { return }
+        perform(selector, with: NSAttributedString(string: placeholder))
     }
     
     func scrollToCaretIfNeeded() {

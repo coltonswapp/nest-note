@@ -24,6 +24,8 @@ final class FeatureFlagService {
         case pilotCardItemsEnabled = "pilot_card_items_enabled"
         case nestReadinessScoreEnabled = "nest_readiness_score_enabled"
         case sitterReferralProgramEnabled = "sitter_referral_program_enabled"
+        /// When enabled, shows a Settings option to text the NestNote support line.
+        case supportTextEnabled = "support_text_enabled"
         
         var defaultValue: Bool {
             switch self {
@@ -51,6 +53,8 @@ final class FeatureFlagService {
                 #else
                 return false
                 #endif
+            case .supportTextEnabled:
+                return true
             }
         }
     }
@@ -58,14 +62,11 @@ final class FeatureFlagService {
     // MARK: - Remote Config Keys
     enum RemoteConfigKey: String, CaseIterable {
         case freeUserSelectionLimit = "free_user_selection_limit"
-        case parentOnboardingFlow = "parent_onboarding_flow"
         
         var defaultValue: Any {
             switch self {
             case .freeUserSelectionLimit:
                 return 6
-            case .parentOnboardingFlow:
-                return "onboarding_config"
             }
         }
     }
@@ -207,11 +208,6 @@ final class FeatureFlagService {
         return value
     }
 
-    /// Gets the onboarding flow config file name from Remote Config (used by A/B test)
-    func getOnboardingFlowConfigName() -> String {
-        return getStringValue(for: .parentOnboardingFlow)
-    }
-    
     /// Checks if paywall bypass is enabled for testing
     /// This combines multiple conditions for maximum flexibility
     /// - Returns: True if paywall should be bypassed, false otherwise

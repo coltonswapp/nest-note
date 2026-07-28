@@ -21,6 +21,19 @@ final class UserService {
     }
     private(set) var isAuthenticated: Bool = false
     private var currentNonce: String?
+
+    var isAuthenticatedWithApple: Bool {
+        guard let user = auth.currentUser else { return false }
+        return user.providerData.contains { $0.providerID == AuthProviderID.apple.rawValue }
+    }
+
+    var currentFirebaseUserID: String? {
+        auth.currentUser?.uid
+    }
+
+    var currentFirebaseUserEmail: String? {
+        auth.currentUser?.email
+    }
     
     // Store pending FCM token
     private var pendingFCMToken: String?
@@ -496,92 +509,47 @@ final class UserService {
     }
     
     func signUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
-        let identifier = info.email
-        
-        // Start capturing logs for this signup attempt
-        SignupLogService.shared.startCapturing(identifier: identifier)
-        
         Logger.log(level: .info, category: .userService, message: "Attempting signup for email: \(info.email)")
         Tracker.shared.track(.regularSignUpAttempted)
+
         do {
-            
-            // Create Firebase user
-            let result = try await auth.createUser(withEmail: info.email, password: info.password)
-            Logger.log(level: .debug, category: .userService, message: "Firebase user created successfully")
-            
-            let firebaseUser = result.user
-            
-            // Set display name
-            let changeRequest = firebaseUser.createProfileChangeRequest()
-            changeRequest.displayName = info.fullName
-            try await changeRequest.commitChanges()
-            Logger.log(level: .debug, category: .userService, message: "Display name set successfully")
-            
-            var defaultNest: NestItem?
-            
-            if let nestName = info.nestInfo?.name,
-               let nestAddress = info.nestInfo?.address {
-                // Create default nest for user
-                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress, surveyResponses: info.surveyResponses)
+            let firebaseUser: User
+            if let existingUser = auth.currentUser {
+                Logger.log(
+                    level: .info,
+                    category: .userService,
+                    message: "Existing Firebase session found (\(existingUser.uid)) — resuming profile creation"
+                )
+                firebaseUser = existingUser
+            } else {
+                let result = try await auth.createUser(withEmail: info.email, password: info.password)
+                Logger.log(level: .debug, category: .userService, message: "Firebase user created successfully")
+                firebaseUser = result.user
             }
-            
-            // Create NestUser with access to their nest
-            let user = NestUser(
-                id: firebaseUser.uid,
-                personalInfo: .init(
-                    name: info.fullName,
-                    email: info.email,
-                    phone: info.phone.isEmpty ? nil : info.phone,
-                    venmoUsername: info.venmoUsername,
-                    notificationPreferences: .default
-                ),
-                primaryRole: info.role,
-                roles: .init(nestAccess: [])
-            )
-            
-            if let defaultNest {
-                user.roles = .init(nestAccess: [.init(nestId: defaultNest.id, accessLevel: .owner, grantedAt: Date())])
-            }
-            
-            // Save user profile to Firestore
-            try await saveUserProfile(user)
-            Logger.log(level: .debug, category: .userService, message: "User profile saved to Firestore")
-            
-            // Update state
-            self.currentUser = user
-            self.isAuthenticated = true
+
+            let user = try await finishSignUpProfile(firebaseUser: firebaseUser, info: info)
             Logger.log(level: .info, category: .userService, message: "Signup successful - User: \(user.personalInfo.name)")
-            Tracker.shared.track(.regularSignUpSucceeded)
             TikTokTracker.shared.trackRegistration()
-
-            // Save authentication state
-            saveAuthState()
-
-            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
-            // This ensures we capture nest creation, survey submission, and final completion
-            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
-
             return user
-            
-        } catch let error as NSError {
+
+        } catch {
             Logger.log(level: .error, category: .userService, message: "Signup failed - Error: \(error.localizedDescription)")
             Tracker.shared.track(.regularSignUpAttempted, result: false, error: error.localizedDescription)
-            
-            // Stop log capture and upload (failure)
-            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
-            
-            switch error.code {
-            case AuthErrorCode.emailAlreadyInUse.rawValue:
-                throw AuthError.emailAlreadyInUse
-            case AuthErrorCode.invalidEmail.rawValue:
-                throw AuthError.emailInvalid
-            case AuthErrorCode.weakPassword.rawValue:
-                throw AuthError.passwordTooWeak
-            case AuthErrorCode.networkError.rawValue:
-                throw AuthError.networkError
-            default:
-                throw AuthError.unknown
+
+            if let nsError = error as NSError?,
+               nsError.code == AuthErrorCode.emailAlreadyInUse.rawValue,
+               let existingUser = auth.currentUser {
+                Logger.log(
+                    level: .info,
+                    category: .userService,
+                    message: "Email already in use but session exists — resuming profile creation"
+                )
+                let user = try await finishSignUpProfile(firebaseUser: existingUser, info: info)
+                TikTokTracker.shared.trackRegistration()
+                return user
             }
+
+            throw mapSignUpAuthError(error)
         }
     }
     
@@ -756,7 +724,8 @@ final class UserService {
                     name: fullName,
                     email: email,
                     phone: info.phone.isEmpty ? nil : info.phone,
-                    venmoUsername: info.venmoUsername
+                    venmoUsername: info.venmoUsername,
+                    hourlyRateCents: info.hourlyRateCents
                 ),
                 primaryRole: info.role,
                 roles: .init(
@@ -808,77 +777,91 @@ final class UserService {
     }
     
     func completeAppleSignUp(with info: OnboardingCoordinator.UserOnboardingInfo) async throws -> NestUser {
-        // Use email as identifier, or fallback to a timestamp-based identifier
-        let identifier = info.email.isEmpty ? "apple_signup_\(Int(Date().timeIntervalSince1970))" : info.email
-        
-        // Start capturing logs for this Apple signup completion
-        SignupLogService.shared.startCapturing(identifier: identifier)
-        
         Logger.log(level: .info, category: .userService, message: "Completing Apple Sign In profile setup")
-        
-        // User is already authenticated with Firebase, just need to create their profile
+
         guard let firebaseUser = auth.currentUser else {
-            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: "No Firebase user found")
             throw AuthError.unknown
         }
-        
+
         do {
-            // Get user info from Firebase user and onboarding info
-            let email = firebaseUser.email ?? ""
-            let fullName = firebaseUser.displayName ?? info.fullName
-            
-            var defaultNest: NestItem?
-            
-            if let nestName = info.nestInfo?.name,
-               let nestAddress = info.nestInfo?.address {
-                // Create default nest for user
-                defaultNest = try await setupNestForUser(userId: firebaseUser.uid, nestName: nestName, nestAddress: nestAddress, surveyResponses: info.surveyResponses)
-            }
-            
-            let user = NestUser(
-                id: firebaseUser.uid,
-                personalInfo: .init(
-                    name: fullName,
-                    email: email,
-                    phone: info.phone.isEmpty ? nil : info.phone,
-                    venmoUsername: info.venmoUsername
-                ),
-                primaryRole: info.role,
-                roles: .init(
-                    ownedNestId: defaultNest?.id,
-                    nestAccess: defaultNest != nil ? [.init(
-                        nestId: defaultNest!.id,
-                        accessLevel: .owner,
-                        grantedAt: Date()
-                    )] : []
-                )
-            )
-            
-            // Save user profile to Firestore
-            try await saveUserProfile(user)
-            
-            // Update current user and authentication state
-            self.currentUser = user
-            self.isAuthenticated = true
-            
+            let user = try await finishSignUpProfile(firebaseUser: firebaseUser, info: info)
             Logger.log(level: .info, category: .userService, message: "Apple Sign In profile setup completed successfully")
-            Tracker.shared.track(.appleSignUpSucceeded)
             TikTokTracker.shared.trackRegistration()
-
-            // Note: Don't stop log capture here - let OnboardingCoordinator handle final upload
-            // This ensures we capture nest creation, survey submission, and final completion
-            Logger.log(level: .info, category: .userService, message: "📋 LOG CAPTURE: Continuing capture for onboarding flow")
-
             return user
-            
         } catch {
             Logger.log(level: .error, category: .userService, message: "Apple Sign In profile setup failed: \(error)")
-            Tracker.shared.track(.appleSignUpSucceeded, result: false, error: error.localizedDescription)
-            
-            // Stop log capture and upload (failure)
-            await SignupLogService.shared.stopCaptureAndUpload(result: .failure, identifier: identifier, error: error.localizedDescription)
-            
             throw error
+        }
+    }
+
+    private func finishSignUpProfile(
+        firebaseUser: User,
+        info: OnboardingCoordinator.UserOnboardingInfo
+    ) async throws -> NestUser {
+        let displayName = info.fullName.isEmpty ? (firebaseUser.displayName ?? "") : info.fullName
+        if !displayName.isEmpty {
+            let changeRequest = firebaseUser.createProfileChangeRequest()
+            changeRequest.displayName = displayName
+            try await changeRequest.commitChanges()
+            Logger.log(level: .debug, category: .userService, message: "Display name set successfully")
+        }
+
+        var defaultNest: NestItem?
+        if let nestName = info.nestInfo?.name,
+           let nestAddress = info.nestInfo?.address {
+            defaultNest = try await setupNestForUser(
+                userId: firebaseUser.uid,
+                nestName: nestName,
+                nestAddress: nestAddress,
+                surveyResponses: info.surveyResponses
+            )
+        }
+
+        let email = firebaseUser.email ?? info.email
+        let user = NestUser(
+            id: firebaseUser.uid,
+            personalInfo: .init(
+                name: displayName,
+                email: email,
+                phone: info.phone.isEmpty ? nil : info.phone,
+                venmoUsername: info.venmoUsername,
+                hourlyRateCents: info.hourlyRateCents,
+                notificationPreferences: .default
+            ),
+            primaryRole: info.role,
+            roles: .init(
+                ownedNestId: defaultNest?.id,
+                nestAccess: defaultNest != nil ? [.init(
+                    nestId: defaultNest!.id,
+                    accessLevel: .owner,
+                    grantedAt: Date()
+                )] : []
+            )
+        )
+
+        try await saveUserProfile(user)
+
+        self.currentUser = user
+        self.isAuthenticated = true
+        saveAuthState()
+
+        return user
+    }
+
+    private func mapSignUpAuthError(_ error: Error) -> Error {
+        guard let nsError = error as NSError? else { return error }
+
+        switch nsError.code {
+        case AuthErrorCode.emailAlreadyInUse.rawValue:
+            return AuthError.emailAlreadyInUse
+        case AuthErrorCode.invalidEmail.rawValue:
+            return AuthError.emailInvalid
+        case AuthErrorCode.weakPassword.rawValue:
+            return AuthError.passwordTooWeak
+        case AuthErrorCode.networkError.rawValue:
+            return AuthError.networkError
+        default:
+            return error
         }
     }
     
@@ -1307,6 +1290,43 @@ final class UserService {
         Logger.log(level: .info, category: .userService, message: "User Profile fetched ✅")
         return userProfile
     }
+
+    func fetchSubscriptionSnapshot(userId: String) async -> UserSubscriptionSnapshot? {
+        do {
+            let snapshot = try await db.collection("users").document(userId).getDocument()
+            guard snapshot.exists else { return nil }
+            return UserSubscriptionSnapshot.parse(from: snapshot.data())
+        } catch {
+            Logger.log(
+                level: .error,
+                category: .userService,
+                message: "Failed to fetch subscription snapshot for \(userId): \(error.localizedDescription)"
+            )
+            return nil
+        }
+    }
+
+    func fetchSubscriptionSnapshots(userIds: [String]) async -> [String: UserSubscriptionSnapshot] {
+        let uniqueIds = Array(Set(userIds.filter { !$0.isEmpty }))
+        guard !uniqueIds.isEmpty else { return [:] }
+
+        return await withTaskGroup(of: (String, UserSubscriptionSnapshot?).self) { group in
+            for userId in uniqueIds {
+                group.addTask {
+                    let snapshot = await self.fetchSubscriptionSnapshot(userId: userId)
+                    return (userId, snapshot)
+                }
+            }
+
+            var results: [String: UserSubscriptionSnapshot] = [:]
+            for await (userId, snapshot) in group {
+                if let snapshot {
+                    results[userId] = snapshot
+                }
+            }
+            return results
+        }
+    }
     
     private func saveUserProfile(_ user: NestUser) async throws {
         Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: Saving user profile for ID: \(user.id)")
@@ -1315,7 +1335,12 @@ final class UserService {
 
         do {
             let docRef = db.collection("users").document(user.id)
-            try await docRef.setData(try Firestore.Encoder().encode(user))
+            let existingDoc = try await docRef.getDocument()
+            var encodedUser = try Firestore.Encoder().encode(user)
+            if !existingDoc.exists {
+                encodedUser["createdAt"] = FieldValue.serverTimestamp()
+            }
+            try await docRef.setData(encodedUser)
 
             Logger.log(level: .info, category: .userService, message: "💾 SAVE PROFILE: ✅ User profile saved to Firestore successfully!")
 
@@ -1346,6 +1371,21 @@ final class UserService {
 
             throw error
         }
+    }
+
+    func markOnboardingComplete(userId: String, lastSurveyResponseId: String?) async throws {
+        var updateData: [String: Any] = [
+            "onboardingCompletedAt": FieldValue.serverTimestamp()
+        ]
+        if let lastSurveyResponseId, !lastSurveyResponseId.isEmpty {
+            updateData["lastSurveyResponseId"] = lastSurveyResponseId
+        } else {
+            updateData["lastSurveyResponseId"] = FieldValue.delete()
+        }
+
+        let docRef = db.collection("users").document(userId)
+        try await docRef.updateData(updateData)
+        Logger.log(level: .info, category: .userService, message: "Marked onboarding complete for user: \(userId)")
     }
     
     // MARK: - User Update Methods
@@ -1378,6 +1418,32 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "User name updated successfully to: \(newName)")
+    }
+
+    /// Whether the current user has already completed their one free fully-featured session.
+    var hasUsedFreeSession: Bool {
+        currentUser?.hasUsedFreeSession ?? false
+    }
+
+    /// Marks the user's one free fully-featured session as used after session completion.
+    func markFreeSessionUsed() async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        guard currentUser.hasUsedFreeSession != true else { return }
+
+        let docRef = db.collection("users").document(currentUser.id)
+        try await docRef.updateData([
+            "hasUsedFreeSession": true,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+
+        self.currentUser?.hasUsedFreeSession = true
+        saveAuthState()
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+
+        Logger.log(level: .info, category: .userService, message: "Marked free session as used for user: \(currentUser.id)")
     }
     
     func updatePhone(_ rawPhone: String) async throws {
@@ -1444,6 +1510,67 @@ final class UserService {
         NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
         
         Logger.log(level: .info, category: .userService, message: "Venmo username updated successfully")
+    }
+
+    func updateHourlyRate(_ hourlyRateCents: Int?) async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.invalidUserData
+        }
+
+        if let hourlyRateCents {
+            guard (SessionPaymentCalculator.minimumHourlyRateCents...SessionPaymentCalculator.maximumHourlyRateCents).contains(hourlyRateCents) else {
+                throw AuthError.invalidUserData
+            }
+        }
+
+        let docRef = db.collection("users").document(currentUser.id)
+        if let hourlyRateCents {
+            try await docRef.updateData([
+                "personalInfo.hourlyRateCents": hourlyRateCents,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        } else {
+            try await docRef.updateData([
+                "personalInfo.hourlyRateCents": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        }
+
+        self.currentUser?.personalInfo.hourlyRateCents = hourlyRateCents
+        saveAuthState()
+
+        try await patchHourlyRateOnAssignedSessions(userId: currentUser.id, hourlyRateCents: hourlyRateCents)
+
+        NotificationCenter.default.post(name: .userInformationUpdated, object: nil)
+
+        Logger.log(level: .info, category: .userService, message: "Hourly rate updated successfully")
+    }
+
+    private func patchHourlyRateOnAssignedSessions(userId: String, hourlyRateCents: Int?) async throws {
+        let sitterSessionsRef = db.collection("users").document(userId).collection("sitterSessions")
+        let snapshot = try await sitterSessionsRef.getDocuments()
+
+        for document in snapshot.documents {
+            guard let sitterSession = try? document.data(as: SitterSession.self) else { continue }
+
+            let sessionRef = db.collection("nests").document(sitterSession.nestID)
+                .collection("sessions").document(sitterSession.id)
+
+            let sessionSnapshot = try await sessionRef.getDocument()
+            guard sessionSnapshot.exists,
+                  let sessionData = sessionSnapshot.data(),
+                  let assignedSitterData = sessionData["assignedSitter"] as? [String: Any],
+                  let assignedUserID = assignedSitterData["userID"] as? String,
+                  assignedUserID == userId else {
+                continue
+            }
+
+            if let hourlyRateCents {
+                try await sessionRef.updateData(["assignedSitter.hourlyRateCents": hourlyRateCents])
+            } else {
+                try await sessionRef.updateData(["assignedSitter.hourlyRateCents": FieldValue.delete()])
+            }
+        }
     }
     
     private func patchVenmoUsernameOnAssignedSessions(userId: String, venmoUsername: String?) async throws {

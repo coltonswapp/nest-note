@@ -1,6 +1,6 @@
 /* eslint-disable max-len */
-const admin = require("firebase-admin");
 const {logger} = require("firebase-functions");
+const {getOwnerFCMTokens, sendPushToTokens} = require("./pushNotifications");
 
 const INVITE_STATUS_ACCEPTED = "accepted";
 const INVITE_TYPE_SITTER_INITIATED = "sitterInitiated";
@@ -209,35 +209,10 @@ async function notifyOwnerSitterJoined(ctx) {
     return {status: "skipped", reason: "missing_owner"};
   }
 
-  const userDoc = await db.collection("users").doc(ownerId).get();
-  if (!userDoc.exists) {
-    return {status: "skipped", reason: "owner_not_found"};
-  }
-
-  const userData = userDoc.data();
-  const personalInfo = userData.personalInfo || {};
-  const notificationPrefs = personalInfo.notificationPreferences;
-  if (notificationPrefs && notificationPrefs.sessionNotifications === false) {
-    logger.info(
-        `[SessionAccepted] Owner ${ownerId} has session notifications disabled`,
-    );
-    return {status: "skipped", reason: "notifications_disabled"};
-  }
-
-  const validTokens = (userData.fcmTokens || [])
-      .filter((tokenObj) => {
-        if (!tokenObj.uploadedDate) {
-          return true;
-        }
-        const tokenAge = Date.now() - tokenObj.uploadedDate.toMillis();
-        return tokenAge <= 1000 * 60 * 60 * 24 * 30 * 4;
-      })
-      .map((tokenObj) => tokenObj.token)
-      .filter(Boolean);
-
-  if (validTokens.length === 0) {
-    logger.info(`[SessionAccepted] No FCM tokens for owner ${ownerId}`);
-    return {status: "skipped", reason: "no_tokens"};
+  const logPrefix = `[SessionAccepted][Session ${sessionId}] `;
+  const {tokens, skippedReason} = await getOwnerFCMTokens(db, ownerId, logPrefix);
+  if (skippedReason) {
+    return {status: "skipped", reason: skippedReason};
   }
 
   const sitterName = (assignedSitter.name || "A sitter").trim();
@@ -254,9 +229,12 @@ async function notifyOwnerSitterJoined(ctx) {
     timestamp: new Date().toISOString(),
   };
 
-  const sendPromises = validTokens.map((token) => {
-    return admin.messaging().send({
-      token,
+  const {successes, failures} = await sendPushToTokens({
+    tokens,
+    userId: ownerId,
+    logPrefix,
+    removeInvalidToken: (userId, token) => removeInvalidToken(db, userId, token),
+    buildMessage: () => ({
       notification: {
         title: notificationTitle,
         body: notificationBody,
@@ -273,18 +251,8 @@ async function notifyOwnerSitterJoined(ctx) {
           userInfo: dataPayload,
         },
       },
-    }).catch((error) => {
-      if (error.code === "messaging/registration-token-not-registered" ||
-          error.code === "messaging/invalid-argument") {
-        removeInvalidToken(db, ownerId, token);
-      }
-      return {error};
-    });
+    }),
   });
-
-  const results = await Promise.all(sendPromises);
-  const successes = results.filter((r) => !(r && r.error)).length;
-  const failures = results.filter((r) => r && r.error).length;
 
   logger.info(
       `[SessionAccepted] Owner notify for session ${sessionId}: ` +

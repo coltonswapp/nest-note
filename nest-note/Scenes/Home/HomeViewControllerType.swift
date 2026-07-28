@@ -228,8 +228,11 @@ extension HomeViewControllerType {
     }
     
     func handleError(_ error: Error) {
-        // Default error handling implementation
-        Logger.log(level: .error, category: .general, message: error.localizedDescription)
+        if let decodingError = error as? DecodingError {
+            Logger.log(level: .error, category: .general, message: "Decoding failed: \(decodingError)")
+        } else {
+            Logger.log(level: .error, category: .general, message: error.localizedDescription)
+        }
         
         DispatchQueue.main.async {
             let alert = UIAlertController(

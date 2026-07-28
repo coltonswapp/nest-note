@@ -6,6 +6,14 @@ class SurveyResponseDetailViewController: NNViewController {
     private let survey: SurveyResponse
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    private var contactName: String?
+    private var contactPhone: String?
+
+    private static let userProfileMetadataKeys: Set<String> = [
+        "userId", "name", "email", "phone", "venmo_username", "nest_name",
+        "referral_code", "is_apple_signin", "discovery_method", "created_at", "role",
+        "paywall_converted", "paywall_started_trial"
+    ]
 
     // MARK: - Initialization
     init(survey: SurveyResponse) {
@@ -23,7 +31,11 @@ class SurveyResponseDetailViewController: NNViewController {
 
         configureCollectionView()
         configureDataSource()
-        applySnapshot()
+        collectionView.delegate = self
+
+        Task {
+            await loadAndApplySnapshot()
+        }
     }
 
     override func setupNavigationBarButtons() {
@@ -37,10 +49,49 @@ class SurveyResponseDetailViewController: NNViewController {
         )
         backButton.tintColor = .label
         navigationItem.leftBarButtonItem = backButton
+
+        let messageButton = UIBarButtonItem(
+            image: UIImage(systemName: "message"),
+            style: .plain,
+            target: self,
+            action: #selector(messageButtonTapped)
+        )
+        messageButton.tintColor = .label
+        navigationItem.rightBarButtonItem = messageButton
+    }
+
+    @objc private func messageButtonTapped() {
+        let firstName = SurveySignupSMSComposer.firstName(from: contactName)
+        let body = SurveySignupSMSComposer.welcomeMessage(firstName: firstName, surveyType: survey.surveyType)
+
+        guard SurveySignupSMSComposer.openMessages(phone: contactPhone, body: body) else {
+            let alert = UIAlertController(
+                title: "Messages Not Available",
+                message: contactPhone?.isEmpty == false ?
+                    "Couldn't open Messages. Copy the welcome text and text them manually." :
+                    "No phone number on file for this signup.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Copy Message", style: .default) { _ in
+                UIPasteboard.general.string = body
+            })
+            alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+            present(alert, animated: true)
+            return
+        }
     }
 
     @objc private func backButtonTapped() {
-        navigationController?.popViewController(animated: true)
+        guard let navigationController else {
+            dismiss(animated: true)
+            return
+        }
+
+        if navigationController.viewControllers.count > 1 {
+            navigationController.popViewController(animated: true)
+        } else {
+            navigationController.dismiss(animated: true)
+        }
     }
 
     // MARK: - Collection View Setup
@@ -59,7 +110,6 @@ class SurveyResponseDetailViewController: NNViewController {
         return UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
             let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
 
-            // Add header
             let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(32))
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: headerSize,
@@ -73,7 +123,6 @@ class SurveyResponseDetailViewController: NNViewController {
     }
 
     private func configureDataSource() {
-        // Header registration
         let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] (headerView, string, indexPath) in
@@ -86,7 +135,6 @@ class SurveyResponseDetailViewController: NNViewController {
             headerView.contentConfiguration = content
         }
 
-        // Basic info cell registration
         let basicInfoCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
             if case let .basicInfo(title, value) = item {
                 var content = cell.defaultContentConfiguration()
@@ -99,7 +147,6 @@ class SurveyResponseDetailViewController: NNViewController {
             }
         }
 
-        // Metadata cell registration
         let metadataCellRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, indexPath, item in
             if case let .metadata(key, value) = item {
                 var content = cell.defaultContentConfiguration()
@@ -112,10 +159,9 @@ class SurveyResponseDetailViewController: NNViewController {
             }
         }
 
-        // Question response cell registration
-        let questionCellRegistration = UICollectionView.CellRegistration<QuestionResponseCell, Item> { cell, indexPath, item in
-            if case let .questionResponse(questionId, answers) = item {
-                cell.configure(questionId: questionId, answers: answers)
+        let questionCellRegistration = UICollectionView.CellRegistration<QuestionResponseCell, Item> { [weak self] cell, indexPath, item in
+            if case let .questionResponse(questionId, answers) = item, let surveyType = self?.survey.surveyType {
+                cell.configure(questionId: questionId, answers: answers, surveyType: surveyType)
             }
         }
 
@@ -135,10 +181,95 @@ class SurveyResponseDetailViewController: NNViewController {
         }
     }
 
-    private func applySnapshot() {
+    private func loadAndApplySnapshot() async {
+        var profileItems = buildUserProfileItems(from: survey.metadata)
+        var resolvedName = survey.metadata["name"]
+        var resolvedPhone = survey.metadata["phone"]
+
+        if let userId = survey.metadata["userId"],
+           (metadataNeedsLiveProfile || profileItems.isEmpty),
+           let user = try? await UserService.shared.fetchUserProfile(userId: userId) {
+            profileItems = buildUserProfileItems(from: survey.metadata, user: user)
+            resolvedName = resolvedName ?? user.personalInfo.name
+            resolvedPhone = resolvedPhone ?? user.personalInfo.phone
+        }
+
+        var subscriptionSnapshot: UserSubscriptionSnapshot?
+        if let userId = survey.metadata["userId"], !userId.isEmpty {
+            subscriptionSnapshot = await UserService.shared.fetchSubscriptionSnapshot(userId: userId)
+        }
+        let subscriptionStatus = SurveySubscriptionStatus.resolve(
+            survey: survey,
+            liveSnapshot: subscriptionSnapshot
+        )
+        profileItems.insert(("Subscription", subscriptionStatus.detailLabel), at: 0)
+
+        if resolvedName?.isEmpty != false {
+            resolvedName = profileItems.first(where: { $0.title == "Name" })?.value
+        }
+        if resolvedPhone?.isEmpty != false {
+            resolvedPhone = profileItems.first(where: { $0.title == "Phone" })?.value
+        }
+
+        await MainActor.run {
+            contactName = resolvedName
+            contactPhone = resolvedPhone
+            applySnapshot(userProfileItems: profileItems)
+        }
+    }
+
+    private var metadataNeedsLiveProfile: Bool {
+        survey.metadata["email"]?.isEmpty != false && survey.metadata["name"]?.isEmpty != false
+    }
+
+    private func buildUserProfileItems(from metadata: [String: String], user: NestUser? = nil) -> [(title: String, value: String)] {
+        var items: [(title: String, value: String)] = []
+
+        func add(_ title: String, _ value: String?) {
+            guard let value, !value.isEmpty else { return }
+            items.append((title, value))
+        }
+
+        add("Name", metadata["name"] ?? user?.personalInfo.name)
+        add("Email", metadata["email"] ?? user?.personalInfo.email)
+        add("Phone", metadata["phone"] ?? user?.personalInfo.phone)
+
+        let role = metadata["role"] ?? user?.primaryRole.rawValue
+        if let role {
+            add("Role", role == NestUser.UserType.sitter.rawValue ? "Sitter" : "Parent")
+        }
+
+        add("Venmo", metadata["venmo_username"] ?? user?.personalInfo.venmoUsername)
+        add("Nest Name", metadata["nest_name"])
+        add("Referral Code", metadata["referral_code"])
+
+        let discovery = metadata["discovery_method"]
+            ?? survey.responses.first(where: { $0.questionId == "discovery_method" })?.answers.first
+        add("Discovery Method", discovery)
+
+        if let appleSignIn = metadata["is_apple_signin"] {
+            add("Sign-In Method", appleSignIn == "true" ? "Apple" : "Email")
+        }
+
+        if let createdAt = metadata["created_at"] {
+            add("Signup Date", createdAt)
+        } else if let createdAt = user?.createdAt {
+            add("Signup Date", DateFormatter.localizedString(from: createdAt, dateStyle: .medium, timeStyle: .short))
+        }
+
+        add("Firebase UID", metadata["userId"] ?? user?.id)
+
+        return items
+    }
+
+    private func applySnapshot(userProfileItems: [(title: String, value: String)]) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
 
-        // Basic Info Section
+        if !userProfileItems.isEmpty {
+            snapshot.appendSections([.userProfile])
+            snapshot.appendItems(userProfileItems.map { .basicInfo(title: $0.title, value: $0.value) }, toSection: .userProfile)
+        }
+
         snapshot.appendSections([.basicInfo])
         var basicInfoItems: [Item] = [
             .basicInfo(title: "Survey ID", value: survey.id),
@@ -146,17 +277,13 @@ class SurveyResponseDetailViewController: NNViewController {
             .basicInfo(title: "Version", value: survey.version),
             .basicInfo(title: "Timestamp", value: DateFormatter.localizedString(from: survey.timestamp, dateStyle: .full, timeStyle: .medium))
         ]
-        
-        // Add duration if available
+
         if let duration = survey.duration {
             let minutes = Int(duration) / 60
             let seconds = Int(duration) % 60
-            let durationString: String
-            if minutes > 0 {
-                durationString = String(format: "%d min %d sec", minutes, seconds)
-            } else {
-                durationString = String(format: "%d sec", seconds)
-            }
+            let durationString = minutes > 0
+                ? String(format: "%d min %d sec", minutes, seconds)
+                : String(format: "%d sec", seconds)
             basicInfoItems.append(.basicInfo(title: "Duration", value: durationString))
         }
 
@@ -168,13 +295,11 @@ class SurveyResponseDetailViewController: NNViewController {
                 : String(format: "%d sec", whole)
             basicInfoItems.append(.basicInfo(title: "Paywall time (onboarding)", value: paywallFormatted))
         }
-        
+
         snapshot.appendItems(basicInfoItems, toSection: .basicInfo)
 
-        // Metadata Section
-        let skipPaywallKey = "paywall_dwell_seconds"
         let metadataItems = survey.metadata
-            .filter { $0.key != skipPaywallKey }
+            .filter { !Self.userProfileMetadataKeys.contains($0.key) && $0.key != "paywall_dwell_seconds" }
             .sorted(by: { $0.key < $1.key })
             .map { Item.metadata(key: $0.key, value: $0.value) }
         if !metadataItems.isEmpty {
@@ -182,7 +307,6 @@ class SurveyResponseDetailViewController: NNViewController {
             snapshot.appendItems(metadataItems, toSection: .metadata)
         }
 
-        // Survey Responses Section
         if !survey.responses.isEmpty {
             snapshot.appendSections([.responses])
             let responseItems = survey.responses.map { response in
@@ -193,17 +317,48 @@ class SurveyResponseDetailViewController: NNViewController {
 
         dataSource.apply(snapshot, animatingDifferences: false)
     }
+
+    private func copyableText(for item: Item) -> String? {
+        switch item {
+        case .basicInfo(_, let value), .metadata(_, let value):
+            return value.isEmpty ? nil : value
+        case .questionResponse(_, let answers):
+            guard !answers.isEmpty else { return nil }
+            return answers.joined(separator: "\n")
+        }
+    }
+
+    private func copyItem(at indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              let text = copyableText(for: item) else { return }
+
+        UIPasteboard.general.string = text
+        if let cell = collectionView.cellForItem(at: indexPath) {
+            cell.showCopyFeedback()
+        }
+        collectionView.deselectItem(at: indexPath, animated: true)
+    }
+}
+
+// MARK: - UICollectionViewDelegate
+extension SurveyResponseDetailViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        copyItem(at: indexPath)
+    }
 }
 
 // MARK: - Types
 extension SurveyResponseDetailViewController {
     enum Section: Hashable {
+        case userProfile
         case basicInfo
         case metadata
         case responses
 
         var title: String {
             switch self {
+            case .userProfile:
+                return "User Profile"
             case .basicInfo:
                 return "Basic Information"
             case .metadata:
@@ -268,18 +423,14 @@ private class QuestionResponseCell: UICollectionViewListCell {
         ])
     }
 
-    func configure(questionId: String, answers: [String]) {
-        // Clean up question ID for display
-        let displayQuestionId = questionId.replacingOccurrences(of: "_", with: " ").capitalized
-        questionLabel.text = displayQuestionId
+    func configure(questionId: String, answers: [String], surveyType: SurveyResponse.SurveyType) {
+        questionLabel.text = SurveyQuestionCatalog.title(for: questionId, surveyType: surveyType)
 
-        // Format answers
         if answers.isEmpty {
             answersLabel.text = "No answer provided"
         } else if answers.count == 1 {
             answersLabel.text = answers.first
         } else {
-            // Multiple answers - show as bullet points
             let bulletPoints = answers.map { "• \($0)" }
             answersLabel.text = bulletPoints.joined(separator: "\n")
         }

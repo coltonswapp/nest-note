@@ -1,5 +1,6 @@
 import UIKit
 import Combine
+import FirebaseAnalytics
 import FirebaseMessaging
 import TipKit
 
@@ -619,10 +620,23 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     }
 
     @objc private func createSessionButtonTapped() {
-        let editSessionVC = EditSessionViewController()
-        let navController = UINavigationController(rootViewController: editSessionVC)
-        navController.modalPresentationStyle = .pageSheet
-        present(navController, animated: true)
+        Task {
+            let canCreate = await SubscriptionService.shared.canUseFullFeatures()
+            await MainActor.run {
+                guard canCreate else {
+                    Analytics.logEvent("second_session_gate_hit", parameters: [
+                        "source": "home_create_button"
+                    ])
+                    presentPremiumPaywall()
+                    return
+                }
+
+                let editSessionVC = EditSessionViewController()
+                let navController = UINavigationController(rootViewController: editSessionVC)
+                navController.modalPresentationStyle = .pageSheet
+                present(navController, animated: true)
+            }
+        }
     }
     
     private func checkSubscriptionStatus() {

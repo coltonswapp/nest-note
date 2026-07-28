@@ -16,4 +16,5 @@ let paywallFeatureCarouselCards: [PaywallFeatureCarouselCard] = [
     .init(id: "multiday", feature: .multiDaySessions, imageName: "L2"),
     .init(id: "events", feature: .sessionEvents, imageName: "L3"),
     .init(id: "review", feature: .nestReview, imageName: "L4"),
+    .init(id: "pdf", feature: .sessionPDFExport, imageName: "L5"),
 ]

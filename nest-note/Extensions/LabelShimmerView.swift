@@ -4,6 +4,7 @@ class LabelShimmerView: UIView {
 
     private let targetLabel: UILabel
     private var shimmerLayer: CAGradientLayer!
+    private let textMaskLayer = CALayer()
 
     init(targetLabel: UILabel) {
         self.targetLabel = targetLabel
@@ -17,11 +18,12 @@ class LabelShimmerView: UIView {
 
     private func setupShimmer() {
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = UIColor.clear
+        backgroundColor = .clear
+        clipsToBounds = true
         isUserInteractionEnabled = false
 
         setupShimmerLayer()
-        setupMask()
+        layer.mask = textMaskLayer
     }
 
     private func setupShimmerLayer() {
@@ -34,7 +36,6 @@ class LabelShimmerView: UIView {
         ]
         shimmerLayer.locations = [0, 0.3, 0.7, 1]
 
-        // 10 degree angle: convert to start/end points
         let angle = 10 * CGFloat.pi / 180
         let startPoint = CGPoint(x: 0.5 - cos(angle) * 0.5, y: 0.5 - sin(angle) * 0.5)
         let endPoint = CGPoint(x: 0.5 + cos(angle) * 0.5, y: 0.5 + sin(angle) * 0.5)
@@ -45,35 +46,48 @@ class LabelShimmerView: UIView {
         layer.addSublayer(shimmerLayer)
     }
 
-    private func setupMask() {
-        let maskLayer = CALayer()
-        layer.mask = maskLayer
-    }
-
     override func layoutSubviews() {
         super.layoutSubviews()
         shimmerLayer.frame = bounds
+        updateTextMask()
+    }
 
-        // Update the mask layer to match the target label's text
-        if let maskLayer = layer.mask {
-            maskLayer.frame = bounds
+    private func updateTextMask() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
 
-            // Create a text layer that matches our target label
-            let textLayer = CATextLayer()
-            textLayer.string = targetLabel.text
-            textLayer.font = targetLabel.font
-            textLayer.fontSize = targetLabel.font.pointSize
-            textLayer.alignmentMode = CATextLayerAlignmentMode(rawValue: targetLabel.textAlignment.caTextAlignment)
-            textLayer.foregroundColor = UIColor.white.cgColor
-            textLayer.frame = maskLayer.bounds
-            textLayer.contentsScale = UIScreen.main.scale
+        textMaskLayer.frame = bounds
+        textMaskLayer.contentsScale = traitCollection.displayScale
 
-            maskLayer.sublayers?.removeAll()
-            maskLayer.addSublayer(textLayer)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = targetLabel.textAlignment
+        // UILabel always word-wraps when numberOfLines == 0, regardless of its lineBreakMode
+        // (which defaults to .byTruncatingTail). NSString.draw honors lineBreakMode literally,
+        // where truncating modes are non-wrapping, so mirror UILabel's actual behavior here.
+        paragraphStyle.lineBreakMode = targetLabel.numberOfLines == 1 ? targetLabel.lineBreakMode : .byWordWrapping
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: targetLabel.font as Any,
+            .foregroundColor: UIColor.white,
+            .paragraphStyle: paragraphStyle
+        ]
+
+        let text = targetLabel.text ?? ""
+        let renderer = UIGraphicsImageRenderer(size: bounds.size)
+        let image = renderer.image { _ in
+            text.draw(
+                with: bounds,
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: attributes,
+                context: nil
+            )
         }
+
+        textMaskLayer.contents = image.cgImage
     }
 
     func startShimmerAnimation() {
+        shimmerLayer.removeAnimation(forKey: "shimmer")
+
         let animation = CABasicAnimation(keyPath: "locations")
         animation.fromValue = [-0.8, -0.6, -0.4, -0.2]
         animation.toValue = [1.2, 1.4, 1.6, 1.8]
@@ -116,6 +130,7 @@ extension UILabel {
             shimmer.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
+        shimmer.layoutIfNeeded()
         shimmer.startShimmerAnimation()
     }
 
@@ -131,25 +146,5 @@ extension UILabel {
 
     func stopShimmer() {
         shimmerView?.stopShimmerAnimation()
-    }
-}
-
-// MARK: - Helper Extensions
-private extension NSTextAlignment {
-    var caTextAlignment: String {
-        switch self {
-        case .left:
-            return CATextLayerAlignmentMode.left.rawValue
-        case .center:
-            return CATextLayerAlignmentMode.center.rawValue
-        case .right:
-            return CATextLayerAlignmentMode.right.rawValue
-        case .justified:
-            return CATextLayerAlignmentMode.justified.rawValue
-        case .natural:
-            return CATextLayerAlignmentMode.natural.rawValue
-        @unknown default:
-            return CATextLayerAlignmentMode.natural.rawValue
-        }
     }
 }

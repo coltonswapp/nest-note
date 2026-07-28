@@ -237,8 +237,7 @@ final class CategoryDetailViewController: NNSheetViewController {
     // MARK: - Setup Methods
     
     override func setupInfoButton() {
-        // CategoryDetailViewController doesn't need an info button
-        infoButton.isHidden = true
+        setLeadingBarButtonHidden(true)
     }
     
     override func addContentToContainer() {
@@ -266,7 +265,7 @@ final class CategoryDetailViewController: NNSheetViewController {
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46)
         ])
     }
