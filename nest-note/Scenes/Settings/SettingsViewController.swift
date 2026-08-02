@@ -1008,6 +1008,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             switch title {
             case "How It Works":
                 showHowItWorks()
+            case "Release Notes":
+                showReleaseNotes()
             case "Text Support":
                 showTextSupport()
             case "Contact Support":
@@ -1281,6 +1283,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func makeSupportItems() -> [Item] {
         var items: [(String, String)] = [
             ("How It Works", "book.pages"),
+            ("Release Notes", "sparkles"),
         ]
 
         if FeatureFlagService.shared.isEnabled(.supportTextEnabled) {
@@ -1297,6 +1300,21 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             showsShareButton: false
         )
         navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showReleaseNotes() {
+        let vc = MarkdownTestViewController(
+            markdown: ReleaseNotesArticle.markdown,
+            showsShareButton: false
+        )
+        vc.modalPresentationStyle = .pageSheet
+
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = false
+        }
+
+        present(vc, animated: true)
     }
 
     private func showTextSupport() {
