@@ -13,11 +13,29 @@ protocol RoutineDetailViewControllerDelegate: AnyObject {
     func routineDetailViewController(didDeleteRoutine routine: RoutineItem)
 }
 
-final class RoutineDetailViewController: NNSheetViewController {
+final class RoutineDetailViewController: NNSheetViewController, NNTippable {
     
     // MARK: - Properties
     weak var routineDelegate: RoutineDetailViewControllerDelegate?
     private let isReadOnly: Bool
+    
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if routine == nil {
+            return !titleString.isEmpty || !routineActions.isEmpty || !pendingAttachmentIds.isEmpty
+        }
+        let currentTitle = routine?.title ?? ""
+        let currentActions = routine?.routineActions ?? []
+        let currentFrequency = routine?.frequency ?? "Daily"
+        let selectedFrequency = frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal) ?? "Daily"
+        return titleString != currentTitle
+            || routineActions != currentActions
+            || selectedFrequency != currentFrequency
+            || pendingAttachmentIds != originalAttachmentIds
+    }
     
     private lazy var routineTableView: UITableView = {
         let tableView = UITableView(frame: .zero, style: .plain)
@@ -75,6 +93,18 @@ final class RoutineDetailViewController: NNSheetViewController {
     private var routineActions: [String] = []
     private let stateManager = RoutineStateManager.shared
     private var isTableViewInEditMode: Bool = false
+
+    private lazy var attachmentStackView: AttachmentStackView = {
+        // Expand left (horizontal accordion) across the footer row.
+        let stack = AttachmentStackView(stackSize: 80, expansionDirection: .left)
+        stack.delegate = self
+        return stack
+    }()
+
+    private var pendingAttachmentIds: [String] = []
+    private var resolvedAttachments: [any BaseItem] = []
+    private var originalAttachmentIds: [String] = []
+    private var hasCompletedInitialAttachmentLoad = false
     
     // MARK: - Initialization
     init(category: String, routine: RoutineItem? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
@@ -110,6 +140,8 @@ final class RoutineDetailViewController: NNSheetViewController {
         
         // Load routine actions
         routineActions = routine?.routineActions ?? []
+        pendingAttachmentIds = routine?.attachmentIds ?? []
+        originalAttachmentIds = pendingAttachmentIds
         
         // Initialize state manager if we have a routine
         if let routine = routine {
@@ -128,10 +160,12 @@ final class RoutineDetailViewController: NNSheetViewController {
             routineTableView.dragInteractionEnabled = true
         }
         
-        itemsHiddenDuringTransition = isReadOnly ? [] : [ctaStack]
+        itemsHiddenDuringTransition = isReadOnly
+            ? [attachmentStackView]
+            : [ctaStack, attachmentStackView]
         
         // Add content insets so content can scroll above the folder label and save button
-        let bottomInset: CGFloat = isReadOnly ? 56 : 104
+        let bottomInset: CGFloat = isReadOnly ? 120 : 168
         routineTableView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
         routineTableView.scrollIndicatorInsets = routineTableView.contentInset
         
@@ -143,6 +177,8 @@ final class RoutineDetailViewController: NNSheetViewController {
 
         // Ensure save button state reflects current title and action list
         updateSaveButtonEnabledState()
+        refreshAttachmentStack()
+        loadResolvedAttachments()
     }
     
     // MARK: - Setup Methods
@@ -150,30 +186,36 @@ final class RoutineDetailViewController: NNSheetViewController {
         super.addContentToContainer()
         
         containerView.addSubview(routineTableView)
+        containerView.addSubview(attachmentStackView)
         containerView.addSubview(folderLabel)
         if !isReadOnly {
             containerView.addSubview(ctaStack)
         }
         
+        folderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        folderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        attachmentStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        attachmentStackView.setContentHuggingPriority(.required, for: .horizontal)
+
         var constraints: [NSLayoutConstraint] = [
             // Table view - extends to bottom of container
             routineTableView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
             routineTableView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             routineTableView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            
-            // Folder label - positioned above CTA stack
+            routineTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+
+            // Same row above CTA: folder left, attachments right
             folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
+            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: attachmentStackView.leadingAnchor, constant: -12),
             folderLabel.heightAnchor.constraint(equalToConstant: 30),
+
+            attachmentStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
         ]
         
         if !isReadOnly {
             constraints.append(contentsOf: [
-                // Table view extends all the way to bottom
-                routineTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
-                
-                // Folder label and CTA stack float over the table view
-                folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -16),
+                folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -12),
+                attachmentStackView.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -12),
                 
                 ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
@@ -186,22 +228,31 @@ final class RoutineDetailViewController: NNSheetViewController {
             ])
         } else {
             constraints.append(contentsOf: [
-                // Table view extends all the way to bottom
-                routineTableView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
-                
-                // Folder label floats over the table view
-                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
+                folderLabel.bottomAnchor.constraint(
+                    equalTo: containerView.bottomAnchor,
+                    constant: -Self.ctaBottomPadding
+                ).with(priority: .defaultHigh),
+                attachmentStackView.bottomAnchor.constraint(
+                    equalTo: containerView.bottomAnchor,
+                    constant: -Self.ctaBottomPadding
+                ).with(priority: .defaultHigh),
             ])
         }
         
         NSLayoutConstraint.activate(constraints)
         
-        // Add variable blur effect at the bottom to fade content behind floating elements
-        folderLabel.pinVariableBlur(to: containerView, direction: .bottom, blurRadius: 20, height: 120)
+        // Blur behind folder + attachment stack + CTA (pin from stack so z-order stays correct).
+        attachmentStackView.pinVariableBlur(to: containerView, direction: .bottom, blurRadius: 20, height: 140)
+        containerView.bringSubviewToFront(folderLabel)
+        containerView.bringSubviewToFront(attachmentStackView)
+        if !isReadOnly {
+            containerView.bringSubviewToFront(ctaStack)
+        }
         containerView.clipsToBounds = true
     }
     
     private func updateSaveButtonEnabledState() {
+        defer { refreshCompactDetentAvailability() }
         guard !isReadOnly else { return }
         let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasTitle = !titleString.isEmpty
@@ -225,15 +276,29 @@ final class RoutineDetailViewController: NNSheetViewController {
         
         let titleChanged = titleString != currentTitle
         let actionsChanged = routineActions != currentActions
+        let attachmentsChanged = pendingAttachmentIds != originalAttachmentIds
         
         
-        let hasChanges = titleChanged || actionsChanged || frequencyChanged
+        let hasChanges = titleChanged || actionsChanged || frequencyChanged || attachmentsChanged
         let shouldEnable = hasTitle && hasAtLeastOneAction && hasChanges
         saveButton.isEnabled = shouldEnable
     }
 
     @objc private func titleFieldChanged() {
+        collapseAttachmentsIfNeeded()
         updateSaveButtonEnabledState()
+    }
+
+    override func leadingMenuWillPresent() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    override func prepareForCompactDraftMode() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    private func collapseAttachmentsIfNeeded() {
+        attachmentStackView.collapseIfNeeded()
     }
 
     /// Applies an in-memory reorder of `routineActions` and keeps per-action completion aligned when `routine` exists.
@@ -358,7 +423,6 @@ final class RoutineDetailViewController: NNSheetViewController {
     
     private func createMenu() -> UIMenu {
         var topActions: [UIAction] = []
-        var bottomActions: [UIAction] = []
         var menuChildren: [UIMenuElement] = []
         
         // Top section - Info and Edit actions
@@ -369,6 +433,17 @@ final class RoutineDetailViewController: NNSheetViewController {
             self?.presentRoutinesInfo()
         }
         topActions.append(learnAction)
+
+        if !isReadOnly {
+            let attachTitle = pendingAttachmentIds.isEmpty ? "Add Attachment" : "Manage Attachments"
+            let attachAction = UIAction(
+                title: attachTitle,
+                image: UIImage(systemName: "paperclip")
+            ) { [weak self] _ in
+                self?.presentAttachmentPicker()
+            }
+            topActions.append(attachAction)
+        }
         
         // Only show edit option if we have routine actions and not in read-only mode
         if !routineActions.isEmpty && !isReadOnly {
@@ -387,7 +462,7 @@ final class RoutineDetailViewController: NNSheetViewController {
             menuChildren.append(topSection)
         }
         
-        // Bottom section - Delete action
+        // Bottom section - Delete action (separated by divider)
         if routine != nil && !isReadOnly {
             let deleteAction = UIAction(
                 title: "Delete Routine",
@@ -396,16 +471,14 @@ final class RoutineDetailViewController: NNSheetViewController {
             ) { [weak self] _ in
                 self?.handleDeleteRoutine()
             }
-            bottomActions.append(deleteAction)
+            menuChildren.append(deleteAction)
         }
-        
-        // Add bottom actions directly (they'll be separated from top section automatically)
-        menuChildren.append(contentsOf: bottomActions)
         
         return UIMenu(children: menuChildren)
     }
     
     private func toggleEditMode() {
+        collapseAttachmentsIfNeeded()
         let wasInEditMode = isTableViewInEditMode
         isTableViewInEditMode.toggle()
         routineTableView.setEditing(isTableViewInEditMode, animated: true)
@@ -442,6 +515,7 @@ final class RoutineDetailViewController: NNSheetViewController {
     }
     
     @objc private func frequencyButtonTapped() {
+        collapseAttachmentsIfNeeded()
         let currentFrequency = routine?.frequency ?? "Daily"
         let frequencyVC = RoutineFrequencyViewController(currentFrequency: currentFrequency)
         frequencyVC.delegate = self
@@ -464,10 +538,18 @@ final class RoutineDetailViewController: NNSheetViewController {
             do {
                 var savedRoutine: RoutineItem
                 
+                let allItems = try await NestService.shared.fetchAllItems()
+                let prunedAttachmentIds = AttachmentResolver.prune(
+                    ids: pendingAttachmentIds,
+                    against: allItems,
+                    excludingHostId: routine?.id
+                )
+
                 if let existingRoutine = routine {
                     existingRoutine.title = title
                     existingRoutine.routineActions = routineActions
                     existingRoutine.frequency = frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal)
+                    existingRoutine.attachmentIds = prunedAttachmentIds
                     existingRoutine.updatedAt = Date()
                     
                     try await NestService.shared.updateRoutine(existingRoutine)
@@ -477,7 +559,8 @@ final class RoutineDetailViewController: NNSheetViewController {
                         title: title,
                         category: category,
                         routineActions: routineActions,
-                        frequency: frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal)
+                        frequency: frequencyButton.configuration?.attributedTitle.map { String($0.characters) } ?? frequencyButton.title(for: .normal),
+                        attachmentIds: prunedAttachmentIds
                     )
                     
                     try await NestService.shared.createRoutine(newRoutine)
@@ -504,6 +587,116 @@ final class RoutineDetailViewController: NNSheetViewController {
     
     // MARK: - Error Handling
     
+    // MARK: - Attachments
+
+    private func refreshAttachmentStack() {
+        // Empty editable stacks show a dashed paperclip; otherwise the accordion.
+        attachmentStackView.configure(
+            items: resolvedAttachments,
+            showsPlus: !isReadOnly,
+            allowsRemoval: !isReadOnly
+        )
+        loadPlaceThumbnailsForAttachments()
+        if !isReadOnly {
+            updateInfoButtonAppearance()
+        }
+    }
+
+    private func loadResolvedAttachments() {
+        guard !pendingAttachmentIds.isEmpty else {
+            hasCompletedInitialAttachmentLoad = true
+            resolvedAttachments = []
+            refreshAttachmentStack()
+            return
+        }
+
+        Task {
+            do {
+                let items = try await fetchItemsForAttachmentResolution()
+                let resolved = AttachmentResolver.resolve(
+                    ids: pendingAttachmentIds,
+                    from: items,
+                    excludingHostId: routine?.id
+                )
+                await MainActor.run {
+                    self.resolvedAttachments = resolved
+                    self.pendingAttachmentIds = resolved.map(\.id)
+                    if !self.hasCompletedInitialAttachmentLoad {
+                        self.originalAttachmentIds = self.pendingAttachmentIds
+                        self.hasCompletedInitialAttachmentLoad = true
+                    }
+                    self.refreshAttachmentStack()
+                    self.updateSaveButtonEnabledState()
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .general,
+                    message: "Failed to resolve routine attachments: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func fetchItemsForAttachmentResolution() async throws -> [BaseItem] {
+        if isReadOnly {
+            return try await SitterViewService.shared.itemsForAttachmentResolution()
+        }
+        return try await NestService.shared.itemsForAttachmentResolution()
+    }
+
+    private func loadPlaceThumbnailsForAttachments() {
+        for item in resolvedAttachments {
+            guard let place = item as? PlaceItem else { continue }
+            Task {
+                do {
+                    let image: UIImage
+                    if isReadOnly {
+                        image = try await SitterViewService.shared.loadImages(for: place)
+                    } else {
+                        image = try await NestService.shared.loadImages(for: place)
+                    }
+                    await MainActor.run {
+                        self.attachmentStackView.setPreviewImage(image, forItemId: place.id)
+                    }
+                } catch {
+                    // Keep icon fallback
+                }
+            }
+        }
+    }
+
+    private func presentAttachmentPicker() {
+        collapseAttachmentsIfNeeded()
+        NNTipManager.shared.dismissTip(AttachmentTips.attachItemsTip)
+        AttachmentPickerPresenter.present(
+            from: self,
+            selectedIds: pendingAttachmentIds,
+            excludingHostId: routine?.id
+        ) { [weak self] ids in
+            guard let self else { return }
+            self.pendingAttachmentIds = ids
+            self.loadResolvedAttachments()
+            self.updateSaveButtonEnabledState()
+        }
+    }
+
+    // MARK: - NNTippable
+
+    func showTips() {
+        guard !isReadOnly else { return }
+        trackScreenVisit()
+
+        guard NNTipManager.shared.shouldShowTip(AttachmentTips.attachItemsTip) else { return }
+        NNTipManager.shared.showTip(
+            AttachmentTips.attachItemsTip,
+            sourceView: attachmentStackView,
+            in: self,
+            pinToEdge: .top,
+            offset: CGPoint(x: 0, y: -8)
+        )
+    }
+
     private func showErrorAlert(message: String) {
         let alert = UIAlertController(
             title: "Error",
@@ -589,6 +782,10 @@ extension RoutineDetailViewController: UITableViewDataSource {
 
 // MARK: - UITableViewDelegate
 extension RoutineDetailViewController: UITableViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         return UITableView.automaticDimension
     }
@@ -614,6 +811,7 @@ extension RoutineDetailViewController: UITableViewDragDelegate {
               indexPath.row < routineActions.count else {
             return []
         }
+        collapseAttachmentsIfNeeded()
         let itemProvider = NSItemProvider(object: routineActions[indexPath.row] as NSString)
         let dragItem = UIDragItem(itemProvider: itemProvider)
         dragItem.localObject = indexPath
@@ -653,7 +851,16 @@ extension RoutineDetailViewController: UITableViewDropDelegate {
 
 // MARK: - RoutineActionCellDelegate
 extension RoutineDetailViewController: RoutineActionCellDelegate {
+    func routineActionCellDidBeginEditing(_ cell: RoutineActionCell) {
+        collapseAttachmentsIfNeeded()
+    }
+
+    func routineActionCellDidChangeText(_ cell: RoutineActionCell) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func routineActionCell(_ cell: RoutineActionCell, didToggleCompletion isCompleted: Bool) {
+        collapseAttachmentsIfNeeded()
         guard let indexPath = routineTableView.indexPath(for: cell),
               let routineId = routine?.id else { return }
         
@@ -698,7 +905,16 @@ extension RoutineDetailViewController: RoutineActionCellDelegate {
 
 // MARK: - AddRoutineActionCellDelegate
 extension RoutineDetailViewController: AddRoutineActionCellDelegate {
+    func addRoutineActionCellDidBeginEditing(_ cell: AddRoutineActionCell) {
+        collapseAttachmentsIfNeeded()
+    }
+
+    func addRoutineActionCellDidChangeText(_ cell: AddRoutineActionCell) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func addRoutineActionCell(_ cell: AddRoutineActionCell, didAddAction action: String) {
+        collapseAttachmentsIfNeeded()
         guard routineActions.count < 10 else { return }
         
         let wasAtLimit = routineActions.count == 9
@@ -740,11 +956,54 @@ extension RoutineDetailViewController: RoutineFrequencyViewControllerDelegate {
 
 // MARK: - UITextFieldDelegate
 extension RoutineDetailViewController: UITextFieldDelegate {
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == titleField {
             textField.resignFirstResponder()
             return false
         }
         return true
+    }
+}
+
+// MARK: - AttachmentStackViewDelegate
+extension RoutineDetailViewController: AttachmentStackViewDelegate {
+    func attachmentStackView(_ stackView: AttachmentStackView, didTapItem item: any BaseItem) {
+        NestItemDetailRouter.presentDetail(
+            for: item,
+            from: self,
+            nestItemRepository: isReadOnly ? SitterViewService.shared : NestService.shared,
+            category: item.category,
+            sourceFrame: stackView.convert(stackView.bounds, to: nil),
+            placeListDelegate: nil,
+            noteDelegate: nil,
+            routineDelegate: nil,
+            contactDelegate: nil
+        )
+    }
+
+    func attachmentStackViewDidTapPlus(_ stackView: AttachmentStackView) {
+        presentAttachmentPicker()
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didChangeExpanded isExpanded: Bool) {
+        // Hide folder while the horizontal accordion is open so cards have room.
+        UIView.animate(withDuration: 0.2) {
+            self.folderLabel.alpha = isExpanded ? 0 : 1
+        }
+        self.folderLabel.isUserInteractionEnabled = !isExpanded
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didRequestRemoveItem item: any BaseItem) {
+        pendingAttachmentIds.removeAll { $0 == item.id }
+        resolvedAttachments.removeAll { $0.id == item.id }
+        // Stack already animated the drop; keep local state in sync without rebuilding.
+        updateSaveButtonEnabledState()
+        if !isReadOnly {
+            setupInfoButton()
+        }
     }
 }

@@ -93,6 +93,7 @@ final class SurveyService {
         case activitySuggestions = "activity_suggestions"
         case contacts = "contacts"
         case expenses = "expenses"
+        case savedNests = "saved_nests"
         
         var id: String { rawValue }
         
@@ -112,6 +113,8 @@ final class SurveyService {
                 return "Contacts"
             case .expenses:
                 return "Expenses"
+            case .savedNests:
+                return "Saved Nests"
             }
         }
             
@@ -131,6 +134,8 @@ final class SurveyService {
                 return "A centralized Contacts management system for each Nest that stores neighborhood, family, and other important contact details readily accessible to caregivers during sessions."
             case .expenses:
                 return "Log and manage expenses incurred during childcare sessions with receipt uploads and reimbursement calculations."
+            case .savedNests:
+                return "After you work with a family, their nest would appear under Saved Nests so you can quickly find past sessions and household context from one place."
             }
         }
             
@@ -150,6 +155,8 @@ final class SurveyService {
                 return "person.2.fill"
             case .expenses:
                 return "dollarsign.square.fill"
+            case .savedNests:
+                return "heart.fill"
             }
         }
     }

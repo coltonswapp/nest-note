@@ -24,7 +24,7 @@ From **Menu → Current Nest**, set up your household. Add your address and star
 
 ### 2. Add what sitters need
 
-- **Entries** — notes with the details (alarm codes, allergies, screen-time rules).
+- **Notes** — details sitters need (alarm codes, allergies, screen-time rules).
 - **Routines** — step-by-step checklists (bedtime, meals, handoff).
 - **Places** — where things are or where to go (pharmacy, park, spare key).
 - **Contacts** — pediatrician, neighbors, grandparents.
@@ -52,10 +52,6 @@ When a family invites you, they share an **invite code**. In NestNote, enter tha
 ### Session requests
 
 You do not have to wait for the family to start. Create a **session request**, send it to a nest owner, and they receive an invite code to accept or adjust dates and times.
-
-### Saved Nests
-
-After you work with a family, their nest can appear under **Saved Nests** so you can quickly find past sessions and household context.
 
 ---
 

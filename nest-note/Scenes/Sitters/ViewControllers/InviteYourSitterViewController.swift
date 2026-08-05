@@ -9,7 +9,7 @@ final class InviteYourSitterViewController: NNViewController {
 
     private enum InviteCardMetrics {
         static let width: CGFloat = 240
-        static let height: CGFloat = 270
+        static let height: CGFloat = 300
         static let tiltAngle: CGFloat = -6 * .pi / 180
     }
 
@@ -468,16 +468,21 @@ final class InviteYourSitterViewController: NNViewController {
 #if DEBUG
 extension InviteYourSitterViewController {
     static func makeDebugInstance() -> InviteYourSitterViewController {
+        // Single-day with times so Settings → Test Invite Your Sitter hits the 2-line date layout.
         let calendar = Calendar.current
-        let start = calendar.date(from: DateComponents(year: 2025, month: 1, day: 12)) ?? Date()
-        let end = calendar.date(from: DateComponents(year: 2025, month: 1, day: 15)) ?? Date()
+        let start = calendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 30, hour: 10, minute: 30)
+        ) ?? Date()
+        let end = calendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 30, hour: 23, minute: 45)
+        ) ?? Date()
         let nest = NestService.shared.currentNest
         let session = SessionItem(
             id: "debug-invite-reveal",
-            title: "Weekend Sit",
+            title: "Evening Sit",
             startDate: start,
             endDate: end,
-            isMultiDay: true,
+            isMultiDay: false,
             nestID: nest?.id ?? "debug-nest"
         )
         return InviteYourSitterViewController(inviteCode: "169421", session: session)

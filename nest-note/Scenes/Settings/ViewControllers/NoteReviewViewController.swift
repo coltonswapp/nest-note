@@ -1,5 +1,5 @@
 //
-//  EntryReviewViewController.swift
+//  NoteReviewViewController.swift
 //  nest-note
 //
 //  Created by Colton Swapp on 1/11/25.
@@ -10,14 +10,14 @@ import RevenueCat
 import RevenueCatUI
 
 // Add delegate protocol to notify when review is completed
-protocol EntryReviewViewControllerDelegate: AnyObject {
+protocol NoteReviewViewControllerDelegate: AnyObject {
     func entryReviewDidComplete()
 }
 
-class EntryReviewViewController: NNViewController, CardStackViewDelegate, PaywallPresentable, PaywallViewControllerDelegate {
+class NoteReviewViewController: NNViewController, CardStackViewDelegate, PaywallPresentable, PaywallViewControllerDelegate {
 
     // Add delegate property
-    weak var reviewDelegate: EntryReviewViewControllerDelegate?
+    weak var reviewDelegate: NoteReviewViewControllerDelegate?
     
     // PaywallPresentable requirement
     var proFeature: ProFeature { return .nestReview }
@@ -120,11 +120,11 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
     }
     
     // Add property for entry repository
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     
     // Review item wrapper to support multiple types
     private enum ReviewItem {
-        case entry(BaseEntry)
+        case entry(NoteItem)
         case place(PlaceItem)
         case routine(RoutineItem)
         
@@ -141,8 +141,8 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
     private var reviewItems: [ReviewItem] = []
     
     // Update initializer to accept repository
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository) {
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -251,7 +251,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
                 
                 // Get review cadence from current nest or use default
                 let reviewCadenceInDays: Int
-                if let nestService = entryRepository as? NestService,
+                if let nestService = nestItemRepository as? NestService,
                    let currentNest = nestService.currentNest {
                     reviewCadenceInDays = currentNest.reviewCadenceInDays
                 } else {
@@ -262,19 +262,19 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
                 let threshold = calendar.date(byAdding: .day, value: -reviewCadenceInDays, to: Date()) ?? Date()
 
                 // Gather items: entries via protocol, places and routines via repository services
-                let entries = try await entryRepository.fetchOutdatedEntries(olderThan: reviewCadenceInDays)
+                let notes = try await nestItemRepository.fetchOutdatedNotes(olderThan: reviewCadenceInDays)
                 var places: [PlaceItem] = []
                 var routines: [RoutineItem] = []
                 
-                if let nestService = entryRepository as? NestService {
+                if let nestService = nestItemRepository as? NestService {
                     places = try await nestService.fetchPlaces()
                     routines = try await nestService.fetchItems(ofType: .routine)
-                } else if let sitterService = entryRepository as? SitterViewService {
+                } else if let sitterService = nestItemRepository as? SitterViewService {
                     places = try await sitterService.fetchNestPlaces()
                     routines = try await sitterService.fetchNestRoutines()
                 } else {
                     // Fallback: try fetchAllItems if implemented
-                    let all = try await entryRepository.fetchAllItems()
+                    let all = try await nestItemRepository.fetchAllItems()
                     places = all.compactMap { $0 as? PlaceItem }
                     routines = all.compactMap { $0 as? RoutineItem }
                 }
@@ -285,7 +285,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
                 
                 // Build review items and sort oldest first
                 var items: [ReviewItem] = []
-                items.append(contentsOf: entries.map { .entry($0) })
+                items.append(contentsOf: notes.map { .entry($0) })
                 items.append(contentsOf: outdatedPlaces.map { .place($0) })
                 items.append(contentsOf: outdatedRoutines.map { .routine($0) })
                 items.sort { $0.updatedAt < $1.updatedAt }
@@ -316,7 +316,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
                         let views: [UIView] = items.map { item in
                             switch item {
                             case .entry(let e):
-                                let v = MiniEntryDetailView()
+                                let v = MiniNoteDetailView()
                                 v.translatesAutoresizingMaskIntoConstraints = false
                                 v.configure(key: e.title, value: e.content, lastModified: e.updatedAt)
                                 return v
@@ -436,16 +436,16 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
         
         switch reviewItems[index] {
         case .entry(let entry):
-            let vc = EntryDetailViewController(category: entry.category, entry: entry, sourceFrame: card.frame)
-            vc.entryDelegate = self
+            let vc = NoteDetailViewController(category: entry.category, entry: entry, sourceFrame: card.frame)
+            vc.noteDelegate = self
             present(vc, animated: true)
         case .place(let place):
-            let isReadOnly = !(entryRepository is NestService)
+            let isReadOnly = !(nestItemRepository is NestService)
             let vc = PlaceDetailViewController(place: place, isReadOnly: isReadOnly, sourceFrame: card.frame)
             vc.placeListDelegate = self
             present(vc, animated: true)
         case .routine(let routine):
-            let isReadOnly = !(entryRepository is NestService)
+            let isReadOnly = !(nestItemRepository is NestService)
             let vc = RoutineDetailViewController(category: routine.category, routine: routine, sourceFrame: card.frame, isReadOnly: isReadOnly)
             vc.routineDelegate = self
             present(vc, animated: true)
@@ -506,17 +506,17 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
                     switch reviewItems[topCardIndex] {
                     case .entry(var e):
                         e.updatedAt = Date()
-                        try await entryRepository.updateEntry(e)
+                        try await nestItemRepository.updateNote(e)
                         await MainActor.run { self.reviewItems[topCardIndex] = .entry(e) }
                     case .place(var p):
                         p.updatedAt = Date()
-                        if let nest = self.entryRepository as? NestService {
+                        if let nest = self.nestItemRepository as? NestService {
                             try await nest.updatePlace(p)
                             await MainActor.run { self.reviewItems[topCardIndex] = .place(p) }
                         }
                     case .routine(var r):
                         r.updatedAt = Date()
-                        if let nest = self.entryRepository as? NestService {
+                        if let nest = self.nestItemRepository as? NestService {
                             try await nest.updateRoutine(r)
                             await MainActor.run { self.reviewItems[topCardIndex] = .routine(r) }
                         }
@@ -538,7 +538,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
         let currentCadence = getCurrentCadence()
         let cadenceText = currentCadence == 1 ? "1 month" : "\(currentCadence) months"
         
-        subtitleLabel.text = "Showing entries older than \(cadenceText). Swipe left (skip), right (current), tap (edit). Adjust review cadence via top-right."
+        subtitleLabel.text = "Showing notes older than \(cadenceText). Swipe left (skip), right (current), tap (edit). Adjust review cadence via top-right."
     }
     
     private func disableInteractionsForUpgradePrompt() {
@@ -609,7 +609,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
     }
     
     private func getCurrentCadence() -> Int {
-        if let nestService = entryRepository as? NestService,
+        if let nestService = nestItemRepository as? NestService,
            let currentNest = nestService.currentNest {
             return currentNest.reviewCadenceInMonths
         }
@@ -618,7 +618,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
     
     private func updateReviewCadence(_ months: Int) {
         Task {
-            guard let nestService = entryRepository as? NestService,
+            guard let nestService = nestItemRepository as? NestService,
                   var currentNest = nestService.currentNest else {
                 await MainActor.run {
                     showToast(text: "Unable to update review cadence", sentiment: .negative)
@@ -691,18 +691,18 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
         do {
             let threshold = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
             
-            let entries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
+            let notes = try await nestItemRepository.fetchOutdatedNotes(olderThan: 90)
             var places: [PlaceItem] = []
             var routines: [RoutineItem] = []
             
-            if let nestService = entryRepository as? NestService {
+            if let nestService = nestItemRepository as? NestService {
                 places = try await nestService.fetchPlaces()
                 routines = try await nestService.fetchItems(ofType: .routine)
-            } else if let sitterService = entryRepository as? SitterViewService {
+            } else if let sitterService = nestItemRepository as? SitterViewService {
                 places = try await sitterService.fetchNestPlaces()
                 routines = try await sitterService.fetchNestRoutines()
             } else {
-                let all = try await entryRepository.fetchAllItems()
+                let all = try await nestItemRepository.fetchAllItems()
                 places = all.compactMap { $0 as? PlaceItem }
                 routines = all.compactMap { $0 as? RoutineItem }
             }
@@ -710,7 +710,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
             let outdatedPlaces = places.filter { $0.updatedAt < threshold }
             let outdatedRoutines = routines.filter { $0.updatedAt < threshold }
             
-            return entries.count + outdatedPlaces.count + outdatedRoutines.count
+            return notes.count + outdatedPlaces.count + outdatedRoutines.count
         } catch {
             Logger.log(level: .error, category: .nestService, message: "Error counting outdated items: \(error.localizedDescription)")
             return 0
@@ -732,7 +732,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
         let newCardView: UIView
         switch item {
         case .entry(let entry):
-            let entryView = MiniEntryDetailView()
+            let entryView = MiniNoteDetailView()
             entryView.translatesAutoresizingMaskIntoConstraints = false
             entryView.configure(key: entry.title, value: entry.content, lastModified: entry.updatedAt)
             newCardView = entryView
@@ -756,7 +756,7 @@ class EntryReviewViewController: NNViewController, CardStackViewDelegate, Paywal
 }
 
 // MARK: - PaywallViewControllerDelegate
-extension EntryReviewViewController {
+extension NoteReviewViewController {
     func paywallViewController(_ controller: PaywallViewController, didFinishPurchasingWith customerInfo: CustomerInfo) {
         TikTokTracker.shared.trackSubscribe()
         controller.dismiss(animated: true) { [weak self] in
@@ -800,11 +800,11 @@ extension EntryReviewViewController {
 }
 
 // Add this extension to handle entry updates
-extension EntryReviewViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
+extension NoteReviewViewController: NoteDetailViewControllerDelegate {
+    func noteDetailViewController(didSaveNote entry: NoteItem?) {
         guard let entry = entry else {
             // Entry was deleted through the edit screen
-            // The didDeleteEntry delegate method will handle this case
+            // The didDeleteNote delegate method will handle this case
             return
         }
         
@@ -818,11 +818,11 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
             // Update in the repository
             Task {
                 do {
-                    try await entryRepository.updateEntry(entry)
+                    try await nestItemRepository.updateNote(entry)
                     
                     await MainActor.run {
                         // Show a success toast
-                        showToast(text: "Entry updated")
+                        showToast(text: "Note updated")
                         
                         // Automatically advance to the next card since this one is now updated
                         if cardStackView.canGoNext {
@@ -841,7 +841,7 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
                     }
                 } catch {
                     await MainActor.run {
-                        showToast(text: "Error updating entry", sentiment: .negative)
+                        showToast(text: "Error updating note", sentiment: .negative)
                         Logger.log(level: .error, category: .nestService, message: "Error updating entry: \(error.localizedDescription)")
                     }
                 }
@@ -849,9 +849,9 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
         }
     }
     
-    func entryDetailViewController(didDeleteEntry entry: BaseEntry) {
+    func noteDetailViewController(didDeleteNote entry: NoteItem) {
         // Show toast for user feedback
-        showToast(text: "Entry deleted")
+        showToast(text: "Note deleted")
         Logger.log(level: .info, category: .nestService, message: "Entry deleted: \(entry.id)")
         
         // Remove from our items
@@ -882,7 +882,7 @@ extension EntryReviewViewController: EntryDetailViewControllerDelegate {
 }
 
 // MARK: - PlaceListViewControllerDelegate (used by PlaceDetailViewController)
-extension EntryReviewViewController: PlaceListViewControllerDelegate {
+extension NoteReviewViewController: PlaceListViewControllerDelegate {
     func placeListViewController(didUpdatePlace place: PlaceItem) {
         if let index = reviewItems.firstIndex(where: { if case .place(let p) = $0 { return p.id == place.id } else { return false } }) {
             reviewItems[index] = .place(place)
@@ -924,7 +924,7 @@ extension EntryReviewViewController: PlaceListViewControllerDelegate {
 }
 
 // MARK: - RoutineDetailViewControllerDelegate
-extension EntryReviewViewController: RoutineDetailViewControllerDelegate {
+extension NoteReviewViewController: RoutineDetailViewControllerDelegate {
     func routineDetailViewController(didSaveRoutine routine: RoutineItem?) {
         guard let routine else { return }
         if let index = reviewItems.firstIndex(where: { if case .routine(let r) = $0 { return r.id == routine.id } else { return false } }) {

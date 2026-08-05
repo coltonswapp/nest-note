@@ -3,16 +3,28 @@ import RevenueCat
 import RevenueCatUI
 import TipKit
 
-protocol EntryDetailViewControllerDelegate: AnyObject {
-    func entryDetailViewController(didSaveEntry entry: BaseEntry?)
-    func entryDetailViewController(didDeleteEntry entry: BaseEntry)
+protocol NoteDetailViewControllerDelegate: AnyObject {
+    func noteDetailViewController(didSaveNote entry: NoteItem?)
+    func noteDetailViewController(didDeleteNote entry: NoteItem)
 }
 
-final class EntryDetailViewController: NNSheetViewController, NNTippable {
+final class NoteDetailViewController: NNSheetViewController, NNTippable {
     
     // MARK: - Properties
-    weak var entryDelegate: EntryDetailViewControllerDelegate?
+    weak var noteDelegate: NoteDetailViewControllerDelegate?
     private let isReadOnly: Bool
+    
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        if entry == nil {
+            let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let content = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !title.isEmpty || !content.isEmpty || !pendingAttachmentIds.isEmpty
+        }
+        return hasUnsavedChanges
+    }
     
     private let contentTextView: UITextView = {
         let textView = UITextView()
@@ -56,8 +68,21 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         return label
     }()
     
-    let entry: BaseEntry?
+    let entry: NoteItem?
     private let category: String
+
+    private lazy var attachmentStackView: AttachmentStackView = {
+        // Expand left (horizontal accordion) across the footer row.
+        let stack = AttachmentStackView(stackSize: 80, expansionDirection: .left)
+        stack.delegate = self
+        return stack
+    }()
+
+    /// Working attachment IDs (pending until save).
+    private var pendingAttachmentIds: [String] = []
+    private var resolvedAttachments: [any BaseItem] = []
+    private var originalAttachmentIds: [String] = []
+    private var hasCompletedInitialAttachmentLoad = false
     
     // Track original values for change detection
     private var originalTitle: String?
@@ -71,7 +96,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     }
     
     // MARK: - Initialization
-    init(category: String, entry: BaseEntry? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
+    init(category: String, entry: NoteItem? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false) {
         self.category = category
         self.entry = entry
         self.isReadOnly = isReadOnly
@@ -96,7 +121,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        titleLabel.text = entry == nil ? "New Entry" : isReadOnly ? "View Entry" : "Edit Entry"
+        titleLabel.text = entry == nil ? "New Note" : isReadOnly ? "View Note" : "Edit Note"
         titleField.text = entry?.title
         titleField.placeholder = "Title"
         titleField.delegate = self
@@ -106,6 +131,8 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         // Store original values for change detection
         originalTitle = entry?.title
         originalContent = entry?.content
+        pendingAttachmentIds = entry?.attachmentIds ?? []
+        originalAttachmentIds = pendingAttachmentIds
         
         // Add target for title field changes
         titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
@@ -119,7 +146,7 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
             configureReadOnlyMode()
         }
         
-        itemsHiddenDuringTransition = [saveButton]
+        itemsHiddenDuringTransition = isReadOnly ? [attachmentStackView] : [saveButton, attachmentStackView]
         
         if entry == nil && !isReadOnly && titleField.text?.isEmpty ?? false {
             titleField.becomeFirstResponder()
@@ -129,6 +156,8 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         
         // Initial save button state update
         updateSaveButtonState()
+        refreshAttachmentStack()
+        loadResolvedAttachments()
     }
     
     // MARK: - Setup Methods
@@ -136,28 +165,37 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         super.addContentToContainer()
         
         containerView.addSubview(contentTextView)
+        containerView.addSubview(attachmentStackView)
         containerView.addSubview(folderLabel)
         if !isReadOnly {
             containerView.addSubview(saveButton)
         }
         
+        folderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        folderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        attachmentStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        attachmentStackView.setContentHuggingPriority(.required, for: .horizontal)
+
         var constraints: [NSLayoutConstraint] = [
             // Content text view
             contentTextView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
             contentTextView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
             contentTextView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            
-            // Folder label - positioned where details button was
+
+            // Same row above Save: folder left, attachments right
             folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
+            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: attachmentStackView.leadingAnchor, constant: -12),
             folderLabel.heightAnchor.constraint(equalToConstant: 30),
+
+            attachmentStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
         ]
         
         if !isReadOnly {
-            // Full width save button
             constraints.append(contentsOf: [
-                contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
-                folderLabel.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -16),
+                contentTextView.bottomAnchor.constraint(equalTo: attachmentStackView.topAnchor, constant: -16),
+                // Bottoms share the row just above Save so empty stack doesn't misplace the folder.
+                folderLabel.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -12),
+                attachmentStackView.bottomAnchor.constraint(equalTo: saveButton.topAnchor, constant: -12),
                 
                 saveButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 saveButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
@@ -165,14 +203,29 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                 saveButton.heightAnchor.constraint(equalToConstant: 46),
             ])
         } else {
-            // Read-only mode - no save button
             constraints.append(contentsOf: [
-                contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
-                folderLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
+                contentTextView.bottomAnchor.constraint(equalTo: attachmentStackView.topAnchor, constant: -16),
+                folderLabel.bottomAnchor.constraint(
+                    equalTo: containerView.bottomAnchor,
+                    constant: -Self.ctaBottomPadding
+                ).with(priority: .defaultHigh),
+                attachmentStackView.bottomAnchor.constraint(
+                    equalTo: containerView.bottomAnchor,
+                    constant: -Self.ctaBottomPadding
+                ).with(priority: .defaultHigh),
             ])
         }
         
         NSLayoutConstraint.activate(constraints)
+
+        // Blur behind folder + attachment stack + save (pin from stack so z-order stays correct).
+        attachmentStackView.pinVariableBlur(to: containerView, direction: .bottom, blurRadius: 20, height: 140)
+        containerView.bringSubviewToFront(folderLabel)
+        containerView.bringSubviewToFront(attachmentStackView)
+        if !isReadOnly {
+            containerView.bringSubviewToFront(saveButton)
+        }
+        containerView.clipsToBounds = true
     }
     
     // MARK: - NNSheetViewController Override
@@ -210,23 +263,34 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
         let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
         
-        var menuItems: [UIMenuElement] = []
+        var topActions: [UIAction] = []
+        var menuChildren: [UIMenuElement] = []
+
+        let attachTitle = pendingAttachmentIds.isEmpty ? "Add Attachment" : "Manage Attachments"
+        let attachAction = UIAction(
+            title: attachTitle,
+            image: UIImage(systemName: "paperclip")
+        ) { [weak self] _ in
+            self?.presentAttachmentPicker()
+        }
+        topActions.append(attachAction)
+        topActions.append(contentsOf: [createdAtAction, modifiedAtAction])
+        
+        let topSection = UIMenu(title: "", options: .displayInline, children: topActions)
+        menuChildren.append(topSection)
         
         if entry != nil {
             let deleteAction = UIAction(
-                title: "Delete Entry",
+                title: "Delete Note",
                 image: UIImage(systemName: "trash"),
                 attributes: .destructive
             ) { [weak self] _ in
                 self?.handleDeleteTapped()
             }
-            menuItems.append(deleteAction)
+            menuChildren.append(deleteAction)
         }
         
-        menuItems.append(contentsOf: [createdAtAction, modifiedAtAction])
-        
-        let menu = UIMenu(title: "", children: menuItems)
-        setLeadingBarButtonMenu(menu)
+        setLeadingBarButtonMenu(UIMenu(title: "", children: menuChildren))
     }
     
     private func setupReadOnlyInfoMenu() {
@@ -244,27 +308,27 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         guard let entry = entry else { return }
         
         let alert = UIAlertController(
-            title: "Delete Entry",
+            title: "Delete Note",
             message: "Are you sure you want to delete '\(entry.title)'? This action cannot be undone.",
             preferredStyle: .alert
         )
         
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-            self?.deleteEntry()
+            self?.deleteNote()
         })
         
         present(alert, animated: true)
     }
     
-    private func deleteEntry() {
+    private func deleteNote() {
         guard let entry = entry else { return }
         
         Task {
             do {
-                try await NestService.shared.deleteEntry(entry)
+                try await NestService.shared.deleteNote(entry)
                 await MainActor.run {
-                    entryDelegate?.entryDetailViewController(didDeleteEntry: entry)
+                    noteDelegate?.noteDetailViewController(didDeleteNote: entry)
                     HapticsHelper.lightHaptic()
                     dismiss(animated: true)
                 }
@@ -305,25 +369,34 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         Task {
             
             do {
-                var savedEntry: BaseEntry
+                var savedNote: NoteItem
                 
+                let allItems = try await NestService.shared.fetchAllItems()
+                let prunedAttachmentIds = AttachmentResolver.prune(
+                    ids: pendingAttachmentIds,
+                    against: allItems,
+                    excludingHostId: entry?.id
+                )
+
                 if let existingEntry = entry {
                     existingEntry.title = title
                     existingEntry.content = content
+                    existingEntry.attachmentIds = prunedAttachmentIds
                     existingEntry.updatedAt = Date()
                     
-                    try await NestService.shared.updateEntry(existingEntry)
-                    savedEntry = existingEntry
+                    try await NestService.shared.updateNote(existingEntry)
+                    savedNote = existingEntry
                 } else {
-                    let newEntry = BaseEntry(
+                    let newEntry = NoteItem(
                         title: title,
                         content: content,
-                        category: category
+                        category: category,
+                        attachmentIds: prunedAttachmentIds
                     )
                     
                     // Create entry (limit check is done before showing this VC)
-                    try await NestService.shared.createEntry(newEntry)
-                    savedEntry = newEntry
+                    try await NestService.shared.createNote(newEntry)
+                    savedNote = newEntry
                     
                     // Track entry creation for rating prompt
                     RatingManager.shared.trackEntryCreation()
@@ -333,10 +406,10 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
                 
                 // Notify delegate
                 await MainActor.run {
-                    self.entryDelegate?.entryDetailViewController(didSaveEntry: savedEntry)
+                    self.noteDelegate?.noteDetailViewController(didSaveNote: savedNote)
                     
                     // Post notification that an entry was saved
-                    NotificationCenter.default.post(name: .entryDidSave, object: nil, userInfo: ["entry": savedEntry])
+                    NotificationCenter.default.post(name: .noteDidSave, object: nil, userInfo: ["note": savedNote])
                     
                     self.dismiss(animated: true)
                 }
@@ -355,44 +428,67 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
     // MARK: - NNTippable Methods
     
     func showTips() {
-        // Show tips in priority order - only show one at a time
-        guard entry == nil && !isReadOnly && titleField.text == nil else {
-            return
-        }
-        
+        guard !isReadOnly else { return }
+
         trackScreenVisit()
-        
-        // Priority 1: Title/content tip (for new users)
-        let titleTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryTitleContentTip)
-        if titleTipShouldShow {
-            NNTipManager.shared.showTip(
-                EntryDetailTips.entryTitleContentTip,
-                sourceView: titleField,
-                in: self,
-                pinToEdge: .bottom,
-                offset: CGPoint(x: 0, y: 70)
-            )
-            return // Don't show other tips
+
+        // New-note tips first (only while creating an empty note)
+        let isNewEmptyNote = entry == nil && (titleField.text?.isEmpty ?? true)
+        if isNewEmptyNote {
+            if NNTipManager.shared.shouldShowTip(NoteDetailTips.noteTitleContentTip) {
+                NNTipManager.shared.showTip(
+                    NoteDetailTips.noteTitleContentTip,
+                    sourceView: titleField,
+                    in: self,
+                    pinToEdge: .bottom,
+                    offset: CGPoint(x: 0, y: 70)
+                )
+                return
+            }
+
+            if NNTipManager.shared.shouldShowTip(NoteDetailTips.noteDetailsTip) {
+                NNTipManager.shared.showTip(
+                    NoteDetailTips.noteDetailsTip,
+                    sourceView: navigationBar,
+                    in: self,
+                    pinToEdge: .leading,
+                    offset: CGPoint(x: 8, y: 0)
+                )
+                return
+            }
         }
-        
-        
-        // Priority 2: Entry details tip (after 10 visits)
-        let detailsTipShouldShow = NNTipManager.shared.shouldShowTip(EntryDetailTips.entryDetailsTip)
-        if detailsTipShouldShow {
-            NNTipManager.shared.showTip(
-                EntryDetailTips.entryDetailsTip,
-                sourceView: navigationBar,
-                in: self,
-                pinToEdge: .leading,
-                offset: CGPoint(x: 8, y: 0)
-            )
-        }
+
+        showAttachmentTipIfNeeded()
+    }
+
+    private func showAttachmentTipIfNeeded() {
+        guard NNTipManager.shared.shouldShowTip(AttachmentTips.attachItemsTip) else { return }
+        NNTipManager.shared.showTip(
+            AttachmentTips.attachItemsTip,
+            sourceView: attachmentStackView,
+            in: self,
+            pinToEdge: .top,
+            offset: CGPoint(x: 0, y: -8)
+        )
     }
     
     // MARK: - Change Detection
     
     @objc private func titleFieldChanged() {
+        collapseAttachmentsIfNeeded()
         checkForUnsavedChanges()
+    }
+
+    override func leadingMenuWillPresent() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    override func prepareForCompactDraftMode() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    private func collapseAttachmentsIfNeeded() {
+        attachmentStackView.collapseIfNeeded()
     }
     
     private func checkForUnsavedChanges() {
@@ -401,11 +497,109 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
         
         let titleChanged = currentTitle != originalTitle
         let contentChanged = currentContent != originalContent
+        let attachmentsChanged = pendingAttachmentIds != originalAttachmentIds
         
-        hasUnsavedChanges = titleChanged || contentChanged
+        hasUnsavedChanges = titleChanged || contentChanged || attachmentsChanged
+    }
+
+    // MARK: - Attachments
+
+    private func refreshAttachmentStack() {
+        // Empty editable stacks show a dashed paperclip; otherwise the accordion.
+        attachmentStackView.configure(
+            items: resolvedAttachments,
+            showsPlus: !isReadOnly,
+            allowsRemoval: !isReadOnly
+        )
+        loadPlaceThumbnailsForAttachments()
+        if !isReadOnly {
+            setupEditableInfoMenu()
+        }
+    }
+
+    private func loadResolvedAttachments() {
+        guard !pendingAttachmentIds.isEmpty else {
+            hasCompletedInitialAttachmentLoad = true
+            resolvedAttachments = []
+            refreshAttachmentStack()
+            return
+        }
+
+        Task {
+            do {
+                let items = try await fetchItemsForAttachmentResolution()
+                let resolved = AttachmentResolver.resolve(
+                    ids: pendingAttachmentIds,
+                    from: items,
+                    excludingHostId: entry?.id
+                )
+                await MainActor.run {
+                    self.resolvedAttachments = resolved
+                    // Keep pending IDs in sync with what still exists
+                    self.pendingAttachmentIds = resolved.map(\.id)
+                    if !self.hasCompletedInitialAttachmentLoad {
+                        self.originalAttachmentIds = self.pendingAttachmentIds
+                        self.hasCompletedInitialAttachmentLoad = true
+                    }
+                    self.refreshAttachmentStack()
+                    self.checkForUnsavedChanges()
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .general,
+                    message: "Failed to resolve attachments: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func fetchItemsForAttachmentResolution() async throws -> [BaseItem] {
+        if isReadOnly {
+            return try await SitterViewService.shared.itemsForAttachmentResolution()
+        }
+        return try await NestService.shared.itemsForAttachmentResolution()
+    }
+
+    private func loadPlaceThumbnailsForAttachments() {
+        for item in resolvedAttachments {
+            guard let place = item as? PlaceItem else { continue }
+            Task {
+                do {
+                    let image: UIImage
+                    if isReadOnly {
+                        image = try await SitterViewService.shared.loadImages(for: place)
+                    } else {
+                        image = try await NestService.shared.loadImages(for: place)
+                    }
+                    await MainActor.run {
+                        self.attachmentStackView.setPreviewImage(image, forItemId: place.id)
+                    }
+                } catch {
+                    // Keep icon fallback
+                }
+            }
+        }
+    }
+
+    private func presentAttachmentPicker() {
+        collapseAttachmentsIfNeeded()
+        NNTipManager.shared.dismissTip(AttachmentTips.attachItemsTip)
+        AttachmentPickerPresenter.present(
+            from: self,
+            selectedIds: pendingAttachmentIds,
+            excludingHostId: entry?.id
+        ) { [weak self] ids in
+            guard let self else { return }
+            self.pendingAttachmentIds = ids
+            self.loadResolvedAttachments()
+            self.checkForUnsavedChanges()
+        }
     }
     
     private func updateSaveButtonState() {
+        defer { refreshCompactDetentAvailability() }
+
         if isReadOnly {
             saveButton.isHidden = true
             return
@@ -443,7 +637,11 @@ final class EntryDetailViewController: NNSheetViewController, NNTippable {
 }
 
 // MARK: - UITextFieldDelegate
-extension EntryDetailViewController: UITextFieldDelegate {
+extension NoteDetailViewController: UITextFieldDelegate {
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == titleField {
             contentTextView.becomeFirstResponder()
@@ -454,16 +652,23 @@ extension EntryDetailViewController: UITextFieldDelegate {
 }
 
 // MARK: - UITextViewDelegate
-extension EntryDetailViewController: UITextViewDelegate {
+extension NoteDetailViewController: UITextViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func textViewDidBeginEditing(_ textView: UITextView) {
-        //
+        collapseAttachmentsIfNeeded()
     }
     
     func textViewDidChange(_ textView: UITextView) {
+        collapseAttachmentsIfNeeded()
         checkForUnsavedChanges()
     }
     
     func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        collapseAttachmentsIfNeeded()
+
         if interaction == .preview {
             return true
         }
@@ -480,5 +685,44 @@ extension EntryDetailViewController: UITextViewDelegate {
     
     func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         return true
+    }
+}
+
+// MARK: - AttachmentStackViewDelegate
+extension NoteDetailViewController: AttachmentStackViewDelegate {
+    func attachmentStackView(_ stackView: AttachmentStackView, didTapItem item: any BaseItem) {
+        NestItemDetailRouter.presentDetail(
+            for: item,
+            from: self,
+            nestItemRepository: isReadOnly ? SitterViewService.shared : NestService.shared,
+            category: item.category,
+            sourceFrame: stackView.convert(stackView.bounds, to: nil),
+            placeListDelegate: nil,
+            noteDelegate: nil,
+            routineDelegate: nil,
+            contactDelegate: nil
+        )
+    }
+
+    func attachmentStackViewDidTapPlus(_ stackView: AttachmentStackView) {
+        presentAttachmentPicker()
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didChangeExpanded isExpanded: Bool) {
+        // Hide folder while the horizontal accordion is open so cards have room.
+        UIView.animate(withDuration: 0.2) {
+            self.folderLabel.alpha = isExpanded ? 0 : 1
+        }
+        self.folderLabel.isUserInteractionEnabled = !isExpanded
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didRequestRemoveItem item: any BaseItem) {
+        pendingAttachmentIds.removeAll { $0 == item.id }
+        resolvedAttachments.removeAll { $0.id == item.id }
+        // Stack already animated the drop; keep local state in sync without rebuilding.
+        checkForUnsavedChanges()
+        if !isReadOnly {
+            setupEditableInfoMenu()
+        }
     }
 }

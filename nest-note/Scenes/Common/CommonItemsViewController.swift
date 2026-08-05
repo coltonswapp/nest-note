@@ -10,9 +10,10 @@ import FirebaseFirestore
 import CoreLocation
 
 protocol CommonItemsViewControllerDelegate: AnyObject {
-    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectEntry entry: CommonEntry)
+    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectNote entry: CommonNote)
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectPlace place: CommonPlace)
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectRoutine routine: CommonRoutine)
+    func commonItemsViewController(_ controller: CommonItemsViewController, didSelectContact contact: CommonContact)
 }
 
 class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate {
@@ -31,14 +32,15 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
 
     // Context for creation flows
     private let category: String
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     
     enum Section: Int, CaseIterable, NNCategoryFilterOption {
-        case codes, other, places, routines
+        case codes, other, contacts, places, routines
         
         var displayTitle: String {
             switch self {
-            case .codes, .other: return "Entries"
+            case .codes, .other: return "Notes"
+            case .contacts: return "Contacts"
             case .places: return "Places"
             case .routines: return "Routines"
             }
@@ -46,51 +48,69 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     }
     
     // Data arrays
-    private let commonEntries: [CommonEntry] = [
+    private let commonNotes: [CommonNote] = [
         // House & Safety Entries
-        CommonEntry(title: "Garage Code", content: "8005", category: "Common"),
-        CommonEntry(title: "Front Door", content: "2208", category: "Common"),
-        CommonEntry(title: "Trash Day", content: "Wednesday", category: "Common"),
-        CommonEntry(title: "WiFi Password", content: "SuperStrongPassword", category: "Common"),
-        CommonEntry(title: "Alarm Code", content: "4321", category: "Common"),
-        CommonEntry(title: "Thermostat", content: "68°F", category: "Common"),
-        CommonEntry(title: "Trash Pickup", content: "Wednesday Morning", category: "Common"),
-        CommonEntry(title: "Shed", content: "1357", category: "Common"),
-        CommonEntry(title: "Power Outage", content: "Flashlights in kitchen drawer", category: "Common"),
-        CommonEntry(title: "Recycling", content: "Blue bin, Fridays", category: "Common"),
-        CommonEntry(title: "Yard Service", content: "Every Monday, 11am-2pm", category: "Common"),
-        CommonEntry(title: "Water Shutoff", content: "Basement, north wall", category: "Common"),
-        CommonEntry(title: "Gas Shutoff", content: "Outside, east side of house", category: "Common"),
+        CommonNote(title: "Garage Code", content: "8005", category: "Common"),
+        CommonNote(title: "Front Door", content: "2208", category: "Common"),
+        CommonNote(title: "Trash Day", content: "Wednesday", category: "Common"),
+        CommonNote(title: "WiFi Password", content: "SuperStrongPassword", category: "Common"),
+        CommonNote(title: "Alarm Code", content: "4321", category: "Common"),
+        CommonNote(title: "Thermostat", content: "68°F", category: "Common"),
+        CommonNote(title: "Trash Pickup", content: "Wednesday Morning", category: "Common"),
+        CommonNote(title: "Shed", content: "1357", category: "Common"),
+        CommonNote(title: "Power Outage", content: "Flashlights in kitchen drawer", category: "Common"),
+        CommonNote(title: "Recycling", content: "Blue bin, Fridays", category: "Common"),
+        CommonNote(title: "Yard Service", content: "Every Monday, 11am-2pm", category: "Common"),
+        CommonNote(title: "Water Shutoff", content: "Basement, north wall", category: "Common"),
+        CommonNote(title: "Gas Shutoff", content: "Outside, east side of house", category: "Common"),
         
         // Emergency & Medical Entries
-        CommonEntry(title: "Emergency Contact", content: "John Doe: 555-123-4567", category: "Common"),
-        CommonEntry(title: "Nearest Hospital", content: "City General - 10 Main St", category: "Common"),
-        CommonEntry(title: "Fire Evacuation", content: "Meet at mailbox", category: "Common"),
-        CommonEntry(title: "Poison Control", content: "1-800-222-1222", category: "Common"),
-        CommonEntry(title: "Home Doctor", content: "Dr. Smith: 555-987-6543", category: "Common"),
-        CommonEntry(title: "911", content: "Address", category: "Common"),
-        CommonEntry(title: "EpiPen", content: "Top shelf", category: "Common"),
-        CommonEntry(title: "Safe", content: "3456", category: "Common"),
-        CommonEntry(title: "Allergies", content: "Peanuts, penicillin", category: "Common"),
-        CommonEntry(title: "Insurance", content: "BlueCross #12345678", category: "Common"),
-        CommonEntry(title: "Urgent Care", content: "WalkIn Clinic - 55 Grove St", category: "Common"),
-        CommonEntry(title: "Power Company", content: "CityPower: 555-789-0123", category: "Common"),
-        CommonEntry(title: "Plumber", content: "Joe's Plumbing: 555-456-7890", category: "Common"),
-        CommonEntry(title: "Neighbor Help", content: "Mrs. Wilson: 555-234-5678", category: "Common"),
+        CommonNote(title: "Emergency Contact", content: "John Doe: 555-123-4567", category: "Common"),
+        CommonNote(title: "Nearest Hospital", content: "City General - 10 Main St", category: "Common"),
+        CommonNote(title: "Fire Evacuation", content: "Meet at mailbox", category: "Common"),
+        CommonNote(title: "Poison Control", content: "1-800-222-1222", category: "Common"),
+        CommonNote(title: "Home Doctor", content: "Dr. Smith: 555-987-6543", category: "Common"),
+        CommonNote(title: "911", content: "Address", category: "Common"),
+        CommonNote(title: "EpiPen", content: "Top shelf", category: "Common"),
+        CommonNote(title: "Safe", content: "3456", category: "Common"),
+        CommonNote(title: "Allergies", content: "Peanuts, penicillin", category: "Common"),
+        CommonNote(title: "Insurance", content: "BlueCross #12345678", category: "Common"),
+        CommonNote(title: "Urgent Care", content: "WalkIn Clinic - 55 Grove St", category: "Common"),
+        CommonNote(title: "Power Company", content: "CityPower: 555-789-0123", category: "Common"),
+        CommonNote(title: "Plumber", content: "Joe's Plumbing: 555-456-7890", category: "Common"),
+        CommonNote(title: "Neighbor Help", content: "Mrs. Wilson: 555-234-5678", category: "Common"),
         
         // Pet Care Entries
-        CommonEntry(title: "Dog Food", content: "1 cup", category: "Common"),
-        CommonEntry(title: "Cat", content: "Indoor", category: "Common"),
-        CommonEntry(title: "Fish", content: "Feed 2x", category: "Common"),
-        CommonEntry(title: "Toys", content: "In bin", category: "Common"),
-        CommonEntry(title: "Treat Rules", content: "Max 2 per day", category: "Common"),
-        CommonEntry(title: "Pet Names", content: "Dog: Max, Cat: Luna, Fish: Bubbles", category: "Common"),
-        CommonEntry(title: "No-Go Areas", content: "Keep pets out of formal dining room", category: "Common"),
-        CommonEntry(title: "Pet Sitter", content: "Emily: 555-222-3333", category: "Common"),
-        CommonEntry(title: "Leash Location", content: "Hanging by front door", category: "Common"),
-        CommonEntry(title: "Pet Emergency", content: "Animal Hospital: 555-789-4561", category: "Common")
+        CommonNote(title: "Dog Food", content: "1 cup", category: "Common"),
+        CommonNote(title: "Cat", content: "Indoor", category: "Common"),
+        CommonNote(title: "Fish", content: "Feed 2x", category: "Common"),
+        CommonNote(title: "Toys", content: "In bin", category: "Common"),
+        CommonNote(title: "Treat Rules", content: "Max 2 per day", category: "Common"),
+        CommonNote(title: "Pet Names", content: "Dog: Max, Cat: Luna, Fish: Bubbles", category: "Common"),
+        CommonNote(title: "No-Go Areas", content: "Keep pets out of formal dining room", category: "Common"),
+        CommonNote(title: "Pet Sitter", content: "Emily: 555-222-3333", category: "Common"),
+        CommonNote(title: "Leash Location", content: "Hanging by front door", category: "Common"),
+        CommonNote(title: "Pet Emergency", content: "Animal Hospital: 555-789-4561", category: "Common")
     ]
     
+    private let commonContacts: [CommonContact] = [
+        CommonContact(title: "Emergency Contact", phoneNumber: "555-123-4567"),
+        CommonContact(title: "Neighbor", phoneNumber: "555-234-5678"),
+        CommonContact(title: "Grandma", phoneNumber: "555-345-6789"),
+        CommonContact(title: "Pediatrician", phoneNumber: "555-987-6543"),
+        CommonContact(title: "Dentist", phoneNumber: "555-876-5432"),
+        CommonContact(title: "Veterinarian", phoneNumber: "555-789-4561"),
+        CommonContact(title: "Pet Sitter", phoneNumber: "555-222-3333"),
+        CommonContact(title: "School Office", phoneNumber: "555-111-2222"),
+        CommonContact(title: "Poison Control", phoneNumber: "1-800-222-1222"),
+        CommonContact(title: "Plumber", phoneNumber: "555-456-7890"),
+        CommonContact(title: "Electrician", phoneNumber: "555-654-3210"),
+        CommonContact(title: "Power Company", phoneNumber: "555-789-0123"),
+        CommonContact(title: "Locksmith", phoneNumber: "555-321-0987"),
+        CommonContact(title: "Landlord", phoneNumber: "555-555-0100"),
+        CommonContact(title: "HVAC", phoneNumber: "555-444-7788")
+    ]
+
     private let commonPlaces: [CommonPlace] = [
         CommonPlace(name: "Grandma's House", icon: "house.fill"),
         CommonPlace(name: "School", icon: "graduationcap.fill"),
@@ -133,9 +153,9 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     
     // MARK: - Init / Lifecycle
 
-    init(category: String, entryRepository: EntryRepository) {
+    init(category: String, nestItemRepository: NestItemRepository) {
         self.category = category
-        self.entryRepository = entryRepository
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -188,7 +208,7 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         filterView.delegate = self
         filterView.frame.size.height = 55
 
-        let availableSections: [Section] = [.codes, .places, .routines]
+        let availableSections: [Section] = [.codes, .contacts, .places, .routines]
         filterView.configure(
             with: availableSections,
             allowsMultipleSelection: false,
@@ -294,7 +314,7 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
             switch section {
             case .codes, .other:
                 guard !didAddEntries else { continue }
-                let sortedEntries = commonEntries.sorted {
+                let sortedEntries = commonNotes.sorted {
                     $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
                 }
                 guard !sortedEntries.isEmpty else { continue }
@@ -302,6 +322,14 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
                 snapshot.appendItems(sortedEntries, toSection: .codes)
                 order.append(.codes)
                 didAddEntries = true
+            case .contacts:
+                let sortedContacts = commonContacts.sorted {
+                    $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                guard !sortedContacts.isEmpty else { continue }
+                snapshot.appendSections([.contacts])
+                snapshot.appendItems(sortedContacts, toSection: .contacts)
+                order.append(.contacts)
             case .places:
                 let sortedPlaces = commonPlaces.sorted {
                     $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -335,6 +363,8 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         case .specific(let ids):
             if ids.contains(Section.codes) {
                 enabledSections = [.codes, .other]
+            } else if ids.contains(Section.contacts) {
+                enabledSections = [.contacts]
             } else if ids.contains(Section.places) {
                 enabledSections = [.places]
             } else if ids.contains(Section.routines) {
@@ -365,11 +395,18 @@ private extension CommonItemsViewController {
 
         switch section {
         case .codes, .other:
-            if let entry = item as? CommonEntry {
+            if let entry = item as? CommonNote {
                 cell.configure(
                     title: entry.title,
                     content: entry.content,
                     contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                )
+            }
+        case .contacts:
+            if let contact = item as? CommonContact {
+                cell.configure(
+                    title: contact.title,
+                    content: contact.phoneNumber
                 )
             }
         case .places:
@@ -402,11 +439,18 @@ private extension CommonItemsViewController {
 
         switch section {
         case .codes, .other:
-            if let entry = item as? CommonEntry {
+            if let entry = item as? CommonNote {
                 waterfallSizingCell.configure(
                     title: entry.title,
                     content: entry.content,
                     contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                )
+            }
+        case .contacts:
+            if let contact = item as? CommonContact {
+                waterfallSizingCell.configure(
+                    title: contact.title,
+                    content: contact.phoneNumber
                 )
             }
         case .places:
@@ -464,7 +508,8 @@ private extension CommonItemsViewController {
 
     func waterfallHeaderTitle(for section: Section) -> String {
         switch section {
-        case .codes, .other: return "ENTRIES"
+        case .codes, .other: return "NOTES"
+        case .contacts: return "CONTACTS"
         case .places: return "PLACES"
         case .routines: return "ROUTINES"
         }
@@ -501,7 +546,7 @@ extension CommonItemsViewController: WaterfallCollectionLayoutDelegate {
 
 // MARK: - Data Models
 
-struct CommonEntry: Hashable {
+struct CommonNote: Hashable {
     let title: String
     let content: String
     let category: String
@@ -522,6 +567,11 @@ struct CommonRoutine: Hashable {
     let icon: String
 }
 
+struct CommonContact: Hashable {
+    let title: String
+    let phoneNumber: String
+}
+
 // MARK: - Selection handling
 extension CommonItemsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -532,8 +582,11 @@ extension CommonItemsViewController: UICollectionViewDelegate {
 
         switch section {
         case .codes, .other:
-            guard let entry = dataSource.itemIdentifier(for: indexPath) as? CommonEntry else { return }
-            delegate?.commonItemsViewController(self, didSelectEntry: entry)
+            guard let entry = dataSource.itemIdentifier(for: indexPath) as? CommonNote else { return }
+            delegate?.commonItemsViewController(self, didSelectNote: entry)
+        case .contacts:
+            guard let contact = dataSource.itemIdentifier(for: indexPath) as? CommonContact else { return }
+            delegate?.commonItemsViewController(self, didSelectContact: contact)
         case .places:
             guard let place = dataSource.itemIdentifier(for: indexPath) as? CommonPlace else { return }
             delegate?.commonItemsViewController(self, didSelectPlace: place)
@@ -546,8 +599,8 @@ extension CommonItemsViewController: UICollectionViewDelegate {
 
 // Protocols
 
-protocol CommonEntriesViewControllerDelegate: EntryDetailViewControllerDelegate {
-    func commonEntriesViewController(didSelectEntry entry: BaseEntry)
+protocol CommonNotesViewControllerDelegate: NoteDetailViewControllerDelegate {
+    func commonNotesViewController(didSelectNote entry: NoteItem)
     func showUpgradePrompt()
 }
 

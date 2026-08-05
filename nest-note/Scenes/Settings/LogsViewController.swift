@@ -53,16 +53,21 @@ class LogsViewController: UIViewController {
     }
     
     private func setupLogSubscription() {
+        // Logger publishes `lines` on the main queue; stay on main when copying.
         Logger.shared.$lines
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.fetchLogs()
+            .sink { [weak self] lines in
+                self?.applyLogs(lines)
             }
             .store(in: &cancellables)
     }
     
     private func fetchLogs() {
-        logs = Logger.shared.lines.reversed()
+        applyLogs(Logger.shared.lines)
+    }
+
+    private func applyLogs(_ lines: [LogLine]) {
+        logs = lines.reversed()
         tableView.reloadData()
     }
     

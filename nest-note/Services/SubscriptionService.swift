@@ -332,14 +332,14 @@ extension SubscriptionService {
 
 // MARK: - Pro Features Enum
 enum ProFeature {
-    case unlimitedEntries
+    case unlimitedNotes
     case multiDaySessions
     case sessionEvents
     case nestReview
     case sessionPDFExport
 
     static let paywallFeatures: [ProFeature] = [
-        .unlimitedEntries,
+        .unlimitedNotes,
         .multiDaySessions,
         .sessionEvents,
         .nestReview,
@@ -348,7 +348,7 @@ enum ProFeature {
 
     var iconName: String {
         switch self {
-        case .unlimitedEntries:
+        case .unlimitedNotes:
             return "infinity"
         case .multiDaySessions:
             return "calendar.badge.clock"
@@ -372,8 +372,8 @@ enum ProFeature {
     
     var displayName: String {
         switch self {
-        case .unlimitedEntries:
-            return "Unlimited Entries"
+        case .unlimitedNotes:
+            return "Unlimited Notes"
         case .multiDaySessions:
             return "Multi-day Sessions"
         case .sessionEvents:
@@ -387,8 +387,8 @@ enum ProFeature {
     
     var description: String {
         switch self {
-        case .unlimitedEntries:
-            return "Create unlimited entries across all categories"
+        case .unlimitedNotes:
+            return "Create unlimited notes across all categories"
         case .multiDaySessions:
             return "Schedule overnight stays and extended care sessions"
         case .sessionEvents:
@@ -404,8 +404,8 @@ enum ProFeature {
     
     var alertTitle: String {
         switch self {
-        case .unlimitedEntries:
-            return "Entry Limit Reached"
+        case .unlimitedNotes:
+            return "Note Limit Reached"
         case .multiDaySessions:
             return "Pro Feature"
         case .sessionEvents:
@@ -419,8 +419,8 @@ enum ProFeature {
     
     var alertMessage: String {
         switch self {
-        case .unlimitedEntries:
-            return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries and more features."
+        case .unlimitedNotes:
+            return "You've reached the 10 note limit on the free plan. Upgrade to Pro for unlimited notes and more features."
         case .multiDaySessions:
             return "Multi-day sessions are a Pro feature. Upgrade to Pro for multi-day sessions and more features."
         case .sessionEvents:
@@ -434,8 +434,8 @@ enum ProFeature {
     
     var successMessage: String {
         switch self {
-        case .unlimitedEntries:
-            return "Subscription activated! You can now create unlimited entries & do so much more!"
+        case .unlimitedNotes:
+            return "Subscription activated! You can now create unlimited notes & do so much more!"
         case .multiDaySessions:
             return "Subscription activated! You can now create multi-day sessions & do so much more!"
         case .sessionEvents:

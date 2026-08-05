@@ -60,7 +60,13 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         let label = NNSmallLabel()
         return label
     }()
-    
+
+    private lazy var attachmentStackView: AttachmentStackView = {
+        let stack = AttachmentStackView(stackSize: 80, expansionDirection: .left)
+        stack.delegate = self
+        return stack
+    }()
+
     private let buttonStackView: UIStackView = {
         let stackView = UIStackView()
         stackView.axis = .horizontal
@@ -77,6 +83,20 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     private var originalAlias: String?
     private let isEditingPlace: Bool
     var isReadOnly: Bool = false
+
+    /// Working attachment IDs (pending until save).
+    private var pendingAttachmentIds: [String] = []
+    private var resolvedAttachments: [any BaseItem] = []
+    private var originalAttachmentIds: [String] = []
+    private var hasCompletedInitialAttachmentLoad = false
+    
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        // New places already have a selected location; edits warn only when changed.
+        return !isEditingPlace || hasUnsavedChanges
+    }
     
     // Add property to track changes
     private var hasUnsavedChanges: Bool = false {
@@ -121,12 +141,18 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         
         titleLabel.text = existingPlace == nil ? "New Place" : isReadOnly ? "View Place" : "Edit Place"
         originalAlias = existingPlace?.alias
+        pendingAttachmentIds = existingPlace?.attachmentIds ?? []
+        originalAttachmentIds = pendingAttachmentIds
         
-        itemsHiddenDuringTransition = [buttonStackView]
+        itemsHiddenDuringTransition = isReadOnly
+            ? [attachmentStackView]
+            : [buttonStackView, attachmentStackView]
         setupContent()
         setupMapView()
         updateSaveButtonState()
         configureFolderLabel()
+        refreshAttachmentStack()
+        loadResolvedAttachments()
         
         placeDelegate = self
         setupInfoButton()
@@ -156,8 +182,12 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     // MARK: - Setup Methods
     
     override func setupInfoButton() {
-        setLeadingBarButtonHidden(false)
-        setLeadingBarButtonMenu(createMenu())
+        let menu = createMenu()
+        let hasActions = !menu.children.isEmpty
+        setLeadingBarButtonHidden(!hasActions)
+        if hasActions {
+            setLeadingBarButtonMenu(menu)
+        }
     }
     
     override func addContentToContainer() {
@@ -170,13 +200,18 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         containerView.addSubview(mapView)
         containerView.addSubview(addressLabel)
         containerView.addSubview(folderLabel)
+        containerView.addSubview(attachmentStackView)
         containerView.addSubview(buttonStackView)
+
+        folderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        folderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        attachmentStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        attachmentStackView.setContentHuggingPriority(.required, for: .horizontal)
         
         // Start slightly larger when keyboard is hidden
         mapHeightConstraint = mapView.heightAnchor.constraint(equalToConstant: expandedMapHeight)
-        
-        NSLayoutConstraint.activate([
-            
+
+        var constraints: [NSLayoutConstraint] = [
             // Map view constraints
             mapView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 16),
             mapView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
@@ -188,22 +223,41 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             addressLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             addressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
-            // Folder label constraints
+            // Same row above CTA: folder left, attachments right
             folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
+            folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: attachmentStackView.leadingAnchor, constant: -12),
             folderLabel.heightAnchor.constraint(equalToConstant: 30),
+
+            attachmentStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
             
             buttonStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             buttonStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             buttonStackView.heightAnchor.constraint(equalToConstant: 46),
-        ] + (isReadOnly ? [
-            buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
-                buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
-        ] : [
-            buttonStackView.topAnchor.constraint(equalTo: folderLabel.bottomAnchor, constant: 16),
             buttonStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
-            saveButton.widthAnchor.constraint(equalTo: buttonStackView.widthAnchor)
-        ]))
+        ]
+
+        if !isReadOnly {
+            constraints.append(contentsOf: [
+                folderLabel.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -12),
+                attachmentStackView.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -12),
+                addressLabel.bottomAnchor.constraint(lessThanOrEqualTo: attachmentStackView.topAnchor, constant: -16),
+                saveButton.widthAnchor.constraint(equalTo: buttonStackView.widthAnchor),
+            ])
+        } else {
+            constraints.append(contentsOf: [
+                folderLabel.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -12),
+                attachmentStackView.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -12),
+                addressLabel.bottomAnchor.constraint(lessThanOrEqualTo: attachmentStackView.topAnchor, constant: -16),
+            ])
+        }
+
+        NSLayoutConstraint.activate(constraints)
+
+        attachmentStackView.pinVariableBlur(to: containerView, direction: .bottom, blurRadius: 20, height: 140)
+        containerView.bringSubviewToFront(folderLabel)
+        containerView.bringSubviewToFront(attachmentStackView)
+        containerView.bringSubviewToFront(buttonStackView)
+        containerView.clipsToBounds = true
     }
     
     @objc private func saveButtonTapped() {
@@ -222,6 +276,13 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
         Task {
             do {
                 saveButton.startLoading()
+
+                let allItems = try await NestService.shared.fetchAllItems()
+                let prunedAttachmentIds = AttachmentResolver.prune(
+                    ids: pendingAttachmentIds,
+                    against: allItems,
+                    excludingHostId: existingPlace?.id
+                )
                 
                 if let existingPlace = existingPlace {
                     // Update existing place
@@ -235,7 +296,8 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         thumbnailURLs: existingPlace.thumbnailURLs,
                         isTemporary: existingPlace.isTemporary,
                         createdAt: existingPlace.createdAt,
-                        updatedAt: Date()
+                        updatedAt: Date(),
+                        attachmentIds: prunedAttachmentIds
                     )
 
                     // Apply pending location update if exists
@@ -250,7 +312,8 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                             thumbnailURLs: existingPlace.thumbnailURLs, // Will be replaced by new method
                             isTemporary: existingPlace.isTemporary,
                             createdAt: existingPlace.createdAt,
-                            updatedAt: Date()
+                            updatedAt: Date(),
+                            attachmentIds: prunedAttachmentIds
                         )
 
                         // Use enhanced update method with thumbnail regeneration
@@ -306,7 +369,8 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         address: address,
                         coordinate: coordinate,
                         category: category,
-                        thumbnailAsset: asset
+                        thumbnailAsset: asset,
+                        attachmentIds: prunedAttachmentIds
                     )
                     
                     await MainActor.run {
@@ -396,7 +460,20 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     @objc private func addressTapped() {
+        collapseAttachmentsIfNeeded()
         placeDelegate?.placeAddressCellAddressTapped(addressLabel, place: existingPlace)
+    }
+
+    override func leadingMenuWillPresent() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    override func prepareForCompactDraftMode() {
+        collapseAttachmentsIfNeeded()
+    }
+
+    private func collapseAttachmentsIfNeeded() {
+        attachmentStackView.collapseIfNeeded()
     }
     
     private func setupMapView() {
@@ -458,29 +535,51 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     private func createMenu() -> UIMenu {
-        var actions: [UIAction] = []
+        var menuChildren: [UIMenuElement] = []
+        var topActions: [UIAction] = []
+
+        if !isReadOnly {
+            let attachTitle = pendingAttachmentIds.isEmpty ? "Add Attachment" : "Manage Attachments"
+            let attachAction = UIAction(
+                title: attachTitle,
+                image: UIImage(systemName: "paperclip")
+            ) { [weak self] _ in
+                self?.presentAttachmentPicker()
+            }
+            topActions.append(attachAction)
+        }
         
         // Only show edit/delete if we have an existing place
         if existingPlace != nil {
-            let editAction = UIAction(
-                title: "Edit Location",
-                image: UIImage(systemName: "mappin.and.ellipse")
-            ) { [weak self] _ in
-                self?.handleEditLocation()
+            if !isReadOnly {
+                let editAction = UIAction(
+                    title: "Edit Location",
+                    image: UIImage(systemName: "mappin.and.ellipse")
+                ) { [weak self] _ in
+                    self?.handleEditLocation()
+                }
+                topActions.append(editAction)
+            }
+
+            if !topActions.isEmpty {
+                menuChildren.append(UIMenu(title: "", options: .displayInline, children: topActions))
             }
             
-            let deleteAction = UIAction(
-                title: "Delete Place",
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { [weak self] _ in
-                self?.handleDelete()
+            if !isReadOnly {
+                let deleteAction = UIAction(
+                    title: "Delete Place",
+                    image: UIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.handleDelete()
+                }
+                menuChildren.append(deleteAction)
             }
-            
-            actions = [editAction, deleteAction]
+        } else if !topActions.isEmpty {
+            menuChildren.append(UIMenu(title: "", options: .displayInline, children: topActions))
         }
         
-        return UIMenu(children: actions)
+        return UIMenu(children: menuChildren)
     }
     
     private func handleEditLocation() {
@@ -576,17 +675,29 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
     
     func showTips() {
-        guard existingPlace != nil && !isReadOnly else { return }
-        
+        guard !isReadOnly else { return }
+
         trackScreenVisit()
-        
-        if NNTipManager.shared.shouldShowTip(PlaceDetailTips.editLocationTip) {
+
+        if existingPlace != nil,
+           NNTipManager.shared.shouldShowTip(PlaceDetailTips.editLocationTip) {
             NNTipManager.shared.showTip(
                 PlaceDetailTips.editLocationTip,
                 sourceView: navigationBar,
                 in: self,
                 pinToEdge: .leading,
                 offset: CGPoint(x: 8, y: 0)
+            )
+            return
+        }
+
+        if NNTipManager.shared.shouldShowTip(AttachmentTips.attachItemsTip) {
+            NNTipManager.shared.showTip(
+                AttachmentTips.attachItemsTip,
+                sourceView: attachmentStackView,
+                in: self,
+                pinToEdge: .top,
+                offset: CGPoint(x: 0, y: -8)
             )
         }
     }
@@ -626,6 +737,7 @@ extension PlaceDetailViewController: SelectPlaceLocationDelegate {
         newCoordinate: CLLocationCoordinate2D,
         newThumbnail: UIImage
     ) {
+        collapseAttachmentsIfNeeded()
         // Store the pending changes
         pendingLocationUpdate = (newAddress, newCoordinate, newThumbnail)
         
@@ -665,6 +777,7 @@ extension PlaceDetailViewController: SelectPlaceLocationDelegate {
 // MARK: - Private Methods
 private extension PlaceDetailViewController {
     @objc func titleFieldChanged() {
+        collapseAttachmentsIfNeeded()
         placeAlias = titleField.text ?? ""
         checkForUnsavedChanges()
     }
@@ -672,11 +785,107 @@ private extension PlaceDetailViewController {
     func checkForUnsavedChanges() {
         let aliasChanged = placeAlias != originalAlias
         let locationChanged = pendingLocationUpdate != nil
+        let attachmentsChanged = pendingAttachmentIds != originalAttachmentIds
         
-        hasUnsavedChanges = aliasChanged || locationChanged
+        hasUnsavedChanges = aliasChanged || locationChanged || attachmentsChanged
+    }
+
+    // MARK: - Attachments
+
+    func refreshAttachmentStack() {
+        attachmentStackView.configure(
+            items: resolvedAttachments,
+            showsPlus: !isReadOnly,
+            allowsRemoval: !isReadOnly
+        )
+        loadPlaceThumbnailsForAttachments()
+        if !isReadOnly {
+            setupInfoButton()
+        }
+    }
+
+    func loadResolvedAttachments() {
+        guard !pendingAttachmentIds.isEmpty else {
+            hasCompletedInitialAttachmentLoad = true
+            resolvedAttachments = []
+            refreshAttachmentStack()
+            return
+        }
+
+        Task {
+            do {
+                let items = try await fetchItemsForAttachmentResolution()
+                let resolved = AttachmentResolver.resolve(
+                    ids: pendingAttachmentIds,
+                    from: items,
+                    excludingHostId: existingPlace?.id
+                )
+                await MainActor.run {
+                    self.resolvedAttachments = resolved
+                    self.pendingAttachmentIds = resolved.map(\.id)
+                    if !self.hasCompletedInitialAttachmentLoad {
+                        self.originalAttachmentIds = self.pendingAttachmentIds
+                        self.hasCompletedInitialAttachmentLoad = true
+                    }
+                    self.refreshAttachmentStack()
+                    self.checkForUnsavedChanges()
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .general,
+                    message: "Failed to resolve place attachments: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    func fetchItemsForAttachmentResolution() async throws -> [BaseItem] {
+        if isReadOnly {
+            return try await SitterViewService.shared.itemsForAttachmentResolution()
+        }
+        return try await NestService.shared.itemsForAttachmentResolution()
+    }
+
+    func loadPlaceThumbnailsForAttachments() {
+        for item in resolvedAttachments {
+            guard let place = item as? PlaceItem else { continue }
+            Task {
+                do {
+                    let image: UIImage
+                    if isReadOnly {
+                        image = try await SitterViewService.shared.loadImages(for: place)
+                    } else {
+                        image = try await NestService.shared.loadImages(for: place)
+                    }
+                    await MainActor.run {
+                        self.attachmentStackView.setPreviewImage(image, forItemId: place.id)
+                    }
+                } catch {
+                    // Keep icon fallback
+                }
+            }
+        }
+    }
+
+    func presentAttachmentPicker() {
+        collapseAttachmentsIfNeeded()
+        NNTipManager.shared.dismissTip(AttachmentTips.attachItemsTip)
+        AttachmentPickerPresenter.present(
+            from: self,
+            selectedIds: pendingAttachmentIds,
+            excludingHostId: existingPlace?.id
+        ) { [weak self] ids in
+            guard let self else { return }
+            self.pendingAttachmentIds = ids
+            self.loadResolvedAttachments()
+            self.checkForUnsavedChanges()
+        }
     }
     
     func updateSaveButtonState() {
+        defer { refreshCompactDetentAvailability() }
+
         if isReadOnly {
             saveButton.isHidden = true
             return
@@ -692,8 +901,50 @@ private extension PlaceDetailViewController {
 }
 
 extension PlaceDetailViewController: UITextFieldDelegate {
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        collapseAttachmentsIfNeeded()
+    }
+
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         textField.resignFirstResponder()
         return true
+    }
+}
+
+// MARK: - AttachmentStackViewDelegate
+extension PlaceDetailViewController: AttachmentStackViewDelegate {
+    func attachmentStackView(_ stackView: AttachmentStackView, didTapItem item: any BaseItem) {
+        NestItemDetailRouter.presentDetail(
+            for: item,
+            from: self,
+            nestItemRepository: isReadOnly ? SitterViewService.shared : NestService.shared,
+            category: item.category,
+            sourceFrame: stackView.convert(stackView.bounds, to: nil),
+            placeListDelegate: nil,
+            noteDelegate: nil,
+            routineDelegate: nil,
+            contactDelegate: nil
+        )
+    }
+
+    func attachmentStackViewDidTapPlus(_ stackView: AttachmentStackView) {
+        presentAttachmentPicker()
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didChangeExpanded isExpanded: Bool) {
+        UIView.animate(withDuration: 0.2) {
+            self.folderLabel.alpha = isExpanded ? 0 : 1
+        }
+        folderLabel.isUserInteractionEnabled = !isExpanded
+    }
+
+    func attachmentStackView(_ stackView: AttachmentStackView, didRequestRemoveItem item: any BaseItem) {
+        pendingAttachmentIds.removeAll { $0 == item.id }
+        resolvedAttachments.removeAll { $0.id == item.id }
+        // Stack already animated the drop; keep local state in sync without rebuilding.
+        checkForUnsavedChanges()
+        if !isReadOnly {
+            setupInfoButton()
+        }
     }
 }

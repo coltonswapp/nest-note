@@ -12,7 +12,7 @@ import CoreImage
 import CoreLocation
 import MapKit
 
-final class NestService: EntryRepository {
+final class NestService: NestItemRepository {
     
     // MARK: - Properties
     static let shared = NestService()
@@ -45,7 +45,7 @@ final class NestService: EntryRepository {
     private var itemRepository: ItemRepository?
     
     // Add cached entries (maintained for backward compatibility)
-    private var cachedEntries: [String: [BaseEntry]]?
+    private var cachedNotes: [String: [NoteItem]]?
     // Cache for saved sitters
     private var cachedSavedSitters: [SavedSitter]?
     
@@ -91,7 +91,7 @@ final class NestService: EntryRepository {
         Logger.log(level: .info, category: .nestService, message: "Resetting NestService...")
         currentNest = nil
         isOwner = false
-        clearEntriesCache()
+        clearNotesCache()
         clearSavedSittersCache()
         clearCategoriesCache()
         invalidateItemsCache()
@@ -183,14 +183,14 @@ final class NestService: EntryRepository {
         }
     }
     
-    // MARK: - EntryRepository Implementation
-    func fetchEntries() async throws -> [String: [BaseEntry]] {
-        Logger.log(level: .info, category: .nestService, message: "fetchEntries() called - using ItemRepository")
+    // MARK: - NestItemRepository Implementation
+    func fetchNotes() async throws -> [String: [NoteItem]] {
+        Logger.log(level: .info, category: .nestService, message: "fetchNotes() called - using ItemRepository")
         
         // Return cached entries if available
-        if let cachedEntries = cachedEntries {
-            Logger.log(level: .info, category: .nestService, message: "Returning \(cachedEntries.values.flatMap { $0 }.count) cached entries")
-            return cachedEntries
+        if let cachedNotes = cachedNotes {
+            Logger.log(level: .info, category: .nestService, message: "Returning \(cachedNotes.values.flatMap { $0 }.count) cached entries")
+            return cachedNotes
         }
         
         guard let itemRepository = itemRepository else {
@@ -200,32 +200,32 @@ final class NestService: EntryRepository {
         // Fetch all items using ItemRepository
         let allItems = try await itemRepository.fetchItems()
         
-        // Filter to only entry items (already BaseEntry from repository)
-        let entries = allItems.compactMap { item -> BaseEntry? in
-            guard item.type == .entry, let baseEntry = item as? BaseEntry else { return nil }
+        // Filter to only entry items (already NoteItem from repository)
+        let notes = allItems.compactMap { item -> NoteItem? in
+            guard item.type == .entry, let baseEntry = item as? NoteItem else { return nil }
             return baseEntry
         }
         
         // Group entries by category
-        let groupedEntries = Dictionary(grouping: entries) { $0.category }
+        let groupedNotes = Dictionary(grouping: notes) { $0.category }
         
         // Cache the entries for backward compatibility
-        self.cachedEntries = groupedEntries
+        self.cachedNotes = groupedNotes
         
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(entries.count) entries using ItemRepository")
-        return groupedEntries
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(notes.count) entries using ItemRepository")
+        return groupedNotes
     }
     
-    func refreshEntries() async throws -> [String: [BaseEntry]] {
-        clearEntriesCache()
-        return try await fetchEntries()
+    func refreshNotes() async throws -> [String: [NoteItem]] {
+        clearNotesCache()
+        return try await fetchNotes()
     }
     
-    /// Gets the current count of entries across all categories
-    /// - Returns: Total number of entries in the current nest
-    func getCurrentEntryCount() async throws -> Int {
-        let groupedEntries = try await fetchEntries()
-        return groupedEntries.values.flatMap { $0 }.count
+    /// Gets the current count of notes across all categories
+    /// - Returns: Total number of notes in the current nest
+    func getCurrentNoteCount() async throws -> Int {
+        let groupedNotes = try await fetchNotes()
+        return groupedNotes.values.flatMap { $0 }.count
     }
 
     // MARK: - Category Methods
@@ -284,28 +284,28 @@ final class NestService: EntryRepository {
         invalidateItemsCache()
     }
     
-    // MARK: - Entry Methods
-    func createEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .nestService, message: "createEntry() called - using ItemRepository")
+    // MARK: - Note Methods
+    func createNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "createNote() called - using ItemRepository")
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
         do {
-            // Use ItemRepository for creation (BaseEntry directly)
+            // Use ItemRepository for creation (NoteItem directly)
             try await itemRepository.createItem(entry)
             
             // Update backward compatibility cache
-            if var cachedEntries = cachedEntries {
-                if var categoryEntries = cachedEntries[entry.category] {
+            if var cachedNotes = cachedNotes {
+                if var categoryEntries = cachedNotes[entry.category] {
                     categoryEntries.append(entry)
-                    cachedEntries[entry.category] = categoryEntries
-                    self.cachedEntries = cachedEntries
+                    cachedNotes[entry.category] = categoryEntries
+                    self.cachedNotes = cachedNotes
                 } else {
                     // If category doesn't exist yet, create it
-                    cachedEntries[entry.category] = [entry]
-                    self.cachedEntries = cachedEntries
+                    cachedNotes[entry.category] = [entry]
+                    self.cachedNotes = cachedNotes
                 }
             }
             
@@ -320,24 +320,24 @@ final class NestService: EntryRepository {
         }
     }
     
-    func updateEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .nestService, message: "updateEntry() called - using ItemRepository")
+    func updateNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "updateNote() called - using ItemRepository")
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
         }
         
         do {
-            // Use ItemRepository for update (BaseEntry directly)
+            // Use ItemRepository for update (NoteItem directly)
             try await itemRepository.updateItem(entry)
             
             // Update backward compatibility cache
-            if var cachedEntries = cachedEntries {
-                if var categoryEntries = cachedEntries[entry.category] {
+            if var cachedNotes = cachedNotes {
+                if var categoryEntries = cachedNotes[entry.category] {
                     if let index = categoryEntries.firstIndex(where: { $0.id == entry.id }) {
                         categoryEntries[index] = entry
-                        cachedEntries[entry.category] = categoryEntries
-                        self.cachedEntries = cachedEntries
+                        cachedNotes[entry.category] = categoryEntries
+                        self.cachedNotes = cachedNotes
                     }
                 }
             }
@@ -353,8 +353,8 @@ final class NestService: EntryRepository {
         }
     }
     
-    func deleteEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .nestService, message: "deleteEntry() called - using ItemRepository")
+    func deleteNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .nestService, message: "deleteNote() called - using ItemRepository")
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -366,11 +366,11 @@ final class NestService: EntryRepository {
             
             // Update cache if it exists
             if var updatedNest = currentNest {
-                updatedNest.entries?.removeAll { $0.id == entry.id }
+                updatedNest.notes?.removeAll { $0.id == entry.id }
                 currentNest = updatedNest
             }
             
-            clearEntriesCache()
+            clearNotesCache()
             
             // Log success event
             Tracker.shared.track(.entryDeleted)
@@ -382,9 +382,9 @@ final class NestService: EntryRepository {
     }
     
     // Add method to clear cache
-    func clearEntriesCache() {
+    func clearNotesCache() {
         Logger.log(level: .info, category: .nestService, message: "Clearing entries cache")
-        cachedEntries = nil
+        cachedNotes = nil
         // Also clear ItemRepository cache
         itemRepository?.clearItemsCache()
     }
@@ -403,7 +403,7 @@ final class NestService: EntryRepository {
             try await itemRepository.createItem(routine)
 
             updateItemInCache(routine)
-            clearEntriesCache()
+            clearNotesCache()
 
             Logger.log(level: .info, category: .nestService, message: "Routine created successfully: \(routine.title)")
             
@@ -428,7 +428,7 @@ final class NestService: EntryRepository {
             try await itemRepository.updateItem(routine)
 
             updateItemInCache(routine)
-            clearEntriesCache()
+            clearNotesCache()
 
             Logger.log(level: .info, category: .nestService, message: "Routine updated successfully: \(routine.title)")
             
@@ -453,7 +453,7 @@ final class NestService: EntryRepository {
             try await itemRepository.deleteItem(id: routine.id)
 
             removeItemFromCache(id: routine.id)
-            clearEntriesCache()
+            clearNotesCache()
 
             Logger.log(level: .info, category: .nestService, message: "Routine deleted successfully: \(routine.title)")
             
@@ -481,7 +481,7 @@ final class NestService: EntryRepository {
         // Add item to cache instead of clearing entire cache
         updateItemInCache(item)
         // Clear entries cache to ensure fresh data (backward compatibility)
-        clearEntriesCache()
+        clearNotesCache()
 
         Logger.log(level: .info, category: .nestService, message: "Item created successfully: \(item.title) (\(item.type.rawValue))")
     }
@@ -499,7 +499,7 @@ final class NestService: EntryRepository {
         // Update item in cache instead of clearing entire cache
         updateItemInCache(item)
         // Clear entries cache to ensure fresh data (backward compatibility)
-        clearEntriesCache()
+        clearNotesCache()
         
         Logger.log(level: .info, category: .nestService, message: "Item updated successfully: \(item.title) (\(item.type.rawValue))")
     }
@@ -517,7 +517,7 @@ final class NestService: EntryRepository {
         // Remove item from cache instead of clearing entire cache
         removeItemFromCache(id: id)
         // Clear entries cache to ensure fresh data (backward compatibility)
-        clearEntriesCache()
+        clearNotesCache()
         
         Logger.log(level: .info, category: .nestService, message: "Item deleted successfully: \(id)")
     }
@@ -582,6 +582,15 @@ final class NestService: EntryRepository {
         defer { inflightFetchAllItemsTask = nil }
 
         return try await task.value
+    }
+
+    /// Snapshot of nest items for resolving attachment IDs.
+    /// Prefers the in-memory cache so opening a detail screen does not look like a fetch.
+    func itemsForAttachmentResolution() async throws -> [BaseItem] {
+        if !cachedItems.isEmpty {
+            return cachedItems
+        }
+        return try await fetchAllItems()
     }
     
     /// Invalidate the cache (call when items are created/updated/deleted)
@@ -648,7 +657,7 @@ final class NestService: EntryRepository {
             categories: categories
         )
         
-        Logger.log(level: .info, category: .nestService, message: "Folder contents for '\(category)': \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines, \(folderContents.subfolders.count) subfolders")
+        Logger.log(level: .info, category: .nestService, message: "Folder contents for '\(category)': \(folderContents.notes.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines, \(folderContents.subfolders.count) subfolders")
         
         return folderContents
     }
@@ -663,23 +672,23 @@ final class NestService: EntryRepository {
     }
     
     /// Fetch both entries and places in a single efficient call
-    func fetchEntriesAndPlaces() async throws -> (entries: [String: [BaseEntry]], places: [PlaceItem]) {
-        Logger.log(level: .info, category: .nestService, message: "📦 fetchEntriesAndPlaces() called - efficient single fetch")
+    func fetchNotesAndPlaces() async throws -> (notes: [String: [NoteItem]], places: [PlaceItem]) {
+        Logger.log(level: .info, category: .nestService, message: "📦 fetchNotesAndPlaces() called - efficient single fetch")
         
         let allItems = try await fetchAllItems() // Single fetch with caching
         
-        // Filter entries (already BaseEntry from repository)
-        let entryItems = allItems.compactMap { item -> BaseEntry? in
+        // Filter entries (already NoteItem from repository)
+        let entryItems = allItems.compactMap { item -> NoteItem? in
             guard item.type == .entry else { return nil }
-            return item as? BaseEntry
+            return item as? NoteItem
         }
-        let groupedEntries = Dictionary(grouping: entryItems) { $0.category }
+        let groupedNotes = Dictionary(grouping: entryItems) { $0.category }
         
         // Filter places
         let placeItems = allItems.compactMap { $0 as? PlaceItem }
         
-        Logger.log(level: .info, category: .nestService, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(placeItems.count) places")
-        return (entries: groupedEntries, places: placeItems)
+        Logger.log(level: .info, category: .nestService, message: "Efficient fetch complete - \(groupedNotes.count) entry groups, \(placeItems.count) places")
+        return (notes: groupedNotes, places: placeItems)
     }
     
     /// Create a new place
@@ -731,7 +740,8 @@ final class NestService: EntryRepository {
                     thumbnailURLs: newThumbnailURLs,
                     isTemporary: place.isTemporary,
                     createdAt: place.createdAt,
-                    updatedAt: Date()
+                    updatedAt: Date(),
+                    attachmentIds: place.attachmentIds
                 )
 
                 Logger.log(level: .info, category: .nestService, message: "New thumbnails generated and uploaded for place: \(place.id)")
@@ -910,7 +920,8 @@ final class NestService: EntryRepository {
                     address: String, 
                     coordinate: CLLocationCoordinate2D, 
                     category: String = "Places",
-                    thumbnailAsset: UIImageAsset? = nil) async throws -> PlaceItem {
+                    thumbnailAsset: UIImageAsset? = nil,
+                    attachmentIds: [String] = []) async throws -> PlaceItem {
         Logger.log(level: .info, category: .nestService, message: "createPlace() called with alias: \(alias), category: \(category)")
         
         guard let nestId = currentNest?.id else {
@@ -951,7 +962,8 @@ final class NestService: EntryRepository {
             address: address,
             coordinate: coordinate,
             thumbnailURLs: thumbnailURLs,
-            isTemporary: false
+            isTemporary: false,
+            attachmentIds: attachmentIds
         )
         
         Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Created PlaceItem with thumbnailURLs: \(placeItem.thumbnailURLs != nil ? "YES" : "NO")")
@@ -968,22 +980,22 @@ final class NestService: EntryRepository {
     }
     
     // Add this method to find entries older than a specified timeframe
-    func fetchOutdatedEntries(olderThan days: Int = 90) async throws -> [BaseEntry] {
+    func fetchOutdatedNotes(olderThan days: Int = 90) async throws -> [NoteItem] {
         // Fetch all entries first
-        let groupedEntries = try await fetchEntries()
-        let allEntries = groupedEntries.values.flatMap { $0 }
+        let groupedNotes = try await fetchNotes()
+        let allNotes = groupedNotes.values.flatMap { $0 }
         
         // Calculate the date threshold (90 days ago by default)
         let calendar = Calendar.current
         let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         
         // Filter entries that haven't been updated for the specified timeframe
-        let outdatedEntries = allEntries.filter { entry in
+        let outdatedNotes = allNotes.filter { entry in
             return entry.updatedAt < threshold
         }
         
-        Logger.log(level: .info, category: .nestService, message: "Found \(outdatedEntries.count) entries older than \(days) days")
-        return outdatedEntries
+        Logger.log(level: .info, category: .nestService, message: "Found \(outdatedNotes.count) entries older than \(days) days")
+        return outdatedNotes
     }
 }
 
@@ -992,7 +1004,7 @@ extension NestService {
     enum NestError: LocalizedError {
         case nestNotFound
         case noCurrentNest
-        case entryLimitReached
+        case noteLimitReached
         case folderDepthExceeded
         case imageConversionFailed
         case imageUploadFailed
@@ -1005,8 +1017,8 @@ extension NestService {
                 return "The requested nest could not be found"
             case .noCurrentNest:
                 return "No nest is currently selected"
-            case .entryLimitReached:
-                return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries."
+            case .noteLimitReached:
+                return "You've reached the 10 note limit on the free plan. Upgrade to Pro for unlimited notes."
             case .folderDepthExceeded:
                 return "Folder depth cannot exceed 3 levels. Please create your folder in a shallower location."
             case .imageConversionFailed:

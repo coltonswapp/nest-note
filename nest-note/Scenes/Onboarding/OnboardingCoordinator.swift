@@ -1034,13 +1034,12 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         if roleSelectionIndex == nil {
             // In config-driven flows, role selection is the survey VC with id "role_selection"
-            roleSelectionIndex = steps.firstIndex(where: {
-                ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
-            })
-            // Fall back to first survey VC if we can't find one with that id
-            if roleSelectionIndex == nil {
-                roleSelectionIndex = steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
-            }
+            roleSelectionIndex = steps.firstIndex(where: { $0.onboardingStepId == "role_selection" })
+                ?? steps.firstIndex(where: {
+                    ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
+                })
+                // Fall back to first survey VC if we can't find one with that id
+                ?? steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Role selection is a survey VC at index: \(roleSelectionIndex ?? -1)")
         }
 
@@ -1323,24 +1322,35 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         containerViewController.updateTotalSteps(allSteps.count)
 
-        // Find the role selection step -- could be OBRoleViewController or a survey VC with role_selection id
+        // Config-driven role selection is a survey with onboardingStepId "role_selection".
+        // Prefer that over currentQuestion.id — survey VCs often haven't loaded their view yet,
+        // so currentQuestion can still be nil (pendingConfiguration only).
         let roleStep: NNOnboardingViewController? = allSteps.first(where: { $0 is OBRoleViewController })
+            ?? allSteps.first(where: { $0.onboardingStepId == "role_selection" })
             ?? allSteps.first(where: {
                 ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
             })
 
         guard let roleStep = roleStep,
               let roleIndex = allSteps.firstIndex(where: { $0 === roleStep }) else {
+            Logger.log(
+                level: .error,
+                category: .signup,
+                message: "🎯 ONBOARDING: skipToRoleSelection failed — no role step found. steps=\(allSteps.map { $0.onboardingStepId ?? String(describing: type(of: $0)) })"
+            )
+            if let first = allSteps.first {
+                currentStepIndex = 0
+                configureStep(first)
+                navigationController.setViewControllers([first], animated: false)
+                containerViewController.updateProgress(step: 0)
+            }
             return
         }
 
         currentStepIndex = roleIndex
         configureStep(roleStep)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.navigationController.setViewControllers([roleStep], animated: false)
-            self.containerViewController.updateProgress(step: self.currentStepIndex)
-        }
+        navigationController.setViewControllers([roleStep], animated: false)
+        containerViewController.updateProgress(step: currentStepIndex)
     }
     
     // MARK: - Survey Configuration

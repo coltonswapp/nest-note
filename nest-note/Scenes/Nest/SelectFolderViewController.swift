@@ -14,9 +14,9 @@ protocol SelectFolderViewControllerDelegate: AnyObject {
 
 class SelectFolderViewController: UIViewController {
     // MARK: - Properties
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     private let currentCategory: String
-    private let selectedEntries: [BaseEntry]
+    private let selectedNotes: [NoteItem]
     private let selectedPlaces: [PlaceItem]
     weak var delegate: SelectFolderViewControllerDelegate?
     
@@ -49,10 +49,10 @@ class SelectFolderViewController: UIViewController {
         }
     }
     
-    init(entryRepository: EntryRepository, currentCategory: String, selectedEntries: [BaseEntry], selectedPlaces: [PlaceItem] = []) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository, currentCategory: String, selectedNotes: [NoteItem], selectedPlaces: [PlaceItem] = []) {
+        self.nestItemRepository = nestItemRepository
         self.currentCategory = currentCategory
-        self.selectedEntries = selectedEntries
+        self.selectedNotes = selectedNotes
         self.selectedPlaces = selectedPlaces
         super.init(nibName: nil, bundle: nil)
         self.title = "Move to Folder"
@@ -161,12 +161,12 @@ class SelectFolderViewController: UIViewController {
     private func setupInstructionLabel() {
         instructionLabel = BlurBackgroundLabel()
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
-        let totalItems = selectedEntries.count + selectedPlaces.count
+        let totalItems = selectedNotes.count + selectedPlaces.count
         let itemDescriptor: String
-        if selectedEntries.count > 0 && selectedPlaces.count > 0 {
+        if selectedNotes.count > 0 && selectedPlaces.count > 0 {
             itemDescriptor = "items"
-        } else if selectedEntries.count > 0 {
-            itemDescriptor = selectedEntries.count == 1 ? "entry" : "entries"
+        } else if selectedNotes.count > 0 {
+            itemDescriptor = selectedNotes.count == 1 ? "note" : "notes"
         } else {
             itemDescriptor = selectedPlaces.count == 1 ? "place" : "places"
         }
@@ -193,7 +193,7 @@ class SelectFolderViewController: UIViewController {
     private func loadCategories() {
         Task {
             do {
-                let fetchedCategories = try await entryRepository.fetchCategories()
+                let fetchedCategories = try await nestItemRepository.fetchCategories()
                 
                 await MainActor.run {
                     self.categories = fetchedCategories

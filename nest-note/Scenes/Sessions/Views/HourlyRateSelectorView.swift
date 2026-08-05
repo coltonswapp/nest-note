@@ -18,26 +18,26 @@ final class HourlyRateSelectorView: UIView {
     }
 
     private enum Layout {
-        static let valueLabelTopInset: CGFloat = 8
-        static let valueLabelToSelectorSpacing: CGFloat = 8
+        static let valueLabelToSelectorSpacing: CGFloat = 4
     }
 
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
+        directionalLayoutMargins = .zero
         selectorView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(valueLabelHost)
         addSubview(selectorView)
 
         NSLayoutConstraint.activate([
-            valueLabelHost.topAnchor.constraint(equalTo: layoutMarginsGuide.topAnchor, constant: Layout.valueLabelTopInset),
+            valueLabelHost.topAnchor.constraint(equalTo: layoutMarginsGuide.topAnchor),
             valueLabelHost.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
             valueLabelHost.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor),
 
             selectorView.topAnchor.constraint(equalTo: valueLabelHost.bottomAnchor, constant: Layout.valueLabelToSelectorSpacing),
             selectorView.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor),
             selectorView.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor),
-            selectorView.heightAnchor.constraint(equalToConstant: 58),
+            selectorView.heightAnchor.constraint(equalToConstant: SessionPaymentValueSelectorView.trackHeight),
             selectorView.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor)
         ])
     }
@@ -46,7 +46,7 @@ final class HourlyRateSelectorView: UIView {
         backgroundColor = NNColors.NNSystemBackground6
         layer.cornerRadius = 18
         clipsToBounds = true
-        directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)
+        directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
     }
 
     func configure(cents: Int) {

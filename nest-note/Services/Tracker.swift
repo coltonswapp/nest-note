@@ -33,7 +33,6 @@ class Tracker {
         
         // MARK: - Extensible Nest Items
         case unknownNestItemDecoded = "unknownNestItemDecoded"
-        case pilotCardCreated = "pilotCardCreated"
         case contactCreated = "contactCreated"
         case contactImportedFromSystem = "contactImportedFromSystem"
         

@@ -13,6 +13,7 @@ final class WaterfallGridCell: UICollectionViewCell {
 
     static let reuseIdentifier = String(describing: WaterfallGridCell.self)
     static let entryContentLineLimit = 8
+    static let cornerRadius: CGFloat = 20
     private static let contentInset: CGFloat = 16
 
     private let cardView = UIView()
@@ -49,7 +50,7 @@ final class WaterfallGridCell: UICollectionViewCell {
 
         cardView.translatesAutoresizingMaskIntoConstraints = false
         cardView.backgroundColor = cardBackgroundColor
-        cardView.layer.cornerRadius = 20
+        cardView.layer.cornerRadius = Self.cornerRadius
         cardView.layer.cornerCurve = .continuous
         cardView.clipsToBounds = true
 
@@ -64,10 +65,14 @@ final class WaterfallGridCell: UICollectionViewCell {
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.textColor = .label
         titleLabel.numberOfLines = 0
+        // Prefer shrinking/truncating body copy over collapsing the title when a
+        // stale waterfall frame is temporarily shorter than the content needs.
+        titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         contentLabel.font = .preferredFont(forTextStyle: .subheadline)
         contentLabel.textColor = .secondaryLabel
         contentLabel.numberOfLines = 0
+        contentLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         checkmarkImageView.translatesAutoresizingMaskIntoConstraints = false
         checkmarkImageView.contentMode = .scaleAspectFit
@@ -220,7 +225,7 @@ final class WaterfallGridCell: UICollectionViewCell {
         guard !actions.isEmpty else { return emptyFallback }
 
         let previewCount = 3
-        var lines = actions.prefix(previewCount).map { "- \($0)" }
+        var lines = actions.prefix(previewCount).map { "• \($0)" }
         let remaining = actions.count - previewCount
         if remaining > 0 {
             lines.append("+\(remaining) item\(remaining == 1 ? "" : "s")")
@@ -236,6 +241,21 @@ final class WaterfallGridCell: UICollectionViewCell {
 
         let thumbnailWidth = columnWidth - (Self.contentInset * 2)
         thumbnailHeightConstraint?.constant = max(72, thumbnailWidth * 0.55)
+    }
+
+    /// Preview only the rounded card face — matches the cell's corner radius and
+    /// excludes the system platter shadow from the context-menu lift mask.
+    func contextMenuTargetedPreview() -> UITargetedPreview {
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: cardView.bounds,
+            cornerRadius: cardView.layer.cornerRadius
+        )
+        // Empty path suppresses the default soft platter shadow that otherwise
+        // follows a larger/mismatched bounds mask.
+        parameters.shadowPath = UIBezierPath()
+        return UITargetedPreview(view: cardView, parameters: parameters)
     }
 
     private func updateSelectionAppearance() {
@@ -254,20 +274,31 @@ final class WaterfallGridCell: UICollectionViewCell {
             }
         } else {
             checkmarkImageView.isHidden = true
-            cardView.backgroundColor = cardBackgroundColor
             applyCardBorder()
+            updateBrowseHighlightAppearance(animated: false)
+        }
+    }
+
+    /// Browse-mode press + sticky selection share the same gray card treatment.
+    private func updateBrowseHighlightAppearance(animated: Bool = true) {
+        guard !isInEditMode else { return }
+        let highlighted = isHighlighted || isSelected
+        let updates = {
+            self.cardView.backgroundColor = highlighted ? .systemGray4 : self.cardBackgroundColor
+        }
+        if animated {
+            UIView.animate(withDuration: highlighted ? 0.1 : 0.05, animations: updates)
+        } else {
+            updates()
         }
     }
 
     override var isHighlighted: Bool {
-        didSet {
-            guard !isInEditMode else { return }
-            UIView.animate(withDuration: 0.1) {
-                self.cardView.backgroundColor = self.isHighlighted
-                    ? UIColor.systemGray4
-                    : self.cardBackgroundColor
-            }
-        }
+        didSet { updateBrowseHighlightAppearance() }
+    }
+
+    override var isSelected: Bool {
+        didSet { updateBrowseHighlightAppearance() }
     }
 
     override func preferredLayoutAttributesFitting(

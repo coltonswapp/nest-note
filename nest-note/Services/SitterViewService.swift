@@ -2,7 +2,7 @@ import Foundation
 import FirebaseFirestore
 import Combine
 
-final class SitterViewService: EntryRepository {
+final class SitterViewService: NestItemRepository {
     // MARK: - Properties
     static let shared = SitterViewService()
     private let db = Firestore.firestore()
@@ -13,6 +13,11 @@ final class SitterViewService: EntryRepository {
     
     // MARK: - ItemRepository Integration
     private var itemRepository: ItemRepository?
+
+    /// Serializes overlapping `fetchCurrentSession` calls (cancel previous, await latest).
+    private let fetchSessionLock = NSLock()
+    private var fetchSessionTask: Task<Void, Error>?
+    private var fetchSessionGeneration = 0
     
     enum ViewState {
         case loading
@@ -45,7 +50,7 @@ final class SitterViewService: EntryRepository {
     }
     
     // MARK: - Nest Entries
-    private var cachedEntries: [String: [BaseEntry]]?
+    private var cachedNotes: [String: [NoteItem]]?
     
     // MARK: - Unified Item Caching (following NestService pattern)
     private var cachedItems: [BaseItem] = []
@@ -58,9 +63,9 @@ final class SitterViewService: EntryRepository {
     }
     
     // Computed property that filters entries from session-filtered items
-    private var cachedEntriesItems: [BaseEntry]? {
+    private var cachedEntriesItems: [NoteItem]? {
         guard !sessionFilteredItems.isEmpty else { return nil }
-        return sessionFilteredItems.compactMap { $0 as? BaseEntry }
+        return sessionFilteredItems.compactMap { $0 as? NoteItem }
     }
     
     // Computed property that filters routines from session-filtered items
@@ -77,6 +82,13 @@ final class SitterViewService: EntryRepository {
     
     func fetchAllItems() async throws -> [BaseItem] {
         try await fetchAllFilteredItems()
+    }
+
+    /// Unfiltered nest items for resolving attachment IDs on selected parents.
+    /// Ensures the full nest cache is warm, then resolves against it (not session-filtered).
+    func itemsForAttachmentResolution() async throws -> [BaseItem] {
+        _ = try await fetchAllFilteredItems()
+        return cachedItems
     }
     
     /// Unified method to fetch all items with session filtering applied once
@@ -133,38 +145,38 @@ final class SitterViewService: EntryRepository {
     }
     
     /// Fetches entries for the current nest, using cache if available
-    func fetchNestEntries() async throws -> [String: [BaseEntry]] {
-        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestEntries() called - using unified approach")
+    func fetchNestNotes() async throws -> [String: [NoteItem]] {
+        Logger.log(level: .info, category: .sitterViewService, message: "fetchNestNotes() called - using unified approach")
         
         // Return cached entries if available
-        if let cachedEntries = cachedEntries {
+        if let cachedNotes = cachedNotes {
             Logger.log(level: .info, category: .sitterViewService, message: "Using cached entries")
-            return cachedEntries
+            return cachedNotes
         }
         
         // Get session-filtered items using unified method (this is cached after first call)
         let filteredItems = try await fetchAllFilteredItems()
         
-        // Filter to only entry items (already BaseEntry from repository)
-        let entries = filteredItems.compactMap { item -> BaseEntry? in
-            guard item.type == .entry, let baseEntry = item as? BaseEntry else { return nil }
+        // Filter to only entry items (already NoteItem from repository)
+        let notes = filteredItems.compactMap { item -> NoteItem? in
+            guard item.type == .entry, let baseEntry = item as? NoteItem else { return nil }
             return baseEntry
         }
         
         // Group entries by category
-        let groupedEntries = Dictionary(grouping: entries) { $0.category }
+        let groupedNotes = Dictionary(grouping: notes) { $0.category }
         
-        // Cache the entries
-        self.cachedEntries = groupedEntries
+        // Cache the notes
+        self.cachedNotes = groupedNotes
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(entries.count) entries using unified approach ✅")
-        return groupedEntries
+        Logger.log(level: .info, category: .sitterViewService, message: "Fetched \(notes.count) entries using unified approach ✅")
+        return groupedNotes
     }
     
     /// Clears the entries cache
-    func clearEntriesCache() {
+    func clearNotesCache() {
         Logger.log(level: .info, category: .sitterViewService, message: "Clearing entries cache")
-        cachedEntries = nil
+        cachedNotes = nil
         // Clear folder contents cache since entries changed
         clearFolderContentsCache()
         // Also clear ItemRepository cache
@@ -195,10 +207,10 @@ final class SitterViewService: EntryRepository {
         cachedFolderContents.removeAll()
     }
     
-    /// Forces a refresh of the entries
-    func refreshEntries() async throws -> [String: [BaseEntry]] {
-        clearEntriesCache()
-        return try await fetchNestEntries()
+    /// Forces a refresh of the notes
+    func refreshNotes() async throws -> [String: [NoteItem]] {
+        clearNotesCache()
+        return try await fetchNestNotes()
     }
     
     /// Forces a refresh of the places
@@ -264,23 +276,23 @@ final class SitterViewService: EntryRepository {
     }
     
     /// Fetch both entries and places in a single efficient call (matching NestService pattern)
-    func fetchEntriesAndPlaces() async throws -> (entries: [String: [BaseEntry]], places: [PlaceItem]) {
-        Logger.log(level: .info, category: .sitterViewService, message: "📦 fetchEntriesAndPlaces() called - efficient single fetch")
+    func fetchNotesAndPlaces() async throws -> (notes: [String: [NoteItem]], places: [PlaceItem]) {
+        Logger.log(level: .info, category: .sitterViewService, message: "📦 fetchNotesAndPlaces() called - efficient single fetch")
         
         let filteredItems = try await fetchAllFilteredItems() // Single fetch with session filtering
         
-        // Filter entries (already BaseEntry from repository)
-        let entryItems = filteredItems.compactMap { item -> BaseEntry? in
+        // Filter entries (already NoteItem from repository)
+        let entryItems = filteredItems.compactMap { item -> NoteItem? in
             guard item.type == .entry else { return nil }
-            return item as? BaseEntry
+            return item as? NoteItem
         }
-        let groupedEntries = Dictionary(grouping: entryItems) { $0.category }
+        let groupedNotes = Dictionary(grouping: entryItems) { $0.category }
         
         // Filter places
         let placeItems = filteredItems.compactMap { $0 as? PlaceItem }
         
-        Logger.log(level: .info, category: .sitterViewService, message: "Efficient fetch complete - \(groupedEntries.count) entry groups, \(placeItems.count) places")
-        return (entries: groupedEntries, places: placeItems)
+        Logger.log(level: .info, category: .sitterViewService, message: "Efficient fetch complete - \(groupedNotes.count) entry groups, \(placeItems.count) places")
+        return (notes: groupedNotes, places: placeItems)
     }
     
     /// Fetch routines (matching NestService pattern)
@@ -298,7 +310,7 @@ final class SitterViewService: EntryRepository {
         
         // Check cache first to avoid expensive folder traversals
         if let cachedContents = cachedFolderContents[category] {
-            Logger.log(level: .info, category: .sitterViewService, message: "📁 Using cached folder contents for '\(category)' - \(cachedContents.entries.count) entries, \(cachedContents.places.count) places, \(cachedContents.routines.count) routines, \(cachedContents.subfolders.count) subfolders")
+            Logger.log(level: .info, category: .sitterViewService, message: "📁 Using cached folder contents for '\(category)' - \(cachedContents.notes.count) entries, \(cachedContents.places.count) places, \(cachedContents.routines.count) routines, \(cachedContents.subfolders.count) subfolders")
             return cachedContents
         }
         
@@ -316,10 +328,10 @@ final class SitterViewService: EntryRepository {
         )
         
         Logger.log(level: .info, category: .sitterViewService, message: "📊 DEBUGGING FOLDER COUNTS for '\(category)':")
-        Logger.log(level: .info, category: .sitterViewService, message: "📊 Direct items: \(folderContents.entries.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Direct items: \(folderContents.notes.count) entries, \(folderContents.places.count) places, \(folderContents.routines.count) routines")
         Logger.log(level: .info, category: .sitterViewService, message: "📊 Subfolders: \(folderContents.subfolders.count)")
         Logger.log(level: .info, category: .sitterViewService, message: "📊 Subfolder details: \(folderContents.subfolders.map { "\($0.title)(\($0.itemCount))" }.joined(separator: ", "))")
-        Logger.log(level: .info, category: .sitterViewService, message: "📊 Total visible items should be: \(folderContents.entries.count + folderContents.places.count + folderContents.routines.count + folderContents.subfolders.count)")
+        Logger.log(level: .info, category: .sitterViewService, message: "📊 Total visible items should be: \(folderContents.notes.count + folderContents.places.count + folderContents.routines.count + folderContents.subfolders.count)")
         
         // Cache the result to speed up future requests
         cachedFolderContents[category] = folderContents
@@ -334,9 +346,40 @@ final class SitterViewService: EntryRepository {
     
     // MARK: - Session Management
     func fetchCurrentSession() async throws {
+        let (task, generation): (Task<Void, Error>, Int) = {
+            fetchSessionLock.lock()
+            defer { fetchSessionLock.unlock() }
+            fetchSessionTask?.cancel()
+            fetchSessionGeneration += 1
+            let generation = fetchSessionGeneration
+            let newTask = Task {
+                try await self.executeFetchCurrentSession()
+            }
+            fetchSessionTask = newTask
+            return (newTask, generation)
+        }()
+
+        do {
+            try await task.value
+        } catch is CancellationError {
+            // Superseded by a newer fetch — wait for the latest so callers observe final state.
+            let latest: Task<Void, Error>? = {
+                fetchSessionLock.lock()
+                defer { fetchSessionLock.unlock() }
+                guard fetchSessionGeneration != generation else { return nil }
+                return fetchSessionTask
+            }()
+            if let latest {
+                try await latest.value
+            }
+        }
+    }
+
+    private func executeFetchCurrentSession() async throws {
         Logger.log(level: .info, category: .sitterViewService, message: "Starting fetchCurrentSession")
         
         // Safely update viewState on main actor
+        try Task.checkCancellation()
         await MainActor.run {
             self.viewState = .loading
         }
@@ -344,12 +387,15 @@ final class SitterViewService: EntryRepository {
         // Add artificial delay to make loading state visible
         do {
             try await Task.sleep(nanoseconds: 750_000_000) // 0.75 seconds
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             Logger.log(level: .error, category: .sitterViewService, message: "Task sleep interrupted: \(error.localizedDescription)")
             // Continue anyway
         }
         
         // Validate user ID
+        try Task.checkCancellation()
         guard let userID = UserService.shared.currentUser?.id, !userID.isEmpty else {
             Logger.log(level: .error, category: .sitterViewService, message: "No current user or empty user ID")
             await MainActor.run {
@@ -366,8 +412,10 @@ final class SitterViewService: EntryRepository {
             
             let session: SessionItem
             do {
+                try Task.checkCancellation()
                 guard let fetchedSession = try await sessionService.fetchInProgressSitterSession(userID: userID) else {
                     Logger.log(level: .info, category: .sitterViewService, message: "No active session found for user")
+                    try Task.checkCancellation()
                     await MainActor.run {
                         self.viewState = .noSession
                     }
@@ -375,6 +423,8 @@ final class SitterViewService: EntryRepository {
                 }
                 session = fetchedSession
                 Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched session: \(session.id) with status: \(session.status)")
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch in-progress session: \(error.localizedDescription)")
                 await MainActor.run {
@@ -388,8 +438,10 @@ final class SitterViewService: EntryRepository {
             
             let sitterSession: SitterSession
             do {
+                try Task.checkCancellation()
                 guard let fetchedSitterSession = try await sessionService.getSitterSession(sessionID: session.id) else {
                     Logger.log(level: .error, category: .sitterViewService, message: "Sitter session not found for session ID: \(session.id)")
+                    try Task.checkCancellation()
                     await MainActor.run {
                         self.viewState = .error(SessionError.sessionNotFound)
                     }
@@ -397,6 +449,8 @@ final class SitterViewService: EntryRepository {
                 }
                 sitterSession = fetchedSitterSession
                 Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched sitter session for nest: \(sitterSession.nestID)")
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch sitter session: \(error.localizedDescription)")
                 await MainActor.run {
@@ -410,11 +464,13 @@ final class SitterViewService: EntryRepository {
             
             let nest: NestItem
             do {
+                try Task.checkCancellation()
                 let nestRef = db.collection("nests").document(sitterSession.nestID)
                 let nestDoc = try await nestRef.getDocument()
                 
                 guard nestDoc.exists else {
                     Logger.log(level: .error, category: .sitterViewService, message: "Nest document does not exist: \(sitterSession.nestID)")
+                    try Task.checkCancellation()
                     await MainActor.run {
                         self.viewState = .error(SessionError.sessionNotFound)
                     }
@@ -450,6 +506,8 @@ final class SitterViewService: EntryRepository {
                 }
                 
                 nest = fetchedNest
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch nest information: \(error.localizedDescription)")
                 await MainActor.run {
@@ -459,10 +517,11 @@ final class SitterViewService: EntryRepository {
             }
             
             // Step 5: Clear caches when switching nests (with nil safety)
+            try Task.checkCancellation()
             await MainActor.run {
                 if self.currentNest?.id != nest.id {
                     Logger.log(level: .debug, category: .sitterViewService, message: "Switching nests, clearing caches")
-                    self.clearEntriesCache()
+                    self.clearNotesCache()
                     self.clearItemsCache()
                     self.clearImageCache()
                 }
@@ -470,6 +529,7 @@ final class SitterViewService: EntryRepository {
             
             // Step 6: Update state with session and nest information
             Logger.log(level: .debug, category: .sitterViewService, message: "Step 6: Updating view state")
+            try Task.checkCancellation()
             await MainActor.run {
                 self.viewState = .ready(session: session, nest: nest)
             }
@@ -477,8 +537,11 @@ final class SitterViewService: EntryRepository {
             // Step 7: Fetch entries for the nest (non-critical, don't fail if this errors)
             Logger.log(level: .debug, category: .sitterViewService, message: "Step 7: Fetching nest entries")
             do {
-                _ = try await fetchNestEntries()
+                try Task.checkCancellation()
+                _ = try await fetchNestNotes()
                 Logger.log(level: .debug, category: .sitterViewService, message: "Successfully fetched nest entries")
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 Logger.log(level: .error, category: .sitterViewService, message: "Failed to fetch nest entries (non-critical): \(error.localizedDescription)")
                 // Don't fail the entire operation for this
@@ -486,6 +549,8 @@ final class SitterViewService: EntryRepository {
             
             Logger.log(level: .info, category: .sitterViewService, message: "fetchCurrentSession completed successfully ✅")
             
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             Logger.log(level: .error, category: .sitterViewService, message: "Critical error in fetchCurrentSession: \(error.localizedDescription)")
             await MainActor.run {
@@ -498,7 +563,7 @@ final class SitterViewService: EntryRepository {
     func reset() {
         Logger.log(level: .info, category: .sitterViewService, message: "Resetting SitterViewService")
         viewState = .loading
-        clearEntriesCache()
+        clearNotesCache()
         clearItemsCache()
         clearFolderContentsCache()
         clearImageCache()
@@ -520,7 +585,7 @@ final class SitterViewService: EntryRepository {
         Logger.log(level: .info, category: .sitterViewService, message: "Setting temporary session context for nest: \(nest.id)")
         
         // Clear any existing caches since we're switching context
-        clearEntriesCache()
+        clearNotesCache()
         clearItemsCache()
         clearFolderContentsCache()
         clearImageCache()
@@ -532,7 +597,7 @@ final class SitterViewService: EntryRepository {
     /// Force clears all caches to ensure fresh data with proper session filtering
     func forceRefreshAllCaches() {
         Logger.log(level: .info, category: .sitterViewService, message: "🐕 DEBUG: Force clearing ALL caches to refresh session filtering")
-        clearEntriesCache()
+        clearNotesCache()
         clearItemsCache()
         clearFolderContentsCache()
         clearImageCache()
@@ -545,13 +610,13 @@ final class SitterViewService: EntryRepository {
         NotificationCenter.default.post(name: .sessionDidChange, object: nil)
     }
     
-    // MARK: - EntryRepository Implementation
-    func fetchEntries() async throws -> [String: [BaseEntry]] {
-        return try await fetchNestEntries()
+    // MARK: - NestItemRepository Implementation
+    func fetchNotes() async throws -> [String: [NoteItem]] {
+        return try await fetchNestNotes()
     }
     
-    func createEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .sitterViewService, message: "createEntry() called - using ItemRepository")
+    func createNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "createNote() called - using ItemRepository")
         
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
@@ -566,13 +631,13 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
-        // Create BaseEntry directly
+        // Create NoteItem directly
         try await itemRepository.createItem(entry)
-        clearEntriesCache() // This also clears folder contents cache
+        clearNotesCache() // This also clears folder contents cache
     }
     
-    func updateEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .sitterViewService, message: "updateEntry() called - using ItemRepository")
+    func updateNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "updateNote() called - using ItemRepository")
         
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
@@ -587,13 +652,13 @@ final class SitterViewService: EntryRepository {
             throw SessionError.noCurrentNest
         }
         
-        // Update BaseEntry directly
+        // Update NoteItem directly
         try await itemRepository.updateItem(entry)
-        clearEntriesCache() // This also clears folder contents cache
+        clearNotesCache() // This also clears folder contents cache
     }
     
-    func deleteEntry(_ entry: BaseEntry) async throws {
-        Logger.log(level: .info, category: .sitterViewService, message: "deleteEntry() called - using ItemRepository")
+    func deleteNote(_ entry: NoteItem) async throws {
+        Logger.log(level: .info, category: .sitterViewService, message: "deleteNote() called - using ItemRepository")
         
         guard case .ready(_, let nest) = viewState else {
             throw SessionError.noCurrentNest
@@ -610,7 +675,7 @@ final class SitterViewService: EntryRepository {
         
         // Delete using ItemRepository
         try await itemRepository.deleteItem(id: entry.id)
-        clearEntriesCache() // This also clears folder contents cache
+        clearNotesCache() // This also clears folder contents cache
     }
     
     // MARK: - Category Methods
@@ -633,7 +698,7 @@ final class SitterViewService: EntryRepository {
         return try await fetchCategories()
     }
     
-    // MARK: - Place Management (EntryRepository Protocol Conformance)
+    // MARK: - Place Management (NestItemRepository Protocol Conformance)
     
     /// Fetches all places for the current nest
     func fetchPlaces() async throws -> [PlaceItem] {

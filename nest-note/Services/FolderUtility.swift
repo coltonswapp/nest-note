@@ -10,10 +10,9 @@ final class FolderUtility {
         let subfolders: [FolderData]
         let allPlaces: [PlaceItem]
 
-        var entries: [BaseEntry] { buckets.entries }
+        var notes: [NoteItem] { buckets.notes }
         var places: [PlaceItem] { buckets.places }
         var routines: [RoutineItem] { buckets.routines }
-        var pilotCards: [PilotCardItem] { buckets.pilotCards }
         var contacts: [ContactItem] { buckets.contacts }
         var unknownItems: [UnknownItem] { buckets.unknownItems }
     }

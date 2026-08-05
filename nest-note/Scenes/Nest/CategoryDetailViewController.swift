@@ -54,6 +54,39 @@ final class CategoryDetailViewController: NNSheetViewController {
     // MARK: - Properties
     weak var categoryDelegate: CategoryDetailViewControllerDelegate?
     
+    override var allowsMinimizedSheetDetent: Bool { true }
+    
+    override var hasDiscardableContent: Bool {
+        let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if category == nil {
+            return !title.isEmpty || selectedIcon != nil
+        }
+        let originalName = category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return title != originalName || selectedIcon != nil
+    }
+
+    private static let previewHeight: CGFloat = 144
+    private static let previewWidth: CGFloat = 170
+    private static let placeholderTitle = "Folder name"
+    private static let placeholderIcon = "folder.fill"
+
+    private lazy var folderPreviewCell: FolderCollectionViewCell = {
+        let cell = FolderCollectionViewCell(frame: .zero)
+        cell.translatesAutoresizingMaskIntoConstraints = false
+        cell.isUserInteractionEnabled = false
+        // Outside a UICollectionView, contentView won't auto-fill — pin it explicitly.
+        cell.contentView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cell.contentView.topAnchor.constraint(equalTo: cell.topAnchor),
+            cell.contentView.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            cell.contentView.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            cell.contentView.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+        ])
+        return cell
+    }()
+
+    override var contentAboveTitleField: UIView? { folderPreviewCell }
+    
     private lazy var iconCollectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
         layout.minimumInteritemSpacing = 8
@@ -91,24 +124,6 @@ final class CategoryDetailViewController: NNSheetViewController {
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
-    }()
-    
-    private let selectedIconImageView: UIImageView = {
-        let imageView = UIImageView()
-        imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = .tertiaryLabel
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.image = UIImage(systemName: "square.dashed")
-        return imageView
-    }()
-    
-    private let selectedIconStackView: UIStackView = {
-        let stackView = UIStackView()
-        stackView.axis = .horizontal
-        stackView.distribution = .equalSpacing
-        stackView.alignment = .center
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        return stackView
     }()
     
     private var selectedIcon: String?
@@ -198,19 +213,21 @@ final class CategoryDetailViewController: NNSheetViewController {
         
         // Use suggested folder name if provided, otherwise use category
         titleField.text = suggestedFolderName ?? category
-        titleField.placeholder = "Folder name"
+        titleField.placeholder = Self.placeholderTitle
+        titleField.delegate = self
+        titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
         
         // Set suggested icon if provided
         if let suggestedIcon = suggestedIcon {
             selectedIcon = suggestedIcon
-            selectedIconImageView.image = UIImage(systemName: suggestedIcon)
-            selectedIconImageView.tintColor = NNColors.primary
         }
         
         iconCollectionView.delegate = self
         iconCollectionView.dataSource = self
         
         itemsHiddenDuringTransition = [buttonStackView]
+
+        updateFolderPreview()
         
         if category == nil && suggestedFolderName == nil {
             titleField.becomeFirstResponder()
@@ -226,11 +243,11 @@ final class CategoryDetailViewController: NNSheetViewController {
         if isViewLoaded {
             titleField.text = name
             selectedIcon = icon
-            selectedIconImageView.image = UIImage(systemName: icon)
-            selectedIconImageView.tintColor = NNColors.primary
+            updateFolderPreview()
             
             // Reload collection view to show the selected icon
             iconCollectionView.reloadData()
+            refreshCompactDetentAvailability()
         }
     }
     
@@ -243,22 +260,23 @@ final class CategoryDetailViewController: NNSheetViewController {
     override func addContentToContainer() {
         super.addContentToContainer()
         
-        selectedIconStackView.addArrangedSubview(selectedIconLabel)
-        selectedIconStackView.addArrangedSubview(selectedIconImageView)
+        containerView.addSubview(folderPreviewCell)
         buttonStackView.addArrangedSubview(saveButton)
         
-        containerView.addSubview(selectedIconStackView)
+        containerView.addSubview(selectedIconLabel)
         containerView.addSubview(iconCollectionView)
         containerView.addSubview(buttonStackView)
         
         NSLayoutConstraint.activate([
-            selectedIconStackView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 16),
-            selectedIconStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            selectedIconStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -24),
-            selectedIconImageView.widthAnchor.constraint(equalToConstant: 24),
-            selectedIconImageView.heightAnchor.constraint(equalToConstant: 24),
+            folderPreviewCell.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            folderPreviewCell.widthAnchor.constraint(equalToConstant: Self.previewWidth),
+            folderPreviewCell.heightAnchor.constraint(equalToConstant: Self.previewHeight),
+
+            selectedIconLabel.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 16),
+            selectedIconLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            selectedIconLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             
-            iconCollectionView.topAnchor.constraint(equalTo: selectedIconStackView.bottomAnchor, constant: 32),
+            iconCollectionView.topAnchor.constraint(equalTo: selectedIconLabel.bottomAnchor, constant: 16),
             iconCollectionView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             iconCollectionView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             iconCollectionView.bottomAnchor.constraint(equalTo: buttonStackView.topAnchor, constant: -16),
@@ -269,8 +287,28 @@ final class CategoryDetailViewController: NNSheetViewController {
             buttonStackView.heightAnchor.constraint(equalToConstant: 46)
         ])
     }
+
+    // MARK: - Preview
+
+    private func updateFolderPreview() {
+        let trimmed = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? Self.placeholderTitle : trimmed
+        let symbolName = selectedIcon ?? Self.placeholderIcon
+
+        let data = FolderData(
+            title: title,
+            image: UIImage(systemName: symbolName),
+            itemCount: 0,
+            fullPath: title
+        )
+        folderPreviewCell.configure(with: data)
+    }
     
     // MARK: - Actions
+    @objc private func titleFieldChanged() {
+        updateFolderPreview()
+    }
+
     @objc private func saveButtonTapped() {
         guard let categoryName = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !categoryName.isEmpty,
@@ -286,6 +324,14 @@ final class CategoryDetailViewController: NNSheetViewController {
     
     override func handleDismissalResult() -> Any? {
         return titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - UITextFieldDelegate
+extension CategoryDetailViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }
 
@@ -305,9 +351,9 @@ extension CategoryDetailViewController: UICollectionViewDataSource, UICollection
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         selectedIcon = icons[indexPath.item]
-        selectedIconImageView.image = UIImage(systemName: icons[indexPath.item])
-        selectedIconImageView.tintColor = NNColors.primary
-        selectedIconImageView.bounce(includeScale: true)
+        updateFolderPreview()
+        collectionView.cellForItem(at: indexPath)?.bounce(includeScale: true)
         HapticsHelper.lightHaptic()
+        refreshCompactDetentAvailability()
     }
-} 
+}

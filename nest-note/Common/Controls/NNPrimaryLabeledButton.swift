@@ -30,6 +30,12 @@ class NNBaseControl: UIControl {
             }
         }
     }
+
+    override var isHidden: Bool {
+        didSet {
+            visualEffectView?.isHidden = isHidden
+        }
+    }
     
     // MARK: - Properties
     private var touchDownTimestamp: TimeInterval?

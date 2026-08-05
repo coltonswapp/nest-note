@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import OSLog
 
 public protocol LogProvider {
 
@@ -35,24 +36,35 @@ public final class Logger {
     private var providers: [LogProvider] = []
     private let appendQueue = DispatchQueue(label: "com.nest-note.loggerQueue")
 
+    /// Observed on the main thread only. Mutations hop to the MainActor.
     @Published public private(set) var lines: [LogLine] = []
 
     private let maxLogLines = 5000
+
+    /// Owned exclusively by `appendQueue` — never touch from caller threads.
+    private let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
 
     private init() {
         register(SystemProvider())
     }
 
     public static func register(_ provider: LogProvider) {
-        self.shared.providers.append(provider)
+        shared.register(provider)
     }
 
     private func register(_ provider: LogProvider) {
-        providers.append(provider)
+        appendQueue.sync {
+            providers.append(provider)
+        }
     }
 
     public static func log(level: Level, category: Category?, message: String) {
-        self.shared.log(level: level, category: category, message: message)
+        shared.log(level: level, category: category, message: message)
     }
 
     public static func log(level: Level, message: String) {
@@ -60,27 +72,32 @@ public final class Logger {
     }
 
     private func log(level: Level, category: Category?, message: String) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "HH:mm:ss"
-        
-        let logLine = LogLine(
-            timestamp: dateFormatter.string(from: Date()),
-            level: level,
-            category: category?.rawValue ?? "",
-            content: message
-        )
-        
+        // Capture value types on the caller, then do all formatting and mutation
+        // on the serial queue so concurrent Swift-concurrency callers cannot race
+        // DateFormatter / StringGuts / providers / lines.
+        let categoryValue = category?.rawValue ?? ""
+        let now = Date()
+
         appendQueue.async { [weak self] in
             guard let self else { return }
-            
-            lines.append(logLine)
-            
-            if lines.count >= maxLogLines {
-                lines.removeFirst()
+
+            let logLine = LogLine(
+                timestamp: self.timestampFormatter.string(from: now),
+                level: level,
+                category: categoryValue,
+                content: message
+            )
+
+            let providerMessage = "## \(logLine.description)"
+            for provider in self.providers {
+                provider.log(level: level, category: category, message: providerMessage)
             }
-            
-            for provider in providers {
-                provider.log(level: level, category: category, message: "## \(logLine.description)")
+
+            DispatchQueue.main.async {
+                self.lines.append(logLine)
+                if self.lines.count >= self.maxLogLines {
+                    self.lines.removeFirst()
+                }
             }
         }
     }
@@ -129,26 +146,21 @@ public extension Logger {
 
 }
 
-import Foundation
-import OSLog
-
 final class SystemProvider: LogProvider {
 
     private var subsystem = Bundle.main.bundleIdentifier
 
-    private lazy var dateFormatter: DateFormatter = {
+    /// Called only from Logger's serial `appendQueue`.
+    private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        formatter.locale = Locale.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         return formatter
     }()
 
-    private var dateString: String {
-        dateFormatter.string(from: Date())
-    }
-
     func log(level: Logger.Level, category: Logger.Category?, message: String) {
+        let dateString = dateFormatter.string(from: Date())
         os_log("%{public}@", type: level.osLogType, "LinusLog: \(dateString) \(message)")
     }
 }

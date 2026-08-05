@@ -771,12 +771,12 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             return
         }
         
-        let categoryVC = NestCategoryViewController(category: category, entryRepository: SitterViewService.shared)
+        let categoryVC = NestCategoryViewController(category: category, nestItemRepository: SitterViewService.shared)
         navigationController?.pushViewController(categoryVC, animated: true)
     }
     
     func presentHouseholdView() {
-        navigationController?.pushViewController(NestViewController(entryRepository: SitterViewService.shared), animated: true)
+        navigationController?.pushViewController(NestViewController(nestItemRepository: SitterViewService.shared), animated: true)
     }
     
     private func iconForCategory(_ categoryName: String) -> String {
@@ -917,7 +917,7 @@ extension SitterHomeViewController: UICollectionViewDelegate {
             if let session = sitterViewService.currentSession {
                 // Present calendar view
                 let dateRange = DateInterval(start: session.startDate, end: session.endDate)
-                let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
+                let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents, isSitter: true)
                 let nav = UINavigationController(rootViewController: calendarVC)
                 present(nav, animated: true)
             }
@@ -925,7 +925,7 @@ extension SitterHomeViewController: UICollectionViewDelegate {
         case .sessionEvent(let event):
             // Present event details
             if let session = sitterViewService.currentSession {
-                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false, entryRepository: SitterViewService.shared)
+                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false, nestItemRepository: SitterViewService.shared)
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }

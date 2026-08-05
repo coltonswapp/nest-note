@@ -13,6 +13,15 @@ final class NNFeedbackViewController: NNSheetViewController {
     private let feedback: Feedback?
     private let isReadOnly: Bool
     
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let body = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !title.isEmpty || !body.isEmpty
+    }
+    
     // MARK: - Initialization
     init() {
         self.feedback = nil
@@ -394,6 +403,7 @@ extension NNFeedbackViewController: UITextViewDelegate {
         DispatchQueue.main.async {
             textView.scrollToCaretIfNeeded()
         }
+        refreshCompactDetentAvailability()
     }
 }
 

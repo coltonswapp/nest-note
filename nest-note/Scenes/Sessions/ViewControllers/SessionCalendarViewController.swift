@@ -62,11 +62,12 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     private var eventsUpdateCallback: (([SessionEvent]) -> Void)?
     
     private lazy var emptyStateView: NNEmptyStateView = {
+        let config = emptyStateConfig(for: dateRange)
         let view = NNEmptyStateView(
-            icon: UIImage(systemName: "calendar.badge.plus"),
-            title: "No events",
-            subtitle: "Tap anywhere on the calendar to add an event.",
-            actionButtonTitle: "Add Event"
+            icon: config.icon,
+            title: config.title,
+            subtitle: config.subtitle,
+            actionButtonTitle: config.actionButtonTitle
         )
         view.isHidden = true
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -193,9 +194,12 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
         ])
         
-        // Initial load
-        Task {
-            await loadData()
+        // Show local/passed-in events immediately; refresh from network when editing an existing session.
+        handleLoadedData()
+        if sessionID != nil {
+            Task {
+                await loadData()
+            }
         }
     }
     
@@ -236,7 +240,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     
     @objc private func addEventTapped() {
         let dateToUse = selectedDate ?? dateRange.start
-        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
+        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, nestItemRepository: NestService.shared)
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -479,41 +483,58 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     private func updateEmptyState() {
-        // Only update empty state for non-sitters
-        if !isSitter {
-            let hasEvents = !eventsByDate.isEmpty
-            
-            if !hasEvents {
-                let (title, subtitle, icon) = emptyStateConfig(for: dateRange)
-                emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
-                emptyStateView.animateIn()
-            } else {
-                emptyStateView.animateOut()
-            }
+        let hasEvents = !eventsByDate.isEmpty
+        
+        if !hasEvents {
+            let config = emptyStateConfig(for: dateRange)
+            emptyStateView.configure(
+                icon: config.icon,
+                title: config.title,
+                subtitle: config.subtitle,
+                actionButtonTitle: config.actionButtonTitle
+            )
+            collectionView.isHidden = true
+            emptyStateView.animateIn()
+        } else {
+            collectionView.isHidden = false
+            emptyStateView.animateOut()
         }
     }
     
-    private func emptyStateConfig(for dateRange: DateInterval) -> (title: String, subtitle: String, icon: UIImage?) {
+    private func emptyStateConfig(for dateRange: DateInterval) -> (title: String, subtitle: String, icon: UIImage?, actionButtonTitle: String?) {
+        if isSitter {
+            return (
+                "No events",
+                "Events for this session will appear here.",
+                UIImage(systemName: "calendar"),
+                nil
+            )
+        }
+        
         let calendar = Calendar.current
         let days = calendar.dateComponents([.day], from: dateRange.start, to: dateRange.end).day ?? 0
+        let icon = UIImage(systemName: "calendar.badge.plus")
         
         if days <= 1 {
             return (
                 "No events today",
-                "Tap anywhere to add an event.",
-                UIImage(systemName: "calendar.badge.plus")
+                "Add an event for this session day.",
+                icon,
+                "Add Event"
             )
         } else if days <= 7 {
             return (
                 "No events this week",
-                "Tap any day to add events.",
-                UIImage(systemName: "calendar.badge.plus")
+                "Add events across the session days.",
+                icon,
+                "Add Event"
             )
         } else {
             return (
-                "No events in this period",
-                "Tap any day to start adding events.",
-                UIImage(systemName: "calendar.badge.plus")
+                "No events yet",
+                "Add events for this session.",
+                icon,
+                "Add Event"
             )
         }
     }
@@ -696,7 +717,7 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 event: item,
                 sourceFrame: sourceFrame,
                 sessionDateRange: dateRange,
-                entryRepository: NestService.shared
+                nestItemRepository: NestService.shared
             )
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
@@ -709,7 +730,7 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 dateToUse = selectedDate ?? dateRange.start
             }
             
-            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
+            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, nestItemRepository: NestService.shared)
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }

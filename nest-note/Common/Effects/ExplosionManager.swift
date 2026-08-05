@@ -32,8 +32,12 @@ struct ExplosionPreset {
 class ExplosionManager {
     static let shared = ExplosionManager()
 
+    /// Matches `ExplosionScene` particle lifetime: fade delay 2–4s + 1s fade-out.
+    private static let overlayVisibleDuration: TimeInterval = 5.5
+
     private var explosionWindow: PassthroughWindow?
     private var explosionScene: ExplosionScene?
+    private var hideOverlayWorkItem: DispatchWorkItem?
 
     private init() {}
 
@@ -52,24 +56,27 @@ class ExplosionManager {
         guard let scene else { return }
 
         let window = PassthroughWindow(windowScene: scene)
-        window.windowLevel = .alert + 2 // Higher than toast window
+        // Above the main app / toast (`.normal + 1`), always below `.alert`.
+        // Never use `.alert` or higher — that traps notification permission,
+        // Save Password, App Store review, etc. under an untappable overlay.
+        // Still hide when idle: QuickLook lives in `.normal` and higher windows
+        // can steal its gestures even with passthrough hit-testing.
+        window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 2)
         window.backgroundColor = .clear
-        window.isHidden = false
+        window.isHidden = true
+        window.isUserInteractionEnabled = false
 
         // Create root view controller with clear background (like ToastManager)
         let rootVC = UIViewController()
         rootVC.view.backgroundColor = .clear
+        rootVC.view.isUserInteractionEnabled = false
 
         // Create PassthroughSKView as a subview
         let skView = PassthroughSKView()
         skView.backgroundColor = .clear
         skView.allowsTransparency = true
+        skView.isUserInteractionEnabled = false
         skView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Temporarily make background visible for debugging
-        #if DEBUG
-        skView.backgroundColor = UIColor.red.withAlphaComponent(0.1)
-        #endif
 
         // Add SKView as subview (not replace root view)
         rootVC.view.addSubview(skView)
@@ -94,12 +101,21 @@ class ExplosionManager {
         self.explosionWindow = window
     }
 
+    /// Hide app overlay windows that sit above system modals (QuickLook, etc.).
+    /// Explosion window stays hidden until the next trigger either way.
+    static func setOverlayWindowsHidden(_ hidden: Bool) {
+        shared.explosionWindow?.isHidden = true
+        ToastManager.shared.setWindowHidden(hidden)
+    }
+
     func triggerExplosion(preset: ExplosionPreset, at point: CGPoint) {
         prepareExplosionWindow(windowScene: nil)
 
-        guard let scene = explosionScene else {
+        guard let scene = explosionScene, let window = explosionWindow else {
             return
         }
+
+        window.isHidden = false
 
         scene.updateParameters(
             gravity: preset.gravity,
@@ -110,6 +126,15 @@ class ExplosionManager {
 
         scene.setExplosionOrigin(point)
         scene.createExplosion(at: point)
+
+        // Keep the overlay up for the full particle lifetime; reset if another burst fires.
+        hideOverlayWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.explosionWindow?.isHidden = true
+            self?.hideOverlayWorkItem = nil
+        }
+        hideOverlayWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.overlayVisibleDuration, execute: workItem)
     }
 
     // MARK: - Static API

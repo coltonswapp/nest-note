@@ -20,8 +20,6 @@ final class FeatureFlagService {
         case testFlightBypassEnabled = "testflight_bypass_enabled"
         case debugAsProUser = "debug_as_pro_user"
         case captureSignupLogs = "capture_signup_logs"
-        /// When enabled, shows pilot `pilot_card` items in the nest UI (extensibility pipeline).
-        case pilotCardItemsEnabled = "pilot_card_items_enabled"
         case nestReadinessScoreEnabled = "nest_readiness_score_enabled"
         case sitterReferralProgramEnabled = "sitter_referral_program_enabled"
         /// When enabled, shows a Settings option to text the NestNote support line.
@@ -35,12 +33,6 @@ final class FeatureFlagService {
                 return true // TESTING: Set to `true` to test as Pro user, `false` to test as Free user
             case .captureSignupLogs:
                 return false // Default to not capturing logs for privacy
-            case .pilotCardItemsEnabled:
-                #if DEBUG
-                return true
-                #else
-                return false
-                #endif
             case .nestReadinessScoreEnabled:
                 #if DEBUG
                 return true

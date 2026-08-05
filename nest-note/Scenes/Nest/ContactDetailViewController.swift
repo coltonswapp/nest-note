@@ -19,6 +19,17 @@ final class ContactDetailViewController: NNSheetViewController {
     private let category: String
     private let existingContact: ContactItem?
     private let isReadOnly: Bool
+    
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        if existingContact == nil {
+            let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !title.isEmpty || !normalizedPhoneString().isEmpty
+        }
+        return hasUnsavedChanges
+    }
 
     private enum ContactNameField {
         case fullName
@@ -97,6 +108,8 @@ final class ContactDetailViewController: NNSheetViewController {
     }()
 
     private var pendingImportFromContacts = false
+    private let initialTitle: String?
+    private let initialPhoneNumber: String?
 
     private var originalTitle: String?
     private var originalPhone: String?
@@ -111,6 +124,18 @@ final class ContactDetailViewController: NNSheetViewController {
         self.category = category
         self.existingContact = contact
         self.isReadOnly = isReadOnly
+        self.initialTitle = nil
+        self.initialPhoneNumber = nil
+        super.init(sourceFrame: sourceFrame)
+    }
+
+    /// Creates a new contact form prefilled with suggested name and phone.
+    init(category: String, title: String, phoneNumber: String, sourceFrame: CGRect? = nil) {
+        self.category = category
+        self.existingContact = nil
+        self.isReadOnly = false
+        self.initialTitle = title
+        self.initialPhoneNumber = phoneNumber
         super.init(sourceFrame: sourceFrame)
     }
 
@@ -123,11 +148,11 @@ final class ContactDetailViewController: NNSheetViewController {
 
         titleLabel.text = existingContact == nil ? "New Contact" : isReadOnly ? "View Contact" : "Edit Contact"
         titleField.placeholder = "Name"
-        titleField.text = existingContact?.title
+        titleField.text = existingContact?.title ?? initialTitle
         titleField.delegate = self
         titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
 
-        phoneTextView.text = existingContact?.phoneNumber
+        phoneTextView.text = existingContact?.phoneNumber ?? initialPhoneNumber
         phoneTextView.delegate = self
 
         originalTitle = existingContact?.title
@@ -235,7 +260,14 @@ final class ContactDetailViewController: NNSheetViewController {
         let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
         let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
 
-        var items: [UIMenuElement] = []
+        var menuChildren: [UIMenuElement] = []
+        let topSection = UIMenu(
+            title: "",
+            options: .displayInline,
+            children: [createdAtAction, modifiedAtAction]
+        )
+        menuChildren.append(topSection)
+
         if existingContact != nil {
             let deleteAction = UIAction(
                 title: "Delete Contact",
@@ -244,10 +276,10 @@ final class ContactDetailViewController: NNSheetViewController {
             ) { [weak self] _ in
                 self?.confirmDelete()
             }
-            items.append(deleteAction)
+            menuChildren.append(deleteAction)
         }
-        items.append(contentsOf: [createdAtAction, modifiedAtAction])
-        return UIMenu(title: "", children: items)
+
+        return UIMenu(title: "", children: menuChildren)
     }
 
     private func configureReadOnlyInfoMenu() {
@@ -508,6 +540,7 @@ final class ContactDetailViewController: NNSheetViewController {
         } else {
             saveButton.isEnabled = nameOk && phoneOk && hasUnsavedChanges
         }
+        refreshCompactDetentAvailability()
     }
 
     @objc private func saveButtonTapped() {

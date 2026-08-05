@@ -92,7 +92,7 @@ class CardStackView: UIView {
         let view = NNEmptyStateView(
             icon: UIImage(systemName: "party.popper.fill"),
             title: "Everything looks up-to-date!",
-            subtitle: "We'll let you know if entries need updating the next time you create a session."
+            subtitle: "We'll let you know if notes need updating the next time you create a session."
         )
         view.alpha = 0
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -229,8 +229,8 @@ class CardStackView: UIView {
         setupGesturesForTopCard()
     }
     
-    private func createCard(from data: (key: String, value: String, date: Date)) -> MiniEntryDetailView {
-        let card = MiniEntryDetailView()
+    private func createCard(from data: (key: String, value: String, date: Date)) -> MiniNoteDetailView {
+        let card = MiniNoteDetailView()
         card.configure(key: data.key, value: data.value, lastModified: data.date)
         card.translatesAutoresizingMaskIntoConstraints = false
         return card

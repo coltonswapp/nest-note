@@ -227,18 +227,27 @@ final class PlaceCell: UICollectionViewCell {
         }
     }
     
-    // Update highlighting behavior
+    // Update highlighting behavior — sticky selection matches press highlight.
     override var isHighlighted: Bool {
-        didSet {
-            UIView.animate(withDuration: 0.1) {
-                // Scale effect
-                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity
-                
-                // Show/hide overlay
-                self.highlightOverlay.isHidden = !self.isHighlighted
-                self.highlightOverlay.backgroundColor = self.isHighlighted ?
-                    .black.withAlphaComponent(0.15) : .black.withAlphaComponent(0.1)
-            }
+        didSet { updateBrowseHighlightAppearance() }
+    }
+
+    override var isSelected: Bool {
+        didSet { updateBrowseHighlightAppearance() }
+    }
+
+    private func updateBrowseHighlightAppearance() {
+        guard !isInEditMode else { return }
+        let pressed = isHighlighted
+        let sticky = isSelected
+        let highlighted = pressed || sticky
+        UIView.animate(withDuration: highlighted ? 0.1 : 0.05) {
+            // Scale only while pressing; sticky selection keeps the overlay.
+            self.transform = pressed ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity
+            self.highlightOverlay.isHidden = !highlighted
+            self.highlightOverlay.backgroundColor = highlighted
+                ? .black.withAlphaComponent(0.15)
+                : .black.withAlphaComponent(0.1)
         }
     }
     

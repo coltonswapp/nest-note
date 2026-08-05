@@ -551,24 +551,21 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Finish Screen", "slider.horizontal.below.rectangle"),
             ("Sitter Finish Screen", "person.crop.circle.badge.checkmark"),
             ("Sitter Payment Setup", "dollarsign.circle"),
+            ("Session Payment Receipt", "dollarsign.square"),
             ("Onboarding", "sparkles"),
             ("Create Session", "calendar.badge.plus"),
             ("Test Category Sheet", "rectangle.stack.badge.plus"),
-            ("Test Entry Sheet", "note.text.badge.plus"),
+            ("Test Note Sheet", "note.text.badge.plus"),
             ("Test Session Sheet", "calendar.badge.plus"),
             ("Test Calendar Events", "calendar.badge.clock"),
             ("Test Event Creation", "calendar.badge.plus"),
-            ("Test Invite Sitter Screen", "person.badge.plus"),
-            ("Glassy Button Playground", "slider.horizontal.3"),
-            ("Entry Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
+            ("Note Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
             ("Debug Card Stack", "rectangle.stack"),
-            ("Test Session Bar", "rectangle.bottomthird.inset.filled"),
             ("Load Debug Sessions", "folder.badge.plus"),
             ("Test Add Place", "mappin.and.ellipse.circle.fill"),
             ("Test Place List", "list.star"),
             ("Test Place Map", "map.fill"),
             ("Test Invite Card", "rectangle.stack.badge.person.crop"),
-            ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
             ("Test Invite Your Sitter", "person.wave.2.fill"),
             ("Toast Test", "text.bubble.fill"),
             ("Markdown Preview", "doc.richtext"),
@@ -579,9 +576,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
             ("Feature Info Paywall", "sparkles.rectangle.stack"),
-            ("Waterfall Grid", "square.grid.2x2"),
             ("Sitter Referral Screen", "gift.fill"),
             ("Delete Sitter Referral Code", "trash"),
+            ("Session Help Banner", "info.circle"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
 
         if isNestReadinessEnabled, NestService.shared.currentNest != nil {
@@ -669,6 +666,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             venmoVC.enableDebugMode()
             let nav = UINavigationController(rootViewController: venmoVC)
             present(nav, animated: true)
+        case "Session Payment Receipt":
+            presentSessionPaymentReceiptExperiment()
         case "Onboarding":
             let coordinator = OnboardingCoordinator()
             coordinator.enablePreviewMode()
@@ -680,9 +679,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case "Test Category Sheet":
             let vc = CategoryDetailViewController(sourceFrame: nil)
             present(vc, animated: true)
-        case "Test Entry Sheet":
-            let vc = EntryDetailViewController(category: "Test Category", sourceFrame: nil)
-            vc.entryDelegate = self
+        case "Test Note Sheet":
+            let vc = NoteDetailViewController(category: "Test Category", sourceFrame: nil)
+            vc.noteDelegate = self
             present(vc, animated: true)
         case "Test Session Sheet":
             let vc = SessionDetailViewController(sourceFrame: nil)
@@ -697,18 +696,15 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
         case "Test Event Creation":
-            let vc = SessionEventViewController(entryRepository: NestService.shared)
+            let vc = SessionEventViewController(nestItemRepository: NestService.shared)
             present(vc, animated: true)
-        case "Entry Review":
+        case "Note Review":
             break
-//            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
+//            let reviewVC = UINavigationController(rootViewController: NoteReviewViewController())
 //            present(reviewVC, animated: true)
         case "Debug Card Stack":
             let reviewVC = DebugCardStackView()
             present(reviewVC, animated: true)
-        case "Test Session Bar":
-            let sessionDebugVC = SessionDebugViewController()
-            navigationController?.pushViewController(sessionDebugVC, animated: true)
         case "Load Debug Sessions":
             SessionService.shared.loadDebugSessions()
             // If the sessions view is visible, refresh it
@@ -729,9 +725,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             navigationController?.pushViewController(viewController, animated: true)
         case "Test Invite Card":
             let vc = InviteCardDebugViewController()
-            navigationController?.pushViewController(vc, animated: true)
-        case "Test Invite Card Animation":
-            let vc = InviteCardAnimationDebugViewController()
             navigationController?.pushViewController(vc, animated: true)
         case "Test Invite Your Sitter":
             let vc = InviteYourSitterViewController.makeDebugInstance()
@@ -772,17 +765,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             vc.routineDelegate = self
             present(vc, animated: true)
         case "Reset Tooltips":
-            resetTooltipsDatastore()
+            let vc = TipResetViewController()
+            navigationController?.pushViewController(vc, animated: true)
         case "Test Subscription Status":
             showSubscriptionStatus()
         case "Feature Info Paywall":
             showFeatureInfoPaywall()
-        case "Waterfall Grid":
-            presentWaterfallGridExperiment()
         case "Sitter Referral Screen":
             presentSitterReferralScreen()
         case "Delete Sitter Referral Code":
             deleteSitterReferralCodeForDebug()
+        case "Session Help Banner":
+            presentSessionHelpBannerDebugPreview()
         case "Show on Home Screen":
             showReadinessHomeBannerPicker()
         case "Referral Admin":
@@ -930,7 +924,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 // Check if there's a current nest (skip for sitter-only rows that don't need a nest)
                 let hasCurrentNest = NestService.shared.currentNest != nil
                 let skipsNestRequirement = ModeManager.shared.isSitterMode
-                    && (title == "Sessions" || title == SitterReferralCopy.settingsRowTitle)
+                    && (title == "Sessions" || title == "Saved Nests" || title == SitterReferralCopy.settingsRowTitle)
                 if !hasCurrentNest && !skipsNestRequirement {
                     // Show prompt to set up nest first
                     showNestSetupPrompt()
@@ -953,6 +947,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     }
                 case SitterReferralCopy.settingsRowTitle:
                     presentSitterReferralScreen()
+                case "Saved Nests":
+                    let featurePreviewVC = NNFeaturePreviewViewController(
+                        feature: SurveyService.Feature.savedNests
+                    )
+                    featurePreviewVC.modalPresentationStyle = .formSheet
+                    present(featurePreviewVC, animated: true)
                 case "Saved Sitters":
                     let sitterListVC = SitterListViewController(displayMode: .default)
                     let nav = UINavigationController(rootViewController: sitterListVC)
@@ -1008,6 +1008,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             switch title {
             case "How It Works":
                 showHowItWorks()
+            case "How Sessions Work":
+                showHowSessionsWork()
             case "Release Notes":
                 showReleaseNotes()
             case "Text Support":
@@ -1095,6 +1097,13 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     #if DEBUG
+    private func presentSessionHelpBannerDebugPreview() {
+        SessionHelpBannerStore.enableDebugPreview()
+        let vc = EditSessionViewController()
+        vc.modalPresentationStyle = .pageSheet
+        present(vc, animated: true)
+    }
+
     private func deleteSitterReferralCodeForDebug() {
         guard let user = UserService.shared.currentUser else {
             showToast(text: "Sign in required")
@@ -1158,12 +1167,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
         Task {
             do {
-                let (_, places) = try await NestService.shared.fetchEntriesAndPlaces()
+                let (_, places) = try await NestService.shared.fetchNotesAndPlaces()
                 await MainActor.run {
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: places,
-                        entryRepository: NestService.shared
+                        nestItemRepository: NestService.shared
                     )
                     self.navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -1173,7 +1182,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: [],
-                        entryRepository: NestService.shared
+                        nestItemRepository: NestService.shared
                     )
                     self.navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -1182,55 +1191,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     #if DEBUG
-    private func presentWaterfallGridExperiment() {
-        guard UserService.shared.isSignedIn else {
-            showSignInPrompt()
-            return
-        }
-
-        guard NestService.shared.currentNest != nil else {
-            showNestSetupPrompt()
-            return
-        }
-
-        Task {
-            do {
-                let (groupedEntries, places) = try await NestService.shared.fetchEntriesAndPlaces()
-                let category = Self.bestCategoryForWaterfallExperiment(from: groupedEntries)
-
-                await MainActor.run {
-                    let categoryVC = NestCategoryViewController(
-                        category: category,
-                        places: places,
-                        entryRepository: NestService.shared,
-                        itemDisplayLayout: .waterfallGrid
-                    )
-                    self.navigationController?.pushViewController(categoryVC, animated: true)
-                }
-            } catch {
-                Logger.log(
-                    level: .error,
-                    category: .general,
-                    message: "Failed to launch waterfall grid experiment: \(error)"
-                )
-                await MainActor.run {
-                    self.showToast(text: "Couldn't load category data")
-                }
-            }
-        }
-    }
-
-    private static func bestCategoryForWaterfallExperiment(from groupedEntries: [String: [BaseEntry]]) -> String {
-        let topLevelCounts = groupedEntries.reduce(into: [String: Int]()) { counts, pair in
-            let topLevel = pair.key.components(separatedBy: "/").first ?? pair.key
-            counts[topLevel, default: 0] += pair.value.count
-        }
-
-        if let richest = topLevelCounts.max(by: { $0.value < $1.value })?.key, richest.isEmpty == false {
-            return richest
-        }
-
-        return "Household"
+    private func presentSessionPaymentReceiptExperiment() {
+        let configuration = SessionPaymentViewController.Configuration(
+            sessionId: "debug-session-payment",
+            nestId: NestService.shared.currentNest?.id ?? "debug-nest",
+            sessionTitle: "Friday Date Night",
+            startDate: Date().addingTimeInterval(-4 * 3600),
+            scheduledHours: 3.5,
+            defaultHourlyRateCents: SessionPaymentCalculator.defaultHourlyRateCents,
+            venmoUsername: "demo.sitter",
+            sitterName: "Alex"
+        )
+        SessionPaymentCalculator.presentPaymentCalculator(from: self, configuration: configuration)
     }
     #endif
 
@@ -1283,7 +1255,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func makeSupportItems() -> [Item] {
         var items: [(String, String)] = [
             ("How It Works", "book.pages"),
-            ("Release Notes", "sparkles"),
+            ("How Sessions Work", "calendar"),
+            ("Release Notes", "newspaper"),
         ]
 
         if FeatureFlagService.shared.isEnabled(.supportTextEnabled) {
@@ -1297,6 +1270,14 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func showHowItWorks() {
         let vc = MarkdownTestViewController(
             markdown: HowItWorksArticle.markdown,
+            showsShareButton: false
+        )
+        navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showHowSessionsWork() {
+        let vc = MarkdownTestViewController(
+            markdown: HowSessionsWorkArticle.markdown,
             showsShareButton: false
         )
         navigationController?.pushViewController(vc, animated: true)
@@ -1365,7 +1346,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func showDeleteAccountConfirmation() {
         let firstAlert = UIAlertController(
             title: "Delete Account",
-            message: "Are you sure you want to delete your account? This action cannot be undone and will permanently delete:\n\n• Your nest and all its data\n• All your entries, routines, and places\n• Your saved sitters\n• Your account information",
+            message: "Are you sure you want to delete your account? This action cannot be undone and will permanently delete:\n\n• Your nest and all its data\n• All your notes, routines, and places\n• Your saved sitters\n• Your account information",
             preferredStyle: .alert
         )
 
@@ -1477,32 +1458,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         applyInitialSnapshots()
     }
     
-    private func resetTooltipsDatastore() {
-        let alert = UIAlertController(
-            title: "Reset Tooltips",
-            message: "This will reset all tooltip data and they will show again. Are you sure?",
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Reset", style: .destructive) { _ in
-            print("🔄 [TipKit Debug] SettingsViewController: User confirmed tooltip reset")
-            NNTipManager.shared.resetAllTips()
-            
-            // Show confirmation
-            let successAlert = UIAlertController(
-                title: "Tooltips Reset",
-                message: "All tooltip data has been reset. Tips will show again when appropriate.",
-                preferredStyle: .alert
-            )
-            successAlert.addAction(UIAlertAction(title: "OK", style: .default))
-            self.present(successAlert, animated: true)
-        })
-        
-        present(alert, animated: true)
-    }
-    
-    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
@@ -1530,12 +1485,12 @@ extension SettingsViewController: AuthenticationDelegate {
     }
 }
 
-extension SettingsViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(didDeleteEntry: BaseEntry) {
-        showToast(text: "Entry saved: \(didDeleteEntry.title)")
+extension SettingsViewController: NoteDetailViewControllerDelegate {
+    func noteDetailViewController(didDeleteNote: NoteItem) {
+        showToast(text: "Note deleted: \(didDeleteNote.title)")
     }
     
-    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
+    func noteDetailViewController(didSaveNote entry: NoteItem?) {
         //
     }
 }

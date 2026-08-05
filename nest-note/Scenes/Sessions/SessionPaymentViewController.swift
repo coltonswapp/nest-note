@@ -56,8 +56,45 @@ final class SessionPaymentViewController: NNViewController {
             titleColor: .white,
             fillStyle: .fill(NNColors.primary)
         )
+        let symbol = UIImage(
+            systemName: "arrow.up.right",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        )
+        button.setImage(symbol)
+        // Trailing placement reads as an external / leave-app action
+        button.stackView.insertArrangedSubview(button.titleLabel, at: 0)
         button.addTarget(self, action: #selector(payButtonTapped), for: .touchUpInside)
         return button
+    }()
+
+    private let venmoIconView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(named: "venmo-icon"))
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            imageView.widthAnchor.constraint(equalToConstant: 22),
+            imageView.heightAnchor.constraint(equalToConstant: 22)
+        ])
+        return imageView
+    }()
+
+    private let recipientLabel: UILabel = {
+        let label = UILabel()
+        label.font = .bodyM
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private lazy var recipientStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [venmoIconView, recipientLabel])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
     }()
 
     init(configuration: Configuration) {
@@ -97,8 +134,36 @@ final class SessionPaymentViewController: NNViewController {
         setupCollectionView()
         configureDataSource()
         applySnapshot()
-        payButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        setupBottomChrome()
         updatePayButtonState()
+    }
+
+    private func setupBottomChrome() {
+        payButton.pinToBottom(of: view, addBlurEffect: true, blurRadius: 16, blurMaskImage: UIImage(named: "testBG3"))
+        configureRecipientRow()
+
+        view.addSubview(recipientStack)
+        NSLayoutConstraint.activate([
+            recipientStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            recipientStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+            recipientStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
+            recipientStack.bottomAnchor.constraint(equalTo: payButton.topAnchor, constant: -12)
+        ])
+        view.bringSubviewToFront(recipientStack)
+        view.bringSubviewToFront(payButton)
+    }
+
+    private func configureRecipientRow() {
+        let username = configuration.venmoUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if username.isEmpty {
+            venmoIconView.alpha = 0.45
+            recipientLabel.text = "\(configuration.sitterName) hasn't added Venmo yet"
+            recipientLabel.textColor = .tertiaryLabel
+        } else {
+            venmoIconView.alpha = 1
+            recipientLabel.text = "Paying \(VenmoPaymentHandler.displayUsername(username))"
+            recipientLabel.textColor = .secondaryLabel
+        }
     }
 
     // MARK: - Collection View
@@ -110,7 +175,7 @@ final class SessionPaymentViewController: NNViewController {
         collectionView.keyboardDismissMode = .interactive
         collectionView.delegate = self
 
-        let bottomInset: CGFloat = 100
+        let bottomInset: CGFloat = 140
         collectionView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
         collectionView.scrollIndicatorInsets = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset - 30, right: 0)
 

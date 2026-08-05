@@ -23,7 +23,12 @@ enum ReleaseNotesArticle {
             )
             return fallbackMarkdown
         }
-        return text
+        return injectingAppVersion(into: text)
+    }
+
+    private static func injectingAppVersion(into text: String) -> String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        return text.replacingOccurrences(of: "{{APP_VERSION}}", with: version)
     }
 
     private static let fallbackMarkdown = """

@@ -279,15 +279,18 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     
     // MARK: - Public Methods
     func configure(with question: SurveyQuestion) {
+        // Always keep the question identity available before the view loads
+        // (coordinators look up steps by currentQuestion.id / onboardingStepId).
+        currentQuestion = question
+
         // If collection view isn't ready, store configuration for later
         if collectionView == nil {
             pendingConfiguration = PendingConfiguration(question: question)
             return
         }
-        
-        currentQuestion = question
+
         setupOnboarding(title: question.title, subtitle: question.subtitle)
-        
+
         self.options = question.filteredOptions.map { SurveyOption(title: $0) }
         self.isMultiSelect = question.isMultiSelect
         collectionView.reloadData()

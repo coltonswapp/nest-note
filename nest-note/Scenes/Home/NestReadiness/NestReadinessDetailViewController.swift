@@ -380,10 +380,10 @@ final class NestReadinessDetailViewController: NNViewController, UICollectionVie
     private func presentCreationFlow(for essential: NestReadinessEssential, category: String) {
         switch essential.preferredItemType {
         case .entry, .contact:
-            present(EntryDetailViewController(category: category, title: essential.title, content: ""), animated: true)
+            present(NoteDetailViewController(category: category, title: essential.title, content: ""), animated: true)
         case .routine:
             present(RoutineDetailViewController(category: category, routineName: essential.title), animated: true)
-        case .place, .pilotCard, .unknownDocument:
+        case .place, .unknownDocument:
             delegate?.readinessDetailViewController(self, didSelectCategory: category)
         }
     }

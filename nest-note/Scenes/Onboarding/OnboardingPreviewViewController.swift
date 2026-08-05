@@ -15,7 +15,7 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
 
     // MARK: - Review Item Model
     private enum ReviewItem {
-        case entry(CommonEntry)
+        case entry(CommonNote)
         case routine(CommonRoutine)
         case place(CommonPlace)
     }
@@ -25,7 +25,7 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
 
         setupOnboarding(
             title: "NestNote offers flexible organization",
-            subtitle: "Entries, routines, and places—swipe to see how they work"
+            subtitle: "Notes, routines, and places—swipe to see how they work"
         )
         setupContent()
         addCTAButton(title: "Continue")
@@ -81,19 +81,19 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
 
     private func setupCardStack() {
         reviewItems = [
-            .entry(CommonEntry(title: "WiFi Password", content: "SuperStrongPassword \n\n Entries are good for codes & passwords", category: "Common")),
+            .entry(CommonNote(title: "WiFi Password", content: "SuperStrongPassword \n\n Notes are good for codes & passwords", category: "Common")),
             .routine(CommonRoutine(name: "Bedtime Routine", icon: "moon.stars.fill")),
             .place(CommonPlace(name: "School", icon: "graduationcap.fill")),
 
-            .entry(CommonEntry(title: "Garage Code", content: "8005", category: "Common")),
+            .entry(CommonNote(title: "Garage Code", content: "8005", category: "Common")),
             .routine(CommonRoutine(name: "After School", icon: "backpack.fill")),
             .place(CommonPlace(name: "Grandma's House", icon: "house.fill")),
 
-            .entry(CommonEntry(title: "Emergency Contact", content: "John Doe: 555-123-4567 \n\n Entries are also good for emergency contacts", category: "Common")),
+            .entry(CommonNote(title: "Emergency Contact", content: "John Doe: 555-123-4567 \n\n Notes are also good for emergency contacts", category: "Common")),
             .routine(CommonRoutine(name: "Morning Wake Up", icon: "sun.rise.fill")),
             .place(CommonPlace(name: "Favorite Park", icon: "tree.fill")),
 
-            .entry(CommonEntry(title: "Allergies", content: "Peanuts, penicillin", category: "Common")),
+            .entry(CommonNote(title: "Allergies", content: "Peanuts, penicillin", category: "Common")),
             .routine(CommonRoutine(name: "Pet Care", icon: "pawprint.fill")),
             .place(CommonPlace(name: "Soccer Practice", icon: "soccerball"))
         ]
@@ -108,7 +108,7 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
     private func createCardView(for item: ReviewItem) -> UIView {
         switch item {
         case .entry(let commonEntry):
-            let view = MiniEntryDetailView()
+            let view = MiniNoteDetailView()
             view.translatesAutoresizingMaskIntoConstraints = false
             view.configure(key: commonEntry.title, value: commonEntry.content, lastModified: Date())
             return view

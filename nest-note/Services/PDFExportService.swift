@@ -6,15 +6,15 @@ class PDFExportService {
     
     // MARK: - PDF Section Types
     enum PDFSection {
-        case entries
+        case notes
         case events
         case contacts
         case places
         case routines
     }
     
-    // Default section order - easily customizable
-    private static let defaultSectionOrder: [PDFSection] = [.events, .entries, .contacts]
+    // Default section order — contacts render inside folder sections with notes/places/routines
+    private static let defaultSectionOrder: [PDFSection] = [.events, .notes]
     
     static func generateSessionPDF(
         session: SessionItem,
@@ -41,7 +41,8 @@ class PDFExportService {
                         // Force light mode for PDF export
                         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
                         let lightImage = imageAsset.imageAsset?.image(with: lightTraits) ?? imageAsset
-                        placeImages[place.id] = lightImage
+                        // Downsample before embedding — full-res photos balloon PDF size and freeze viewers.
+                        placeImages[place.id] = downsampledImage(lightImage, maxPixelDimension: 240)
                         print("PDFExport: Loaded light mode image for place: \(place.displayName)")
                     } catch {
                         print("PDFExport: Failed to load image for place \(place.displayName): \(error)")
@@ -53,17 +54,17 @@ class PDFExportService {
             print("PDFExport: Failed to fetch places: \(error)")
             // Continue without places if fetch fails
         }
-        // Fetch entries from EntryRepository first
-        var allEntries: [BaseEntry] = []
+        // Fetch entries from NestItemRepository first
+        var allNotes: [NoteItem] = []
         do {
-            let entriesByCategory = try await NestService.shared.fetchEntries()
-            // Flatten the dictionary of [String: [BaseEntry]] to [BaseEntry]
-            allEntries = entriesByCategory.values.flatMap { $0 }
-            print("PDFExport: Fetched \(allEntries.count) entries from EntryRepository")
+            let entriesByCategory = try await NestService.shared.fetchNotes()
+            // Flatten the dictionary of [String: [NoteItem]] to [NoteItem]
+            allNotes = entriesByCategory.values.flatMap { $0 }
+            print("PDFExport: Fetched \(allNotes.count) entries from NestItemRepository")
         } catch {
-            print("PDFExport: Failed to fetch entries: \(error)")
-            // Fallback to nestItem.entries if available
-            allEntries = nestItem.entries ?? []
+            print("PDFExport: Failed to fetch notes: \(error)")
+            // Fallback to nestItem.notes if available
+            allNotes = nestItem.notes ?? []
         }
 
         // Fetch routines
@@ -95,80 +96,144 @@ class PDFExportService {
         }()
 
         // Filter entries and places for the Entries section to ONLY selected items
-        let filteredEntriesForEntriesSection: [BaseEntry] = allEntries.filter { selectionSet.contains($0.id) }
+        let filteredEntriesForEntriesSection: [NoteItem] = allNotes.filter { selectionSet.contains($0.id) }
         let filteredPlacesForEntriesSection: [PlaceItem] = allPlaces.filter { selectionSet.contains($0.id) }
         let filteredRoutinesForSection: [RoutineItem] = allRoutines.filter { selectionSet.contains($0.id) }
         let filteredContactsForSection: [ContactItem] = allContacts.filter { selectionSet.contains($0.id) }
-        
+
+        // Full nest lookup so attachments on selected parents can resolve even if not independently selected
+        var attachmentLookup: [String: any BaseItem] = [:]
+        for item in allNotes { attachmentLookup[item.id] = item }
+        for item in allPlaces { attachmentLookup[item.id] = item }
+        for item in allRoutines { attachmentLookup[item.id] = item }
+        for item in allContacts { attachmentLookup[item.id] = item }
+
+        // UIGraphicsPDFRenderer / UIKit text & image drawing must run on the main thread.
+        // Off-main rendering can produce corrupt PDFs that QuickLook fails to open.
+        return await MainActor.run {
+            renderSessionPDF(
+                session: session,
+                nestItem: nestItem,
+                events: events,
+                notes: filteredEntriesForEntriesSection,
+                places: filteredPlacesForEntriesSection,
+                routines: filteredRoutinesForSection,
+                contacts: filteredContactsForSection,
+                eventPlaces: eventPlaces,
+                placeImages: placeImages,
+                attachmentLookup: attachmentLookup,
+                sectionOrder: sectionOrder
+            )
+        }
+    }
+
+    @MainActor
+    private static func renderSessionPDF(
+        session: SessionItem,
+        nestItem: NestItem,
+        events: [SessionEvent],
+        notes: [NoteItem],
+        places: [PlaceItem],
+        routines: [RoutineItem],
+        contacts: [ContactItem],
+        eventPlaces: [String: PlaceItem],
+        placeImages: [String: UIImage],
+        attachmentLookup: [String: any BaseItem],
+        sectionOrder: [PDFSection]?
+    ) -> Data? {
+        // Build the QR image before opening the PDF context. Nested UIGraphicsImageRenderer
+        // calls inside pdfData { } can leave the PDF graphics state corrupt.
+        print("PDFExport: Attempting to load logo: \(NNImage.primaryLogo != nil ? "Success" : "Failed")")
+        let qrCodeImage: UIImage? = {
+            guard let logoImage = NNImage.primaryLogo else { return nil }
+            let image = generateQRCodeWithLogo(text: "https://www.nestnoteapp.com", logo: logoImage)
+            if image != nil {
+                print("PDFExport: QR code with logo generated successfully")
+            } else {
+                print("PDFExport: QR code generation failed, using fallback logo")
+            }
+            return image
+        }()
+
         let pageSize = CGRect(x: 0, y: 0, width: 612, height: 792) // 8.5 x 11 inches at 72 DPI
         let renderer = UIGraphicsPDFRenderer(bounds: pageSize)
-        
+
         let pdfData = renderer.pdfData { context in
             // Start the first page
             context.beginPage()
             let cgContext = context.cgContext
-            
+
             var currentY: CGFloat = 60 // Top margin
             let leftMargin: CGFloat = 40
             let rightMargin: CGFloat = 40
             let contentWidth = pageSize.width - leftMargin - rightMargin
-            
+
             // Draw header
-            currentY = drawHeader(context: cgContext, session: session, pageSize: pageSize, leftMargin: leftMargin, rightMargin: rightMargin, currentY: currentY)
-            
+            currentY = drawHeader(
+                context: cgContext,
+                session: session,
+                pageSize: pageSize,
+                leftMargin: leftMargin,
+                rightMargin: rightMargin,
+                currentY: currentY,
+                qrCodeImage: qrCodeImage
+            )
+
             // Draw horizontal line
             currentY += 20
             drawHorizontalLine(context: cgContext, y: currentY, leftMargin: leftMargin, rightMargin: rightMargin)
             currentY += 30
-            
+
             // Use the provided section order or default
             let requestedSections = sectionOrder ?? defaultSectionOrder
-            
+
             // Filter out sections that have no content
             let sectionsToRender = requestedSections.filter { section in
                 switch section {
                 case .events:
                     return !events.isEmpty
-                case .entries:
-                    return !filteredEntriesForEntriesSection.isEmpty || !filteredPlacesForEntriesSection.isEmpty || !filteredRoutinesForSection.isEmpty
+                case .notes:
+                    return !notes.isEmpty || !places.isEmpty || !routines.isEmpty || !contacts.isEmpty
                 case .contacts:
-                    return !filteredContactsForSection.isEmpty
+                    // Standalone contacts section is opt-in via sectionOrder; default folds contacts into .notes
+                    return !contacts.isEmpty
                 case .places:
-                    return !filteredPlacesForEntriesSection.isEmpty
+                    return !places.isEmpty
                 case .routines:
-                    return !filteredRoutinesForSection.isEmpty
+                    return !routines.isEmpty
                 }
             }
-            
+
             // Draw sections in the specified order
             for (index, section) in sectionsToRender.enumerated() {
                 let isFirstSection = index == 0
-                
+
                 // Add spacing between sections (except for the first one)
                 if !isFirstSection {
                     currentY += 24
                 }
-                
+
                 currentY = drawSection(
                     section: section,
                     context: context,
                     cgContext: cgContext,
                     session: session,
                     nestItem: nestItem,
-                    allEntries: filteredEntriesForEntriesSection,
+                    allNotes: notes,
                     events: events,
                     eventPlaces: eventPlaces,
-                    allPlaces: filteredPlacesForEntriesSection,
-                    allRoutines: filteredRoutinesForSection,
-                    allContacts: filteredContactsForSection,
+                    allPlaces: places,
+                    allRoutines: routines,
+                    allContacts: contacts,
                     placeImages: placeImages,
+                    attachmentLookup: attachmentLookup,
                     currentY: currentY,
                     leftMargin: leftMargin,
                     rightMargin: rightMargin,
                     contentWidth: contentWidth,
                     pageSize: pageSize
                 )
-                
+
                 // Add half-width divider after each section (except the last one)
                 if index < sectionsToRender.count - 1 {
                     currentY += 12
@@ -177,11 +242,48 @@ class PDFExportService {
                 }
             }
         }
-        
+
+        // Validate the PDF can be opened before returning it to callers / QuickLook.
+        guard let document = PDFDocument(data: pdfData), document.pageCount > 0 else {
+            print("PDFExport: Generated PDF failed validation (\(pdfData.count) bytes, unreadable or empty)")
+            return nil
+        }
+
+        print("PDFExport: Generated valid PDF (\(pdfData.count) bytes, \(document.pageCount) page(s))")
         return pdfData
     }
+
+    /// Shrinks images before they are drawn into the PDF content stream.
+    private static func downsampledImage(_ image: UIImage, maxPixelDimension: CGFloat) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let longest = max(width, height)
+        guard longest > maxPixelDimension else { return image }
+
+        let scale = maxPixelDimension / longest
+        let newWidth = max(1, Int((width * scale).rounded()))
+        let newHeight = max(1, Int((height * scale).rounded()))
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: newWidth,
+            height: newHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return image
+        }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+        guard let scaled = context.makeImage() else { return image }
+        return UIImage(cgImage: scaled, scale: 1, orientation: image.imageOrientation)
+    }
     
-    private static func calculateSectionHeight(categoryName: String, entries: [BaseEntry], contentWidth: CGFloat) -> CGFloat {
+    private static func calculateSectionHeight(categoryName: String, notes: [NoteItem], contentWidth: CGFloat) -> CGFloat {
         var totalHeight: CGFloat = 0
         
         // Category title height
@@ -194,8 +296,8 @@ class PDFExportService {
         totalHeight += categorySize.height + 20 // title + spacing
         
         // Separate grid and full-width items
-        let gridItems = entries.filter { isGridItem($0) }
-        let fullWidthItems = entries.filter { !isGridItem($0) }
+        let gridItems = notes.filter { isGridItem($0) }
+        let fullWidthItems = notes.filter { !isGridItem($0) }
         
         // Calculate grid items height
         if !gridItems.isEmpty {
@@ -236,7 +338,15 @@ class PDFExportService {
         return totalHeight
     }
     
-    private static func drawHeader(context: CGContext, session: SessionItem, pageSize: CGRect, leftMargin: CGFloat, rightMargin: CGFloat, currentY: CGFloat) -> CGFloat {
+    private static func drawHeader(
+        context: CGContext,
+        session: SessionItem,
+        pageSize: CGRect,
+        leftMargin: CGFloat,
+        rightMargin: CGFloat,
+        currentY: CGFloat,
+        qrCodeImage: UIImage?
+    ) -> CGFloat {
         var y = currentY
         
         // Session title
@@ -301,47 +411,19 @@ class PDFExportService {
         
         dateText.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: dateAttributes)
         
-        // Draw QR code with embedded logo
+        // Draw QR code with embedded logo (pre-rendered outside the PDF context)
         let qrSize: CGFloat = 70
         let qrX = pageSize.width - rightMargin - qrSize
         let qrRect = CGRect(x: qrX, y: currentY, width: qrSize, height: qrSize)
         
-        // Generate QR code with logo
-        print("PDFExport: Attempting to load logo: \(NNImage.primaryLogo != nil ? "Success" : "Failed")")
-        if let logoImage = NNImage.primaryLogo,
-           let qrCodeImage = generateQRCodeWithLogo(text: "https://www.nestnoteapp.com", logo: logoImage) {
-            print("PDFExport: QR code with logo generated successfully")
-            
-            // Save the current graphics state
+        let imageToDraw = qrCodeImage ?? NNImage.primaryLogo
+        if let imageToDraw, let cgImage = imageToDraw.cgImage {
             context.saveGState()
-            
-            // Flip the coordinate system to fix upside-down image
             context.translateBy(x: 0, y: qrRect.maxY)
             context.scaleBy(x: 1.0, y: -1.0)
-            
-            // Draw the QR code in the flipped coordinate system
-            if let cgImage = qrCodeImage.cgImage {
-                let flippedRect = CGRect(x: qrRect.minX, y: 0, width: qrRect.width, height: qrRect.height)
-                context.draw(cgImage, in: flippedRect)
-            }
-            
-            // Restore the graphics state
+            let flippedRect = CGRect(x: qrRect.minX, y: 0, width: qrRect.width, height: qrRect.height)
+            context.draw(cgImage, in: flippedRect)
             context.restoreGState()
-        } else {
-            print("PDFExport: QR code generation failed, using fallback logo")
-            // Fallback to simple logo if QR generation fails
-            if let logoImage = UIImage(named: "NNImage.primaryLogo") {
-                context.saveGState()
-                context.translateBy(x: 0, y: qrRect.maxY)
-                context.scaleBy(x: 1.0, y: -1.0)
-                
-                if let cgImage = logoImage.cgImage {
-                    let flippedRect = CGRect(x: qrRect.minX, y: 0, width: qrRect.width, height: qrRect.height)
-                    context.draw(cgImage, in: flippedRect)
-                }
-                
-                context.restoreGState()
-            }
         }
         
         return y + 20
@@ -364,7 +446,7 @@ class PDFExportService {
         context.strokePath()
     }
     
-    private static func drawCategorySectionWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, categoryName: String, entries: [BaseEntry], places: [PlaceItem], placeImages: [String: UIImage], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
+    private static func drawCategorySectionWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, categoryName: String, notes: [NoteItem], places: [PlaceItem], placeImages: [String: UIImage], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
         var y = currentY
         let bottomMargin: CGFloat = 60
         
@@ -387,8 +469,8 @@ class PDFExportService {
         y += categoryHeight
         
         // Separate grid items from full-width items (entries only)
-        let gridEntries = entries.filter { isGridItem($0) }
-        let fullWidthItems = entries.filter { !isGridItem($0) }
+        let gridEntries = notes.filter { isGridItem($0) }
+        let fullWidthItems = notes.filter { !isGridItem($0) }
         
         // Draw grid entries first (3-column layout)
         if !gridEntries.isEmpty {
@@ -404,14 +486,24 @@ class PDFExportService {
         
         // Draw full-width items with page breaks
         for entry in fullWidthItems {
-            y = drawFullWidthItemWithPageBreaks(context: context, cgContext: cgContext, entry: entry, currentY: y, leftMargin: leftMargin, contentWidth: contentWidth, pageSize: pageSize, bottomMargin: bottomMargin)
+            y = drawFullWidthItemWithPageBreaks(
+                context: context,
+                cgContext: cgContext,
+                entry: entry,
+                attachmentLookup: [:],
+                currentY: y,
+                leftMargin: leftMargin,
+                contentWidth: contentWidth,
+                pageSize: pageSize,
+                bottomMargin: bottomMargin
+            )
             y += 16
         }
         
         return y
     }
     
-    private static func drawCategorySection(context: CGContext, categoryName: String, entries: [BaseEntry], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
+    private static func drawCategorySection(context: CGContext, categoryName: String, notes: [NoteItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect) -> CGFloat {
         var y = currentY
         
         // Category title
@@ -426,8 +518,8 @@ class PDFExportService {
         y += categorySize.height + 12
         
         // Separate grid items from full-width items
-        let gridItems = entries.filter { isGridItem($0) }
-        let fullWidthItems = entries.filter { !isGridItem($0) }
+        let gridItems = notes.filter { isGridItem($0) }
+        let fullWidthItems = notes.filter { !isGridItem($0) }
         
         // Draw grid items (2x2 layout)
         if !gridItems.isEmpty {
@@ -444,12 +536,12 @@ class PDFExportService {
         return y
     }
     
-    private static func isGridItem(_ entry: BaseEntry) -> Bool {
+    private static func isGridItem(_ entry: NoteItem) -> Bool {
         // Use the same logic as the app: title ≤ 15 characters AND content ≤ 15 characters
         return entry.title.count <= 15 && entry.content.count <= 15
     }
     
-    private static func drawGridItems(context: CGContext, items: [BaseEntry], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
+    private static func drawGridItems(context: CGContext, items: [NoteItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
         let columnsPerRow = 3  // 3x3 grid
         let rowHeight: CGFloat = 70
         let columnWidth = contentWidth / CGFloat(columnsPerRow)
@@ -493,7 +585,7 @@ class PDFExportService {
         return y + CGFloat(totalRows) * rowHeight
     }
     
-    private static func drawFullWidthItem(context: CGContext, entry: BaseEntry, currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
+    private static func drawFullWidthItem(context: CGContext, entry: NoteItem, currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat) -> CGFloat {
         var y = currentY
         
         // Draw title
@@ -514,7 +606,6 @@ class PDFExportService {
             .foregroundColor: UIColor.black
         ]
         
-        let contentRect = CGRect(x: leftMargin, y: y, width: contentWidth, height: 1000) // Large height for automatic sizing
         let contentSize = entry.content.boundingRect(
             with: CGSize(width: contentWidth, height: 1000),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -527,14 +618,14 @@ class PDFExportService {
         return y + contentSize.height
     }
     
-    private static func drawGridItemsWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, items: [BaseEntry], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+    private static func drawGridItemsWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, items: [NoteItem], currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
         let columnsPerRow = 3
         let rowHeight: CGFloat = 70
         let columnWidth = contentWidth / CGFloat(columnsPerRow)
         let itemSpacing: CGFloat = 8
         
         var y = currentY
-        var currentRowItems: [BaseEntry] = []
+        var currentRowItems: [NoteItem] = []
         
         for (index, item) in items.enumerated() {
             currentRowItems.append(item)
@@ -604,7 +695,7 @@ class PDFExportService {
                     let x = leftMargin + CGFloat(columnIndex) * columnWidth
                     let availableWidth = columnWidth - (columnIndex < columnsPerRow - 1 ? itemSpacing : 0)
                     
-                    if let entry = rowItem as? BaseEntry {
+                    if let entry = rowItem as? NoteItem {
                         // Draw entry item
                         let titleFont = UIFont.systemFont(ofSize: 12, weight: .medium)
                         let titleAttributes: [NSAttributedString.Key: Any] = [
@@ -769,7 +860,17 @@ class PDFExportService {
         place.address.draw(in: addressRect, withAttributes: addressAttributes)
     }
     
-    private static func drawFullWidthItemWithPageBreaks(context: UIGraphicsPDFRendererContext, cgContext: CGContext, entry: BaseEntry, currentY: CGFloat, leftMargin: CGFloat, contentWidth: CGFloat, pageSize: CGRect, bottomMargin: CGFloat) -> CGFloat {
+    private static func drawFullWidthItemWithPageBreaks(
+        context: UIGraphicsPDFRendererContext,
+        cgContext: CGContext,
+        entry: NoteItem,
+        attachmentLookup: [String: any BaseItem],
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
         var y = currentY
         
         // Calculate the full height needed for this item
@@ -807,7 +908,87 @@ class PDFExportService {
         // Draw content
         entry.content.draw(in: CGRect(x: leftMargin, y: y, width: contentWidth, height: contentSize.height), withAttributes: contentAttributes)
         y += contentSize.height
+
+        y = drawAttachedItems(
+            context: context,
+            cgContext: cgContext,
+            attachmentIds: entry.attachmentIds,
+            attachmentLookup: attachmentLookup,
+            excludingHostId: entry.id,
+            currentY: y,
+            leftMargin: leftMargin,
+            contentWidth: contentWidth,
+            pageSize: pageSize,
+            bottomMargin: bottomMargin
+        )
         
+        return y
+    }
+
+    /// Compact nested list of attachments under a parent entry/routine.
+    private static func drawAttachedItems(
+        context: UIGraphicsPDFRendererContext,
+        cgContext: CGContext,
+        attachmentIds: [String],
+        attachmentLookup: [String: any BaseItem],
+        excludingHostId: String?,
+        currentY: CGFloat,
+        leftMargin: CGFloat,
+        contentWidth: CGFloat,
+        pageSize: CGRect,
+        bottomMargin: CGFloat
+    ) -> CGFloat {
+        var items: [any BaseItem] = []
+        var seen = Set<String>()
+        for id in attachmentIds {
+            guard id != excludingHostId, !seen.contains(id), let item = attachmentLookup[id] else { continue }
+            seen.insert(id)
+            items.append(item)
+            if items.count >= AttachmentResolver.maxCount { break }
+        }
+        guard !items.isEmpty else { return currentY }
+
+        var y = currentY + 6
+        let labelFont = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: labelFont,
+            .foregroundColor: UIColor.darkGray
+        ]
+        let rowFont = UIFont.systemFont(ofSize: 12, weight: .regular)
+        let rowAttributes: [NSAttributedString.Key: Any] = [
+            .font: rowFont,
+            .foregroundColor: UIColor.black
+        ]
+        let indent: CGFloat = 12
+
+        let header = "Attached"
+        let headerHeight = header.size(withAttributes: labelAttributes).height
+        if y + headerHeight > pageSize.height - bottomMargin {
+            context.beginPage()
+            y = 60
+        }
+        header.draw(at: CGPoint(x: leftMargin + indent, y: y), withAttributes: labelAttributes)
+        y += headerHeight + 4
+
+        for item in items {
+            let typeLabel: String
+            switch item.type {
+            case .entry: typeLabel = "Note"
+            case .place: typeLabel = "Place"
+            case .routine: typeLabel = "Routine"
+            case .contact: typeLabel = "Contact"
+            case .unknownDocument: typeLabel = "Item"
+            }
+            let line = "• \(item.title) (\(typeLabel))"
+            let lineHeight = line.size(withAttributes: rowAttributes).height
+            if y + lineHeight > pageSize.height - bottomMargin {
+                context.beginPage()
+                y = 60
+            }
+            line.draw(at: CGPoint(x: leftMargin + indent, y: y), withAttributes: rowAttributes)
+            y += lineHeight + 3
+        }
+
         return y
     }
     
@@ -885,13 +1066,14 @@ class PDFExportService {
         cgContext: CGContext,
         session: SessionItem,
         nestItem: NestItem,
-        allEntries: [BaseEntry],
+        allNotes: [NoteItem],
         events: [SessionEvent],
         eventPlaces: [String: PlaceItem],
         allPlaces: [PlaceItem],
         allRoutines: [RoutineItem],
         allContacts: [ContactItem],
         placeImages: [String: UIImage],
+        attachmentLookup: [String: any BaseItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         rightMargin: CGFloat,
@@ -900,14 +1082,16 @@ class PDFExportService {
     ) -> CGFloat {
         
         switch section {
-        case .entries:
+        case .notes:
             return drawEntriesSection(
                 context: context,
                 cgContext: cgContext,
-                allEntries: allEntries,
+                allNotes: allNotes,
                 allPlaces: allPlaces,
                 allRoutines: allRoutines,
+                allContacts: allContacts,
                 placeImages: placeImages,
+                attachmentLookup: attachmentLookup,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -954,6 +1138,7 @@ class PDFExportService {
                 context: context,
                 cgContext: cgContext,
                 routines: allRoutines,
+                attachmentLookup: attachmentLookup,
                 currentY: currentY,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -966,10 +1151,12 @@ class PDFExportService {
     private static func drawEntriesSection(
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
-        allEntries: [BaseEntry],
+        allNotes: [NoteItem],
         allPlaces: [PlaceItem],
         allRoutines: [RoutineItem],
+        allContacts: [ContactItem],
         placeImages: [String: UIImage],
+        attachmentLookup: [String: any BaseItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
@@ -979,19 +1166,24 @@ class PDFExportService {
         var y = currentY
         
         // Use all entries regardless of visibility level
-        print("PDFExport: Total entries: \(allEntries.count)")
+        print("PDFExport: Total notes: \(allNotes.count)")
         
-        for entry in allEntries {
+        for entry in allNotes {
             print("PDFExport: Entry '\(entry.title)' - category: '\(entry.category)'")
         }
+        for contact in allContacts {
+            print("PDFExport: Contact '\(contact.title)' - category: '\(contact.category)'")
+        }
         
-        // Group by category for unified folder rendering
-        let entriesByCategory = Dictionary(grouping: allEntries) { $0.category }
+        // Group by category for unified folder rendering (notes, places, routines, contacts)
+        let entriesByCategory = Dictionary(grouping: allNotes) { $0.category }
         let placesByCategory = Dictionary(grouping: allPlaces) { $0.category }
         let routinesByCategory = Dictionary(grouping: allRoutines) { $0.category }
+        let contactsByCategory = Dictionary(grouping: allContacts) { $0.category }
         let allCategories = Set(entriesByCategory.keys)
             .union(placesByCategory.keys)
             .union(routinesByCategory.keys)
+            .union(contactsByCategory.keys)
         
         // Draw categories
         if allCategories.isEmpty {
@@ -1001,17 +1193,18 @@ class PDFExportService {
                 .font: noEntriesFont,
                 .foregroundColor: UIColor.gray
             ]
-            let noEntriesText = "No entries or places available"
-            noEntriesText.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: noEntriesAttributes)
+            let noNotesText = "No notes or places available"
+            noNotesText.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: noEntriesAttributes)
             y += noEntriesFont.lineHeight
         } else {
             let categories = allCategories.sorted()
             for (catIndex, categoryName) in categories.enumerated() {
-                let entries = entriesByCategory[categoryName] ?? []
+                let notes = entriesByCategory[categoryName] ?? []
                 let places = placesByCategory[categoryName] ?? []
                 let routines = routinesByCategory[categoryName] ?? []
+                let contacts = contactsByCategory[categoryName] ?? []
 
-                if !entries.isEmpty || !places.isEmpty || !routines.isEmpty {
+                if !notes.isEmpty || !places.isEmpty || !routines.isEmpty || !contacts.isEmpty {
                     // Category header
                     let categoryFont = UIFont.systemFont(ofSize: 22, weight: .bold)
                     let categoryAttributes: [NSAttributedString.Key: Any] = [
@@ -1025,8 +1218,8 @@ class PDFExportService {
                     categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
                     y += headerHeight
 
-                    // 1) Entries (grid then full-width)
-                    let gridEntries = entries.filter { isGridItem($0) }
+                    // 1) Entries (grid then full-width). Entries with attachments always use full-width.
+                    let gridEntries = notes.filter { isGridItem($0) && $0.attachmentIds.isEmpty }
                     if !gridEntries.isEmpty {
                         y = drawGridItemsWithPageBreaks(
                             context: context,
@@ -1040,11 +1233,12 @@ class PDFExportService {
                         )
                         y += 16
                     }
-                    for entry in entries.filter({ !isGridItem($0) }) {
+                    for entry in notes.filter({ !isGridItem($0) || !$0.attachmentIds.isEmpty }) {
                         y = drawFullWidthItemWithPageBreaks(
                             context: context,
                             cgContext: cgContext,
                             entry: entry,
+                            attachmentLookup: attachmentLookup,
                             currentY: y,
                             leftMargin: leftMargin,
                             contentWidth: contentWidth,
@@ -1054,7 +1248,24 @@ class PDFExportService {
                         y += 16
                     }
 
-                    // 2) Places (2 per row) with extra padding from entries
+                    // 2) Contacts in this folder (same category header — not a separate section)
+                    if !contacts.isEmpty {
+                        let sortedContacts = contacts.sorted {
+                            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                        }
+                        y = drawContactsGridWithPageBreaks(
+                            context: context,
+                            contacts: sortedContacts,
+                            currentY: y,
+                            leftMargin: leftMargin,
+                            contentWidth: contentWidth,
+                            pageSize: pageSize,
+                            bottomMargin: 60
+                        )
+                        y += 16
+                    }
+
+                    // 3) Places (2 per row) with extra padding from notes
                     if !places.isEmpty {
                         // Extra top padding before places to reduce cramping with entries above
                         y += 12
@@ -1073,13 +1284,14 @@ class PDFExportService {
                         y += 24
                     }
 
-                    // 3) Routines (checklist)
+                    // 4) Routines (checklist)
                     if !routines.isEmpty {
                         y = drawRoutineCategory(
                             context: context,
                             cgContext: cgContext,
                             categoryName: "", // no nested header inside category
                             routines: routines,
+                            attachmentLookup: attachmentLookup,
                             currentY: y,
                             leftMargin: leftMargin,
                             contentWidth: contentWidth,
@@ -1599,6 +1811,7 @@ class PDFExportService {
         context: UIGraphicsPDFRendererContext,
         cgContext: CGContext,
         routines: [RoutineItem],
+        attachmentLookup: [String: any BaseItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
@@ -1621,7 +1834,7 @@ class PDFExportService {
         "Routines".draw(at: CGPoint(x: leftMargin, y: y), withAttributes: titleAttributes)
         y += titleHeight
 
-        // Group routines by category for consistency with entries
+        // Group routines by category for consistency with notes
         let routinesByCategory = Dictionary(grouping: routines) { $0.category }
         for category in routinesByCategory.keys.sorted() {
             let categoryRoutines = routinesByCategory[category] ?? []
@@ -1630,6 +1843,7 @@ class PDFExportService {
                 cgContext: cgContext,
                 categoryName: category,
                 routines: categoryRoutines,
+                attachmentLookup: attachmentLookup,
                 currentY: y,
                 leftMargin: leftMargin,
                 contentWidth: contentWidth,
@@ -1647,6 +1861,7 @@ class PDFExportService {
         cgContext: CGContext,
         categoryName: String,
         routines: [RoutineItem],
+        attachmentLookup: [String: any BaseItem],
         currentY: CGFloat,
         leftMargin: CGFloat,
         contentWidth: CGFloat,
@@ -1656,17 +1871,19 @@ class PDFExportService {
         var y = currentY
 
         // Category title
-        let categoryFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
-        let categoryAttributes: [NSAttributedString.Key: Any] = [
-            .font: categoryFont,
-            .foregroundColor: UIColor.black
-        ]
-        let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 12
-        if y + categoryHeight > pageSize.height - bottomMargin {
-            context.beginPage(); y = 60
+        if !categoryName.isEmpty {
+            let categoryFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
+            let categoryAttributes: [NSAttributedString.Key: Any] = [
+                .font: categoryFont,
+                .foregroundColor: UIColor.black
+            ]
+            let categoryHeight = categoryName.size(withAttributes: categoryAttributes).height + 12
+            if y + categoryHeight > pageSize.height - bottomMargin {
+                context.beginPage(); y = 60
+            }
+            categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
+            y += categoryHeight
         }
-        categoryName.draw(at: CGPoint(x: leftMargin, y: y), withAttributes: categoryAttributes)
-        y += categoryHeight
 
         // Each routine
         for routine in routines {
@@ -1683,7 +1900,7 @@ class PDFExportService {
             routine.title.uppercased().draw(at: CGPoint(x: leftMargin, y: y), withAttributes: routineTitleAttrs)
             y += routineTitleHeight + 6
 
-            // Actions list with bullet (circle)
+            // Actions list with bullet (circle); wrap long lines instead of clipping
             let actionFont = UIFont.systemFont(ofSize: 14, weight: .regular)
             let actionAttrs: [NSAttributedString.Key: Any] = [
                 .font: actionFont,
@@ -1693,23 +1910,47 @@ class PDFExportService {
             let bulletSpacing: CGFloat = 8
             let actionLineSpacing: CGFloat = 6
             let actionIndentX = leftMargin + bulletSize + bulletSpacing + 4
+            let actionTextWidth = contentWidth - (actionIndentX - leftMargin)
             for action in routine.routineActions {
-                let lineHeight = max(bulletSize, actionFont.lineHeight)
+                let textSize = (action as NSString).boundingRect(
+                    with: CGSize(width: actionTextWidth, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: actionAttrs,
+                    context: nil
+                ).size
+                let lineHeight = max(bulletSize, ceil(textSize.height))
                 if y + lineHeight > pageSize.height - bottomMargin {
                     context.beginPage(); y = 60
                 }
 
-                // Draw circular bullet
-                let bulletRect = CGRect(x: leftMargin, y: y + (lineHeight - bulletSize) / 2, width: bulletSize, height: bulletSize)
+                // Draw circular bullet aligned to first line
+                let bulletRect = CGRect(
+                    x: leftMargin,
+                    y: y + (actionFont.lineHeight - bulletSize) / 2,
+                    width: bulletSize,
+                    height: bulletSize
+                )
                 cgContext.setFillColor(UIColor.black.cgColor)
                 cgContext.fillEllipse(in: bulletRect)
 
-                // Draw action text
-                let actionPoint = CGPoint(x: actionIndentX, y: y)
-                (action as NSString).draw(at: actionPoint, withAttributes: actionAttrs)
+                let actionRect = CGRect(x: actionIndentX, y: y, width: actionTextWidth, height: lineHeight)
+                (action as NSString).draw(in: actionRect, withAttributes: actionAttrs)
 
                 y += lineHeight + actionLineSpacing
             }
+
+            y = drawAttachedItems(
+                context: context,
+                cgContext: cgContext,
+                attachmentIds: routine.attachmentIds,
+                attachmentLookup: attachmentLookup,
+                excludingHostId: routine.id,
+                currentY: y,
+                leftMargin: leftMargin,
+                contentWidth: contentWidth,
+                pageSize: pageSize,
+                bottomMargin: bottomMargin
+            )
 
             y += 8 // spacing between routines
         }

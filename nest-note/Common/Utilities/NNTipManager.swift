@@ -124,15 +124,9 @@ class NNTipManager {
     
     /// Setup rules for predefined tips
     private func setupPredefinedRules() {
-        // Add rule to visibilityLevelTip - only show after 3 visits to EntryDetailViewController
         addRule(
-            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 3),
-            for: EntryDetailTips.visibilityLevelTip.id
-        )
-        
-        addRule(
-            VisitCountRule(screenName: "EntryDetailViewController", minimumVisits: 6),
-            for: EntryDetailTips.entryDetailsTip.id
+            VisitCountRule(screenName: "NoteDetailViewController", minimumVisits: 6),
+            for: NoteDetailTips.noteDetailsTip.id
         )
         
         addRule(
@@ -252,6 +246,36 @@ class NNTipManager {
         
         // Also dismiss any currently visible tooltip for this tip
         dismissActiveTipView(for: tip.id)
+    }
+
+    /// Whether a tip has been dismissed (eligible to reset for re-show).
+    func isTipDismissed(_ tip: NNTipModel) -> Bool {
+        dismissedTips.contains(tip.id)
+    }
+
+    /// Clears dismissal for a single tip so it can show again.
+    func resetTip(_ tip: NNTipModel) {
+        var dismissed = dismissedTips
+        dismissed.remove(tip.id)
+        dismissedTips = dismissed
+        dismissActiveTipView(for: tip.id)
+        print("✅ [TipKit Debug] Reset tip: \(tip.id)")
+    }
+
+    /// Clears dismissal for every tip in a section.
+    func resetTips(_ tips: [NNTipModel]) {
+        var dismissed = dismissedTips
+        for tip in tips {
+            dismissed.remove(tip.id)
+            dismissActiveTipView(for: tip.id)
+        }
+        dismissedTips = dismissed
+        print("✅ [TipKit Debug] Reset \(tips.count) tip(s)")
+    }
+
+    /// Clears dismissal for every tip in a catalog section.
+    func resetSection(_ section: NNTipSection) {
+        resetTips(section.tips)
     }
     
     // Dismiss active tip view for a specific tip ID

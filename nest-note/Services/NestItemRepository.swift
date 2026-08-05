@@ -1,26 +1,26 @@
 import Foundation
 import UIKit
 
-protocol EntryRepository {
+protocol NestItemRepository {
     func fetchAllItems() async throws -> [BaseItem]
     
-    /// Fetches all entries grouped by category
-    func fetchEntries() async throws -> [String: [BaseEntry]]
+    /// Fetches all notes grouped by category
+    func fetchNotes() async throws -> [String: [NoteItem]]
     
-    /// Refreshes entries, clearing any cache
-    func refreshEntries() async throws -> [String: [BaseEntry]]
+    /// Refreshes notes, clearing any cache
+    func refreshNotes() async throws -> [String: [NoteItem]]
     
-    /// Creates a new entry
-    func createEntry(_ entry: BaseEntry) async throws
+    /// Creates a new note
+    func createNote(_ entry: NoteItem) async throws
     
-    /// Updates an existing entry
-    func updateEntry(_ entry: BaseEntry) async throws
+    /// Updates an existing note
+    func updateNote(_ entry: NoteItem) async throws
     
-    /// Deletes an entry
-    func deleteEntry(_ entry: BaseEntry) async throws
+    /// Deletes a note
+    func deleteNote(_ entry: NoteItem) async throws
     
-    /// Clears any cached entries
-    func clearEntriesCache()
+    /// Clears any cached notes
+    func clearNotesCache()
     
     /// Fetches all categories for the current nest
     func fetchCategories() async throws -> [NestCategory]
@@ -28,9 +28,9 @@ protocol EntryRepository {
     /// Refreshes categories, clearing any cache
     func refreshCategories() async throws -> [NestCategory]
     
-    /// Fetches entries that haven't been updated in a specified timeframe
+    /// Fetches notes that haven't been updated in a specified timeframe
     /// Default implementation provided in extension
-    func fetchOutdatedEntries(olderThan days: Int) async throws -> [BaseEntry]
+    func fetchOutdatedNotes(olderThan days: Int) async throws -> [NoteItem]
     
     // MARK: - Place Management
     /// Fetches all places for the current nest
@@ -53,22 +53,22 @@ protocol EntryRepository {
     func clearImageCache()
 } 
 
-// Default implementation for fetchOutdatedEntries
-extension EntryRepository {
-    func fetchOutdatedEntries(olderThan days: Int = 90) async throws -> [BaseEntry] {
+// Default implementation for fetchOutdatedNotes
+extension NestItemRepository {
+    func fetchOutdatedNotes(olderThan days: Int = 90) async throws -> [NoteItem] {
         // Fetch all entries first
-        let groupedEntries = try await fetchEntries()
-        let allEntries = groupedEntries.values.flatMap { $0 }
+        let groupedNotes = try await fetchNotes()
+        let allNotes = groupedNotes.values.flatMap { $0 }
         
         // Calculate the date threshold (90 days ago by default)
         let calendar = Calendar.current
         let threshold = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         
         // Filter entries that haven't been updated for the specified timeframe
-        let outdatedEntries = allEntries.filter { entry in
+        let outdatedNotes = allNotes.filter { entry in
             return entry.updatedAt < threshold
         }
         
-        return outdatedEntries
+        return outdatedNotes
     }
 } 

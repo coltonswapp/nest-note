@@ -1,6 +1,6 @@
 import UIKit
 
-class MiniEntryDetailView: UIView {
+class MiniNoteDetailView: UIView {
     // MARK: - Properties
     private let keyLabel: UILabel = {
         let label = UILabel()

@@ -13,7 +13,18 @@ final class SessionEventViewController: NNSheetViewController {
     private let event: SessionEvent?
     private let isReadOnly: Bool
     private var sessionDateRange: DateInterval?
-    private let entryRepository: EntryRepository?
+    private let nestItemRepository: NestItemRepository?
+    
+    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        if event == nil {
+            let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !title.isEmpty || hasUnsavedChanges
+        }
+        return hasUnsavedChanges
+    }
     
     // Track original values for change detection
     private var originalTitle: String?
@@ -87,7 +98,7 @@ final class SessionEventViewController: NNSheetViewController {
     }()
     
     private lazy var locationView: SessionEventLocationView = {
-        let view = SessionEventLocationView(place: nil, entryRepository: entryRepository)
+        let view = SessionEventLocationView(place: nil, nestItemRepository: nestItemRepository)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.editButton.addTarget(self, action: #selector(showLocationSelector), for: .touchUpInside)
         view.delegate = self
@@ -129,12 +140,12 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, entryRepository: EntryRepository? = nil) {
+    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, nestItemRepository: NestItemRepository? = nil) {
         self.sessionID = sessionID
         self.event = event
         self.isReadOnly = isReadOnly
         self.sessionDateRange = sessionDateRange
-        self.entryRepository = entryRepository
+        self.nestItemRepository = nestItemRepository
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
@@ -195,7 +206,7 @@ final class SessionEventViewController: NNSheetViewController {
                 if let placeID = event.placeID {
                     do {
                         // Use the provided repository or fall back to NestService
-                        let repository = entryRepository ?? NestService.shared
+                        let repository = nestItemRepository ?? NestService.shared
                         let place = try await repository.getPlace(for: placeID)
                         await MainActor.run {
                             locationView.configureWith(place)
@@ -669,6 +680,7 @@ final class SessionEventViewController: NNSheetViewController {
     private func updateSaveButtonState() {
         saveButton.isEnabled = hasUnsavedChanges || event == nil
         saveButton.alpha = saveButton.isEnabled ? 1.0 : 0.6
+        refreshCompactDetentAvailability()
     }
 }
 
@@ -815,12 +827,12 @@ class SessionEventLocationView: UIView {
     }()
     
     weak var delegate: PlaceAddressCellDelegate?
-    private let entryRepository: EntryRepository?
+    private let nestItemRepository: NestItemRepository?
     
     var place: PlaceItem?
     
-    init(place: PlaceItem?, entryRepository: EntryRepository? = nil) {
-        self.entryRepository = entryRepository
+    init(place: PlaceItem?, nestItemRepository: NestItemRepository? = nil) {
+        self.nestItemRepository = nestItemRepository
         super.init(frame: .zero)
         addSubviews()
         constrainSubviews()
@@ -902,7 +914,7 @@ class SessionEventLocationView: UIView {
                 Task {
                     do {
                         // Use the provided repository or fall back to NestService
-                        let repository = entryRepository ?? NestService.shared
+                        let repository = nestItemRepository ?? NestService.shared
                         let image = try await repository.loadImages(for: place)
                         await MainActor.run {
                             thumbnailImageView.image = image

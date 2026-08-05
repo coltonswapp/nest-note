@@ -9,7 +9,7 @@ import UIKit
 
 class PinnedCategoriesViewController: UIViewController {
     // MARK: - Properties
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, CategoryItem>!
     private var instructionLabel: BlurBackgroundLabel!
@@ -40,8 +40,8 @@ class PinnedCategoriesViewController: UIViewController {
         }
     }
     
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository) {
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
         self.title = "Pinned Folders"
     }
@@ -165,8 +165,8 @@ class PinnedCategoriesViewController: UIViewController {
         Task {
             do {
                 // Fetch both categories and Pinned Folders
-                async let categoriesTask = entryRepository.fetchCategories()
-                async let pinnedCategoriesTask = (entryRepository as? NestService)?.fetchPinnedCategories() ?? []
+                async let categoriesTask = nestItemRepository.fetchCategories()
+                async let pinnedCategoriesTask = (nestItemRepository as? NestService)?.fetchPinnedCategories() ?? []
                 
                 let (fetchedCategories, pinnedCategoryNames) = try await (categoriesTask, pinnedCategoriesTask)
                 
@@ -250,7 +250,7 @@ class PinnedCategoriesViewController: UIViewController {
                 let categoryNamesArray = Array(pinnedCategoryNames)
                 
                 // Save using NestService
-                if let nestService = entryRepository as? NestService {
+                if let nestService = nestItemRepository as? NestService {
                     try await nestService.savePinnedCategories(categoryNamesArray)
                 }
                 

@@ -72,9 +72,9 @@ enum NestReadinessComponent: String, CaseIterable {
     var expansionText: String {
         switch self {
         case .itemsDocumented:
-            return "Add entries, places, routines, and contacts. More items help your score, with the biggest gains in your first ~30 items."
+            return "Add notes, places, routines, and contacts. More items help your score, with the biggest gains in your first ~30 items."
         case .itemTypes:
-            return "Use all four item types: text entries, important places, routines, and phone contacts."
+            return "Use all four item types: text notes, important places, routines, and phone contacts."
         case .categoriesFilled:
             return "Add at least one item to each folder in your nest, including Household and Emergency."
         case .essentialsCovered:

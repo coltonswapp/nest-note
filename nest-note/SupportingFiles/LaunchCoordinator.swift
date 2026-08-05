@@ -22,21 +22,25 @@ enum AuthStateError: LocalizedError {
 
 // MARK: - Timeout Helper
 func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
-    return try await withThrowingTaskGroup(of: T.self) { group in
-        // Add the main operation
+    try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask {
             try await operation()
         }
 
-        // Add timeout task
         group.addTask {
             try await Task.sleep(for: .seconds(seconds))
             throw TimeoutError()
         }
 
-        // Return the first result (either success or timeout)
-        let result = try await group.next()!
+        // First finished child wins (success or timeout).
+        guard let result = try await group.next() else {
+            throw TimeoutError()
+        }
+
+        // Cancel the loser, then drain so a late TimeoutError / CancellationError
+        // from the sleeper cannot escape the group and clobber a successful result.
         group.cancelAll()
+        while let _ = try? await group.next() {}
         return result
     }
 }
@@ -124,7 +128,7 @@ final class LaunchCoordinator {
     func installLoadingPlaceholder() {
         guard navigationController == nil else { return }
 
-        let navigationController = UINavigationController(rootViewController: LoadingViewController())
+        let navigationController = NNNavigationController(rootViewController: LoadingViewController())
         self.navigationController = navigationController
         window?.rootViewController = navigationController
         window?.makeKeyAndVisible()
@@ -444,39 +448,47 @@ extension LaunchCoordinator: AuthenticationDelegate {
     }
     
     func signUpTapped() {
-        guard let navigationController = self.navigationController else {
-            return
+        presentOnboarding { coordinator in
+            coordinator.start()
         }
-        
-        let onboardingCoordinator = OnboardingCoordinator()
-        self.currentOnboardingCoordinator = onboardingCoordinator
-        let containerVC = onboardingCoordinator.start()
-        onboardingCoordinator.authenticationDelegate = self
-        (containerVC as? OnboardingContainerViewController)?.delegate = self
-        
-        // Present the container view controller modally
-        containerVC.modalPresentationStyle = .fullScreen
-        navigationController.present(containerVC, animated: true)
     }
     
     func startAppleSignInOnboarding(with credential: ASAuthorizationAppleIDCredential) {
+        presentOnboarding { coordinator in
+            // Pre-configure with Apple credential before building the flow
+            coordinator.handleAppleSignIn(credential: credential)
+            return coordinator.start()
+        }
+    }
+
+    /// Presents onboarding on the root nav. If auth/landing is already presented there,
+    /// dismiss it first — UIKit silently fails a second present on the same presenter.
+    private func presentOnboarding(
+        configure: @escaping (OnboardingCoordinator) -> UIViewController
+    ) {
         guard let navigationController = self.navigationController else {
             return
         }
-        
-        let onboardingCoordinator = OnboardingCoordinator()
-        self.currentOnboardingCoordinator = onboardingCoordinator
-        
-        // Pre-configure the coordinator with Apple credential
-        onboardingCoordinator.handleAppleSignIn(credential: credential)
-        
-        let containerVC = onboardingCoordinator.start()
-        onboardingCoordinator.authenticationDelegate = self
-        (containerVC as? OnboardingContainerViewController)?.delegate = self
-        
-        // Present the container view controller modally
-        containerVC.modalPresentationStyle = .fullScreen
-        navigationController.present(containerVC, animated: true)
+
+        let present = { [weak self] in
+            guard let self, let navigationController = self.navigationController else { return }
+
+            let onboardingCoordinator = OnboardingCoordinator()
+            self.currentOnboardingCoordinator = onboardingCoordinator
+
+            let containerVC = configure(onboardingCoordinator)
+            onboardingCoordinator.authenticationDelegate = self
+            (containerVC as? OnboardingContainerViewController)?.delegate = self
+
+            containerVC.modalPresentationStyle = .fullScreen
+            navigationController.present(containerVC, animated: true)
+        }
+
+        if navigationController.presentedViewController != nil {
+            navigationController.dismiss(animated: true, completion: present)
+        } else {
+            present()
+        }
     }
     
     func signUpComplete() {

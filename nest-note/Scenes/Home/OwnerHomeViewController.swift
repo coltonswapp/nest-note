@@ -579,7 +579,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     // MARK: - Navigation
     func presentHouseholdView() {
         guard let _ = nestService.currentNest else { return }
-        navigationController?.pushViewController(NestViewController(entryRepository: NestService.shared), animated: true)
+        navigationController?.pushViewController(NestViewController(nestItemRepository: NestService.shared), animated: true)
     }
     
     func presentCategoryView(category: String) {
@@ -588,13 +588,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         Task {
             do {
                 // Use efficient combined fetch to get both entries and places
-                let (_, places) = try await nestService.fetchEntriesAndPlaces()
+                let (_, places) = try await nestService.fetchNotesAndPlaces()
                 
                 await MainActor.run {
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: places,
-                        entryRepository: nestService
+                        nestItemRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -605,7 +605,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: [],
-                        entryRepository: nestService
+                        nestItemRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }
