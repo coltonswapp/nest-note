@@ -19,8 +19,6 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
     weak var routineDelegate: RoutineDetailViewControllerDelegate?
     private let isReadOnly: Bool
     
-    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
-    
     override var hasDiscardableContent: Bool {
         guard !isReadOnly else { return false }
         let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -90,6 +88,7 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
     
     let routine: RoutineItem?
     private let category: String
+    private let suggestedActions: [String]
     private var routineActions: [String] = []
     private let stateManager = RoutineStateManager.shared
     private var isTableViewInEditMode: Bool = false
@@ -111,14 +110,21 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
         self.category = category
         self.routine = routine
         self.isReadOnly = isReadOnly
+        self.suggestedActions = []
         super.init(sourceFrame: sourceFrame)
         titleField.text = routine?.title
     }
     
-    init(category: String, routineName: String, sourceFrame: CGRect? = nil) {
+    init(
+        category: String,
+        routineName: String,
+        suggestedActions: [String] = [],
+        sourceFrame: CGRect? = nil
+    ) {
         self.category = category
         self.routine = nil
         self.isReadOnly = false
+        self.suggestedActions = suggestedActions
         super.init(sourceFrame: sourceFrame)
         
         titleField.text = routineName
@@ -138,8 +144,8 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
         titleField.delegate = self
         titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
         
-        // Load routine actions
-        routineActions = routine?.routineActions ?? []
+        // Load routine actions (or suggested sample steps for new routines from Common Items)
+        routineActions = routine?.routineActions ?? suggestedActions
         pendingAttachmentIds = routine?.attachmentIds ?? []
         originalAttachmentIds = pendingAttachmentIds
         
@@ -252,7 +258,6 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
     }
     
     private func updateSaveButtonEnabledState() {
-        defer { refreshCompactDetentAvailability() }
         guard !isReadOnly else { return }
         let titleString = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasTitle = !titleString.isEmpty
@@ -290,10 +295,6 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
     }
 
     override func leadingMenuWillPresent() {
-        collapseAttachmentsIfNeeded()
-    }
-
-    override func prepareForCompactDraftMode() {
         collapseAttachmentsIfNeeded()
     }
 
@@ -407,7 +408,7 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
                 await MainActor.run {
                     self.routineDelegate?.routineDetailViewController(didDeleteRoutine: routine)
                     HapticsHelper.thwompHaptic()
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
@@ -531,6 +532,7 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
         }
         
         saveButton.startLoading()
+        prepareToSaveAndDismiss()
         titleField.isUserInteractionEnabled = false
         routineTableView.isUserInteractionEnabled = false
         
@@ -572,10 +574,11 @@ final class RoutineDetailViewController: NNSheetViewController, NNTippable {
                 // Notify delegate
                 await MainActor.run {
                     self.routineDelegate?.routineDetailViewController(didSaveRoutine: savedRoutine)
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     saveButton.stopLoading(withSuccess: false)
                     titleField.isUserInteractionEnabled = true
                     routineTableView.isUserInteractionEnabled = true

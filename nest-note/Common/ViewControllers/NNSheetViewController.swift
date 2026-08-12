@@ -9,66 +9,20 @@ class NNSheetViewController: NNViewController {
     static let ctaBottomPadding: CGFloat = 24
     private static let navigationBarHeight: CGFloat = 44
     private static let navigationBarTopInset: CGFloat = 12
-    private static let minimizedDetentIdentifier = UISheetPresentationController.Detent.Identifier("nnMinimized")
-    /// Just taller than the nav-bar button row (inset + bar + a little breathing room).
-    private static let minimizedDetentHeight: CGFloat =
-        navigationBarTopInset + navigationBarHeight + 20
-    /// Bottom-pinned CTAs collide with the nav chrome below this height — keep the form
-    /// hidden while the sheet is in (or animating through) this band.
-    private static let minimizedContentHideHeight: CGFloat = minimizedDetentHeight + 160
     
     // MARK: - Properties
     weak var delegate: NNSheetViewControllerDelegate?
 
-    /// Fired once after the sheet finishes dismissing (close button, swipe, or nav-pop discard).
+    /// Fired once after the sheet finishes dismissing (close button or swipe).
     var onSheetDidDismiss: (() -> Void)?
-    
-    /// When `true`, the sheet can be dragged (or toggled) down to a small docked detent
-    /// so the presenting content stays interactive — similar to a Mail compose draft.
-    /// Opt in from create/edit sheets only; read-only sheets keep normal dismiss behavior.
-    var allowsMinimizedSheetDetent: Bool { false }
     
     /// Whether close / swipe-dismiss should confirm before discarding in-progress work.
     /// Create/edit subclasses override this when the user has entered or changed content.
     var hasDiscardableContent: Bool { false }
     
-    /// Compact/minimize is only offered while there are pending changes to keep.
-    private var canEnterCompactMode: Bool {
-        allowsMinimizedSheetDetent && hasDiscardableContent
-    }
-    
-    private var isSheetMinimized: Bool {
-        sheetPresentationController?.selectedDetentIdentifier == Self.minimizedDetentIdentifier
-            || isInCompactDraftMode
-    }
-    
-    /// Explicit flag so compact mode stays reliable even if detent identity lags during animation.
-    private var isInCompactDraftMode = false
-    
-    /// Set before calling `dismiss` so detent-change callbacks during the dismiss
-    /// animation don't re-enter compact mode and hide sheet content mid-transition.
+    /// Set before calling `dismiss` so keyboard/layout callbacks during the dismiss
+    /// animation don't fight the transition.
     private var isDismissingSheet = false
-    
-    /// Avoid treating the initial present animation (short → tall) as a compact transition.
-    private var hasCompletedInitialPresentation = false
-    
-    /// After expand is requested, keep the form hidden until the sheet is tall enough
-    /// that bottom CTAs won't sit in the chrome band.
-    private var pendingCompactContentRestore = false
-    
-    /// Minimized create/edit sheet that would be lost if the presenting screen is popped.
-    var isDraftWaiting: Bool { allowsMinimizedSheetDetent && isInCompactDraftMode }
-    
-    private weak var draftPopGuardedPresenter: UIViewController?
-    private var draftPopGuardInstalled = false
-    private var draftPopGuardPreviousInteractivePopEnabled = true
-    /// Subviews we hid while compact so they can't overlap/steal taps from the nav chrome.
-    private var viewsHiddenForCompactMode: [UIView] = []
-    
-    /// Centered draft subject for compact mode. Non-interactive so it can't cover bar buttons.
-    private lazy var compactDraftTitleView: CompactDraftTitleView = {
-        CompactDraftTitleView()
-    }()
     
     let containerView: UIView = {
         let view = UIView()
@@ -100,6 +54,8 @@ class NNSheetViewController: NNViewController {
     private var leadingDoneBarButtonTitle: String?
     private weak var leadingDoneTarget: AnyObject?
     private var leadingDoneAction: Selector?
+    /// Appears to the left of the close button (index 0 of this array is closest to close).
+    private var trailingBarButtonItems: [UIBarButtonItem] = []
     
     let titleField: UITextField = {
         let field = UITextField()
@@ -149,16 +105,6 @@ class NNSheetViewController: NNViewController {
         refreshNavigationBarItems()
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        hasCompletedInitialPresentation = true
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        syncCompactContentWithSheetHeight()
-    }
-
     // MARK: - Setup Methods
     override func addSubviews() {
         view.addSubview(containerView)
@@ -168,7 +114,7 @@ class NNSheetViewController: NNViewController {
         addContentToContainer()
 
         // Chrome lives on `view`, above `containerView`, so form/CTA/blur/attachment
-        // siblings can never cover bar buttons — especially in the short undimmed detent.
+        // siblings can never cover bar buttons.
         view.addSubview(navigationBar)
     }
     
@@ -230,7 +176,7 @@ class NNSheetViewController: NNViewController {
         navigationBar.setItems([sheetNavigationItem], animated: false)
 
         let appearance = UINavigationBarAppearance()
-        // Clear chrome so glass close/minimize controls sit on the sheet background
+        // Clear chrome so glass close controls sit on the sheet background
         // instead of a flat nav-bar slab.
         appearance.configureWithTransparentBackground()
         appearance.shadowColor = .clear
@@ -270,44 +216,25 @@ class NNSheetViewController: NNViewController {
         refreshNavigationBarItems()
     }
 
+    /// Sets bar buttons shown immediately to the left of the system close control.
+    func setTrailingBarButtonItems(_ items: [UIBarButtonItem]) {
+        trailingBarButtonItems = items
+        refreshNavigationBarItems()
+    }
+
     func refreshNavigationBarItems() {
-        let minimized = isSheetMinimized
+        sheetNavigationItem.titleView = nil
+        sheetNavigationItem.title = titleLabel.text
 
-        if minimized {
-            // Custom centered title — system `.title` shifts left with no leading item and
-            // two trailing buttons. Title view is non-interactive so bar buttons stay tappable.
-            compactDraftTitleView.text = draftSubjectText()
-            sheetNavigationItem.titleView = compactDraftTitleView
-            sheetNavigationItem.title = nil
-        } else {
-            sheetNavigationItem.titleView = nil
-            sheetNavigationItem.title = titleLabel.text
-        }
-
-        // System items keep native Liquid Glass styling. Split close + chevron so iOS 26
-        // doesn't merge them into one shared glass capsule.
         let closeItem = UIBarButtonItem(
             barButtonSystemItem: .close,
             target: self,
             action: #selector(dismissViewController)
         )
-        if canEnterCompactMode || isInCompactDraftMode {
-            let minimizeItem = makeMinimizeBarButtonItem()
-            if #available(iOS 26.0, *) {
-                sheetNavigationItem.rightBarButtonItems = [
-                    closeItem,
-                    .fixedSpace(),
-                    minimizeItem
-                ]
-            } else {
-                sheetNavigationItem.rightBarButtonItems = [closeItem, minimizeItem]
-            }
-        } else {
-            sheetNavigationItem.rightBarButtonItems = [closeItem]
-        }
+        // First item is rightmost; close stays outermost, trailing items sit beside it.
+        sheetNavigationItem.rightBarButtonItems = [closeItem] + trailingBarButtonItems
 
-        // Leading: ellipsis menu / Done. Hidden while docked compact.
-        if minimized || !showsLeadingBarButton {
+        if !showsLeadingBarButton {
             sheetNavigationItem.leftBarButtonItem = nil
         } else if let title = leadingDoneBarButtonTitle,
                   let target = leadingDoneTarget,
@@ -348,256 +275,27 @@ class NNSheetViewController: NNViewController {
         navigationBar.setItems([sheetNavigationItem], animated: false)
     }
 
-    private func makeMinimizeBarButtonItem() -> UIBarButtonItem {
-        let imageName = isSheetMinimized ? "chevron.up" : "chevron.down"
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: imageName),
-            style: .plain,
-            target: self,
-            action: #selector(toggleMinimizedDetent)
-        )
-        item.accessibilityLabel = isSheetMinimized ? "Expand sheet" : "Minimize sheet"
-        if #available(iOS 26.0, *) {
-            item.sharesBackground = false
-        }
-        return item
-    }
-    
-    /// Subject line for the docked draft: the field text, or the sheet title (e.g. "New Note").
-    private func draftSubjectText() -> String {
-        let trimmed = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !trimmed.isEmpty { return trimmed }
-        let fallback = titleLabel.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return fallback.isEmpty ? "Untitled" : fallback
-    }
-    
-    private func updateMinimizedAppearance(compact: Bool? = nil, animated: Bool = true) {
-        // While the sheet is dismissing, UIKit can pass through the minimized detent
-        // as height shrinks — ignore that so content stays visible for the transition.
-        guard !isDismissingSheet else { return }
-
-        let wasCompact = isInCompactDraftMode
-        if let compact {
-            isInCompactDraftMode = compact
-        } else if let selected = sheetPresentationController?.selectedDetentIdentifier {
-            isInCompactDraftMode = selected == Self.minimizedDetentIdentifier
-        }
-        let minimized = isInCompactDraftMode
-
-        // Drop attachment overlays before the first hide pass so we don't restore
-        // orphaned tap zones when expanding again.
-        if minimized && !wasCompact {
-            prepareForCompactDraftMode()
-        }
-
-        if minimized {
-            pendingCompactContentRestore = false
-            applyCompactFormHidden(true, animated: animated)
-        } else if isSheetHeightInCompactBand {
-            // Expand requested while still short — restore chrome now, form later.
-            pendingCompactContentRestore = true
-            applyCompactFormHidden(true, animated: false)
-        } else {
-            pendingCompactContentRestore = false
-            applyCompactFormHidden(false, animated: animated)
-        }
-
-        refreshNavigationBarItems()
-        refreshDraftNavigationPopGuard()
-    }
-
-    /// Collapse overlays (e.g. attachment accordion siblings) before docking.
-    /// Subclasses with floating chrome should override and clean it up here.
-    func prepareForCompactDraftMode() {}
-
-    private var isSheetHeightInCompactBand: Bool {
-        let height = view.bounds.height
-        guard height > 0 else { return false }
-        return height <= Self.minimizedContentHideHeight
-    }
-
-    /// Keep form visibility tied to live sheet height so drag-minimize and chevron-expand
-    /// don't flash bottom-pinned CTAs (frequency/save) through the chrome band.
-    ///
-    /// Does **not** flip `isInCompactDraftMode` — that still comes from the detent callback
-    /// / chevron toggle. Height only drives form hide/show so a cancelled drag can't stick
-    /// us in logical compact mode.
-    private func syncCompactContentWithSheetHeight() {
-        guard hasCompletedInitialPresentation, !isDismissingSheet, allowsMinimizedSheetDetent else {
-            return
-        }
-
-        if isSheetHeightInCompactBand {
-            // Dragging toward compact (or animating through the band): hide CTAs/fields now.
-            if canEnterCompactMode || isInCompactDraftMode || pendingCompactContentRestore {
-                // Collapse attachment overlays on first hide; logical compact still waits
-                // for the detent callback / chevron so a cancelled drag can recover.
-                if canEnterCompactMode && !isInCompactDraftMode && viewsHiddenForCompactMode.isEmpty {
-                    prepareForCompactDraftMode()
-                }
-                applyCompactFormHidden(true, animated: false)
-            }
-            return
-        }
-
-        if isInCompactDraftMode {
-            // Still docked logically — keep form hidden even if height briefly grew.
-            applyCompactFormHidden(true, animated: false)
-            return
-        }
-
-        if pendingCompactContentRestore || containerView.alpha < 1 || !viewsHiddenForCompactMode.isEmpty {
-            // Expand finished, or a drag toward compact was cancelled before settle.
-            pendingCompactContentRestore = false
-            applyCompactFormHidden(false, animated: true)
-        }
-    }
-
-    private func applyCompactFormHidden(_ hidden: Bool, animated: Bool) {
-        if hidden {
-            suppressOverlappingContentForCompactMode()
-        } else {
-            restoreViewsHiddenForCompactMode()
-        }
-        containerView.isUserInteractionEnabled = !hidden
-        view.bringSubviewToFront(navigationBar)
-
-        let updates = {
-            self.containerView.alpha = hidden ? 0 : 1
-        }
-        if animated {
-            UIView.animate(
-                withDuration: 0.2,
-                delay: 0,
-                options: [.beginFromCurrentState, .allowUserInteraction],
-                animations: updates
-            )
-        } else {
-            containerView.layer.removeAllAnimations()
-            updates()
-        }
-    }
-
-    /// Hide `containerView` subviews while compact so they aren't visible under the chrome.
-    private func suppressOverlappingContentForCompactMode() {
-        for subview in containerView.subviews {
-            guard !viewsHiddenForCompactMode.contains(where: { $0 === subview }) else {
-                subview.isHidden = true
-                continue
-            }
-            guard !subview.isHidden else { continue }
-            subview.isHidden = true
-            viewsHiddenForCompactMode.append(subview)
-        }
-    }
-    
-    /// Call from the presenting screen's `viewWillAppear` so edge-swipe stays disabled
-    /// after pushing/popping under a minimized draft.
-    func refreshDraftNavigationPopGuard() {
-        guard allowsMinimizedSheetDetent,
-              let nav = resolvedPresentingNavigationController() else {
-            removeDraftNavigationPopGuard()
-            return
-        }
-
-        let presenter = resolvedPresentingContentViewController()
-        let shouldGuard = isInCompactDraftMode && (presenter == nil || nav.topViewController === presenter)
-        if shouldGuard {
-            installDraftNavigationPopGuard(navigationController: nav)
-        } else {
-            removeDraftNavigationPopGuard()
-        }
-    }
-    
-    private func resolvedPresentingContentViewController() -> UIViewController? {
-        guard let presenting = presentingViewController else { return nil }
-        if let nav = presenting as? UINavigationController {
-            return nav.topViewController
-        }
-        return presenting
-    }
-    
-    private func resolvedPresentingNavigationController() -> UINavigationController? {
-        if let nav = presentingViewController as? UINavigationController {
-            return nav
-        }
-        return presentingViewController?.navigationController
-    }
-    
-    private func installDraftNavigationPopGuard(navigationController nav: UINavigationController) {
-        if !draftPopGuardInstalled {
-            draftPopGuardedPresenter = resolvedPresentingContentViewController()
-            draftPopGuardPreviousInteractivePopEnabled = nav.interactivePopGestureRecognizer?.isEnabled ?? true
-            draftPopGuardInstalled = true
-        }
-        // Back button is intercepted by NNNavigationController; disable edge-swipe here.
-        nav.interactivePopGestureRecognizer?.isEnabled = false
-    }
-    
-    private func removeDraftNavigationPopGuard() {
-        guard draftPopGuardInstalled else { return }
-
-        draftPopGuardedPresenter?.navigationController?.interactivePopGestureRecognizer?.isEnabled =
-            draftPopGuardPreviousInteractivePopEnabled
-        resolvedPresentingNavigationController()?.interactivePopGestureRecognizer?.isEnabled =
-            draftPopGuardPreviousInteractivePopEnabled
-
-        draftPopGuardedPresenter = nil
-        draftPopGuardPreviousInteractivePopEnabled = true
-        draftPopGuardInstalled = false
-    }
-    
-    /// Used by `NNNavigationController` when the user tries to leave while a draft is docked.
-    func confirmDiscardForNavigationPop(proceed: @escaping () -> Void) {
-        confirmDiscardIfNeeded(
-            title: "Discard Draft?",
-            message: "You have a draft in progress. Leaving will discard it.",
-            discardActionTitle: "Discard Draft",
-            proceed: proceed
-        )
-    }
-    
-    /// Dismisses the draft sheet, then runs `completion` (typically a nav pop).
-    func dismissForNavigationPop(completion: @escaping () -> Void) {
-        prepareForSheetDismissal()
-        let result = handleDismissalResult()
-        delegate?.sheetViewController(self, didDismissWithResult: result)
-        dismiss(animated: true) { [weak self] in
-            self?.notifySheetDidDismiss()
-            completion()
-        }
-    }
-
     private func notifySheetDidDismiss() {
         let callback = onSheetDidDismiss
         onSheetDidDismiss = nil
         callback?()
     }
 
+    /// Call at the start of save/update, then finish with `dismissSheet()`.
+    /// Pair with `cancelSaveAndDismiss()` if the save fails and the sheet stays open.
+    func prepareToSaveAndDismiss() {}
+
+    /// Called after a failed save/update when the sheet stays open.
+    func cancelSaveAndDismiss() {}
+
     private func prepareForSheetDismissal() {
         guard !isDismissingSheet else { return }
         isDismissingSheet = true
-        removeDraftNavigationPopGuard()
 
         // keyboardLayoutGuide can collapse during a page-sheet dismiss, zeroing the
         // container height (and clipping content when clipsToBounds is set). Pin to the
         // view bottom before the transition so layout stays stable.
         unpinContainerFromKeyboardLayoutGuide()
-
-        // Drop the compact detent so dismiss doesn't step through it and hide content.
-        if let sheet = sheetPresentationController, allowsMinimizedSheetDetent {
-            sheet.detents = [.large()]
-            sheet.largestUndimmedDetentIdentifier = nil
-            sheet.prefersGrabberVisible = false
-        }
-        restoreViewsHiddenForCompactMode()
-        isInCompactDraftMode = false
-        pendingCompactContentRestore = false
-        containerView.isUserInteractionEnabled = true
-
-        // Kill any in-flight compact-mode fade so content can't finish at alpha 0 mid-dismiss.
-        containerView.layer.removeAllAnimations()
-        containerView.alpha = 1
         view.layoutIfNeeded()
     }
 
@@ -622,17 +320,6 @@ class NNSheetViewController: NNViewController {
         containerBottomConstraint = bottom
     }
     
-    private func restoreViewsHiddenForCompactMode() {
-        for subview in viewsHiddenForCompactMode {
-            subview.layer.removeAllAnimations()
-            subview.isHidden = false
-        }
-        viewsHiddenForCompactMode.removeAll()
-        containerView.layer.removeAllAnimations()
-        containerView.alpha = 1
-        containerView.isUserInteractionEnabled = true
-    }
-    
     /// Shows the discard confirmation; `proceed` runs only if the user chooses to discard.
     func confirmDiscardIfNeeded(
         title: String = "Discard Changes?",
@@ -640,15 +327,11 @@ class NNSheetViewController: NNViewController {
         discardActionTitle: String = "Discard Changes",
         proceed: @escaping () -> Void
     ) {
-        // Avoid stacking alerts if the user taps back repeatedly.
+        // Avoid stacking alerts if the user taps close repeatedly.
         if presentedViewController is UIAlertController { return }
 
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Keep Editing", style: .cancel) { [weak self] _ in
-            guard let self, self.isInCompactDraftMode else { return }
-            // Bring the draft back up so it's obvious what they're keeping.
-            self.toggleMinimizedDetent()
-        })
+        alert.addAction(UIAlertAction(title: "Keep Editing", style: .cancel))
         alert.addAction(UIAlertAction(title: discardActionTitle, style: .destructive) { _ in
             proceed()
         })
@@ -680,91 +363,14 @@ class NNSheetViewController: NNViewController {
     private func configureSheetPresentationIfNeeded() {
         containerView.layer.cornerRadius = 0
         presentationController?.delegate = self
-        applyCompactDetentConfiguration(forceLargeSelection: true)
-        sheetPresentationController?.prefersScrollingExpandsWhenScrolledToEdge = true
-        titleField.addTarget(
-            self,
-            action: #selector(titleFieldEditingChangedForCompactDetent),
-            for: .editingChanged
-        )
-    }
-    
-    /// Call from subclasses whenever form content may have gained/lost pending changes
-    /// so the compact detent and chevron stay in sync.
-    func refreshCompactDetentAvailability() {
-        guard allowsMinimizedSheetDetent else { return }
-        applyCompactDetentConfiguration(forceLargeSelection: false)
-        refreshNavigationBarItems()
-    }
-    
-    private func applyCompactDetentConfiguration(forceLargeSelection: Bool) {
-        guard let sheet = sheetPresentationController else { return }
-
-        guard allowsMinimizedSheetDetent else {
+        if let sheet = sheetPresentationController {
             sheet.detents = [.large()]
+            sheet.selectedDetentIdentifier = .large
             sheet.prefersGrabberVisible = false
-            sheet.largestUndimmedDetentIdentifier = nil
-            if forceLargeSelection {
-                sheet.selectedDetentIdentifier = .large
-            }
-            return
+            // Nested scroll views (e.g. icon grids) must own the drag; otherwise
+            // scrolling at the edge is treated as a sheet dismiss gesture.
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
         }
-
-        if canEnterCompactMode {
-            let minimized = UISheetPresentationController.Detent.custom(
-                identifier: Self.minimizedDetentIdentifier
-            ) { _ in
-                Self.minimizedDetentHeight
-            }
-            sheet.detents = [minimized, .large()]
-            sheet.prefersGrabberVisible = true
-            // Keep the presenter interactive only while docked; full height dims as usual.
-            sheet.largestUndimmedDetentIdentifier = Self.minimizedDetentIdentifier
-            if forceLargeSelection {
-                sheet.selectedDetentIdentifier = .large
-            }
-        } else {
-            // Pending changes cleared — leave compact if needed, then remove the detent.
-            if isInCompactDraftMode || sheet.selectedDetentIdentifier == Self.minimizedDetentIdentifier {
-                sheet.animateChanges {
-                    sheet.selectedDetentIdentifier = .large
-                }
-                updateMinimizedAppearance(compact: false)
-            }
-            sheet.detents = [.large()]
-            sheet.prefersGrabberVisible = false
-            sheet.largestUndimmedDetentIdentifier = nil
-        }
-    }
-    
-    @objc private func titleFieldEditingChangedForCompactDetent() {
-        refreshCompactDetentAvailability()
-    }
-    
-    @objc private func toggleMinimizedDetent() {
-        guard allowsMinimizedSheetDetent,
-              let sheet = sheetPresentationController else { return }
-
-        let currentlyCompact = isInCompactDraftMode
-            || sheet.selectedDetentIdentifier == Self.minimizedDetentIdentifier
-        let minimizing = !currentlyCompact
-
-        // Only dock when there's something pending to keep as a draft.
-        if minimizing && !hasDiscardableContent { return }
-
-        let target: UISheetPresentationController.Detent.Identifier = minimizing
-            ? Self.minimizedDetentIdentifier
-            : .large
-
-        if minimizing {
-            view.endEditing(true)
-        }
-
-        sheet.animateChanges {
-            sheet.selectedDetentIdentifier = target
-        }
-        // Pass compact explicitly — selectedDetentIdentifier can lag during animation.
-        updateMinimizedAppearance(compact: minimizing)
     }
     
     private func setupKeyboardObservers() {
@@ -844,13 +450,20 @@ class NNSheetViewController: NNViewController {
     }
     
     private func performDismiss() {
+        dismissSheet()
+    }
+
+    /// Dismisses the sheet and fires `onSheetDidDismiss`. Prefer this over raw `dismiss(animated:)`
+    /// so contextual UI (e.g. collection-view highlight) can clear after save/delete.
+    func dismissSheet(animated: Bool = true, completion: (() -> Void)? = nil) {
         // Freeze layout before endEditing so keyboard hide can't collapse the container.
         prepareForSheetDismissal()
         view.endEditing(true)
         let result = handleDismissalResult()
         delegate?.sheetViewController(self, didDismissWithResult: result)
-        dismiss(animated: true) { [weak self] in
+        dismiss(animated: animated) { [weak self] in
             self?.notifySheetDidDismiss()
+            completion?()
         }
     }
     
@@ -876,9 +489,26 @@ extension NNSheetViewController: UISheetPresentationControllerDelegate {
     }
 
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
-        // Covers interactive swipe-dismiss (bypasses performDismiss).
-        prepareForSheetDismissal()
-        view.endEditing(true)
+        // willDismiss fires as soon as the interactive swipe begins — even a slight
+        // pull. Defer prepare/endEditing until the gesture commits so a cancelled
+        // drag doesn't dismiss the keyboard or leave isDismissingSheet stuck true.
+        guard let coordinator = transitionCoordinator else {
+            prepareForSheetDismissal()
+            view.endEditing(true)
+            return
+        }
+
+        coordinator.notifyWhenInteractionChanges { [weak self] context in
+            guard let self else { return }
+            if context.isCancelled {
+                self.isDismissingSheet = false
+                return
+            }
+            // Finger up (or interaction ended) and dismiss will finish.
+            guard !context.isInteractive else { return }
+            self.prepareForSheetDismissal()
+            self.view.endEditing(true)
+        }
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
@@ -886,76 +516,5 @@ extension NNSheetViewController: UISheetPresentationControllerDelegate {
         let result = handleDismissalResult()
         delegate?.sheetViewController(self, didDismissWithResult: result)
         notifySheetDidDismiss()
-    }
-
-    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
-        _ sheetPresentationController: UISheetPresentationController
-    ) {
-        guard !isDismissingSheet else { return }
-
-        if sheetPresentationController.selectedDetentIdentifier == Self.minimizedDetentIdentifier {
-            // Compact is only valid while there are pending changes.
-            guard hasDiscardableContent else {
-                sheetPresentationController.animateChanges {
-                    sheetPresentationController.selectedDetentIdentifier = .large
-                }
-                updateMinimizedAppearance(compact: false)
-                refreshCompactDetentAvailability()
-                return
-            }
-            view.endEditing(true)
-        }
-        updateMinimizedAppearance()
-    }
-}
-
-// MARK: - CompactDraftTitleView
-
-/// Centered draft subject for the docked sheet. Non-interactive so a wide title can't
-/// cover close / expand hit targets (especially with an undimmed compact detent).
-private final class CompactDraftTitleView: UIView {
-    private let label: UILabel = {
-        let label = UILabel()
-        label.font = .systemFont(ofSize: 17, weight: .semibold)
-        label.textColor = .label
-        label.textAlignment = .center
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-
-    var text: String? {
-        get { label.text }
-        set {
-            label.text = newValue
-            invalidateIntrinsicContentSize()
-        }
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var intrinsicContentSize: CGSize {
-        let labelSize = label.intrinsicContentSize
-        // Cap width so the title stays visually centered between the bar buttons
-        // without extending under them.
-        return CGSize(width: min(max(labelSize.width, 40), 200), height: 44)
-    }
-
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        nil
     }
 }

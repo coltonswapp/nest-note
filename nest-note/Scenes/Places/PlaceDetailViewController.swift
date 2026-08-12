@@ -90,8 +90,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     private var originalAttachmentIds: [String] = []
     private var hasCompletedInitialAttachmentLoad = false
     
-    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
-    
     override var hasDiscardableContent: Bool {
         guard !isReadOnly else { return false }
         // New places already have a selected location; edits warn only when changed.
@@ -273,16 +271,22 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
             return
         }
         
+        saveButton.startLoading()
+        prepareToSaveAndDismiss()
+
         Task {
             do {
-                saveButton.startLoading()
-
-                let allItems = try await NestService.shared.fetchAllItems()
-                let prunedAttachmentIds = AttachmentResolver.prune(
-                    ids: pendingAttachmentIds,
-                    against: allItems,
-                    excludingHostId: existingPlace?.id
-                )
+                let prunedAttachmentIds: [String]
+                if pendingAttachmentIds.isEmpty {
+                    prunedAttachmentIds = []
+                } else {
+                    let allItems = try await NestService.shared.fetchAllItems()
+                    prunedAttachmentIds = AttachmentResolver.prune(
+                        ids: pendingAttachmentIds,
+                        against: allItems,
+                        excludingHostId: existingPlace?.id
+                    )
+                }
                 
                 if let existingPlace = existingPlace {
                     // Update existing place
@@ -309,18 +313,20 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                             alias: placeAlias,
                             address: locationUpdate.address,
                             coordinate: locationUpdate.coordinate,
-                            thumbnailURLs: existingPlace.thumbnailURLs, // Will be replaced by new method
+                            thumbnailURLs: existingPlace.thumbnailURLs,
                             isTemporary: existingPlace.isTemporary,
                             createdAt: existingPlace.createdAt,
                             updatedAt: Date(),
                             attachmentIds: prunedAttachmentIds
                         )
 
-                        // Use enhanced update method with thumbnail regeneration
+                        // Reuse the map-picker thumbnail instead of regenerating
+                        let asset = imageAsset(from: locationUpdate.thumbnail)
                         updatedPlace = try await NestService.shared.updatePlace(
                             updatedPlace,
                             shouldRegenerateThumbnails: true,
-                            newCoordinate: locationUpdate.coordinate
+                            newCoordinate: locationUpdate.coordinate,
+                            thumbnailAsset: asset
                         )
                     } else {
                         // No location change - use standard update
@@ -333,36 +339,23 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         
                         // Dismiss the sheet after a short delay
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            self.dismiss(animated: true)
+                            self.dismissSheet()
                         }
                     }
                 } else {
                     // Create new place
-                    let address = existingPlace?.address ?? formatAddress(from: placemark)
+                    let address = formatAddress(from: placemark)
                     let coordinate = placemark.location?.coordinate ?? CLLocationCoordinate2D()
                     
-                    // Generate thumbnail if not provided
-                    let finalThumbnail: UIImage
-                    if let thumbnail = thumbnail {
-                        finalThumbnail = thumbnail
+                    let asset: UIImageAsset
+                    if let thumbnailAsset {
+                        asset = thumbnailAsset
+                    } else if let thumbnail {
+                        asset = imageAsset(from: thumbnail)
                     } else {
-                        // Generate thumbnail from current map view
-                        finalThumbnail = try await generateThumbnail(for: coordinate)
+                        let generated = try await generateThumbnail(for: coordinate)
+                        asset = imageAsset(from: generated)
                     }
-                    
-                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: self.thumbnailAsset is \(self.thumbnailAsset != nil ? "NOT NIL" : "NIL")")
-                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: finalThumbnail size: \(finalThumbnail.size)")
-                    
-                    let asset = thumbnailAsset ?? {
-                        Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: Creating new UIImageAsset with light/dark variants")
-                        let asset = UIImageAsset()
-                        asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .light))
-                        asset.register(finalThumbnail, with: UITraitCollection(userInterfaceStyle: .dark))
-                        Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: UIImageAsset created successfully")
-                        return asset
-                    }()
-                    
-                    Logger.log(level: .info, category: .nestService, message: "🖼️ PLACE DEBUG: About to call createPlace with asset: \(asset)")
                     
                     let newPlace = try await NestService.shared.createPlace(
                         alias: placeAlias,
@@ -381,25 +374,33 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                         // Notify delegate and dismiss
                         self.placeListDelegate?.placeListViewController(didUpdatePlace: newPlace)
                         
-                        NotificationCenter.default.post(name: .placeDidSave, object: nil)
+                        NotificationCenter.default.post(name: .placeDidSave, object: newPlace)
                         
                         // Dismiss the sheet and pop to root after a short delay
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            self.dismiss(animated: true) {
-//                                onComplete()
-                                //
-                            }
+                            self.dismissSheet()
                         }
                     }
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     self.saveButton.stopLoading()
                     HapticsHelper.failureHaptic()
                     self.showToast(text: "Failed to save place", sentiment: .negative)
                 }
             }
         }
+    }
+    
+    private func imageAsset(from image: UIImage) -> UIImageAsset {
+        if let existing = image.imageAsset {
+            return existing
+        }
+        let asset = UIImageAsset()
+        asset.register(image, with: UITraitCollection(userInterfaceStyle: .light))
+        asset.register(image, with: UITraitCollection(userInterfaceStyle: .dark))
+        return asset
     }
     
     private func generateThumbnail(for coordinate: CLLocationCoordinate2D) async throws -> UIImage {
@@ -465,10 +466,6 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
     }
 
     override func leadingMenuWillPresent() {
-        collapseAttachmentsIfNeeded()
-    }
-
-    override func prepareForCompactDraftMode() {
         collapseAttachmentsIfNeeded()
     }
 
@@ -622,7 +619,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                     self.showToast(text: "Place deleted", sentiment: .positive)
                     
                     // Dismiss the sheet
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
@@ -884,8 +881,6 @@ private extension PlaceDetailViewController {
     }
     
     func updateSaveButtonState() {
-        defer { refreshCompactDetentAvailability() }
-
         if isReadOnly {
             saveButton.isHidden = true
             return

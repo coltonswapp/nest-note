@@ -316,6 +316,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        
+        // New sessions: focus the title so people don't miss naming the session.
+        if !isEditingSession && !hasCreatedSessionInFlow && !isArchivedSession,
+           (titleTextField.text ?? "").isEmpty,
+           !titleTextField.isFirstResponder {
+            titleTextField.becomeFirstResponder()
+        }
     }
     
     override func setup() {
@@ -1062,6 +1069,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Set delegate and other properties after collection view is fully configured
         collectionView.delegate = self
         collectionView.delaysContentTouches = false
+        collectionView.keyboardDismissMode = .onDrag
         collectionView.refreshControl = refreshControl
     }
     
@@ -1457,11 +1465,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             }
             sections.append(.events)
             
-            // Only show expenses section if user hasn't voted on the feature
-            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
-                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
-            }
-            
             if isEditingSession {
                 sections.insert(.sitter, at: 0)
             }
@@ -1480,11 +1483,6 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
             if shouldShowSelectNestItemsSection {
                 snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
-            }
-            
-            // Only add expenses item if section exists
-            if sections.contains(.expenses) {
-                snapshot.appendItems([.expenses], toSection: .expenses)
             }
             
             snapshot.appendItems([.events], toSection: .events)
@@ -1518,8 +1516,15 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
-        let selectedDate = sessionItem.isMultiDay ? nil : sessionItem.startDate
-        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate, nestItemRepository: NestService.shared)
+        let selectedDate = sessionItem.isMultiDay ? nil : currentStartDate
+        let sessionDateRange = DateInterval(start: currentStartDate, end: currentEndDate)
+        let eventVC = SessionEventViewController(
+            sessionID: sessionItem.id,
+            nestID: sessionItem.nestID,
+            selectedDate: selectedDate,
+            sessionDateRange: sessionDateRange,
+            nestItemRepository: NestService.shared
+        )
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -1870,6 +1875,20 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         with selectedIds: [String],
         from folderVC: ModifiedSelectFolderViewController
     ) {
+        let alert = makeSelectNestItemsConfirmationAlert(
+            selectedIds: selectedIds,
+            isCreationFlow: true
+        ) { [weak self, weak folderVC] in
+            guard let self, let folderVC else { return }
+            self.persistSelectedEntriesAndCreateInvite(selectedIds: selectedIds, from: folderVC)
+        }
+        folderVC.present(alert, animated: true)
+    }
+    
+    private func persistSelectedEntriesAndCreateInvite(
+        selectedIds: [String],
+        from folderVC: ModifiedSelectFolderViewController
+    ) {
         selectedItemIds = selectedIds
         sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
         
@@ -1905,6 +1924,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private func makeSelectNestItemsConfirmationAlert(
         selectedIds: [String],
+        isCreationFlow: Bool = false,
         confirmHandler: @escaping () -> Void
     ) -> UIAlertController {
         let totalCount = selectedIds.count
@@ -1912,15 +1932,18 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let alert: UIAlertController
         if totalCount == 0 {
             alert = UIAlertController(
-                title: "Remove All Items?",
-                message: "No items will be visible to sitters during this session.",
+                title: isCreationFlow ? "Continue Without Items?" : "Remove All Items?",
+                message: "No items will be visible to sitters during this session. You can update this later.",
                 preferredStyle: .alert
             )
         } else {
             let itemText = totalCount == 1 ? "item" : "items"
+            let message = isCreationFlow
+                ? "Sitters will see these \(totalCount) \(itemText) during the session. You can update this later."
+                : "Add \(totalCount) \(itemText) to the session? Sitters will see them for the duration of the session. You can update this later."
             alert = UIAlertController(
                 title: "Confirm Selection",
-                message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
+                message: message,
                 preferredStyle: .alert
             )
         }
@@ -1945,7 +1968,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private func pushInviteYourSitter(for session: SessionItem, inviteCode: String?) {
         let code = inviteCode ?? "000000"
-        let inviteVC = InviteYourSitterViewController(inviteCode: code, session: session)
+        let inviteVC = InviteYourSitterViewController(
+            inviteCode: code,
+            session: session,
+            promptsForNotificationsOnDismiss: true
+        )
         navigationController?.pushViewController(inviteVC, animated: true)
     }
     
@@ -2880,7 +2907,14 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 
                 await MainActor.run {
                     // Present event details
-                    let eventVC = SessionEventViewController(sessionID: self.sessionItem.id, event: event, nestItemRepository: NestService.shared)
+                    let sessionDateRange = DateInterval(start: self.currentStartDate, end: self.currentEndDate)
+                    let eventVC = SessionEventViewController(
+                        sessionID: self.sessionItem.id,
+                        nestID: self.sessionItem.nestID,
+                        event: event,
+                        sessionDateRange: sessionDateRange,
+                        nestItemRepository: NestService.shared
+                    )
                     eventVC.eventDelegate = self
                     self.present(eventVC, animated: true)
                 }

@@ -330,6 +330,15 @@ class NNPrimaryLabeledButton: NNBaseControl {
         label.isHidden = true
         return label
     }()
+    private lazy var feedbackImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = foregroundColor
+        imageView.isUserInteractionEnabled = false
+        imageView.isHidden = true
+        return imageView
+    }()
     private var isAnimatingFeedback: Bool = false
     
     // MARK: - Initialization
@@ -353,6 +362,7 @@ class NNPrimaryLabeledButton: NNBaseControl {
                 self.titleLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
                 self.imageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
                 self.feedbackLabel.textColor = self.isEnabled ? self.foregroundColor : .systemGray2
+                self.feedbackImageView.tintColor = self.isEnabled ? self.foregroundColor : .systemGray2
             }
         }
     }
@@ -360,6 +370,7 @@ class NNPrimaryLabeledButton: NNBaseControl {
     override var foregroundColor: UIColor {
         didSet {
             feedbackLabel.textColor = foregroundColor
+            feedbackImageView.tintColor = foregroundColor
         }
     }
 
@@ -383,13 +394,20 @@ class NNPrimaryLabeledButton: NNBaseControl {
 
     private func setupFeedbackLabel() {
         addSubview(feedbackLabel)
+        addSubview(feedbackImageView)
         NSLayoutConstraint.activate([
             feedbackLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
             feedbackLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             feedbackLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
-            feedbackLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12)
+            feedbackLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+
+            feedbackImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            feedbackImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            feedbackImageView.widthAnchor.constraint(equalToConstant: 20),
+            feedbackImageView.heightAnchor.constraint(equalToConstant: 20)
         ])
         feedbackLabel.textColor = foregroundColor
+        feedbackImageView.tintColor = foregroundColor
     }
 
     // MARK: - Intrinsic Content Size
@@ -410,15 +428,45 @@ class NNPrimaryLabeledButton: NNBaseControl {
     // MARK: - Quick Feedback Transition (vertical slide)
     func showQuickFeedback(_ text: String, holdDuration: TimeInterval = 1.5, inOutDuration: TimeInterval = 0.2) {
         guard !isAnimatingFeedback else { return }
-        isAnimatingFeedback = true
-        layoutIfNeeded()
+        prepareTextFeedback(text)
+        animateFeedbackTransition(holdDuration: holdDuration, inOutDuration: inOutDuration)
+    }
 
-        let originalStackTransform = stackView.transform
+    func showCheckmarkFeedback(holdDuration: TimeInterval = 1.5, inOutDuration: TimeInterval = 0.2) {
+        guard !isAnimatingFeedback else { return }
+        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
+        prepareImageFeedback(UIImage(systemName: "checkmark", withConfiguration: config))
+        animateFeedbackTransition(holdDuration: holdDuration, inOutDuration: inOutDuration)
+    }
 
+    func showCopiedFeedback() {
+        showQuickFeedback("Copied!")
+    }
+
+    private func prepareTextFeedback(_ text: String) {
+        feedbackImageView.isHidden = true
+        feedbackImageView.alpha = 0
         feedbackLabel.text = text
         feedbackLabel.isHidden = false
         feedbackLabel.alpha = 1.0
         feedbackLabel.transform = CGAffineTransform(translationX: 0, y: bounds.height)
+    }
+
+    private func prepareImageFeedback(_ image: UIImage?) {
+        feedbackLabel.isHidden = true
+        feedbackLabel.alpha = 0
+        feedbackImageView.image = image?.withRenderingMode(.alwaysTemplate)
+        feedbackImageView.isHidden = false
+        feedbackImageView.alpha = 1.0
+        feedbackImageView.transform = CGAffineTransform(translationX: 0, y: bounds.height)
+    }
+
+    private func animateFeedbackTransition(holdDuration: TimeInterval, inOutDuration: TimeInterval) {
+        isAnimatingFeedback = true
+        layoutIfNeeded()
+
+        let originalStackTransform = stackView.transform
+        let feedbackView: UIView = feedbackLabel.isHidden ? feedbackImageView : feedbackLabel
 
         let animateIn = UIViewPropertyAnimator(
             duration: inOutDuration,
@@ -426,7 +474,7 @@ class NNPrimaryLabeledButton: NNBaseControl {
             controlPoint2: CGPoint(x: 0.24, y: 1.0)
         ) {
             self.stackView.transform = CGAffineTransform(translationX: 0, y: -self.bounds.height)
-            self.feedbackLabel.transform = .identity
+            feedbackView.transform = .identity
         }
 
         animateIn.addCompletion { _ in
@@ -437,10 +485,11 @@ class NNPrimaryLabeledButton: NNBaseControl {
                     controlPoint2: CGPoint(x: 0.24, y: 1.0)
                 ) {
                     self.stackView.transform = originalStackTransform
-                    self.feedbackLabel.transform = CGAffineTransform(translationX: 0, y: self.bounds.height)
+                    feedbackView.transform = CGAffineTransform(translationX: 0, y: self.bounds.height)
                 }
                 animateOut.addCompletion { _ in
                     self.feedbackLabel.isHidden = true
+                    self.feedbackImageView.isHidden = true
                     self.isAnimatingFeedback = false
                 }
                 animateOut.startAnimation()
@@ -448,10 +497,6 @@ class NNPrimaryLabeledButton: NNBaseControl {
         }
 
         animateIn.startAnimation()
-    }
-
-    func showCopiedFeedback() {
-        showQuickFeedback("Copied!")
     }
 }
 
@@ -466,6 +511,9 @@ class NNLoadingButton: NNBaseControl {
     // MARK: - Properties
     private let transitionStyle: LoadingTransitionStyle
     private var spinnerTrailingConstraint: NSLayoutConstraint?
+    /// True while the CTA is in its loading presentation. Layout from sheet detent
+    /// changes must not shove the spinner back off-screen during this window.
+    private var isLoading = false
     
     private lazy var spinner: NNLoadingSpinner = {
         let spinner = NNLoadingSpinner()
@@ -505,7 +553,14 @@ class NNLoadingButton: NNBaseControl {
     override func layoutSubviews() {
         super.layoutSubviews()
         spinner.alpha = 1.0
-        startSpinnerOffScreen()
+        if isLoading {
+            // Sheet layout during save can re-enter here — keep the loading
+            // presentation instead of parking the spinner off-screen.
+            applyLoadingTransforms()
+        } else if spinner.isHidden {
+            startSpinnerOffScreen()
+            stackView.transform = .identity
+        }
     }
     
     private func setupSpinner() {
@@ -549,11 +604,26 @@ class NNLoadingButton: NNBaseControl {
             spinner.transform = CGAffineTransform(translationX: 60, y: 0)
         }
     }
+
+    private func applyLoadingTransforms() {
+        switch transitionStyle {
+        case .verticalSlide:
+            spinner.transform = .identity
+            stackView.transform = CGAffineTransform(translationX: 0, y: -frame.height)
+        case .rightHide:
+            spinner.transform = .identity
+        }
+    }
     
     // MARK: - Loading State
     func startLoading() {
+        guard !isLoading else { return }
+        isLoading = true
         spinner.isHidden = false
         isUserInteractionEnabled = false
+        // Apply immediately so a following layout pass / fast dismiss can't leave
+        // the CTA with title slid away and spinner still off-screen.
+        applyLoadingTransforms()
 
         switch transitionStyle {
         case .verticalSlide:
@@ -564,8 +634,8 @@ class NNLoadingButton: NNBaseControl {
     }
     
     func stopLoading(withSuccess success: Bool? = nil) {
-        
-        
+        isLoading = false
+
         if let success = success {
             // Animate success/failure state first
             spinner.animateState(success: success) { [weak self] in

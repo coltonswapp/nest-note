@@ -14,8 +14,6 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
     weak var noteDelegate: NoteDetailViewControllerDelegate?
     private let isReadOnly: Bool
     
-    override var allowsMinimizedSheetDetent: Bool { !isReadOnly }
-    
     override var hasDiscardableContent: Bool {
         guard !isReadOnly else { return false }
         if entry == nil {
@@ -70,6 +68,8 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
     
     let entry: NoteItem?
     private let category: String
+    private let initialTitle: String?
+    private let initialContent: String?
 
     private lazy var attachmentStackView: AttachmentStackView = {
         // Expand left (horizontal accordion) across the footer row.
@@ -100,17 +100,19 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
         self.category = category
         self.entry = entry
         self.isReadOnly = isReadOnly
+        self.initialTitle = nil
+        self.initialContent = nil
         super.init(sourceFrame: sourceFrame)
     }
     
+    /// Creates a new note form prefilled from a Common Items suggestion.
     init(category: String, title: String, content: String, sourceFrame: CGRect? = nil) {
         self.category = category
         self.entry = nil
         self.isReadOnly = false
+        self.initialTitle = title
+        self.initialContent = content
         super.init(sourceFrame: sourceFrame)
-        
-        titleField.text = title
-        contentTextView.text = content
     }
     
     required init?(coder: NSCoder) {
@@ -122,10 +124,10 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
         super.viewDidLoad()
         
         titleLabel.text = entry == nil ? "New Note" : isReadOnly ? "View Note" : "Edit Note"
-        titleField.text = entry?.title
+        titleField.text = entry?.title ?? initialTitle
         titleField.placeholder = "Title"
         titleField.delegate = self
-        contentTextView.text = entry?.content
+        contentTextView.text = entry?.content ?? initialContent
         contentTextView.delegate = self
         
         // Store original values for change detection
@@ -330,7 +332,7 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
                 await MainActor.run {
                     noteDelegate?.noteDetailViewController(didDeleteNote: entry)
                     HapticsHelper.lightHaptic()
-                    dismiss(animated: true)
+                    dismissSheet()
                 }
             } catch {
                 Logger.log(level: .error, category: .nestService, message: "Failed to delete entry: \(error.localizedDescription)")
@@ -363,6 +365,7 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
         }
         
         saveButton.startLoading()
+        prepareToSaveAndDismiss()
         titleField.isUserInteractionEnabled = false
         contentTextView.isUserInteractionEnabled = false
         
@@ -411,10 +414,11 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
                     // Post notification that an entry was saved
                     NotificationCenter.default.post(name: .noteDidSave, object: nil, userInfo: ["note": savedNote])
                     
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     saveButton.stopLoading(withSuccess: false)
                     titleField.isUserInteractionEnabled = true
                     contentTextView.isUserInteractionEnabled = true
@@ -480,10 +484,6 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
     }
 
     override func leadingMenuWillPresent() {
-        collapseAttachmentsIfNeeded()
-    }
-
-    override func prepareForCompactDraftMode() {
         collapseAttachmentsIfNeeded()
     }
 
@@ -598,8 +598,6 @@ final class NoteDetailViewController: NNSheetViewController, NNTippable {
     }
     
     private func updateSaveButtonState() {
-        defer { refreshCompactDetentAvailability() }
-
         if isReadOnly {
             saveButton.isHidden = true
             return

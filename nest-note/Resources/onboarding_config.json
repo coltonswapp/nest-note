@@ -31,7 +31,7 @@
         "type": "survey",
         "config": {
           "type": "survey",
-          "title": "How often do you leave your children with a sitter on a monthly basis?",
+          "title": "How often do you leave your children / pets with a sitter on a monthly basis?",
           "subtitle": "This helps us understand your needs better",
           "options": [
             {
@@ -147,6 +147,10 @@
               "value": "pets"
             },
             {
+              "title": "House",
+              "value": "house"
+            },
+            {
               "title": "Plants",
               "value": "plants"
             }
@@ -156,12 +160,12 @@
         }
       },
       {
-        "id": "nestnote_features",
-        "type": "preview",
+        "id": "folder_preview",
+        "type": "folder_preview",
         "config": {
-          "type": "preview",
-          "title": "NestNote offers flexible organization",
-          "subtitle": "Notes, routines, and places—swipe to see how they work",
+          "type": "folder_preview",
+          "title": null,
+          "subtitle": null,
           "cta_text": "Continue"
         }
       },
@@ -203,6 +207,7 @@
             }
           ],
           "multi_select": false,
+          "layout": "grid",
           "cta_text": "Continue"
         }
       },

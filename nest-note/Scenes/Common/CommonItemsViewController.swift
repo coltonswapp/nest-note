@@ -65,7 +65,6 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
         CommonNote(title: "Gas Shutoff", content: "Outside, east side of house", category: "Common"),
         
         // Emergency & Medical Entries
-        CommonNote(title: "Emergency Contact", content: "John Doe: 555-123-4567", category: "Common"),
         CommonNote(title: "Nearest Hospital", content: "City General - 10 Main St", category: "Common"),
         CommonNote(title: "Fire Evacuation", content: "Meet at mailbox", category: "Common"),
         CommonNote(title: "Poison Control", content: "1-800-222-1222", category: "Common"),
@@ -123,26 +122,42 @@ class CommonItemsViewController: NNViewController, NNCategoryFilterViewDelegate 
     ]
     
     private let commonRoutines: [CommonRoutine] = [
-        CommonRoutine(name: "Morning Wake Up", icon: "sun.rise.fill"),
-        CommonRoutine(name: "Bedtime Routine", icon: "moon.stars.fill"),
-        CommonRoutine(name: "After School", icon: "backpack.fill"),
-        CommonRoutine(name: "Pet Care", icon: "pawprint.fill"),
-        CommonRoutine(name: "Meal Prep", icon: "fork.knife"),
-        CommonRoutine(name: "Bath Time", icon: "bathtub.fill"),
-        CommonRoutine(name: "Homework Time", icon: "pencil.and.scribble"),
-        CommonRoutine(name: "Screen Time Setup", icon: "tv.fill"),
-        CommonRoutine(name: "Leaving House", icon: "door.left.hand.open"),
-        CommonRoutine(name: "Coming Home", icon: "house.fill"),
-        CommonRoutine(name: "Emergency Protocol", icon: "exclamationmark.triangle.fill"),
-        CommonRoutine(name: "Quiet Time", icon: "book.closed.fill")
-    ]
-
-    private static let sampleRoutineActions = [
-        "Check all doors",
-        "Turn off lights",
-        "Set thermostat",
-        "Lock windows",
-        "Arm security system"
+        CommonRoutine(name: "Morning Wake Up", icon: "sun.rise.fill", actions: [
+            "Wake up gently", "Brush teeth", "Get dressed", "Eat breakfast"
+        ]),
+        CommonRoutine(name: "Bedtime Routine", icon: "moon.stars.fill", actions: [
+            "Brush teeth", "Put on pajamas", "Read a story", "Turn on nightlight", "Close door halfway"
+        ]),
+        CommonRoutine(name: "After School", icon: "backpack.fill", actions: [
+            "Hang up backpack", "Wash hands", "Have a snack", "Start homework"
+        ]),
+        CommonRoutine(name: "Pet Care", icon: "pawprint.fill", actions: [
+            "Fill water bowl", "Give food", "Let outside / litter check", "Play for 10 minutes"
+        ]),
+        CommonRoutine(name: "Meal Prep", icon: "fork.knife", actions: [
+            "Wash hands", "Set the table", "Serve portions", "Wipe counters after"
+        ]),
+        CommonRoutine(name: "Bath Time", icon: "bathtub.fill", actions: [
+            "Fill tub to marked line", "Wash hair", "Rinse thoroughly", "Dry off and lotion"
+        ]),
+        CommonRoutine(name: "Homework Time", icon: "pencil.and.scribble", actions: [
+            "Clear the desk", "Check planner", "Complete assignments", "Pack backpack for tomorrow"
+        ]),
+        CommonRoutine(name: "Screen Time Setup", icon: "tv.fill", actions: [
+            "Agree on time limit", "Start timer", "Keep volume reasonable", "Put device away when done"
+        ]),
+        CommonRoutine(name: "Leaving House", icon: "door.left.hand.open", actions: [
+            "Check all doors", "Turn off lights", "Set thermostat", "Lock windows", "Arm security system"
+        ]),
+        CommonRoutine(name: "Coming Home", icon: "house.fill", actions: [
+            "Disarm alarm", "Hang keys by door", "Unpack bags", "Wash hands"
+        ]),
+        CommonRoutine(name: "Emergency Protocol", icon: "exclamationmark.triangle.fill", actions: [
+            "Stay calm", "Call parent / emergency contact", "Meet at mailbox", "Do not open door for strangers"
+        ]),
+        CommonRoutine(name: "Quiet Time", icon: "book.closed.fill", actions: [
+            "Choose a book or puzzle", "Dim the lights", "Stay in quiet space", "Reset timer if needed"
+        ])
     ]
     
     private var enabledSections: Set<Section> = [.codes, .other] {
@@ -426,7 +441,7 @@ private extension CommonItemsViewController {
             if let routine = item as? CommonRoutine {
                 cell.configure(
                     title: routine.name,
-                    content: WaterfallGridCell.routinePreviewText(for: Self.sampleRoutineActions)
+                    content: WaterfallGridCell.routinePreviewText(for: routine.actions)
                 )
             }
         }
@@ -467,7 +482,7 @@ private extension CommonItemsViewController {
             if let routine = item as? CommonRoutine {
                 waterfallSizingCell.configure(
                     title: routine.name,
-                    content: WaterfallGridCell.routinePreviewText(for: Self.sampleRoutineActions)
+                    content: WaterfallGridCell.routinePreviewText(for: routine.actions)
                 )
             }
         }
@@ -565,6 +580,13 @@ struct CommonPlace: Hashable {
 struct CommonRoutine: Hashable {
     let name: String
     let icon: String
+    let actions: [String]
+
+    init(name: String, icon: String, actions: [String] = []) {
+        self.name = name
+        self.icon = icon
+        self.actions = actions
+    }
 }
 
 struct CommonContact: Hashable {

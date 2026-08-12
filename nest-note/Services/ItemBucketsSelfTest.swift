@@ -10,7 +10,7 @@ import Foundation
 #if DEBUG
 enum ItemBucketsSelfTest {
     static func run() {
-        let contact = ContactItem(category: "Test", title: "Name", phoneNumber: "+15551234567")
+        let contact = ContactItem(category: "Test", title: "Name", content: "+15551234567")
         let bucket = ItemBuckets(items: [contact])
         assert(bucket.contacts.count == 1, "ItemBuckets should route contact items")
         assert(bucket.notes.isEmpty)

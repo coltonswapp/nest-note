@@ -78,6 +78,7 @@ enum NNTipCatalog {
         NNTipSection(title: "Settings", tips: [
             SettingsTips.profileTip,
             SettingsTips.sessionsTip,
+            SettingsTips.sitterReferralCodeTip,
         ]),
     ]
 
@@ -188,6 +189,15 @@ enum SettingsTips {
         systemImageName: "rectangle.fill.on.rectangle.angled.fill",
         audience: .owner,
         criteria: "Settings · My Nest section visible"
+    )
+
+    static let sitterReferralCodeTip = NNTipModel(
+        id: "SitterReferralCodeTip",
+        title: "Tap to Copy",
+        message: "This is your unique referral code — tap anytime to copy it.",
+        systemImageName: "doc.on.doc",
+        audience: .sitter,
+        criteria: "Sitter referral · code visible"
     )
 }
 

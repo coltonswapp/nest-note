@@ -12,8 +12,6 @@ final class SessionDetailViewController: NNSheetViewController {
     private var session: (any SessionDisplayable)?
     private var isArchived: Bool = false
     
-    override var allowsMinimizedSheetDetent: Bool { !isArchived }
-    
     override var hasDiscardableContent: Bool {
         guard !isArchived else { return false }
         let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

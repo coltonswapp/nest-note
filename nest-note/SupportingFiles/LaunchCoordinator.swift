@@ -128,7 +128,7 @@ final class LaunchCoordinator {
     func installLoadingPlaceholder() {
         guard navigationController == nil else { return }
 
-        let navigationController = NNNavigationController(rootViewController: LoadingViewController())
+        let navigationController = UINavigationController(rootViewController: LoadingViewController())
         self.navigationController = navigationController
         window?.rootViewController = navigationController
         window?.makeKeyAndVisible()

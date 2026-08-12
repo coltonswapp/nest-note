@@ -374,10 +374,19 @@ class SessionService {
     // MARK: - Helper Methods
     /// Determines the correct nestID for a given sessionID
     /// Handles both owner and sitter scenarios using local session cache
-    private func getNestIDForSession(sessionID: String) async throws -> String {
+    private func getNestIDForSession(sessionID: String, preferredNestID: String? = nil) async throws -> String {
+        if let preferredNestID, !preferredNestID.isEmpty {
+            return preferredNestID
+        }
+
         // First, check local sessions array for the nestID (most efficient)
         if let session = sessions.first(where: { $0.id == sessionID }) {
             return session.nestID
+        }
+
+        // Owner flows often have the current nest even when the session list isn't loaded yet
+        if let currentNestID = NestService.shared.currentNest?.id {
+            return currentNestID
         }
         
         // If not in local cache, check if user is a sitter for this session
@@ -399,9 +408,9 @@ class SessionService {
     
     // MARK: - Session Events
     /// Creates or updates a single event in a session
-    func updateSessionEvent(_ event: SessionEvent, sessionID: String) async throws {
+    func updateSessionEvent(_ event: SessionEvent, sessionID: String, nestID: String? = nil) async throws {
         // Get the correct nestID for this session (handles both owner and sitter cases)
-        let nestID = try await getNestIDForSession(sessionID: sessionID)
+        let nestID = try await getNestIDForSession(sessionID: sessionID, preferredNestID: nestID)
         
         Logger.log(level: .info, category: .sessionService, message: "Updating event: \(event.id) for session: \(sessionID) in nest: \(nestID)")
         

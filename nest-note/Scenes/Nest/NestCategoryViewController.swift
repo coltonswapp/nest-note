@@ -387,6 +387,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             name: .placeDidSave,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(placeDidSave(_:)),
+            name: .placeThumbnailsDidUpdate,
+            object: nil
+        )
     }
     
     @objc private func placeDidSave(_ notification: Notification) {
@@ -447,7 +453,6 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 await loadNotes()
             }
         }
-        (presentedViewController as? NNSheetViewController)?.refreshDraftNavigationPopGuard()
     }
     
     // Implement NestLoadable requirement - now much simpler!
@@ -916,7 +921,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: HalfWidthCell.reuseIdentifier, for: indexPath) as! HalfWidthCell
                 cell.configure(
                     key: contact.title,
-                    value: contact.phoneNumber,
+                    value: contact.content,
                     isNestOwner: self.nestItemRepository is NestService,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedContacts.contains(contact),
@@ -2067,7 +2072,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         guard let indexPath = dataSource?.indexPath(for: entry),
               let cell = collectionView.cellForItem(at: indexPath) else { return }
         
-        if let halfWidthCell = cell as? HalfWidthCell {
+        if let waterfallCell = cell as? WaterfallGridCell {
+            waterfallCell.flash()
+        } else if let halfWidthCell = cell as? HalfWidthCell {
             halfWidthCell.flash()
         } else if let fullWidthCell = cell as? FullWidthCell {
             fullWidthCell.flash()
@@ -2080,31 +2087,22 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             return
         }
 
-        // Rebuild the full snapshot instead of appending/reloading into `.codes`/`.other`.
-        // Those sections are often missing (waterfall only uses `.codes`; first long entry
-        // creates `.other`), which crashes DiffableDataSource with section != NSNotFound.
         shouldApplySnapshotAutomatically = false
         notes[index] = entry
         shouldApplySnapshotAutomatically = true
 
         DispatchQueue.main.async {
-            guard let dataSource = self.dataSource else { return }
-            var snapshot = self.createSnapshot()
-            if snapshot.itemIdentifiers.contains(where: { ($0 as? NoteItem)?.id == entry.id }) {
-                // Identity is id-only; force cell refresh after in-place content edits.
-                if #available(iOS 15.0, *) {
-                    snapshot.reconfigureItems([entry])
-                } else {
-                    snapshot.reloadItems([entry])
-                }
-            }
-            // Content edits change card height; drop cached sizes before re-layout.
-            self.waterfallHeightCache.removeAll()
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                guard let self else { return }
-                self.invalidateWaterfallLayoutAfterContentChange()
-                self.flashCell(for: entry)
-            }
+            self.refreshGridItem(
+                matching: { ($0 as? NoteItem)?.id == entry.id },
+                updatedItem: entry,
+                orderIds: {
+                    self.notes
+                        .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                        .map(\.id)
+                },
+                idFromItem: { ($0 as? NoteItem)?.id },
+                flash: { self.flashCell(for: entry) }
+            )
         }
     }
     
@@ -2125,22 +2123,20 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             }
             self.shouldApplySnapshotAutomatically = true
 
-            guard let dataSource = self.dataSource else { return }
-            var snapshot = dataSource.snapshot()
-
-            // Use reconfigureItems instead of reloadItems for better performance
-            if #available(iOS 15.0, *) {
-                snapshot.reconfigureItems([place])
-            } else {
-                snapshot.reloadItems([place])
-            }
-
-            self.waterfallHeightCache.removeAll()
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                guard let self else { return }
-                self.invalidateWaterfallLayoutAfterContentChange()
-                self.flashPlaceCell(for: place)
-            }
+            // PlaceItem is a struct with id-only equality — replace the snapshot
+            // identifier so Diffable hands the cell provider fresh values.
+            self.refreshGridItem(
+                matching: { ($0 as? PlaceItem)?.id == place.id },
+                updatedItem: place,
+                replacesStoredIdentifier: true,
+                orderIds: {
+                    self.places
+                        .sorted { ($0.alias ?? "").localizedCaseInsensitiveCompare($1.alias ?? "") == .orderedAscending }
+                        .map(\.id)
+                },
+                idFromItem: { ($0 as? PlaceItem)?.id },
+                flash: { self.flashPlaceCell(for: place) }
+            )
         }
     }
     
@@ -2155,9 +2151,13 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func flashPlaceCell(for place: PlaceItem) {
         guard let indexPath = dataSource?.indexPath(for: place),
-              let cell = collectionView.cellForItem(at: indexPath) as? PlaceCell else { return }
-        
-        cell.flash()
+              let cell = collectionView.cellForItem(at: indexPath) else { return }
+
+        if let waterfallCell = cell as? WaterfallGridCell {
+            waterfallCell.flash()
+        } else if let placeCell = cell as? PlaceCell {
+            placeCell.flash()
+        }
     }
     
     private func updateLocalRoutine(_ routine: RoutineItem) {
@@ -2168,22 +2168,17 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             }
             self.shouldApplySnapshotAutomatically = true
 
-            guard let dataSource = self.dataSource else { return }
-            var snapshot = dataSource.snapshot()
-            
-            // Use reconfigureItems instead of reloadItems for better performance
-            if #available(iOS 15.0, *) {
-                snapshot.reconfigureItems([routine])
-            } else {
-                snapshot.reloadItems([routine])
-            }
-
-            self.waterfallHeightCache.removeAll()
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                guard let self else { return }
-                self.invalidateWaterfallLayoutAfterContentChange()
-                self.flashRoutineCell(for: routine)
-            }
+            self.refreshGridItem(
+                matching: { ($0 as? RoutineItem)?.id == routine.id },
+                updatedItem: routine,
+                orderIds: {
+                    self.routines
+                        .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                        .map(\.id)
+                },
+                idFromItem: { ($0 as? RoutineItem)?.id },
+                flash: { self.flashRoutineCell(for: routine) }
+            )
         }
     }
     
@@ -2198,9 +2193,131 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func flashRoutineCell(for routine: RoutineItem) {
         guard let indexPath = dataSource?.indexPath(for: routine),
-              let cell = collectionView.cellForItem(at: indexPath) as? RoutineCell else { return }
-        
-        cell.flash()
+              let cell = collectionView.cellForItem(at: indexPath) else { return }
+
+        if let waterfallCell = cell as? WaterfallGridCell {
+            waterfallCell.flash()
+        } else if let routineCell = cell as? RoutineCell {
+            routineCell.flash()
+        }
+    }
+
+    private func updateLocalContact(_ contact: ContactItem) {
+        DispatchQueue.main.async {
+            self.shouldApplySnapshotAutomatically = false
+            if let index = self.contacts.firstIndex(where: { $0.id == contact.id }) {
+                self.contacts[index] = contact
+            }
+            self.shouldApplySnapshotAutomatically = true
+
+            self.refreshGridItem(
+                matching: { ($0 as? ContactItem)?.id == contact.id },
+                updatedItem: contact,
+                replacesStoredIdentifier: true,
+                orderIds: {
+                    self.contacts
+                        .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                        .map(\.id)
+                },
+                idFromItem: { ($0 as? ContactItem)?.id },
+                flash: {
+                    if let indexPath = self.dataSource?.indexPath(for: contact),
+                       let cell = self.collectionView.cellForItem(at: indexPath) as? WaterfallGridCell {
+                        cell.flash()
+                    }
+                }
+            )
+        }
+    }
+
+    /// Reloads one item from the *live* Diffable snapshot so the cell provider
+    /// runs again. A freshly built snapshot + `reconfigureItems` is often a no-op
+    /// when identity is id-only (equal items → no cell refresh).
+    private func refreshGridItem<Item: Hashable>(
+        matching: @escaping (AnyHashable) -> Bool,
+        updatedItem: Item,
+        replacesStoredIdentifier: Bool = false,
+        orderIds: () -> [String],
+        idFromItem: (AnyHashable) -> String?,
+        flash: @escaping () -> Void
+    ) {
+        guard let dataSource else {
+            applySnapshot(animated: false, completion: flash)
+            return
+        }
+
+        let currentSnapshot = dataSource.snapshot()
+        guard let existing = currentSnapshot.itemIdentifiers.first(where: matching),
+              let section = currentSnapshot.sectionIdentifier(containingItem: existing) else {
+            waterfallHeightCache.removeAll()
+            applySnapshot(animated: false) { [weak self] in
+                self?.invalidateWaterfallLayoutAfterContentChange()
+                flash()
+            }
+            return
+        }
+
+        let currentOrder = currentSnapshot.itemIdentifiers(inSection: section).compactMap(idFromItem)
+        let desiredOrder = orderIds().filter { currentOrder.contains($0) }
+        let orderChanged = currentOrder != desiredOrder
+
+        var snapshot = currentSnapshot
+        if replacesStoredIdentifier {
+            // Structs hashed by id keep stale values across apply; swap identifiers.
+            let sectionItems = snapshot.itemIdentifiers(inSection: section)
+            snapshot.deleteItems(sectionItems)
+            if orderChanged {
+                let fresh = createSnapshot()
+                if fresh.sectionIdentifiers.contains(section) {
+                    snapshot.appendItems(fresh.itemIdentifiers(inSection: section), toSection: section)
+                } else {
+                    waterfallHeightCache.removeAll()
+                    applySnapshot(animated: false) { [weak self] in
+                        self?.invalidateWaterfallLayoutAfterContentChange()
+                        flash()
+                    }
+                    return
+                }
+            } else if let index = sectionItems.firstIndex(of: existing) {
+                var replaced = sectionItems
+                replaced[index] = updatedItem
+                snapshot.appendItems(replaced, toSection: section)
+            } else {
+                snapshot.appendItems([updatedItem], toSection: section)
+            }
+        } else if orderChanged {
+            // Reference-type items were mutated in place; rebuild to re-sort,
+            // then reload so moved cells pick up the new title/content.
+            waterfallHeightCache.removeAll()
+            applySnapshot(animated: false) { [weak self] in
+                guard let self, let dataSource = self.dataSource else {
+                    flash()
+                    return
+                }
+                var snapshot = dataSource.snapshot()
+                if let item = snapshot.itemIdentifiers.first(where: matching) {
+                    snapshot.reloadItems([item])
+                    dataSource.apply(snapshot, animatingDifferences: false) {
+                        self.invalidateWaterfallLayoutAfterContentChange()
+                        flash()
+                    }
+                } else {
+                    self.invalidateWaterfallLayoutAfterContentChange()
+                    flash()
+                }
+            }
+            return
+        } else {
+            // Classes mutated in place: force the existing cell to reconfigure.
+            snapshot.reloadItems([existing])
+        }
+
+        waterfallHeightCache.removeAll()
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self else { return }
+            self.invalidateWaterfallLayoutAfterContentChange()
+            flash()
+        }
     }
     
     // Update loadNotes to use the new streamlined approach
@@ -2883,7 +3000,8 @@ extension NestCategoryViewController: UICollectionViewDelegate {
 
     private func clearContextualItemHighlight(forItemId itemId: String) {
         guard !isEditingMode else { return }
-        for indexPath in collectionView.indexPathsForSelectedItems ?? [] {
+        let selectedIndexPaths = collectionView.indexPathsForSelectedItems ?? []
+        for indexPath in selectedIndexPaths {
             guard let selected = dataSource.itemIdentifier(for: indexPath) else { continue }
             let selectedId: String?
             switch selected {
@@ -2898,6 +3016,10 @@ extension NestCategoryViewController: UICollectionViewDelegate {
                 collectionView.deselectItem(at: indexPath, animated: true)
                 return
             }
+        }
+        // Snapshot refresh after save can reshuffle identity lookup; clear any leftover browse selection.
+        for indexPath in collectionView.indexPathsForSelectedItems ?? [] {
+            collectionView.deselectItem(at: indexPath, animated: true)
         }
     }
     
@@ -3116,20 +3238,29 @@ extension NestCategoryViewController: NoteDetailViewControllerDelegate {
 
 extension NestCategoryViewController: ContactDetailViewControllerDelegate {
     func contactDetailViewController(_ controller: ContactDetailViewController, didSave contact: ContactItem) {
-        Task {
-            await loadFolderContents()
-            await MainActor.run {
-                self.showToast(text: "Contact saved")
-            }
+        if let nestService = nestItemRepository as? NestService {
+            nestService.invalidateItemsCache()
         }
+
+        if contacts.contains(where: { $0.id == contact.id }) {
+            updateLocalContact(contact)
+        } else {
+            shouldApplySnapshotAutomatically = false
+            contacts.append(contact)
+            shouldApplySnapshotAutomatically = true
+            applySnapshot(animated: true)
+            refreshEmptyState()
+            updateFilterView()
+        }
+        showToast(text: "Contact saved")
     }
 
     func contactDetailViewController(_ controller: ContactDetailViewController, didDelete contact: ContactItem) {
-        Task {
-            await loadFolderContents()
-            await MainActor.run {
-                self.showToast(text: "Contact deleted")
-            }
+        if let index = contacts.firstIndex(where: { $0.id == contact.id }) {
+            selectedContacts.remove(contact)
+            contacts.remove(at: index)
+            showToast(text: "Contact deleted")
+            refreshEmptyState()
         }
     }
 }
@@ -3320,7 +3451,8 @@ extension NestCategoryViewController: CommonItemsViewControllerDelegate {
 
         let routineDetailVC = RoutineDetailViewController(
             category: self.category,
-            routineName: routine.name
+            routineName: routine.name,
+            suggestedActions: routine.actions
         )
         routineDetailVC.routineDelegate = self
         self.dismiss(animated: true) {
@@ -3574,6 +3706,7 @@ private extension NestCategoryViewController {
                     content: place.address,
                     layoutStyle: .place,
                     showsPlaceThumbnail: true,
+                    attachmentCount: place.attachmentIds.count,
                     isEditMode: isEditingMode,
                     isSelected: selectedPlaces.contains(place)
                 )
@@ -3584,6 +3717,7 @@ private extension NestCategoryViewController {
                 cell.configure(
                     title: routine.title,
                     content: Self.routinePreviewLabel(for: routine),
+                    attachmentCount: routine.attachmentIds.count,
                     isEditMode: isEditingMode,
                     isSelected: selectedRoutines.contains(routine)
                 )
@@ -3592,7 +3726,7 @@ private extension NestCategoryViewController {
             if let contact = item as? ContactItem {
                 cell.configure(
                     title: contact.title,
-                    content: contact.phoneNumber,
+                    content: contact.content,
                     isEditMode: isEditingMode,
                     isSelected: selectedContacts.contains(contact)
                 )
@@ -3612,6 +3746,7 @@ private extension NestCategoryViewController {
                     title: entry.title,
                     content: entry.content,
                     contentLineLimit: WaterfallGridCell.entryContentLineLimit,
+                    attachmentCount: entry.attachmentIds.count,
                     isEditMode: isEditingMode,
                     isSelected: selectedNotes.contains(entry)
                 )
@@ -3634,6 +3769,7 @@ private extension NestCategoryViewController {
                         thumbnail: image,
                         layoutStyle: .place,
                         showsPlaceThumbnail: true,
+                        attachmentCount: place.attachmentIds.count,
                         isEditMode: isEditingMode,
                         isSelected: selectedPlaces.contains(place)
                     )
@@ -3668,21 +3804,23 @@ private extension NestCategoryViewController {
                     content: place.address,
                     thumbnail: place.thumbnailURLs != nil ? UIImage() : nil,
                     layoutStyle: .place,
-                    showsPlaceThumbnail: true
+                    showsPlaceThumbnail: true,
+                    attachmentCount: place.attachmentIds.count
                 )
             }
         case .routines:
             if let routine = item as? RoutineItem {
                 waterfallSizingCell.configure(
                     title: routine.title,
-                    content: Self.routinePreviewLabel(for: routine)
+                    content: Self.routinePreviewLabel(for: routine),
+                    attachmentCount: routine.attachmentIds.count
                 )
             }
         case .contacts:
             if let contact = item as? ContactItem {
                 waterfallSizingCell.configure(
                     title: contact.title,
-                    content: contact.phoneNumber
+                    content: contact.content
                 )
             }
         case .unknownItems:
@@ -3697,7 +3835,8 @@ private extension NestCategoryViewController {
                 waterfallSizingCell.configure(
                     title: entry.title,
                     content: entry.content,
-                    contentLineLimit: WaterfallGridCell.entryContentLineLimit
+                    contentLineLimit: WaterfallGridCell.entryContentLineLimit,
+                    attachmentCount: entry.attachmentIds.count
                 )
             }
         }

@@ -34,11 +34,8 @@ final class FeatureFlagService {
             case .captureSignupLogs:
                 return false // Default to not capturing logs for privacy
             case .nestReadinessScoreEnabled:
-                #if DEBUG
+                // Show Nest Score on home by default; Remote Config can still disable it.
                 return true
-                #else
-                return false
-                #endif
             case .sitterReferralProgramEnabled:
                 #if DEBUG
                 return true
@@ -108,6 +105,7 @@ final class FeatureFlagService {
             
             Logger.log(level: .info, category: .general, message: "Remote config fetched successfully. Status: \(status)")
             self?.logCurrentFlags()
+            NotificationCenter.default.post(name: .featureFlagsDidUpdate, object: nil)
         }
     }
     

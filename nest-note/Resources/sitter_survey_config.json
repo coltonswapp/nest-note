@@ -53,6 +53,7 @@
                 "DEBUG - Testing"
             ],
             "multi_select": false,
+            "layout": "grid",
             "category": "discovery",
             "order": 3
         }

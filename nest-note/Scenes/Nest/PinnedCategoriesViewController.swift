@@ -16,8 +16,9 @@ class PinnedCategoriesViewController: UIViewController {
     private var saveButton: NNLoadingButton!
     
     private var categories: [NestCategory] = []
-    private var pinnedCategoryNames: Set<String> = []
-    private var originalPinnedCategoryNames: Set<String> = []
+    /// Ordered pin list — append on pin, remove on unpin so Home stays stable.
+    private var pinnedCategoryNames: [String] = []
+    private var originalPinnedCategoryNames: [String] = []
     
     enum Section: Int, CaseIterable {
         case categories
@@ -172,8 +173,10 @@ class PinnedCategoriesViewController: UIViewController {
                 
                 await MainActor.run {
                     self.categories = fetchedCategories
-                    self.pinnedCategoryNames = Set(pinnedCategoryNames)
-                    self.originalPinnedCategoryNames = Set(pinnedCategoryNames)
+                    // Drop legacy "Places" pin — it was a synthetic option, not a real folder
+                    let sanitized = pinnedCategoryNames.filter { $0 != "Places" }
+                    self.pinnedCategoryNames = sanitized
+                    self.originalPinnedCategoryNames = sanitized
                     self.applySnapshot()
                     self.updateSaveButtonState()
                 }
@@ -200,16 +203,6 @@ class PinnedCategoriesViewController: UIViewController {
             )
         }
         
-        // Always add "Places" as an option
-        let placesItem = CategoryItem(
-            name: "Places",
-            fullPath: "Places",
-            symbolName: "map.fill",
-            isPinned: pinnedCategoryNames.contains("Places"),
-            id: "123"
-        )
-        categoryItems.append(placesItem)
-        
         // Sort all items alphabetically
         categoryItems.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         
@@ -218,18 +211,13 @@ class PinnedCategoriesViewController: UIViewController {
     }
     
     private func togglePin(for categoryName: String) {
-        if pinnedCategoryNames.contains(categoryName) {
-            pinnedCategoryNames.remove(categoryName)
+        if let index = pinnedCategoryNames.firstIndex(of: categoryName) {
+            pinnedCategoryNames.remove(at: index)
         } else {
-            // Check if we're at the limit
-            if pinnedCategoryNames.count >= 4 {
-                return
-            }
-            pinnedCategoryNames.insert(categoryName)
+            guard pinnedCategoryNames.count < 4 else { return }
+            pinnedCategoryNames.append(categoryName)
         }
-        
-        print(pinnedCategoryNames)
-        
+
         applySnapshot()
         updateSaveButtonState()
     }
@@ -246,12 +234,8 @@ class PinnedCategoriesViewController: UIViewController {
             }
             
             do {
-                // Convert Set to Array for saving
-                let categoryNamesArray = Array(pinnedCategoryNames)
-                
-                // Save using NestService
                 if let nestService = nestItemRepository as? NestService {
-                    try await nestService.savePinnedCategories(categoryNamesArray)
+                    try await nestService.savePinnedCategories(pinnedCategoryNames)
                 }
                 
                 await MainActor.run {

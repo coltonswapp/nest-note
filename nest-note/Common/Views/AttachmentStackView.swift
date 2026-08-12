@@ -989,11 +989,37 @@ final class AttachmentStackView: UIView, UIGestureRecognizerDelegate, UIContextM
 
     private func computeInitialRotations(count: Int) -> [CGFloat] {
         guard count > 0 else { return [] }
-        if count == 1 { return [0] }
-        let maxRotation: CGFloat = 0.35
-        return (0..<count).map { i in
-            let t = CGFloat(i) / CGFloat(max(count - 1, 1))
-            return (t * 2 - 1) * maxRotation
+        // A lone attachment (+ optional plus) shouldn't fan — tilt looks odd with one card.
+        let itemCount = slots.reduce(0) { partial, slot in
+            if case .item = slot { return partial + 1 }
+            return partial
+        }
+        if itemCount <= 1 {
+            return Array(repeating: 0, count: count)
+        }
+
+        // Visual order matches setupStack (slots reversed). Deterministic jitter from
+        // item id so rebuilds don't jump, but angles feel casually tossed.
+        let visualSlots = Array(slots.reversed())
+        return (0..<count).map { index in
+            let slot = index < visualSlots.count ? visualSlots[index] : .plus
+            if case .plus = slot { return 0 }
+
+            let seedSource: String
+            if case .item(let item) = slot {
+                seedSource = item.id
+            } else {
+                seedSource = "\(index)"
+            }
+            let hash = seedSource.unicodeScalars.reduce(into: 0) { partial, scalar in
+                partial = partial &* 31 &+ Int(scalar.value)
+            }
+            let unit = CGFloat(abs(hash % 1000)) / 1000.0
+            let magnitude = 0.16 + unit * 0.28 // ~9°–25°
+            let sign: CGFloat = (hash & 1) == 0 ? -1 : 1
+            // Nudge away from a strict alternate pattern.
+            let flip: CGFloat = (abs(hash) % 5 == 0) ? -1 : 1
+            return magnitude * sign * flip
         }
     }
 
@@ -1252,7 +1278,7 @@ private final class AttachmentCardView: UIView {
                 )
             )
         case let contact as ContactItem:
-            return (contact.title, contact.phoneNumber)
+            return (contact.title, contact.content)
         case let entry as NoteItem:
             return (entry.title, entry.content)
         case let unknown as UnknownItem:

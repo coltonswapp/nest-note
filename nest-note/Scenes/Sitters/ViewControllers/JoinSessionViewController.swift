@@ -417,7 +417,7 @@ class JoinSessionViewController: NNViewController {
                 await MainActor.run {
                     findSessionButton.stopLoading(withSuccess: true)
 
-                    SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
+                    SessionNotificationPrompt.presentIfNeeded(from: self, audience: .sitter) { [weak self] in
                         Task { @MainActor in
                             self?.showSessionJoinedSuccessAlert(sitterSession: sitterSession)
                         }

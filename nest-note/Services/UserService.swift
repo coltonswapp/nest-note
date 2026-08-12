@@ -864,6 +864,28 @@ final class UserService {
             return error
         }
     }
+
+    /// Returns `false` when Firebase reports existing sign-in methods for the email.
+    /// When email enumeration protection is enabled, Firebase may return an empty list even for
+    /// registered emails — treat that as "unknown / available" and rely on signup-time errors.
+    func isEmailAvailable(_ email: String) async throws -> Bool {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        do {
+            let methods = try await auth.fetchSignInMethods(forEmail: trimmed)
+            return methods.isEmpty
+        } catch {
+            let nsError = error as NSError
+            if nsError.code == AuthErrorCode.invalidEmail.rawValue {
+                throw AuthError.emailInvalid
+            }
+            if nsError.code == AuthErrorCode.networkError.rawValue {
+                throw AuthError.networkError
+            }
+            throw error
+        }
+    }
     
     /// Creates a nest for the specified user
     /// - Parameters:

@@ -92,8 +92,6 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     // MARK: - Folder Parsing Methods (using shared FolderUtility)
     
     private func getFoldersForCurrentPath() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
         Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Getting folders for currentFolderPath='\(currentFolderPath)'")
         
         if currentFolderPath.isEmpty {
@@ -106,9 +104,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getTopLevelFolders() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
-        // Get top-level categories (no "/" in name)
+        // Get top-level categories (no "/" in name) — show even when the nest has no items yet
         let topLevelCategories = categories.filter { !$0.name.contains("/") }
         let categoryNames = topLevelCategories.map { $0.name }
         
@@ -141,8 +137,6 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getSubfoldersForCurrentPath() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
         let subfolders = FolderUtility.buildSubfolders(
             for: currentFolderPath,
             allItems: allItemsForFolderUtility,
@@ -238,7 +232,6 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 await loadNotes()
             }
         }
-        (presentedViewController as? NNSheetViewController)?.refreshDraftNavigationPopGuard()
     }
     
     func handleLoadedNotes(_ groupedNotes: [String: [NoteItem]]) {
@@ -915,6 +908,7 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                     self.notes = groupedNotes
                     self.places = refreshedPlaces
                     self.routines = refreshedRoutines
+                    self.clearFolderCache()
                     self.applyInitialSnapshots()
                     self.showToast(text: "Folder Created")
                 }

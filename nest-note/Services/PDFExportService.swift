@@ -1615,7 +1615,7 @@ class PDFExportService {
                     contact.title.uppercased().draw(in: titleRect, withAttributes: titleAttributes)
 
                     let phoneRect = CGRect(x: x, y: y + 32, width: availableWidth, height: 30)
-                    contact.phoneNumber.draw(in: phoneRect, withAttributes: phoneAttributes)
+                    contact.content.draw(in: phoneRect, withAttributes: phoneAttributes)
                 }
 
                 y += rowHeight

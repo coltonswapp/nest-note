@@ -476,6 +476,13 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
                 self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .pinnedCategoriesDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData(forceRefresh: true)
+            }
+            .store(in: &cancellables)
         
         // Subscribe to app returning from long background
         NotificationCenter.default.publisher(for: .appReturnedFromLongBackground)
@@ -629,8 +636,8 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
         snapshot.appendSections([.nest])
         snapshot.appendItems([.nest(name: nest.name, address: nest.address)], toSection: .nest)
         
-        // Store pinned categories and categories from nest
-        self.pinnedCategories = nest.pinnedCategories ?? []
+        // Store pinned categories and categories from nest (drop legacy synthetic "Places" pin)
+        self.pinnedCategories = (nest.pinnedCategories ?? []).filter { $0 != "Places" }
         self.categories = nest.categories ?? []
         
         // Add quick access section with pinned categories
@@ -780,11 +787,6 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     }
     
     private func iconForCategory(_ categoryName: String) -> String {
-        // Handle special case for "Places" which isn't a regular category
-        if categoryName == "Places" {
-            return "map.fill"
-        }
-
         // Find the category in our categories array
         if let category = categories.first(where: { $0.name == categoryName }) {
             return category.symbolName
@@ -888,20 +890,12 @@ extension SitterHomeViewController: UICollectionViewDelegate {
             }
             
         case .pinnedCategory(let name, _):
-            if name == "Places" {
-                let sitterService = SitterViewService.shared
-                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: sitterService)
-                placesVC.isReadOnly = true
-                let nav = UINavigationController(rootViewController: placesVC)
-                present(nav, animated: true)
-            } else {
-                // Find the full path for this display name in pinnedCategories
-                let fullPath = pinnedCategories.first { categoryName in
-                    let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
-                    return displayName == name
-                } ?? name
-                presentCategoryView(category: fullPath)
-            }
+            // Find the full path for this display name in pinnedCategories
+            let fullPath = pinnedCategories.first { categoryName in
+                let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                return displayName == name
+            } ?? name
+            presentCategoryView(category: fullPath)
             
         case .currentSession(let session):
             if let nestName = sitterViewService.currentNestName {
@@ -925,7 +919,15 @@ extension SitterHomeViewController: UICollectionViewDelegate {
         case .sessionEvent(let event):
             // Present event details
             if let session = sitterViewService.currentSession {
-                let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: false, nestItemRepository: SitterViewService.shared)
+                let sessionDateRange = DateInterval(start: session.startDate, end: session.endDate)
+                let eventVC = SessionEventViewController(
+                    sessionID: session.id,
+                    nestID: session.nestID,
+                    event: event,
+                    isReadOnly: false,
+                    sessionDateRange: sessionDateRange,
+                    nestItemRepository: SitterViewService.shared
+                )
                 eventVC.eventDelegate = self
                 present(eventVC, animated: true)
             }

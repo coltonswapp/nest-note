@@ -337,13 +337,15 @@ enum ProFeature {
     case sessionEvents
     case nestReview
     case sessionPDFExport
+    case attachments
 
     static let paywallFeatures: [ProFeature] = [
         .unlimitedNotes,
         .multiDaySessions,
         .sessionEvents,
         .nestReview,
-        .sessionPDFExport
+        .sessionPDFExport,
+        .attachments
     ]
 
     var iconName: String {
@@ -358,6 +360,8 @@ enum ProFeature {
             return "doc.text.magnifyingglass"
         case .sessionPDFExport:
             return "doc.richtext"
+        case .attachments:
+            return "paperclip"
         }
     }
     
@@ -382,6 +386,8 @@ enum ProFeature {
             return "Nest Review"
         case .sessionPDFExport:
             return "Session PDF Export"
+        case .attachments:
+            return "Attachments"
         }
     }
     
@@ -397,6 +403,8 @@ enum ProFeature {
             return "Quickly review and update outdated nest information"
         case .sessionPDFExport:
             return "Generate and share a printable PDF of session details"
+        case .attachments:
+            return "Link related notes, contacts, places, and routines together"
         }
     }
     
@@ -406,13 +414,7 @@ enum ProFeature {
         switch self {
         case .unlimitedNotes:
             return "Note Limit Reached"
-        case .multiDaySessions:
-            return "Pro Feature"
-        case .sessionEvents:
-            return "Pro Feature"
-        case .nestReview:
-            return "Pro Feature"
-        case .sessionPDFExport:
+        case .multiDaySessions, .sessionEvents, .nestReview, .sessionPDFExport, .attachments:
             return "Pro Feature"
         }
     }
@@ -429,6 +431,8 @@ enum ProFeature {
             return "Nest Review is a Pro feature. Upgrade to Pro to quickly update outdated information and more features."
         case .sessionPDFExport:
             return "Session PDF export is a Pro feature. Upgrade to Pro to generate and share session PDFs and more features."
+        case .attachments:
+            return "Attachments are a Pro feature. Upgrade to Pro to link related nest items and more features."
         }
     }
     
@@ -444,6 +448,8 @@ enum ProFeature {
             return "Subscription activated! You can now use Nest Review & do so much more!"
         case .sessionPDFExport:
             return "Subscription activated! You can now export session PDFs & do so much more!"
+        case .attachments:
+            return "Subscription activated! You can now use attachments & do so much more!"
         }
     }
 }

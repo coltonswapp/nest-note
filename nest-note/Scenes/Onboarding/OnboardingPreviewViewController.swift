@@ -82,19 +82,27 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
     private func setupCardStack() {
         reviewItems = [
             .entry(CommonNote(title: "WiFi Password", content: "SuperStrongPassword \n\n Notes are good for codes & passwords", category: "Common")),
-            .routine(CommonRoutine(name: "Bedtime Routine", icon: "moon.stars.fill")),
+            .routine(CommonRoutine(name: "Bedtime Routine", icon: "moon.stars.fill", actions: [
+                "Brush teeth", "Read story", "Turn on nightlight", "Close door halfway"
+            ])),
             .place(CommonPlace(name: "School", icon: "graduationcap.fill")),
 
             .entry(CommonNote(title: "Garage Code", content: "8005", category: "Common")),
-            .routine(CommonRoutine(name: "After School", icon: "backpack.fill")),
+            .routine(CommonRoutine(name: "After School", icon: "backpack.fill", actions: [
+                "Hang up backpack", "Wash hands", "Have snack", "Start homework"
+            ])),
             .place(CommonPlace(name: "Grandma's House", icon: "house.fill")),
 
             .entry(CommonNote(title: "Emergency Contact", content: "John Doe: 555-123-4567 \n\n Notes are also good for emergency contacts", category: "Common")),
-            .routine(CommonRoutine(name: "Morning Wake Up", icon: "sun.rise.fill")),
+            .routine(CommonRoutine(name: "Morning Wake Up", icon: "sun.rise.fill", actions: [
+                "Wake up gently", "Brush teeth", "Get dressed", "Eat breakfast"
+            ])),
             .place(CommonPlace(name: "Favorite Park", icon: "tree.fill")),
 
             .entry(CommonNote(title: "Allergies", content: "Peanuts, penicillin", category: "Common")),
-            .routine(CommonRoutine(name: "Pet Care", icon: "pawprint.fill")),
+            .routine(CommonRoutine(name: "Pet Care", icon: "pawprint.fill", actions: [
+                "Fill water bowl", "Give food", "Let outside", "Clean accidents"
+            ])),
             .place(CommonPlace(name: "Soccer Practice", icon: "soccerball"))
         ]
 
@@ -114,24 +122,10 @@ class OnboardingPreviewViewController: NNOnboardingViewController, CardStackView
             return view
 
         case .routine(let commonRoutine):
-            let actions: [String]
-            switch commonRoutine.name {
-            case "Bedtime Routine":
-                actions = ["Brush teeth", "Read story", "Turn on nightlight", "Close door halfway"]
-            case "After School":
-                actions = ["Hang up backpack", "Wash hands", "Have snack", "Start homework"]
-            case "Morning Wake Up":
-                actions = ["Wake up gently", "Brush teeth", "Get dressed", "Eat breakfast"]
-            case "Pet Care":
-                actions = ["Fill water bowl", "Give food", "Let outside", "Clean accidents"]
-            default:
-                actions = ["Step 1", "Step 2", "Step 3", "Step 4"]
-            }
-
             let routine = RoutineItem(
                 title: commonRoutine.name,
                 category: "Demo",
-                routineActions: actions
+                routineActions: commonRoutine.actions
             )
             let view = MiniRoutineReviewView()
             view.translatesAutoresizingMaskIntoConstraints = false

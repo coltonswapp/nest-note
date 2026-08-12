@@ -304,7 +304,7 @@ final class NestReadinessService {
             return entry.content.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
         case .contact:
             guard let contact = item as? ContactItem else { return false }
-            let digits = contact.phoneNumber.filter(\.isNumber)
+            let digits = (contact.primaryPhoneNumber ?? contact.content).filter(\.isNumber)
             return digits.count >= 7
         case .routine:
             guard let routine = item as? RoutineItem else { return false }
@@ -331,7 +331,7 @@ final class NestReadinessService {
         let normalizedTitle = normalize(item.title)
         let normalizedContent: String = {
             if let entry = item as? NoteItem { return normalize(entry.content) }
-            if let contact = item as? ContactItem { return normalize(contact.phoneNumber) }
+            if let contact = item as? ContactItem { return normalize(contact.content) }
             if let routine = item as? RoutineItem { return normalize(routine.routineActions.joined(separator: " ")) }
             return ""
         }()

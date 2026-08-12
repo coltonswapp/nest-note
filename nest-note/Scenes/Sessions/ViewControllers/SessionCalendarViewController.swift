@@ -91,14 +91,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         self.eventsUpdateCallback = eventsUpdateCallback
         let calendar = Calendar.current
         
-        // Strip time components and get start of day for both dates
-        let startOfStartDay = calendar.startOfDay(for: dateRange.start)
-        let startOfEndDay = calendar.startOfDay(for: dateRange.end)
-        
-        // Create new DateInterval with clean dates
-        let cleanDateRange = DateInterval(start: startOfStartDay, end: startOfEndDay)
-        
-        self.dateRange = cleanDateRange
+        // Keep real session start/end times — event validation and defaults need them.
+        // The compact calendar already normalizes to start/end-of-day for day cells.
+        self.dateRange = dateRange
         
         // Group provided events by date
         if !events.isEmpty {
@@ -107,7 +102,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             }
         }
 
-        self.compactCalendarView = NNCompactCalendarView(dateRange: cleanDateRange, events: events)
+        self.compactCalendarView = NNCompactCalendarView(dateRange: dateRange, events: events)
         
         super.init(nibName: nil, bundle: nil)
         self.compactCalendarView.delegate = self
@@ -240,7 +235,13 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     
     @objc private func addEventTapped() {
         let dateToUse = selectedDate ?? dateRange.start
-        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, nestItemRepository: NestService.shared)
+        let eventVC = SessionEventViewController(
+            sessionID: sessionID,
+            nestID: nestID,
+            selectedDate: dateToUse,
+            sessionDateRange: dateRange,
+            nestItemRepository: NestService.shared
+        )
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -714,6 +715,7 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             // Present event editing with source frame
             let eventVC = SessionEventViewController(
                 sessionID: sessionID,
+                nestID: nestID,
                 event: item,
                 sourceFrame: sourceFrame,
                 sessionDateRange: dateRange,
@@ -730,7 +732,13 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 dateToUse = selectedDate ?? dateRange.start
             }
             
-            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, nestItemRepository: NestService.shared)
+            let eventVC = SessionEventViewController(
+                sessionID: sessionID,
+                nestID: nestID,
+                selectedDate: dateToUse,
+                sessionDateRange: dateRange,
+                nestItemRepository: NestService.shared
+            )
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }
@@ -847,7 +855,11 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             // Existing session - save to server
             Task {
                 do {
-                    try await SessionService.shared.updateSessionEvent(duplicatedEvent, sessionID: sessionID)
+                    try await SessionService.shared.updateSessionEvent(
+                        duplicatedEvent,
+                        sessionID: sessionID,
+                        nestID: self.nestID
+                    )
                 } catch {
                     Logger.log(level: .error, category: .sessionService, message: "Failed to duplicate event: \(error.localizedDescription)")
                     
@@ -986,20 +998,10 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
             }
         }
         
-        // Save the event based on context
+        // EventVC already persists for existing sessions; only sync local state here.
         let allEvents = eventsByDate.values.flatMap { $0 }
         
-        if let sessionID = sessionID {
-            // Existing session - save to server immediately
-            Task {
-                do {
-                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
-                } catch {
-                    Logger.log(level: .error, category: .sessionService, message: "Failed to save event: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            // New session - update parent's sessionEvents array via callback
+        if sessionID == nil {
             eventsUpdateCallback?(allEvents)
         }
         

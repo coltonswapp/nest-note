@@ -54,8 +54,6 @@ final class CategoryDetailViewController: NNSheetViewController {
     // MARK: - Properties
     weak var categoryDelegate: CategoryDetailViewControllerDelegate?
     
-    override var allowsMinimizedSheetDetent: Bool { true }
-    
     override var hasDiscardableContent: Bool {
         let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if category == nil {
@@ -247,7 +245,6 @@ final class CategoryDetailViewController: NNSheetViewController {
             
             // Reload collection view to show the selected icon
             iconCollectionView.reloadData()
-            refreshCompactDetentAvailability()
         }
     }
     
@@ -319,7 +316,7 @@ final class CategoryDetailViewController: NNSheetViewController {
         
         // Pass both the folder name and selected icon to the delegate
         categoryDelegate?.categoryDetailViewController(self, didSaveCategory: categoryName, withIcon: selectedIcon!)
-        dismiss(animated: true)
+        dismissSheet()
     }
     
     override func handleDismissalResult() -> Any? {
@@ -354,6 +351,20 @@ extension CategoryDetailViewController: UICollectionViewDataSource, UICollection
         updateFolderPreview()
         collectionView.cellForItem(at: indexPath)?.bounce(includeScale: true)
         HapticsHelper.lightHaptic()
-        refreshCompactDetentAvailability()
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // Prevent the sheet dismiss gesture from stealing icon-grid scrolls.
+        isModalInPresentation = true
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate {
+            isModalInPresentation = false
+        }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        isModalInPresentation = false
     }
 }

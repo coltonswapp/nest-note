@@ -133,7 +133,7 @@ final class NestService: NestItemRepository {
                 name: name,
                 address: address
             )
-            nest.pinnedCategories = ["Household"]
+            nest.pinnedCategories = ["Household", "Emergency"]
             Logger.log(level: .info, category: .nestService, message: "🏠 STEP 1: ✅ NestItem created with ID: \(nest.id)")
 
             // Step 2: Encode nest data
@@ -705,61 +705,47 @@ final class NestService: NestItemRepository {
         // Cache already updated by updateItem() - no need to invalidate
     }
 
-    /// Update a place with optional thumbnail regeneration for location changes
-    func updatePlace(_ place: PlaceItem, shouldRegenerateThumbnails: Bool = false, newCoordinate: CLLocationCoordinate2D? = nil) async throws -> PlaceItem {
+    /// Update a place with optional thumbnail regeneration for location changes.
+    /// Prefer passing `thumbnailAsset` from the map picker to avoid a second snapshot.
+    /// Thumbnail Storage work runs in the background after Firestore is updated.
+    func updatePlace(
+        _ place: PlaceItem,
+        shouldRegenerateThumbnails: Bool = false,
+        newCoordinate: CLLocationCoordinate2D? = nil,
+        thumbnailAsset: UIImageAsset? = nil
+    ) async throws -> PlaceItem {
         Logger.log(level: .info, category: .nestService, message: "updatePlace() called with thumbnail regeneration: \(shouldRegenerateThumbnails)")
 
         var updatedPlace = place
+        var assetForUpload: UIImageAsset?
 
-        if shouldRegenerateThumbnails, let coordinate = newCoordinate {
-            // Delete old thumbnails first if they exist
-            if place.thumbnailURLs != nil {
+        if shouldRegenerateThumbnails {
+            if let thumbnailAsset {
+                assetForUpload = thumbnailAsset
+            } else if let coordinate = newCoordinate {
                 do {
-                    try await deleteThumbnails(for: place)
-                    Logger.log(level: .info, category: .nestService, message: "Old thumbnails deleted for place: \(place.id)")
+                    let newThumbnail = try await generateThumbnailForCoordinate(coordinate)
+                    assetForUpload = createImageAsset(from: newThumbnail)
                 } catch {
-                    Logger.log(level: .error, category: .nestService, message: "Failed to delete old thumbnails: \(error.localizedDescription)")
-                    // Continue with update - don't fail the entire operation
+                    Logger.log(level: .error, category: .nestService, message: "Failed to regenerate thumbnails: \(error.localizedDescription)")
                 }
             }
 
-            // Generate new thumbnails for the updated location
-            do {
-                let newThumbnail = try await generateThumbnailForCoordinate(coordinate)
-                let newThumbnailAsset = createImageAsset(from: newThumbnail)
-                let newThumbnailURLs = try await uploadThumbnails(placeID: place.id, from: newThumbnailAsset)
-
-                // Update place with new thumbnail URLs
-                updatedPlace = PlaceItem(
-                    id: place.id,
-                    nestId: place.nestId,
-                    category: place.category,
-                    alias: place.alias,
-                    address: place.address,
-                    coordinate: coordinate,
-                    thumbnailURLs: newThumbnailURLs,
-                    isTemporary: place.isTemporary,
-                    createdAt: place.createdAt,
-                    updatedAt: Date(),
-                    attachmentIds: place.attachmentIds
-                )
-
-                Logger.log(level: .info, category: .nestService, message: "New thumbnails generated and uploaded for place: \(place.id)")
-            } catch {
-                Logger.log(level: .error, category: .nestService, message: "Failed to regenerate thumbnails: \(error.localizedDescription)")
-                // Continue without thumbnails rather than failing the update
-                updatedPlace.thumbnailURLs = nil
+            if let assetForUpload {
+                imageAssets[place.id] = assetForUpload
             }
         }
 
-        // Perform the standard update
+        // Persist metadata immediately; Storage uploads are non-blocking
         try await updateItem(updatedPlace)
         Logger.log(level: .info, category: .nestService, message: "Place updated successfully: \(updatedPlace.title)")
 
-        // Clear image cache for this place if thumbnails were regenerated
-        if shouldRegenerateThumbnails {
-            clearImageCache(for: updatedPlace.id)
-            Logger.log(level: .info, category: .nestService, message: "Cleared image cache for place: \(updatedPlace.id)")
+        if let assetForUpload {
+            scheduleThumbnailUpload(
+                for: updatedPlace,
+                asset: assetForUpload,
+                deleteExisting: place.thumbnailURLs != nil
+            )
         }
 
         return updatedPlace
@@ -794,16 +780,16 @@ final class NestService: NestItemRepository {
     func loadImages(for place: PlaceItem) async throws -> UIImage {
         Logger.log(level: .debug, category: .nestService, message: "loadImages() called for place: \(place.alias ?? place.title)")
         
-        // If the place has no thumbnails (temporary place), return a placeholder
-        guard let thumbnailURLs = place.thumbnailURLs else {
-            Logger.log(level: .debug, category: .nestService, message: "Place has no thumbnails, returning placeholder")
-            return UIImage(systemName: "mappin.circle") ?? UIImage()
-        }
-        
-        // Check cache first - exactly like working PlacesService
+        // Prefer in-memory assets (including ones staged before Storage URLs exist)
         if let asset = imageAssets[place.id] {
             Logger.log(level: .debug, category: .nestService, message: "Found cached image asset for place: \(place.alias ?? place.title)")
             return asset.image(with: .current)
+        }
+        
+        // If the place has no thumbnails (temporary place / upload pending), return a placeholder
+        guard let thumbnailURLs = place.thumbnailURLs else {
+            Logger.log(level: .debug, category: .nestService, message: "Place has no thumbnails, returning placeholder")
+            return UIImage(systemName: "mappin.circle") ?? UIImage()
         }
         
         Logger.log(level: .debug, category: .nestService, message: "Cache miss - loading images from URLs - Light: \(thumbnailURLs.light), Dark: \(thumbnailURLs.dark)")
@@ -915,7 +901,8 @@ final class NestService: NestItemRepository {
         return placeItem
     }
     
-    /// Create a place with convenient signature
+    /// Create a place with convenient signature.
+    /// Firestore write completes first; map thumbnails upload in the background and patch URLs after.
     func createPlace(alias: String, 
                     address: String, 
                     coordinate: CLLocationCoordinate2D, 
@@ -928,32 +915,13 @@ final class NestService: NestItemRepository {
             throw NestError.noCurrentNest
         }
         
-        // Generate ID for the place first
         let placeID = UUID().uuidString
         
-        // Handle thumbnailAsset upload first if provided
-        var thumbnailURLs: PlaceItem.ThumbnailURLs? = nil
-        if let thumbnailAsset = thumbnailAsset {
-            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Starting thumbnail upload for place ID: \(placeID)")
-            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: ThumbnailAsset received: \(thumbnailAsset)")
-            
-            do {
-                // Upload thumbnails and get URLs using the actual place ID
-                thumbnailURLs = try await uploadThumbnails(placeID: placeID, from: thumbnailAsset)
-                
-                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Upload completed successfully!")
-                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Light URL: \(thumbnailURLs?.light ?? "nil")")
-                Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Dark URL: \(thumbnailURLs?.dark ?? "nil")")
-            } catch {
-                Logger.log(level: .error, category: .nestService, message: "📷 THUMBNAIL DEBUG: Upload FAILED with error: \(error)")
-                Logger.log(level: .error, category: .nestService, message: "📷 THUMBNAIL DEBUG: Error details: \(error.localizedDescription)")
-                // Continue without thumbnails if upload fails
-            }
-        } else {
-            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: No thumbnailAsset provided - place will be created without thumbnails")
+        // Stage local thumbs so the list can render immediately while Storage uploads
+        if let thumbnailAsset {
+            imageAssets[placeID] = thumbnailAsset
         }
         
-        // Create PlaceItem with thumbnails if available
         let placeItem = PlaceItem(
             id: placeID,
             nestId: nestId,
@@ -961,21 +929,18 @@ final class NestService: NestItemRepository {
             alias: alias,
             address: address,
             coordinate: coordinate,
-            thumbnailURLs: thumbnailURLs,
+            thumbnailURLs: nil,
             isTemporary: false,
             attachmentIds: attachmentIds
         )
         
-        Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: Created PlaceItem with thumbnailURLs: \(placeItem.thumbnailURLs != nil ? "YES" : "NO")")
-        if let urls = placeItem.thumbnailURLs {
-            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: PlaceItem light URL: \(urls.light)")
-            Logger.log(level: .info, category: .nestService, message: "📷 THUMBNAIL DEBUG: PlaceItem dark URL: \(urls.dark)")
-        }
-        
-        // Create using ItemRepository
         try await createPlace(placeItem)
         
-        Logger.log(level: .info, category: .nestService, message: "Place created successfully: \(placeItem.alias ?? placeItem.title) with thumbnails: \(thumbnailURLs != nil)")
+        if let thumbnailAsset {
+            scheduleThumbnailUpload(for: placeItem, asset: thumbnailAsset, deleteExisting: false)
+        }
+        
+        Logger.log(level: .info, category: .nestService, message: "Place created successfully: \(placeItem.alias ?? placeItem.title); thumbnails uploading in background: \(thumbnailAsset != nil)")
         return placeItem
     }
     
@@ -1068,11 +1033,13 @@ extension NestService {
             let categoriesRef = db.collection("nests").document(nestId).collection("nestCategories")
             var categoriesToCreate: [NestCategory] = []
 
-            // Step 1: Always create "Household" folder as default
-            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: Creating default Household category...")
+            // Step 1: Always create required default folders (Nest Score expects Household + Emergency)
+            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: Creating default Household and Emergency categories...")
             let householdCategory = NestCategory(name: "Household", symbolName: "house.fill", isDefault: true, isPinned: true)
+            let emergencyCategory = NestCategory(name: "Emergency", symbolName: "exclamationmark.triangle.fill", isDefault: true, isPinned: true)
             categoriesToCreate.append(householdCategory)
-            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: ✅ Household category prepared")
+            categoriesToCreate.append(emergencyCategory)
+            Logger.log(level: .info, category: .nestService, message: "📁 STEP 1: ✅ Default categories prepared")
 
             // Step 2: Create categories based on care responsibilities from survey
             if let careResponsibilities = careResponsibilities {
@@ -1088,7 +1055,7 @@ extension NestService {
                 }
                 Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: ✅ Care responsibility categories prepared")
             } else {
-                Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: No care responsibilities provided, using default only")
+                Logger.log(level: .info, category: .nestService, message: "📁 STEP 2: No care responsibilities provided, using defaults only")
             }
 
             // Step 3: Create all categories in Firestore
@@ -1114,9 +1081,11 @@ extension NestService {
         let categoriesRef = db.collection("nests").document(nestId).collection("nestCategories")
         var categoriesToCreate: [NestCategory] = []
         
-        // Always create "Household" folder as default
+        // Always create required default folders (Nest Score expects Household + Emergency)
         let householdCategory = NestCategory(name: "Household", symbolName: "house.fill", isDefault: true, isPinned: true)
+        let emergencyCategory = NestCategory(name: "Emergency", symbolName: "exclamationmark.triangle.fill", isDefault: true, isPinned: true)
         categoriesToCreate.append(householdCategory)
+        categoriesToCreate.append(emergencyCategory)
         
         // Create categories based on care responsibilities from survey
         if let careResponsibilities = careResponsibilities {
@@ -1142,6 +1111,9 @@ extension NestService {
             return NestCategory(name: "Children", symbolName: "figure.child", isDefault: false, isPinned: false)
         case "Pets":
             return NestCategory(name: "Pets", symbolName: "pawprint.fill", isDefault: false, isPinned: false)
+        case "House":
+            // Household is always created as the default pinned folder
+            return NestCategory(name: "Household", symbolName: "house.fill", isDefault: true, isPinned: true)
         case "Plants":
             return NestCategory(name: "Plants", symbolName: "leaf.fill", isDefault: false, isPinned: false)
         default:
@@ -1487,6 +1459,11 @@ extension NestService {
 
 // MARK: - Pinned Folders Methods
 extension NestService {
+    /// Filters out legacy synthetic pins (e.g. "Places") that are not real folders.
+    private static func sanitizedPinnedCategories(_ categoryNames: [String]) -> [String] {
+        categoryNames.filter { $0 != "Places" }
+    }
+    
     func fetchPinnedCategories() async throws -> [String] {
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
@@ -1495,7 +1472,7 @@ extension NestService {
         // First check if we have it in currentNest
         if let pinnedCategories = currentNest?.pinnedCategories {
             Logger.log(level: .info, category: .nestService, message: "Using cached Pinned Folders from currentNest")
-            return pinnedCategories
+            return Self.sanitizedPinnedCategories(pinnedCategories)
         }
         
         // Fetch from Firestore
@@ -1508,14 +1485,16 @@ extension NestService {
             return []
         }
         
+        let sanitized = Self.sanitizedPinnedCategories(pinnedCategories)
+        
         // Update currentNest cache
         if var updatedNest = currentNest {
-            updatedNest.pinnedCategories = pinnedCategories
+            updatedNest.pinnedCategories = sanitized
             currentNest = updatedNest
         }
         
-        Logger.log(level: .info, category: .nestService, message: "Fetched \(pinnedCategories.count) Pinned Folders")
-        return pinnedCategories
+        Logger.log(level: .info, category: .nestService, message: "Fetched \(sanitized.count) Pinned Folders")
+        return sanitized
     }
     
     func savePinnedCategories(_ categoryNames: [String]) async throws {
@@ -1523,21 +1502,27 @@ extension NestService {
             throw NestError.noCurrentNest
         }
         
+        let sanitized = Self.sanitizedPinnedCategories(categoryNames)
+        
         do {
             // Update in Firestore
             let docRef = db.collection("nests").document(nestId)
             try await docRef.updateData([
-                "pinnedCategories": categoryNames,
+                "pinnedCategories": sanitized,
                 "updatedAt": FieldValue.serverTimestamp()
             ])
             
             // Update currentNest cache
             if var updatedNest = currentNest {
-                updatedNest.pinnedCategories = categoryNames
+                updatedNest.pinnedCategories = sanitized
                 currentNest = updatedNest
             }
+
+            await MainActor.run {
+                NotificationCenter.default.post(name: .pinnedCategoriesDidChange, object: nil)
+            }
             
-            Logger.log(level: .info, category: .nestService, message: "Pinned Folders saved successfully: \(categoryNames)")
+            Logger.log(level: .info, category: .nestService, message: "Pinned Folders saved successfully: \(sanitized)")
             
             // Log success event
             Tracker.shared.track(.pinnedCategoriesUpdated)
@@ -1549,6 +1534,48 @@ extension NestService {
     }
     
     // MARK: - Thumbnail Upload Methods
+    
+    /// Uploads light/dark thumbs after the place document exists, then patches URLs.
+    private func scheduleThumbnailUpload(
+        for place: PlaceItem,
+        asset: UIImageAsset,
+        deleteExisting: Bool
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                if deleteExisting {
+                    try await self.deleteThumbnails(for: place)
+                }
+                
+                let urls = try await self.uploadThumbnails(placeID: place.id, from: asset)
+                var updatedPlace = place
+                updatedPlace.thumbnailURLs = urls
+                updatedPlace.updatedAt = Date()
+                
+                try await self.updateItem(updatedPlace)
+                
+                Logger.log(
+                    level: .info,
+                    category: .nestService,
+                    message: "Background thumbnail upload completed for place: \(place.id)"
+                )
+                
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: .placeThumbnailsDidUpdate,
+                        object: updatedPlace
+                    )
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .nestService,
+                    message: "Background thumbnail upload failed for place \(place.id): \(error.localizedDescription)"
+                )
+            }
+        }
+    }
     
     private func uploadThumbnails(placeID: String, from asset: UIImageAsset) async throws -> PlaceItem.ThumbnailURLs {
         guard let nestId = currentNest?.id else {
@@ -1562,41 +1589,27 @@ extension NestService {
         Logger.log(level: .debug, category: .nestService, 
             message: "Uploading thumbnails to nest: \(nestId)")
         
-        // FORCE the trait collections we want!
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
         
-        // Get images with FORCED trait collections
         let lightImage = asset.image(with: lightTraits)
         let darkImage = asset.image(with: darkTraits)
-            
         
-        // Convert to JPEG data
-        guard let lightData = lightImage.jpegData(compressionQuality: 0.7),
-              let darkData = darkImage.jpegData(compressionQuality: 0.7) else {
+        guard let lightData = lightImage.jpegData(compressionQuality: 0.6),
+              let darkData = darkImage.jpegData(compressionQuality: 0.6) else {
             throw NestError.imageConversionFailed
         }
         
-        // Debug logging
         Logger.log(level: .debug, category: .nestService, 
             message: "Light image data size: \(lightData.count) bytes")
         Logger.log(level: .debug, category: .nestService, 
             message: "Dark image data size: \(darkData.count) bytes")
         
-        let lightHash = lightData.hashValue
-        let darkHash = darkData.hashValue
-        Logger.log(level: .debug, category: .nestService, 
-            message: "Light image hash: \(lightHash)")
-        Logger.log(level: .debug, category: .nestService, 
-            message: "Dark image hash: \(darkHash)")
-        Logger.log(level: .debug, category: .nestService, 
-            message: "Images are different: \(lightHash != darkHash)")
+        // Upload light and dark in parallel
+        async let lightURL = uploadImage(data: lightData, to: lightRef)
+        async let darkURL = uploadImage(data: darkData, to: darkRef)
         
-        // Upload both images
-        let lightURL = try await uploadImage(data: lightData, to: lightRef)
-        let darkURL = try await uploadImage(data: darkData, to: darkRef)
-        
-        return PlaceItem.ThumbnailURLs(light: lightURL, dark: darkURL)
+        return try await PlaceItem.ThumbnailURLs(light: lightURL, dark: darkURL)
     }
     
     private func uploadImage(data: Data, to ref: StorageReference) async throws -> String {
@@ -1604,36 +1617,44 @@ extension NestService {
             let metadata = StorageMetadata()
             metadata.contentType = "image/jpeg"
             
-            // Create the upload task
-            let uploadTask = ref.putData(data, metadata: metadata) { metadata, error in
-                if let error = error {
+            var didResume = false
+            let resumeOnce: (Result<String, Error>) -> Void = { result in
+                guard !didResume else { return }
+                didResume = true
+                switch result {
+                case .success(let url):
+                    continuation.resume(returning: url)
+                case .failure(let error):
                     continuation.resume(throwing: error)
+                }
+            }
+            
+            // putData starts the upload immediately; no need to call resume()
+            _ = ref.putData(data, metadata: metadata) { metadata, error in
+                if let error = error {
+                    resumeOnce(.failure(error))
                     return
                 }
                 
                 guard metadata != nil else {
-                    continuation.resume(throwing: NestError.imageUploadFailed)
+                    resumeOnce(.failure(NestError.imageUploadFailed))
                     return
                 }
                 
-                // Get download URL after successful upload
                 ref.downloadURL { url, error in
                     if let error = error {
-                        continuation.resume(throwing: error)
+                        resumeOnce(.failure(error))
                         return
                     }
                     
                     guard let downloadURL = url else {
-                        continuation.resume(throwing: NestError.imageUploadFailed)
+                        resumeOnce(.failure(NestError.imageUploadFailed))
                         return
                     }
                     
-                    continuation.resume(returning: downloadURL.absoluteString)
+                    resumeOnce(.success(downloadURL.absoluteString))
                 }
             }
-            
-            // Start the upload
-            uploadTask.resume()
         }
     }
     

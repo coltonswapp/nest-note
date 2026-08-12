@@ -15,6 +15,7 @@ final class InviteYourSitterViewController: NNViewController {
 
     private let inviteCode: String
     private let session: SessionItem
+    private let promptsForNotificationsOnDismiss: Bool
 
     private let topImageView: UIImageView = {
         let view = UIImageView()
@@ -94,8 +95,8 @@ final class InviteYourSitterViewController: NNViewController {
         return view
     }()
 
-    private lazy var textButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
+    private lazy var textButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
             title: "Text",
             image: UIImage(systemName: "message"),
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
@@ -105,8 +106,8 @@ final class InviteYourSitterViewController: NNViewController {
         return button
     }()
 
-    private lazy var shareButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
+    private lazy var shareButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
             title: "Share",
             image: UIImage(systemName: "square.and.arrow.up"),
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
@@ -116,8 +117,8 @@ final class InviteYourSitterViewController: NNViewController {
         return button
     }()
 
-    private lazy var copyButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
+    private lazy var copyButton: NNPrimaryLabeledButton = {
+        let button = NNPrimaryLabeledButton(
             title: "Copy",
             image: UIImage(systemName: "doc.on.doc"),
             backgroundColor: NNColors.primary.withAlphaComponent(0.15),
@@ -153,9 +154,14 @@ final class InviteYourSitterViewController: NNViewController {
     private var inviteCardCenterYConstraint: NSLayoutConstraint?
     private var hasAnimatedInviteCard = false
 
-    init(inviteCode: String, session: SessionItem) {
+    init(
+        inviteCode: String,
+        session: SessionItem,
+        promptsForNotificationsOnDismiss: Bool = false
+    ) {
         self.inviteCode = inviteCode
         self.session = session
+        self.promptsForNotificationsOnDismiss = promptsForNotificationsOnDismiss
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -386,42 +392,10 @@ final class InviteYourSitterViewController: NNViewController {
         return "You've been invited to a NestNote session!\n\nUse this link to join: \(url)"
     }
 
-    private func showCodeCopyFeedback() {
-        HapticsHelper.lightHaptic()
-
-        let copiedLabel = UILabel()
-        copiedLabel.text = "Copied!"
-        copiedLabel.textColor = .white
-        copiedLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        copiedLabel.textAlignment = .center
-        copiedLabel.font = .captionBoldM
-        copiedLabel.layer.cornerRadius = 10
-        copiedLabel.clipsToBounds = true
-        copiedLabel.alpha = 0
-        copiedLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        codeContainerView.addSubview(copiedLabel)
-        NSLayoutConstraint.activate([
-            copiedLabel.centerXAnchor.constraint(equalTo: codeContainerView.centerXAnchor),
-            copiedLabel.centerYAnchor.constraint(equalTo: codeContainerView.centerYAnchor),
-            copiedLabel.widthAnchor.constraint(equalToConstant: 100),
-            copiedLabel.heightAnchor.constraint(equalToConstant: 40),
-        ])
-
-        UIView.animate(withDuration: 0.2) {
-            copiedLabel.alpha = 1
-        }
-
-        UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
-            copiedLabel.alpha = 0
-        }) { _ in
-            copiedLabel.removeFromSuperview()
-        }
-    }
-
     private func copyInviteCode() {
         UIPasteboard.general.string = formattedInviteCode()
-        showCodeCopyFeedback()
+        copyButton.showCheckmarkFeedback()
+        HapticsHelper.lightHaptic()
     }
 
     @objc private func qrButtonTapped() {
@@ -462,6 +436,19 @@ final class InviteYourSitterViewController: NNViewController {
 
     @objc private func copyButtonTapped() {
         copyInviteCode()
+    }
+
+    @objc override func closeButtonTapped() {
+        guard promptsForNotificationsOnDismiss else {
+            dismiss(animated: true)
+            return
+        }
+
+        let presenter = navigationController?.presentingViewController ?? presentingViewController
+        dismiss(animated: true) {
+            guard let presenter else { return }
+            SessionNotificationPrompt.presentIfNeeded(from: presenter, audience: .owner) {}
+        }
     }
 }
 
