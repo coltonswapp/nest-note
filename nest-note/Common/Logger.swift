@@ -123,6 +123,7 @@ public extension Logger {
 
         case userService = "🧍🏼 UserService"
         case nestService = "👨🏼‍🤝‍👨🏽 NestService"
+        case demoMode = "🎬 DemoMode"
         case sitterViewService = "🧘‍♂️ SitterViewService"
         case sessionService = "📅 SessionService"
         

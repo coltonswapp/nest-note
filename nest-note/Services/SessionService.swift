@@ -10,6 +10,7 @@ enum SessionError: LocalizedError {
     case inviteExpired
     case inviteAlreadyUsed
     case sessionNotFound
+    case demoModeReadOnly
     
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum SessionError: LocalizedError {
             return "This invite has already been used"
         case .sessionNotFound:
             return "Session not found"
+        case .demoModeReadOnly:
+            return "The demo nest is view-only."
         }
     }
 }
@@ -127,6 +130,19 @@ class SessionService {
     
     func sessionExists(sessionId: String) -> Bool {
         return sessions.contains(where: { $0.id == sessionId })
+    }
+
+    private func ensureSessionsAreWritable() throws {
+        guard !DemoModeService.shared.isActive else {
+            throw SessionError.demoModeReadOnly
+        }
+    }
+
+    /// Fake invite for demo filming — no `invites/` document, no email.
+    private func demoPlaceholderInvite() -> (id: String, code: String)? {
+        guard DemoModeService.shared.isActive else { return nil }
+        let code = DemoModeService.placeholderInviteCode
+        return (id: "invite-\(code)", code: code)
     }
     
     // MARK: - Create
@@ -283,6 +299,7 @@ class SessionService {
     
     // MARK: - Delete
     func deleteSession(nestID: String, sessionID: String) async throws {
+        try ensureSessionsAreWritable()
         Logger.log(level: .info, category: .sessionService, message: "Deleting session: \(sessionID)")
         
         let sessionRef = db.collection("nests")
@@ -581,6 +598,7 @@ class SessionService {
     
     // Add a new method to update session status
     func updateSessionStatus(_ session: SessionItem, to newStatus: SessionStatus) async throws {
+        try ensureSessionsAreWritable()
         var updatedSession = session
         
         // Validate the status change
@@ -809,6 +827,11 @@ class SessionService {
         sitterName: String,
         sessionID: String
     ) async throws -> (id: String, code: String) {
+        if let placeholder = demoPlaceholderInvite() {
+            Logger.log(level: .info, category: .sessionService, message: "Demo mode: skipping real invite for \(sessionID)")
+            return placeholder
+        }
+        try ensureSessionsAreWritable()
         // Convert the method to use email parameter directly
         let sitter = SitterItem(id: UUID().uuidString, name: sitterName, email: sitterEmail)
         let code = try await createInviteForSitter(sessionID: sessionID, sitter: sitter)
@@ -818,6 +841,10 @@ class SessionService {
 
     /// Creates an open invite (no sitter assigned) for a session
     func createOpenInvite(sessionID: String) async throws -> (id: String, code: String) {
+        if let placeholder = demoPlaceholderInvite() {
+            Logger.log(level: .info, category: .sessionService, message: "Demo mode: skipping open invite for \(sessionID)")
+            return placeholder
+        }
         guard let nestID = NestService.shared.currentNest?.id else {
             throw SessionError.noCurrentNest
         }
@@ -940,6 +967,11 @@ class SessionService {
         sessionID: String,
         sitter: SitterItem
     ) async throws -> String {
+        if let placeholder = demoPlaceholderInvite() {
+            Logger.log(level: .info, category: .sessionService, message: "Demo mode: skipping sitter invite for \(sessionID)")
+            return placeholder.code
+        }
+        try ensureSessionsAreWritable()
         guard let nestID = NestService.shared.currentNest?.id else {
             throw SessionError.noCurrentNest
         }

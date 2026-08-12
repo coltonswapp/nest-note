@@ -65,10 +65,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             name: ModeManager.modeDidChangeNotification,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDemoModeChange),
+            name: .demoModeDidChange,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        Task { await DemoModeService.shared.refreshConfig() }
         if isFirstAppearance {
             isFirstAppearance = false
         } else {
@@ -468,7 +476,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         // Account section
         let currentUser = UserService.shared.currentUser
-        snapshot.appendItems([.account(email: currentUser?.personalInfo.email.lowercased() ?? "Not signed in",
+        let accountEmail = DemoModeService.shared.isActive
+            ? ""
+            : (currentUser?.personalInfo.email.lowercased() ?? "Not signed in")
+        snapshot.appendItems([.account(email: accountEmail,
                                      name: currentUser?.personalInfo.name ?? "Tap to sign in")],
                            toSection: .account)
         
@@ -497,13 +508,21 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 let sittingItems = sittingRows.map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
             } else {
-                let nestItems = [
+                var nestRows = [
                     ("Sessions", "calendar"),
                     ("Nest Members", "person.2.fill"),
                     ("Permanent Access", "person.badge.key.fill"),
                     ("Saved Sitters", "heart"),
                     ("Subscription", "creditcard")
-                ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
+                ]
+                if DemoModeService.shared.shouldShowEntryRow {
+                    if DemoModeService.shared.isActive {
+                        nestRows.append(("Exit demo nest", "arrow.uturn.backward"))
+                    } else {
+                        nestRows.append(("View demo nest", "play.rectangle.fill"))
+                    }
+                }
+                let nestItems = nestRows.map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(nestItems, toSection: .myNest)
             }
         } else {
@@ -571,6 +590,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Folder Preview Experiment", "folder.fill"),
             ("Waterfall → Folder Experiment", "square.grid.2x2.fill"),
             ("Load Debug Sessions", "folder.badge.plus"),
+            ("Create Demo Nest", "house.fill"),
+            ("Publish Demo Content", "square.and.arrow.up"),
             ("Test Add Place", "mappin.and.ellipse.circle.fill"),
             ("Test Place List", "list.star"),
             ("Test Invite Your Sitter", "person.wave.2.fill"),
@@ -688,6 +709,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                let topVC = sessionsVC.topViewController as? NestSessionsViewController {
                 topVC.refreshSessions()
             }
+        case "Create Demo Nest":
+            createDemoNestFromDebugMenu()
+        case "Publish Demo Content":
+            publishDemoContentFromDebugMenu()
         case "Test Add Place":
             let viewController = SelectPlaceViewController()
             let nav = UINavigationController(rootViewController: viewController)
@@ -874,6 +899,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             // Check if this is the "no nest" placeholder
             if name.contains("Let's Setup") {
                 showNestSetup()
+            } else if DemoModeService.shared.isActive {
+                showDemoNestInfo()
             } else {
                 // Regular nest detail flow
                 let vc = NestDetailViewController()
@@ -885,8 +912,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             if UserService.shared.isSignedIn {
                 // Check if there's a current nest (skip for sitter-only rows that don't need a nest)
                 let hasCurrentNest = NestService.shared.currentNest != nil
-                let skipsNestRequirement = ModeManager.shared.isSitterMode
-                    && (title == "Sessions" || title == "Saved Nests" || title == SitterReferralCopy.settingsRowTitle)
+                let skipsNestRequirement = title == "View demo nest" || title == "Exit demo nest"
+                    || (ModeManager.shared.isSitterMode
+                    && (title == "Sessions" || title == "Saved Nests" || title == SitterReferralCopy.settingsRowTitle))
                 if !hasCurrentNest && !skipsNestRequirement {
                     // Show prompt to set up nest first
                     showNestSetupPrompt()
@@ -934,6 +962,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                             }
                         }
                     }
+                case "View demo nest":
+                    enterDemoMode()
+                case "Exit demo nest":
+                    exitDemoMode()
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -1564,6 +1596,67 @@ extension SettingsViewController {
             present(nav, animated: true)
         }
     }
+
+    @objc private func handleDemoModeChange() {
+        applyInitialSnapshots()
+    }
+
+    private func showDemoNestInfo() {
+        let alert = UIAlertController(
+            title: "Demo nest",
+            message: "You’re viewing the NestNote demo nest. Your nest is unchanged.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Exit demo nest", style: .default) { [weak self] _ in
+            self?.exitDemoMode()
+        })
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func enterDemoMode() {
+        Task { @MainActor in
+            do {
+                try await DemoModeService.shared.enter()
+            } catch {
+                showToast(text: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    private func exitDemoMode() {
+        Task { @MainActor in
+            do {
+                try await DemoModeService.shared.exit()
+            } catch {
+                showToast(text: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    #if DEBUG
+    private func createDemoNestFromDebugMenu() {
+        Task { @MainActor in
+            do {
+                let nestId = try await DemoNestSeeder.createDemoNestIfNeeded()
+                showToast(text: "Demo nest ready", subtitle: nestId, sentiment: .positive)
+            } catch {
+                showToast(text: "Couldn’t create demo nest", subtitle: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    private func publishDemoContentFromDebugMenu() {
+        Task { @MainActor in
+            do {
+                try await DemoNestSeeder.publishContent()
+                showToast(text: "Demo content published", sentiment: .positive)
+            } catch {
+                showToast(text: "Publish failed", subtitle: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+    #endif
 }
 
 extension SettingsViewController: CreateSessionRequestViewControllerDelegate {

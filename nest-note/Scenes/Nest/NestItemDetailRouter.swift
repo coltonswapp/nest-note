@@ -20,7 +20,7 @@ enum NestItemDetailRouter {
         contactDelegate: ContactDetailViewControllerDelegate? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
-        let isReadOnly = !(nestItemRepository is NestService)
+        let isReadOnly = !nestItemRepository.allowsNestEdits
         let frame = sourceFrame ?? .zero
 
         switch item.type {

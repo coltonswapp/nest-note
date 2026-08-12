@@ -440,12 +440,12 @@ class NoteReviewViewController: NNViewController, CardStackViewDelegate, Paywall
             vc.noteDelegate = self
             present(vc, animated: true)
         case .place(let place):
-            let isReadOnly = !(nestItemRepository is NestService)
+            let isReadOnly = !nestItemRepository.allowsNestEdits
             let vc = PlaceDetailViewController(place: place, isReadOnly: isReadOnly, sourceFrame: card.frame)
             vc.placeListDelegate = self
             present(vc, animated: true)
         case .routine(let routine):
-            let isReadOnly = !(nestItemRepository is NestService)
+            let isReadOnly = !nestItemRepository.allowsNestEdits
             let vc = RoutineDetailViewController(category: routine.category, routine: routine, sourceFrame: card.frame, isReadOnly: isReadOnly)
             vc.routineDelegate = self
             present(vc, animated: true)

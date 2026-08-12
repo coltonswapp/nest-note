@@ -675,7 +675,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
 
     @objc private func createSessionButtonTapped() {
         Task {
-            let canCreate = await SubscriptionService.shared.canUseFullFeatures()
+            let canCreate = DemoModeService.shared.isActive
+                ? true
+                : await SubscriptionService.shared.canUseFullFeatures()
             await MainActor.run {
                 guard canCreate else {
                     Analytics.logEvent("second_session_gate_hit", parameters: [

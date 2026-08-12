@@ -71,4 +71,17 @@ extension NestItemRepository {
         
         return outdatedNotes
     }
+}
+
+extension NestItemRepository {
+    /// Owner repository that is allowed to mutate nest content.
+    /// Demo mode uses `NestService` for owner chrome but blocks writes.
+    var allowsNestEdits: Bool {
+        self is NestService && !DemoModeService.shared.isActive
+    }
+
+    /// Owner add/pin chrome, including demo mode so the nest looks authentic.
+    var showsOwnerChrome: Bool {
+        self is NestService
+    }
 } 

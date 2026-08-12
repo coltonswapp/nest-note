@@ -190,6 +190,10 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var logCategory: Logger.Category {
         return nestItemRepository is NestService ? .nestService : .sitterViewService
     }
+
+    private var allowsNestEdits: Bool {
+        nestItemRepository.allowsNestEdits
+    }
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
@@ -474,7 +478,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNavigationBar() {
         // Only show menu for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
         
         let pinnedCategoriesAction = UIAction(
             title: "Pinned Folders",
@@ -584,7 +588,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNewCategoryButton() {
         // Only show new category button for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
         
         // Check if we've reached max folder depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -600,7 +604,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNewFolderButton() {
         // Only show floating button for pre-iOS 26 and nest owners
-        guard !isUsingToolbar && nestItemRepository is NestService else { return }
+        guard !isUsingToolbar && allowsNestEdits else { return }
         
         // Check if we've reached max folder depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -672,7 +676,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     @available(iOS 26.0, *)
     private func setupToolbar() {
         // Only show toolbar for nest owners
-        guard nestItemRepository is NestService else {
+        guard allowsNestEdits else {
             toolbarItems = []
             navigationController?.setToolbarHidden(true, animated: true)
             return
@@ -790,7 +794,7 @@ extension NestViewController: UICollectionViewDelegate {
     // MARK: - Context Menu (Folder actions)
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         // Only allow for nest owners and only for folder cells
-        guard nestItemRepository is NestService,
+        guard allowsNestEdits,
               indexPath.section == Section.main.rawValue,
               let item = dataSource.itemIdentifier(for: indexPath),
               let folderData = item as? FolderData else {

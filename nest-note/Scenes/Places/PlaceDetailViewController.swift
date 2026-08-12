@@ -387,7 +387,7 @@ final class PlaceDetailViewController: NNSheetViewController, NNTippable {
                     self.cancelSaveAndDismiss()
                     self.saveButton.stopLoading()
                     HapticsHelper.failureHaptic()
-                    self.showToast(text: "Failed to save place", sentiment: .negative)
+                    self.showToast(text: error.localizedDescription, sentiment: .negative)
                 }
             }
         }

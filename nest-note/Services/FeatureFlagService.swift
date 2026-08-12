@@ -24,6 +24,8 @@ final class FeatureFlagService {
         case sitterReferralProgramEnabled = "sitter_referral_program_enabled"
         /// When enabled, shows a Settings option to text the NestNote support line.
         case supportTextEnabled = "support_text_enabled"
+        /// Global kill switch for influencer demo mode. Allowlist lives in Firestore `adminConfig/demoMode`.
+        case demoModeEnabled = "demo_mode_enabled"
         
         var defaultValue: Bool {
             switch self {
@@ -44,6 +46,8 @@ final class FeatureFlagService {
                 #endif
             case .supportTextEnabled:
                 return true
+            case .demoModeEnabled:
+                return false
             }
         }
     }
