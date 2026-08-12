@@ -113,15 +113,19 @@ final class LaunchCoordinator {
     }
     
     @objc private func handleModeChange() {
+        showLoadingBird()
+    }
+
+    private func showLoadingBird() {
         guard let navigationController = self.navigationController else { return }
-        
-        // Set loading placeholder before showing auth flow
-        UIView.transition(with: navigationController.view,
-                         duration: 0.3,
-                         options: .transitionCrossDissolve,
-                         animations: {
-            navigationController.setViewControllers([LoadingViewController()], animated: false)
-        })
+        UIView.transition(
+            with: navigationController.view,
+            duration: 0.3,
+            options: .transitionCrossDissolve,
+            animations: {
+                navigationController.setViewControllers([LoadingViewController()], animated: false)
+            }
+        )
     }
     
     // MARK: - Public Methods
@@ -412,6 +416,86 @@ final class LaunchCoordinator {
             try await reconfigureAfterAuthentication()
         } catch {
             throw error
+        }
+    }
+
+    /// Rebuilds Home after entering or exiting demo mode. NestService must already point at the right nest.
+    func reloadInterface(toast: String? = nil, toastSubtitle: String? = nil) async throws {
+        try await configureForCurrentUser()
+        if let toast {
+            await MainActor.run {
+                navigationController?.topViewController?.showToast(
+                    delay: 0.45,
+                    text: toast,
+                    subtitle: toastSubtitle
+                )
+            }
+        }
+    }
+
+    /// Same visual path as switching roles: dismiss modals, loading bird, then Home.
+    func transitionInterface(
+        toast: String? = nil,
+        toastSubtitle: String? = nil,
+        work: @escaping () async throws -> Void
+    ) async throws {
+        await MainActor.run {
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+
+        await dismissPresentedAndShowLoadingBird()
+
+        let started = Date()
+        do {
+            try await work()
+        } catch {
+            try? await configureForCurrentUser()
+            throw error
+        }
+
+        let elapsed = Date().timeIntervalSince(started)
+        let minimumBirdDuration: TimeInterval = 2.0
+        if elapsed < minimumBirdDuration {
+            try await Task.sleep(for: .seconds(minimumBirdDuration - elapsed))
+        }
+
+        try await configureForCurrentUser()
+
+        if let toast {
+            await MainActor.run {
+                navigationController?.topViewController?.showToast(
+                    delay: 0.45,
+                    text: toast,
+                    subtitle: toastSubtitle
+                )
+            }
+        }
+    }
+
+    @MainActor
+    private func dismissPresentedAndShowLoadingBird() async {
+        guard let navigationController else { return }
+
+        if navigationController.presentedViewController != nil {
+            await withCheckedContinuation { continuation in
+                navigationController.dismiss(animated: true) {
+                    continuation.resume()
+                }
+            }
+        }
+
+        await withCheckedContinuation { continuation in
+            UIView.transition(
+                with: navigationController.view,
+                duration: 0.3,
+                options: .transitionCrossDissolve,
+                animations: {
+                    navigationController.setViewControllers([LoadingViewController()], animated: false)
+                },
+                completion: { _ in
+                    continuation.resume()
+                }
+            )
         }
     }
 }

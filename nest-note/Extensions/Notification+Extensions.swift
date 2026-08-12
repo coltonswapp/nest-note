@@ -13,4 +13,6 @@ extension Notification.Name {
     static let adminSignupNotificationTapped = Notification.Name("adminSignupNotificationTapped")
     /// Posted after Firebase Remote Config fetch/activate completes.
     static let featureFlagsDidUpdate = Notification.Name("featureFlagsDidUpdate")
+    /// Posted after entering or exiting influencer demo mode.
+    static let demoModeDidChange = Notification.Name("demoModeDidChange")
 }

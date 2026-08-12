@@ -184,6 +184,14 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     private var logCategory: Logger.Category {
         return nestItemRepository is NestService ? .nestService : .sitterViewService
     }
+
+    private var allowsNestEdits: Bool {
+        nestItemRepository.allowsNestEdits
+    }
+
+    private var showsOwnerChrome: Bool {
+        nestItemRepository.showsOwnerChrome
+    }
     
     init(
         category: String,
@@ -922,7 +930,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: contact.title,
                     value: contact.content,
-                    isNestOwner: self.nestItemRepository is NestService,
+                    isNestOwner: self.allowsNestEdits,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedContacts.contains(contact),
                     isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
@@ -935,7 +943,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: unknown.title,
                     value: "Type: \(unknown.originalTypeString)",
-                    isNestOwner: self.nestItemRepository is NestService,
+                    isNestOwner: self.allowsNestEdits,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedUnknownItems.contains(unknown),
                     isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
@@ -957,7 +965,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    isNestOwner: self.nestItemRepository is NestService,
+                    isNestOwner: self.allowsNestEdits,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedNotes.contains(entry),
                     isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
@@ -969,7 +977,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    isNestOwner: self.nestItemRepository is NestService,
+                    isNestOwner: self.allowsNestEdits,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedNotes.contains(entry),
                     isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet || navigationController?.modalPresentationStyle == .pageSheet
@@ -985,7 +993,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 cell.configure(
                     key: entry.title,
                     value: entry.content,
-                    isNestOwner: self.nestItemRepository is NestService,
+                    isNestOwner: self.allowsNestEdits,
                     isEditMode: self.isEditingMode,
                     isSelected: self.selectedNotes.contains(entry),
                     isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
@@ -1283,7 +1291,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     
     private func setupNavigationBar() {
         // Only show menu button for nest owners
-        if nestItemRepository is NestService {
+        if allowsNestEdits {
             if isEditingMode {
                 // In edit-only mode, don't show any navigation buttons as the flow controller handles navigation
                 if isEditOnlyMode {
@@ -1684,8 +1692,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     @objc private func addButtonTapped() {
-        // Only allow adding entries for nest owners
-        guard nestItemRepository is NestService else { return }
+        // Show the create sheet for nest owners, including demo (saves are blocked).
+        guard showsOwnerChrome else { return }
         
         let newEntryVC = NoteDetailViewController(category: self.category)
         newEntryVC.noteDelegate = self
@@ -1715,7 +1723,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
 
     @objc private func deleteButtonTapped() {
         // Only allow deletion for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
 
         let selectedNotesArray = Array(selectedNotes)
         let selectedPlacesArray = Array(selectedPlaces)
@@ -1900,7 +1908,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
 
     private func setupAddEntryButton() {
         // Only show floating button for pre-iOS 18, nest owners, and not in edit-only mode
-        guard !isUsingToolbar && !isUsingGlassContainer && nestItemRepository is NestService && !isEditOnlyMode else { return }
+        guard !isUsingToolbar && !isUsingGlassContainer && showsOwnerChrome && !isEditOnlyMode else { return }
 
         addEntryButton = UIButton(type: .system)
         addEntryButton.translatesAutoresizingMaskIntoConstraints = false
@@ -2044,9 +2052,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             if let toolbarItems = self.toolbarItems {
                 for item in toolbarItems {
                     if item.action == #selector(moveButtonTapped) {
-                        item.isEnabled = hasSelection && nestItemRepository is NestService
+                        item.isEnabled = hasSelection && allowsNestEdits
                     } else if item.action == #selector(deleteButtonTapped) {
-                        item.isEnabled = hasSelection && nestItemRepository is NestService
+                        item.isEnabled = hasSelection && allowsNestEdits
                     }
                 }
             }
@@ -2366,11 +2374,11 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 title: "It's a little quiet in here",
                 subtitle: nestItemRepository is NestService ? "Items for this folder will appear here. Add an item by tapping below or explore suggestions." :
                     "This folder either has no items in it or none of the items were shared with you.",
-                actionButtonTitle: nestItemRepository is NestService ? "Add Item" : nil,
-                actionButtonMenu: nestItemRepository is NestService ? createAddItemMenu() : nil
+                actionButtonTitle: showsOwnerChrome ? "Add Item" : nil,
+                actionButtonMenu: showsOwnerChrome ? createAddItemMenu() : nil
             )
             
-            if nestItemRepository is NestService {
+            if showsOwnerChrome {
                 emptyStateView.addAction(title: "Item Suggestions", backgroundColor: .systemBlue.withAlphaComponent(0.15), foregroundColor: .systemBlue, tag: 1)
             }
         }
@@ -2505,7 +2513,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     }
     
     func addContactTapped() {
-        guard nestItemRepository is NestService else { return }
+        guard showsOwnerChrome else { return }
         let vc = ContactDetailViewController(category: category)
         vc.contactDelegate = self
         // Defer until the add menu finishes dismissing (avoids presentation timing issues on Simulator).
@@ -2529,7 +2537,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             )
             deleteBarButtonItem.image = UIImage(systemName: "trash")
             deleteBarButtonItem.tintColor = .systemRed
-            deleteBarButtonItem.isEnabled = hasSelection && nestItemRepository is NestService // Only nest owners can delete
+            deleteBarButtonItem.isEnabled = hasSelection && allowsNestEdits // Only nest owners can delete
 
             let moveBarButtonItem = UIBarButtonItem(
                 title: "Move",
@@ -2538,9 +2546,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 action: #selector(moveButtonTapped)
             )
             moveBarButtonItem.image = UIImage(systemName: "arrow.right")
-            moveBarButtonItem.isEnabled = hasSelection && nestItemRepository is NestService // Only nest owners can move
+            moveBarButtonItem.isEnabled = hasSelection && allowsNestEdits // Only nest owners can move
 
-            if nestItemRepository is NestService && !isEditOnlyMode {
+            if allowsNestEdits && !isEditOnlyMode {
                 // Full functionality for nest owners
                 toolbarItems = [deleteBarButtonItem, .flexibleSpace(), moveBarButtonItem]
             } else if isEditOnlyMode {
@@ -2551,8 +2559,8 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 toolbarItems = []
             }
         } else {
-            // Add menu in normal mode (only for nest owners and not edit-only mode)
-            if nestItemRepository is NestService && !isEditOnlyMode {
+            // Add menu in normal mode (nest owners and demo; saves are blocked in demo)
+            if showsOwnerChrome && !isEditOnlyMode {
                 let addBarButtonItem = UIBarButtonItem(systemItem: .add)
                 addBarButtonItem.menu = createAddItemMenu()
 
@@ -2617,7 +2625,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
     @available(iOS 26.0, *)
     private func setupGlassContainer() {
         // Only setup for nest owners and not in edit-only mode
-        guard nestItemRepository is NestService && !isEditOnlyMode else { return }
+        guard showsOwnerChrome && !isEditOnlyMode else { return }
 
         // Create the glass container effect
         let glassContainerEffect = UIGlassContainerEffect()
@@ -3091,7 +3099,7 @@ extension NestCategoryViewController: UICollectionViewDelegate {
     // MARK: - Context Menu Support
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         // Disable during selection flows; only nest owners can delete
-        guard !isEditOnlyMode, !isEditingMode, nestItemRepository is NestService,
+        guard !isEditOnlyMode, !isEditingMode, allowsNestEdits,
               let item = dataSource.itemIdentifier(for: indexPath) else {
             return nil
         }
@@ -3301,7 +3309,7 @@ extension NestCategoryViewController: CategoryDetailViewControllerDelegate {
             } catch {
                 await MainActor.run {
                     Logger.log(level: .error, category: logCategory, message: "Failed to create folder: \(error.localizedDescription)")
-                    self.showToast(text: "Failed to create folder")
+                    self.showToast(text: error.localizedDescription, sentiment: .negative)
                 }
             }
         }
@@ -3383,8 +3391,8 @@ extension NestCategoryViewController: NNEmptyStateViewDelegate {
         guard !isEditOnlyMode else { return }
         
         print("Empty state tapped:")
-        // Only allow adding entries for nest owners
-        guard nestItemRepository is NestService else { return }
+        // Show the create sheet for nest owners, including demo (saves are blocked).
+        guard showsOwnerChrome else { return }
         
         // Use the same action as the add button
         addButtonTapped()
@@ -3396,7 +3404,7 @@ extension NestCategoryViewController: CommonNotesViewControllerDelegate {
     func commonNotesViewController(didSelectNote entry: NoteItem) {
         // Show the entry detail with this controller as the delegate
         let cellFrame = view.frame  // We don't have a cell frame since we're coming from a different view
-        let isReadOnly = !(nestItemRepository is NestService)
+        let isReadOnly = !(allowsNestEdits)
         
         let editEntryVC = NoteDetailViewController(
             category: entry.category,
@@ -3417,7 +3425,7 @@ extension NestCategoryViewController: CommonNotesViewControllerDelegate {
 extension NestCategoryViewController: CommonItemsViewControllerDelegate {
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectNote entry: CommonNote) {
         // Only allow creating entries for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
         Logger.log(level: .info, category: logCategory, message: "Selected common entry: \(entry.title)")
 
         let editEntryVC = NoteDetailViewController(
@@ -3433,7 +3441,7 @@ extension NestCategoryViewController: CommonItemsViewControllerDelegate {
 
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectPlace place: CommonPlace) {
         // Only allow creating places for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
 
         // Present SelectPlaceViewController to choose location, prefilled with suggested name
         let selectPlaceVC = SelectPlaceViewController()
@@ -3447,7 +3455,7 @@ extension NestCategoryViewController: CommonItemsViewControllerDelegate {
 
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectRoutine routine: CommonRoutine) {
         // Only allow creating routines for nest owners
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
 
         let routineDetailVC = RoutineDetailViewController(
             category: self.category,
@@ -3461,7 +3469,7 @@ extension NestCategoryViewController: CommonItemsViewControllerDelegate {
     }
 
     func commonItemsViewController(_ controller: CommonItemsViewController, didSelectContact contact: CommonContact) {
-        guard nestItemRepository is NestService else { return }
+        guard allowsNestEdits else { return }
 
         let contactDetailVC = ContactDetailViewController(
             category: self.category,
@@ -3701,16 +3709,22 @@ private extension NestCategoryViewController {
             break
         case .places:
             if let place = item as? PlaceItem {
+                let placeholder = DemoNestSeed.usesMapPlaceholder(for: place)
+                    ? DemoNestSeed.placeholderImage(for: place)
+                    : nil
                 cell.configure(
                     title: place.alias ?? place.title,
                     content: place.address,
+                    thumbnail: placeholder,
                     layoutStyle: .place,
                     showsPlaceThumbnail: true,
                     attachmentCount: place.attachmentIds.count,
                     isEditMode: isEditingMode,
                     isSelected: selectedPlaces.contains(place)
                 )
-                loadPlaceThumbnail(for: place, into: cell)
+                if placeholder == nil {
+                    loadPlaceThumbnail(for: place, into: cell)
+                }
             }
         case .routines:
             if let routine = item as? RoutineItem {
@@ -3757,7 +3771,7 @@ private extension NestCategoryViewController {
     }
 
     func loadPlaceThumbnail(for place: PlaceItem, into cell: WaterfallGridCell) {
-        guard place.thumbnailURLs != nil else { return }
+        guard place.thumbnailURLs != nil || DemoNestSeed.usesMapPlaceholder(for: place) else { return }
 
         Task {
             do {
@@ -3799,10 +3813,11 @@ private extension NestCategoryViewController {
             break
         case .places:
             if let place = item as? PlaceItem {
+                let showsThumb = place.thumbnailURLs != nil || DemoNestSeed.usesMapPlaceholder(for: place)
                 waterfallSizingCell.configure(
                     title: place.alias ?? place.title,
                     content: place.address,
-                    thumbnail: place.thumbnailURLs != nil ? UIImage() : nil,
+                    thumbnail: showsThumb ? UIImage() : nil,
                     layoutStyle: .place,
                     showsPlaceThumbnail: true,
                     attachmentCount: place.attachmentIds.count

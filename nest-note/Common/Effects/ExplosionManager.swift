@@ -106,6 +106,7 @@ class ExplosionManager {
     static func setOverlayWindowsHidden(_ hidden: Bool) {
         shared.explosionWindow?.isHidden = true
         ToastManager.shared.setWindowHidden(hidden)
+        DemoModeBadgeOverlay.shared.setSuppressed(hidden)
     }
 
     func triggerExplosion(preset: ExplosionPreset, at point: CGPoint) {

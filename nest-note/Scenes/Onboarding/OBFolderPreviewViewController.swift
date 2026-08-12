@@ -919,114 +919,27 @@ final class OBFolderPreviewViewController: NNOnboardingViewController {
     }
 
     private static func previewItems(for folderTitle: String) -> [PreviewItem] {
-        switch folderTitle {
-        case "Children", "Kids":
-            return childrenPreviewItems
-        case "Pets":
-            return petsPreviewItems
-        case "Plants":
-            return plantsPreviewItems
-        default:
-            return householdPreviewItems
+        DemoNestSeed.items(forFolderName: folderTitle).map { spec in
+            switch spec {
+            case .note(let title, let content):
+                return PreviewItem(title: title, content: content, kind: .note, mapPlaceholderName: nil)
+            case .routine(let title, let actions):
+                return PreviewItem(
+                    title: title,
+                    content: WaterfallGridCell.routinePreviewText(for: actions),
+                    kind: .routine,
+                    mapPlaceholderName: nil
+                )
+            case .place(let title, _, _, let previewContent, let mapPlaceholderName):
+                return PreviewItem(
+                    title: title,
+                    content: previewContent,
+                    kind: .place,
+                    mapPlaceholderName: mapPlaceholderName
+                )
+            }
         }
     }
-
-    private static let householdPreviewItems: [PreviewItem] = [
-        PreviewItem(title: "WiFi Password", content: "SuperStrongPassword", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Garage Code", content: "8005", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Leaving House",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Check all doors", "Turn off lights", "Set thermostat", "Lock windows", "Arm security system"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Trash Day", content: "Bins out Tuesday night. Recycling every other week (blue bin).", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Alarm Code", content: "4321 — disarm within 30 seconds of opening the door.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Coming Home",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Disarm alarm", "Hang keys by door", "Unpack bags", "Wash hands"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Thermostat", content: "Keep around 68°F. Away mode is fine overnight.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Water Shutoff", content: "Basement, north wall — red valve.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Neighbor Help", content: "Mrs. Wilson — (555) 234-5678", kind: .place, mapPlaceholderName: "map-placeholder2")
-    ]
-
-    private static let childrenPreviewItems: [PreviewItem] = [
-        PreviewItem(title: "Allergies", content: "Peanuts and penicillin. EpiPen on the top shelf in the pantry.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Bedtime Routine",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Brush teeth", "Put on pajamas", "Read a story", "Turn on nightlight", "Close door halfway"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "School Office", content: "(555) 111-2222 — ask for the front desk.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "After School",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Hang up backpack", "Wash hands", "Have a snack", "Start homework"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Pediatrician", content: "Dr. Smith — (555) 987-6543", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Bath Time",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Fill tub to marked line", "Wash hair", "Rinse thoroughly", "Dry off and lotion"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Screen Time", content: "45 minutes max after homework. Keep volume reasonable.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "School", content: "Lincoln Elementary — drop-off at the main loop.", kind: .place, mapPlaceholderName: "map-placeholder1"),
-        PreviewItem(title: "Soccer Practice", content: "Thursday 4:30pm at Rec Center Field 2.", kind: .place, mapPlaceholderName: "map-placeholder4")
-    ]
-
-    private static let petsPreviewItems: [PreviewItem] = [
-        PreviewItem(title: "Pet Names", content: "Dog: Max · Cat: Luna · Fish: Bubbles", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Pet Care",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Fill water bowl", "Give food", "Let outside / litter check", "Play for 10 minutes"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Dog Food", content: "1 cup morning and evening. Food is in the pantry bin.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Treat Rules", content: "Max 2 treats per day — no chocolate, ever.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Leash Location", content: "Hanging by the front door with the poop bags.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "No-Go Areas", content: "Keep pets out of the formal dining room and guest bedroom.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Veterinarian", content: "Animal Hospital — (555) 789-4561", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Pet Sitter", content: "Emily — (555) 222-3333", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Favorite Park", content: "Sunrise Meadow Park — Max's usual walk loop.", kind: .place, mapPlaceholderName: "map-placeholder3")
-    ]
-
-    private static let plantsPreviewItems: [PreviewItem] = [
-        PreviewItem(title: "Watering Schedule", content: "Most houseplants: every 7–10 days. Check soil first — if damp, wait.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(
-            title: "Plant Care",
-            content: WaterfallGridCell.routinePreviewText(for: [
-                "Check soil moisture", "Water until it drains", "Empty saucers", "Rotate pots a quarter turn"
-            ]),
-            kind: .routine,
-            mapPlaceholderName: nil
-        ),
-        PreviewItem(title: "Fiddle Leaf Fig", content: "Bright indirect light by the living room window. Water sparingly.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Herbs on Sill", content: "Basil & mint — water when the top inch is dry. Snip often.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Succulents", content: "Kitchen shelf. Water lightly every 2–3 weeks. No misting.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Plant Food", content: "Liquid fertilizer under the sink. Use half-strength monthly in summer.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Yard Service", content: "Every Monday, 11am–2pm. Leave the side gate unlocked.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Outdoor Hose", content: "Spigot on the east side. Timer is set for early mornings.", kind: .note, mapPlaceholderName: nil),
-        PreviewItem(title: "Garden Bed", content: "Backyard raised beds — tomatoes & peppers along the fence.", kind: .place, mapPlaceholderName: "map-placeholder5")
-    ]
 
     private func thumbnail(for item: PreviewItem) -> UIImage? {
         guard let name = item.mapPlaceholderName else { return nil }

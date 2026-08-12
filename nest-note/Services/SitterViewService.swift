@@ -756,6 +756,9 @@ final class SitterViewService: NestItemRepository {
         
         // If the place has no thumbnails (temporary place), return a placeholder
         guard let thumbnailURLs = place.thumbnailURLs else {
+            if DemoModeService.shared.isActive, let placeholder = DemoNestSeed.placeholderImage(for: place) {
+                return placeholder
+            }
             Logger.log(level: .debug, category: .sitterViewService, message: "Place has no thumbnails, returning placeholder")
             return UIImage(systemName: "mappin.circle") ?? UIImage()
         }

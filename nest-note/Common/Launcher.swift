@@ -30,6 +30,7 @@ final class Launcher {
         
         // Only setup NestService if user is signed in
         if userSetupResult.isSignedIn {
+            await DemoModeService.shared.refreshConfig()
             do {
                 try await NestService.shared.setup()
             } catch {
@@ -56,6 +57,7 @@ final class Launcher {
         await NestService.shared.reset()
         // Reset SessionService
         await SessionService.shared.reset()
+        DemoModeService.shared.clearOnLogout()
         
         // Reset UserService last
         do {

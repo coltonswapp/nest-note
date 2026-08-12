@@ -36,6 +36,10 @@ final class NestService: NestItemRepository {
             if oldValue?.id != nestId {
                 itemRepository = FirebaseItemRepository(nestId: nestId)
                 clearImageCache()
+                clearNotesCache()
+                clearSavedSittersCache()
+                clearCategoriesCache()
+                invalidateItemsCache()
             }
         }
     }
@@ -76,6 +80,13 @@ final class NestService: NestItemRepository {
             Logger.log(level: .info, category: .nestService, message: "No current user, skipping nest setup")
             return
         }
+
+        if await DemoModeService.shared.shouldLoadDemoNestOnSetup(),
+           let demoNestId = DemoModeService.shared.nestId {
+            try await fetchAndSetCurrentNest(nestId: demoNestId)
+            Logger.log(level: .info, category: .nestService, message: "Nest setup loaded demo nest: \(demoNestId)")
+            return
+        }
         
         // Find first nest where user is the owner
         guard let primaryNestId = currentUser.roles.nestAccess.first(where: { $0.accessLevel == .owner })?.nestId else {
@@ -85,6 +96,12 @@ final class NestService: NestItemRepository {
         
         try await fetchAndSetCurrentNest(nestId: primaryNestId)
         Logger.log(level: .info, category: .nestService, message: currentNest != nil ? "Nest setup complete with nest: \(currentNest!)": "Nest setup incomplete.. (no nest found) ❌")
+    }
+
+    private func ensureNestIsWritable() throws {
+        guard !DemoModeService.shared.isActive else {
+            throw NestError.demoModeReadOnly
+        }
     }
     
     func reset() async {
@@ -121,6 +138,7 @@ final class NestService: NestItemRepository {
     
     // MARK: - Firestore Methods
     func createNest(ownerId: String, name: String, address: String, careResponsibilities: [String]? = nil) async throws -> NestItem {
+        try ensureNestIsWritable()
         Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Starting nest creation for user: \(ownerId)")
         Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Name: '\(name)', Address: '\(address)'")
         Logger.log(level: .info, category: .nestService, message: "🏠 NEST CREATION: Care responsibilities: \(careResponsibilities ?? [])")
@@ -287,6 +305,7 @@ final class NestService: NestItemRepository {
     // MARK: - Note Methods
     func createNote(_ entry: NoteItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "createNote() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -322,6 +341,7 @@ final class NestService: NestItemRepository {
     
     func updateNote(_ entry: NoteItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "updateNote() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -355,6 +375,7 @@ final class NestService: NestItemRepository {
     
     func deleteNote(_ entry: NoteItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "deleteNote() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -393,6 +414,7 @@ final class NestService: NestItemRepository {
     
     func createRoutine(_ routine: RoutineItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "createRoutine() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -418,6 +440,7 @@ final class NestService: NestItemRepository {
     
     func updateRoutine(_ routine: RoutineItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "updateRoutine() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -443,6 +466,7 @@ final class NestService: NestItemRepository {
     
     func deleteRoutine(_ routine: RoutineItem) async throws {
         Logger.log(level: .info, category: .nestService, message: "deleteRoutine() called - using ItemRepository")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -471,6 +495,7 @@ final class NestService: NestItemRepository {
     /// Generic method to create any BaseItem type
     func createItem<T: BaseItem>(_ item: T) async throws {
         Logger.log(level: .info, category: .nestService, message: "createItem() called for type: \(item.type.rawValue)")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -489,6 +514,7 @@ final class NestService: NestItemRepository {
     /// Generic method to update any BaseItem type  
     func updateItem<T: BaseItem>(_ item: T) async throws {
         Logger.log(level: .info, category: .nestService, message: "updateItem() called for type: \(item.type.rawValue)")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -507,6 +533,7 @@ final class NestService: NestItemRepository {
     /// Generic method to delete any BaseItem type by ID
     func deleteItem(id: String) async throws {
         Logger.log(level: .info, category: .nestService, message: "deleteItem() called for id: \(id)")
+        try ensureNestIsWritable()
         
         guard let itemRepository = itemRepository else {
             throw NestError.noCurrentNest
@@ -598,6 +625,15 @@ final class NestService: NestItemRepository {
         Logger.log(level: .info, category: .nestService, message: "🗑️ CACHE INVALIDATED: Clearing \(cachedItems.count) cached items")
         cachedItems = []
         lastFetchTime = nil
+        itemRepository?.clearItemsCache()
+    }
+
+    /// Drop all nest item/category caches after an out-of-band write (e.g. demo seeder).
+    func purgeCachesAfterExternalMutation() {
+        invalidateItemsCache()
+        clearNotesCache()
+        clearCategoriesCache()
+        clearSavedSittersCache()
     }
     
     /// Add or update an item in the cache
@@ -788,6 +824,10 @@ final class NestService: NestItemRepository {
         
         // If the place has no thumbnails (temporary place / upload pending), return a placeholder
         guard let thumbnailURLs = place.thumbnailURLs else {
+            if DemoModeService.shared.isActive, let placeholder = DemoNestSeed.placeholderImage(for: place) {
+                Logger.log(level: .debug, category: .nestService, message: "Using demo map placeholder for place: \(place.alias ?? place.title)")
+                return placeholder
+            }
             Logger.log(level: .debug, category: .nestService, message: "Place has no thumbnails, returning placeholder")
             return UIImage(systemName: "mappin.circle") ?? UIImage()
         }
@@ -975,6 +1015,7 @@ extension NestService {
         case imageUploadFailed
         case invalidImageURL
         case creationFailed
+        case demoModeReadOnly
         
         var errorDescription: String? {
             switch self {
@@ -994,6 +1035,8 @@ extension NestService {
                 return "Invalid image URL"
             case .creationFailed:
                 return "Failed to create nest and categories"
+            case .demoModeReadOnly:
+                return "Changes aren't saved in the demo nest."
             }
         }
     }
@@ -1129,6 +1172,7 @@ extension NestService {
     }
     
     func createCategory(_ category: NestCategory) async throws {
+        try ensureNestIsWritable()
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
@@ -1166,6 +1210,7 @@ extension NestService {
     }
     
     func deleteCategory(_ categoryName: String) async throws {
+        try ensureNestIsWritable()
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
@@ -1270,6 +1315,7 @@ extension NestService {
     
     // Add a new saved sitter
     func addSavedSitter(_ sitter: SavedSitter) async throws {
+        try ensureNestIsWritable()
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
@@ -1293,6 +1339,7 @@ extension NestService {
     
     // Delete a saved sitter
     func deleteSavedSitter(_ sitter: SavedSitter) async throws {
+        try ensureNestIsWritable()
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
@@ -1386,6 +1433,7 @@ extension NestService {
 // MARK: - Nest Update Methods
 extension NestService {
     func updateNestName(_ nestId: String, _ newName: String) async throws {
+        try ensureNestIsWritable()
         guard let currentNest else {
             throw NestError.noCurrentNest
         }
@@ -1415,6 +1463,7 @@ extension NestService {
     }
     
     func updateNestAddress(_ nestId: String, _ newAddress: String) async throws {
+        try ensureNestIsWritable()
         guard let currentNest else {
             throw NestError.noCurrentNest
         }
@@ -1444,6 +1493,7 @@ extension NestService {
     }
     
     func updateNest(_ nest: NestItem) async throws {
+        try ensureNestIsWritable()
         let db = Firestore.firestore()
         let data = try Firestore.Encoder().encode(nest)
         
@@ -1498,6 +1548,7 @@ extension NestService {
     }
     
     func savePinnedCategories(_ categoryNames: [String]) async throws {
+        try ensureNestIsWritable()
         guard let nestId = currentNest?.id else {
             throw NestError.noCurrentNest
         }
