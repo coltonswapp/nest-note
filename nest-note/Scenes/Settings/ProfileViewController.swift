@@ -177,6 +177,16 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
     
+    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
+        return isTappable(item)
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
+        return isTappable(item)
+    }
+    
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
@@ -218,6 +228,22 @@ class ProfileViewController: NNViewController, UICollectionViewDelegate {
         }
         
         collectionView.deselectItem(at: indexPath, animated: true)
+    }
+    
+    private func isTappable(_ item: Item) -> Bool {
+        switch item {
+        case .info(let title, _):
+            switch title {
+            case "Name", "Phone", "Venmo Username", "Hourly Rate":
+                return true
+            default:
+                return false
+            }
+        case .action:
+            return true
+        case .modeSwitch:
+            return false
+        }
     }
     
     private func handleSignOut() {

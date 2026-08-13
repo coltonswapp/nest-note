@@ -2,7 +2,7 @@ import UIKit
 
 final class SessionPaymentValueCollectionViewLayout: UICollectionViewFlowLayout {
     private let cellWidth: CGFloat = SessionPaymentValueSelectorView.tickSpacing
-    private let cellHeight: CGFloat = 58
+    private let cellHeight: CGFloat = SessionPaymentValueSelectorView.trackHeight
 
     override init() {
         super.init()

@@ -149,7 +149,7 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
         case .action(let title, _, _):
             switch title {
             case "Nest Review":
-                presentEntryReview()
+                presentNoteReview()
             case "Add another Residence":
                 let featureVC = NNFeaturePreviewViewController(feature: .multipleNests)
                 let nav = UINavigationController(rootViewController: featureVC)
@@ -180,8 +180,8 @@ class NestDetailViewController: NNViewController, UICollectionViewDelegate {
         present(alert, animated: true)
     }
     
-    private func presentEntryReview() {
-        let reviewVC = EntryReviewViewController(entryRepository: NestService.shared)
+    private func presentNoteReview() {
+        let reviewVC = NoteReviewViewController(nestItemRepository: NestService.shared)
         
         let nav = UINavigationController(rootViewController: reviewVC)
         
@@ -257,6 +257,11 @@ class InfoCell: UICollectionViewListCell {
         fatalError("init(coder:) has not been implemented")
     }
     
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+        backgroundConfiguration = UIBackgroundConfiguration.listGroupedCell().updated(for: state)
+    }
+    
     private func setupViews() {
         contentView.addSubview(stackView)
         stackView.translatesAutoresizingMaskIntoConstraints = false
@@ -306,6 +311,11 @@ class ActionCell: UICollectionViewListCell {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+        backgroundConfiguration = UIBackgroundConfiguration.listGroupedCell().updated(for: state)
     }
     
     private func setupViews() {

@@ -4,7 +4,11 @@ import UserNotifications
 enum SessionNotificationPrompt {
     /// Presents the enable-notifications education screen when the user has not authorized push,
     /// or silently refreshes prefs + FCM token when already authorized.
-    static func presentIfNeeded(from viewController: UIViewController, completion: @escaping () -> Void) {
+    static func presentIfNeeded(
+        from viewController: UIViewController,
+        audience: EnableNotificationsViewController.Audience = .owner,
+        completion: @escaping () -> Void
+    ) {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async {
                 if settings.authorizationStatus == .authorized {
@@ -15,7 +19,7 @@ enum SessionNotificationPrompt {
                         }
                     }
                 } else {
-                    let enableVC = EnableNotificationsViewController()
+                    let enableVC = EnableNotificationsViewController(audience: audience)
                     enableVC.onFinished = completion
                     let nav = UINavigationController(rootViewController: enableVC)
                     nav.modalPresentationStyle = .pageSheet
@@ -28,7 +32,74 @@ enum SessionNotificationPrompt {
 
 final class EnableNotificationsViewController: NNViewController {
 
+    enum Audience {
+        case owner
+        case sitter
+
+        var subtitle: String {
+            switch self {
+            case .owner:
+                return "Get notified when your session starts, runs long, or ends — so you're never caught off guard."
+            case .sitter:
+                return "Stay in sync with the families you sit for — know when care starts, runs long, or wraps up."
+            }
+        }
+
+        var bulletItems: [NNBulletItem] {
+            switch self {
+            case .owner:
+                return [
+                    NNBulletItem(
+                        title: "Session Starting",
+                        description: "Know the moment care begins",
+                        iconName: "calendar.badge.clock"
+                    ),
+                    NNBulletItem(
+                        title: "Sitter Joined",
+                        description: "Get notified when your sitter joins the session",
+                        iconName: "person.crop.circle.badge.checkmark"
+                    ),
+                    NNBulletItem(
+                        title: "Session Extended",
+                        description: "Get alerted when a session runs past its scheduled end",
+                        iconName: "timer.circle.fill"
+                    ),
+                    NNBulletItem(
+                        title: "Session Completed",
+                        description: "See when wrapping up is done",
+                        iconName: "checkmark.circle.fill"
+                    ),
+                    NNBulletItem(
+                        title: "Payment Reminders",
+                        description: "A nudge when it's time to pay your sitter",
+                        iconName: "dollarsign.circle.fill"
+                    ),
+                ]
+            case .sitter:
+                return [
+                    NNBulletItem(
+                        title: "Session Starting",
+                        description: "Get a heads-up when it's time to arrive",
+                        iconName: "calendar.badge.clock"
+                    ),
+                    NNBulletItem(
+                        title: "Session Extended",
+                        description: "Know right away if parents need more time",
+                        iconName: "timer.circle.fill"
+                    ),
+                    NNBulletItem(
+                        title: "Session Completed",
+                        description: "Confirm when the session has wrapped up",
+                        iconName: "checkmark.circle.fill"
+                    ),
+                ]
+            }
+        }
+    }
+
     var onFinished: (() -> Void)?
+
+    private let audience: Audience
 
     private let topImageView: UIImageView = {
         let view = UIImageView()
@@ -63,7 +134,6 @@ final class EnableNotificationsViewController: NNViewController {
 
     private let subtitleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Get notified when your session starts, runs long, or ends — so you're never caught off guard."
         label.font = .bodyM
         label.textColor = .secondaryLabel
         label.textAlignment = .center
@@ -78,26 +148,13 @@ final class EnableNotificationsViewController: NNViewController {
         return button
     }()
 
-    init() {
-        let items = [
-            NNBulletItem(
-                title: "Session Starting",
-                description: "Know the moment care begins",
-                iconName: "calendar.badge.clock"
-            ),
-            NNBulletItem(
-                title: "Session Extended",
-                description: "Get alerted when a session runs past its scheduled end",
-                iconName: "timer.circle.fill"
-            ),
-            NNBulletItem(
-                title: "Session Completed",
-                description: "See when wrapping up is done",
-                iconName: "checkmark.circle.fill"
-            ),
-        ]
-        self.infoView = NNBulletStack(items: items)
+    private var hasAnimatedBullets = false
+
+    init(audience: Audience = .owner) {
+        self.audience = audience
+        self.infoView = NNBulletStack(items: audience.bulletItems)
         super.init(nibName: nil, bundle: nil)
+        subtitleLabel.text = audience.subtitle
     }
 
     required init?(coder: NSCoder) {
@@ -108,6 +165,14 @@ final class EnableNotificationsViewController: NNViewController {
         super.viewDidLoad()
         setupView()
         setupNavigationBar()
+        infoView.prepareItemsForSlideIn()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasAnimatedBullets else { return }
+        hasAnimatedBullets = true
+        infoView.animateItemsIn(initialDelay: 0.08)
     }
 
     private func setupNavigationBar() {

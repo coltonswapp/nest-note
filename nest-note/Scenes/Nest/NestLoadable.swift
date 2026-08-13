@@ -1,13 +1,13 @@
 import UIKit
 
 protocol NestLoadable: CollectionViewLoadable {
-    var entryRepository: EntryRepository { get }
+    var nestItemRepository: NestItemRepository { get }
     var hasLoadedInitialData: Bool { get set }
-    func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]])
+    func handleLoadedNotes(_ groupedNotes: [String: [NoteItem]])
 }
 
 extension NestLoadable {
-    func loadEntries(showLoadingIndicator: Bool = true) async {
+    func loadNotes(showLoadingIndicator: Bool = true) async {
         do {
             if showLoadingIndicator {
                 await MainActor.run {
@@ -15,10 +15,10 @@ extension NestLoadable {
                 }
             }
             
-            let groupedEntries = try await NestService.shared.fetchEntries()
+            let groupedNotes = try await NestService.shared.fetchNotes()
             
             await MainActor.run {
-                handleLoadedEntries(groupedEntries)
+                handleLoadedNotes(groupedNotes)
                 hasLoadedInitialData = true
                 loadingIndicator.stopAnimating()
             }
@@ -26,19 +26,19 @@ extension NestLoadable {
         } catch {
             await MainActor.run {
                 loadingIndicator.stopAnimating()
-                Logger.log(level: .error, category: .nestService, message: "Error loading entries: \(error.localizedDescription)")
+                Logger.log(level: .error, category: .nestService, message: "Error loading notes: \(error.localizedDescription)")
             }
         }
     }
     
-    func refreshEntries() async {
+    func refreshNotes() async {
         do {
-            let groupedEntries = try await NestService.shared.refreshEntries()
+            let groupedNotes = try await NestService.shared.refreshNotes()
             await MainActor.run {
-                handleLoadedEntries(groupedEntries)
+                handleLoadedNotes(groupedNotes)
             }
         } catch {
-            Logger.log(level: .error, category: .nestService, message: "Error refreshing entries: \(error.localizedDescription)")
+            Logger.log(level: .error, category: .nestService, message: "Error refreshing notes: \(error.localizedDescription)")
         }
     }
 }

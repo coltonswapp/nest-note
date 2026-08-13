@@ -51,12 +51,12 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         hasher.combine(currentFolderPath)
         
         // Hash per-category entry counts to detect distribution changes
-        if let entries = entries {
+        if let notes = notes {
             // Sort category keys to ensure consistent hashing
-            let sortedCategories = entries.keys.sorted()
+            let sortedCategories = notes.keys.sorted()
             for category in sortedCategories {
                 hasher.combine(category)
-                hasher.combine(entries[category]?.count ?? 0)
+                hasher.combine(notes[category]?.count ?? 0)
             }
         }
         
@@ -92,8 +92,6 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     // MARK: - Folder Parsing Methods (using shared FolderUtility)
     
     private func getFoldersForCurrentPath() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
         Logger.log(level: .info, category: logCategory, message: "FOLDER COUNT DEBUG: Getting folders for currentFolderPath='\(currentFolderPath)'")
         
         if currentFolderPath.isEmpty {
@@ -106,9 +104,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getTopLevelFolders() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
-        // Get top-level categories (no "/" in name)
+        // Get top-level categories (no "/" in name) — show even when the nest has no items yet
         let topLevelCategories = categories.filter { !$0.name.contains("/") }
         let categoryNames = topLevelCategories.map { $0.name }
         
@@ -141,8 +137,6 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func getSubfoldersForCurrentPath() -> [FolderData] {
-        guard !allItemsForFolderUtility.isEmpty else { return [] }
-        
         let subfolders = FolderUtility.buildSubfolders(
             for: currentFolderPath,
             allItems: allItemsForFolderUtility,
@@ -165,7 +159,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         return categories.first { $0.name.lowercased() == rootFolderName.lowercased() }
     }
     
-    private var entries: [String: [BaseEntry]]?
+    private var notes: [String: [NoteItem]]?
     private var places: [PlaceItem] = []
     private var routines: [RoutineItem] = []
     /// Unified list for folder counts (includes any `BaseItem` types).
@@ -173,7 +167,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
 
     private var allItemsForFolderUtility: [BaseItem] {
         if !allItems.isEmpty { return allItems }
-        let flat = entries?.values.flatMap { $0 } ?? []
+        let flat = notes?.values.flatMap { $0 } ?? []
         return flat + places + routines
     }
     
@@ -182,7 +176,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     private var newCategoryButton: NNPrimaryLabeledButton?
     private var newFolderButton: UIButton?
     
-    internal let entryRepository: EntryRepository
+    internal let nestItemRepository: NestItemRepository
 
     // Toolbar support
     private var isUsingToolbar: Bool {
@@ -194,16 +188,20 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
 
     // Dynamic logging category based on repository type
     private var logCategory: Logger.Category {
-        return entryRepository is NestService ? .nestService : .sitterViewService
+        return nestItemRepository is NestService ? .nestService : .sitterViewService
+    }
+
+    private var allowsNestEdits: Bool {
+        nestItemRepository.allowsNestEdits
     }
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
-        return .unlimitedEntries
+        return .unlimitedNotes
     }
     
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository) {
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -213,7 +211,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = entryRepository is NestService ? "My Nest" : "The Nest"
+        title = nestItemRepository is NestService ? "My Nest" : "The Nest"
         configureCollectionView()
         setupLoadingIndicator()
         setupNewCategoryButton()
@@ -228,6 +226,17 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 setupToolbar()
             }
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(nestCategoryDidChange(_:)),
+            name: .nestCategoryDidChange,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -235,13 +244,13 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         
         if !hasLoadedInitialData {
             Task {
-                await loadEntries()
+                await loadNotes()
             }
         }
     }
     
-    func handleLoadedEntries(_ groupedEntries: [String: [BaseEntry]]) {
-        self.entries = groupedEntries
+    func handleLoadedNotes(_ groupedNotes: [String: [NoteItem]]) {
+        self.notes = groupedNotes
         clearFolderCache() // Clear cache when data changes
         applyInitialSnapshots()
     }
@@ -260,33 +269,33 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupRefreshControl() {
         refreshControl = UIRefreshControl()
-        refreshControl.addTarget(self, action: #selector(refreshEntries), for: .valueChanged)
+        refreshControl.addTarget(self, action: #selector(refreshNotes), for: .valueChanged)
         collectionView.refreshControl = refreshControl
     }
     
-    @objc private func refreshEntries() {
+    @objc private func refreshNotes() {
         Task {
             do {
                 Logger.log(level: .info, category: logCategory, message: "Refreshing entries, categories, and places")
                 
                 // Invalidate cache first for refresh
-                if let nestService = entryRepository as? NestService {
+                if let nestService = nestItemRepository as? NestService {
                     nestService.invalidateItemsCache()
                 }
                 
                 // Refresh categories
-                let categories = try await entryRepository.refreshCategories()
+                let categories = try await nestItemRepository.refreshCategories()
                 self.categories = categories
                 
                 // For NestService, use efficient combined fetch (cache already invalidated)
-                if let nestService = entryRepository as? NestService {
+                if let nestService = nestItemRepository as? NestService {
                     do {
-                        let (groupedEntries, places) = try await nestService.fetchEntriesAndPlaces()
+                        let (groupedNotes, places) = try await nestService.fetchNotesAndPlaces()
                         let routines: [RoutineItem] = try await nestService.fetchItems(ofType: .routine)
-                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedEntries.count) entry groups, \(places.count) places, \(routines.count) routines")
+                        Logger.log(level: .info, category: logCategory, message: "Efficient refresh complete - \(groupedNotes.count) entry groups, \(places.count) places, \(routines.count) routines")
                         
                         await MainActor.run {
-                            self.entries = groupedEntries
+                            self.notes = groupedNotes
                             self.places = places
                             self.routines = routines
                             self.clearFolderCache() // Clear cache when data refreshes
@@ -296,10 +305,10 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     } catch {
                         Logger.log(level: .error, category: logCategory, message: "Failed to refresh entries and places: \(error)")
                         // Fallback to separate refresh
-                        let groupedEntries = try await entryRepository.refreshEntries()
+                        let groupedNotes = try await nestItemRepository.refreshNotes()
                         
                         await MainActor.run {
-                            self.entries = groupedEntries
+                            self.notes = groupedNotes
                             self.places = []
                             self.routines = []
                             self.clearFolderCache()
@@ -307,18 +316,18 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                             self.refreshControl.endRefreshing()
                         }
                     }
-                } else if let sitterService = entryRepository as? SitterViewService {
+                } else if let sitterService = nestItemRepository as? SitterViewService {
                     // For SitterViewService, refresh entries, places, and routines (now supported)
-                    sitterService.clearEntriesCache()
+                    sitterService.clearNotesCache()
                     sitterService.clearPlacesCache()
                     sitterService.clearItemsCache() // Clear routines cache too
-                    let groupedEntries = try await entryRepository.refreshEntries()
+                    let groupedNotes = try await nestItemRepository.refreshNotes()
                     let places = try await sitterService.fetchNestPlaces()
                     let routines = try await sitterService.fetchNestRoutines()
-                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups, \(places.count) places, and \(routines.count) routines")
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedNotes.count) entry groups, \(places.count) places, and \(routines.count) routines")
                     
                     await MainActor.run {
-                        self.entries = groupedEntries
+                        self.notes = groupedNotes
                         self.places = places
                         self.routines = routines
                         self.clearFolderCache()
@@ -327,11 +336,11 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                     }
                 } else {
                     // For other repository types, refresh entries only
-                    let groupedEntries = try await entryRepository.refreshEntries()
-                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedEntries.count) entry groups")
+                    let groupedNotes = try await nestItemRepository.refreshNotes()
+                    Logger.log(level: .info, category: logCategory, message: "Refreshed \(groupedNotes.count) entry groups")
                     
                     await MainActor.run {
-                        self.entries = groupedEntries
+                        self.notes = groupedNotes
                         self.places = []
                         self.routines = []
                         self.clearFolderCache()
@@ -480,7 +489,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNavigationBar() {
         // Only show menu for nest owners
-        guard entryRepository is NestService else { return }
+        guard allowsNestEdits else { return }
         
         let pinnedCategoriesAction = UIAction(
             title: "Pinned Folders",
@@ -524,7 +533,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     }
     
     private func presentPinnedCategories() {
-        let pinnedCategoriesVC = PinnedCategoriesViewController(entryRepository: entryRepository)
+        let pinnedCategoriesVC = PinnedCategoriesViewController(nestItemRepository: nestItemRepository)
         present(UINavigationController(rootViewController: pinnedCategoriesVC), animated: true)
     }
     
@@ -562,9 +571,9 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         
         // Get address from the appropriate service
         var address: String?
-        if let nestService = entryRepository as? NestService {
+        if let nestService = nestItemRepository as? NestService {
             address = nestService.currentNest?.address
-        } else if let sitterService = entryRepository as? SitterViewService {
+        } else if let sitterService = nestItemRepository as? SitterViewService {
             address = sitterService.currentNestAddress
         }
         
@@ -590,7 +599,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNewCategoryButton() {
         // Only show new category button for nest owners
-        guard entryRepository is NestService else { return }
+        guard allowsNestEdits else { return }
         
         // Check if we've reached max folder depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -606,7 +615,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     
     private func setupNewFolderButton() {
         // Only show floating button for pre-iOS 26 and nest owners
-        guard !isUsingToolbar && entryRepository is NestService else { return }
+        guard !isUsingToolbar && allowsNestEdits else { return }
         
         // Check if we've reached max folder depth
         let currentDepth = currentFolderPath.isEmpty ? 0 : currentFolderPath.components(separatedBy: "/").count
@@ -678,7 +687,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
     @available(iOS 26.0, *)
     private func setupToolbar() {
         // Only show toolbar for nest owners
-        guard entryRepository is NestService else {
+        guard allowsNestEdits else {
             toolbarItems = []
             navigationController?.setToolbarHidden(true, animated: true)
             return
@@ -705,7 +714,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
         }
     }
     
-    private func loadEntries() async {
+    private func loadNotes() async {
         loadingIndicator.startAnimating()
         navigationItem.rightBarButtonItem?.isEnabled = false
         
@@ -713,39 +722,39 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             Logger.log(level: .info, category: logCategory, message: "Starting to load entries, categories, and places")
             
             // Fetch categories first
-            let categories = try await entryRepository.fetchCategories()
+            let categories = try await nestItemRepository.fetchCategories()
             self.categories = categories
             
             // For NestService, use efficient combined fetch
-            if let nestService = entryRepository as? NestService {
+            if let nestService = nestItemRepository as? NestService {
                 do {
                     let items = try await nestService.fetchAllItems()
                     self.allItems = items
-                    let groupedEntries = Dictionary(grouping: items.compactMap { $0 as? BaseEntry }, by: { $0.category })
-                    self.entries = groupedEntries
+                    let groupedNotes = Dictionary(grouping: items.compactMap { $0 as? NoteItem }, by: { $0.category })
+                    self.notes = groupedNotes
                     self.places = items.compactMap { $0 as? PlaceItem }
                     self.routines = items.compactMap { $0 as? RoutineItem }
-                    Logger.log(level: .info, category: logCategory, message: "Unified fetch complete - \(groupedEntries.count) entry groups, \(self.places.count) places, \(self.routines.count) routines, \(items.count) total items")
+                    Logger.log(level: .info, category: logCategory, message: "Unified fetch complete - \(groupedNotes.count) entry groups, \(self.places.count) places, \(self.routines.count) routines, \(items.count) total items")
                 } catch {
                     Logger.log(level: .error, category: logCategory, message: "Failed to fetch all items: \(error)")
-                    let groupedEntries = try await entryRepository.fetchEntries()
-                    self.entries = groupedEntries
+                    let groupedNotes = try await nestItemRepository.fetchNotes()
+                    self.notes = groupedNotes
                     self.places = []
                     self.routines = []
                     self.allItems = []
                 }
-            } else if let sitterService = entryRepository as? SitterViewService {
+            } else if let sitterService = nestItemRepository as? SitterViewService {
                 let items = try await sitterService.fetchAllItems()
                 self.allItems = items
-                let groupedEntries = Dictionary(grouping: items.compactMap { $0 as? BaseEntry }, by: { $0.category })
-                self.entries = groupedEntries
+                let groupedNotes = Dictionary(grouping: items.compactMap { $0 as? NoteItem }, by: { $0.category })
+                self.notes = groupedNotes
                 self.places = items.compactMap { $0 as? PlaceItem }
                 self.routines = items.compactMap { $0 as? RoutineItem }
-                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups, \(self.places.count) places, and \(self.routines.count) routines")
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedNotes.count) entry groups, \(self.places.count) places, and \(self.routines.count) routines")
             } else {
-                let groupedEntries = try await entryRepository.fetchEntries()
-                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedEntries.count) entry groups")
-                self.entries = groupedEntries
+                let groupedNotes = try await nestItemRepository.fetchNotes()
+                Logger.log(level: .info, category: logCategory, message: "Fetched \(groupedNotes.count) entry groups")
+                self.notes = groupedNotes
                 self.places = []
                 self.routines = []
                 self.allItems = []
@@ -754,7 +763,7 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
             await MainActor.run {
                 self.newCategoryButton?.isEnabled = true
                 self.hasLoadedInitialData = true
-                self.handleLoadedEntries(self.entries ?? [:])
+                self.handleLoadedNotes(self.notes ?? [:])
                 self.loadingIndicator.stopAnimating()
                 navigationItem.rightBarButtonItem?.isEnabled = true
             }
@@ -787,7 +796,7 @@ extension NestViewController: UICollectionViewDelegate {
             let nestCategoryViewController = NestCategoryViewController(
                 category: folderData.fullPath,
                 places: places,
-                entryRepository: entryRepository
+                nestItemRepository: nestItemRepository
             )
             navigationController?.pushViewController(nestCategoryViewController, animated: true)
         }
@@ -796,7 +805,7 @@ extension NestViewController: UICollectionViewDelegate {
     // MARK: - Context Menu (Folder actions)
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         // Only allow for nest owners and only for folder cells
-        guard entryRepository is NestService,
+        guard allowsNestEdits,
               indexPath.section == Section.main.rawValue,
               let item = dataSource.itemIdentifier(for: indexPath),
               let folderData = item as? FolderData else {
@@ -821,7 +830,7 @@ extension NestViewController {
     private func deleteFolderWithConfirmation(_ folderData: FolderData) {
         let alert = UIAlertController(
             title: "Delete Folder",
-            message: "Are you sure you want to delete the folder '\(folderData.title)'? This will also delete all entries within this folder. This action cannot be undone.",
+            message: "Are you sure you want to delete the folder '\(folderData.title)'? This will also delete all items within this folder. This action cannot be undone.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -832,7 +841,7 @@ extension NestViewController {
     }
 
     private func deleteFolder(_ folderData: FolderData) {
-        guard let nestService = entryRepository as? NestService else {
+        guard let nestService = nestItemRepository as? NestService else {
             Logger.log(level: .error, category: logCategory, message: "Only nest owners can delete folders")
             return
         }
@@ -841,20 +850,8 @@ extension NestViewController {
             do {
                 try await nestService.deleteCategory(folderData.fullPath)
 
-                // Refresh categories, entries, places, and routines
-                async let categoriesTask = nestService.fetchCategories()
-                async let entriesPlacesTask = nestService.fetchEntriesAndPlaces()
-                async let routinesTask: [RoutineItem] = nestService.fetchItems(ofType: .routine)
-
-                let (newCategories, (groupedEntries, places), routines) = try await (categoriesTask, entriesPlacesTask, routinesTask)
-
                 await MainActor.run {
-                    self.categories = newCategories
-                    self.entries = groupedEntries
-                    self.places = places
-                    self.routines = routines
-                    self.clearFolderCache()
-                    self.applyInitialSnapshots()
+                    self.removeCategoryLocally(folderData.fullPath)
                     self.showToast(text: "Folder Deleted")
                 }
             } catch {
@@ -864,6 +861,33 @@ extension NestViewController {
                 }
             }
         }
+    }
+
+    @objc private func nestCategoryDidChange(_ notification: Notification) {
+        guard let path = notification.object as? String else { return }
+        Task { @MainActor in
+            self.removeCategoryLocally(path)
+        }
+    }
+
+    private func removeCategoryLocally(_ categoryName: String) {
+        let stillPresent = categories.contains {
+            $0.name == categoryName || $0.name.hasPrefix(categoryName + "/")
+        }
+        guard stillPresent else { return }
+
+        categories.removeAll { $0.name == categoryName || $0.name.hasPrefix(categoryName + "/") }
+        allItems.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        if var notes {
+            notes = notes.filter { key, _ in
+                key != categoryName && !key.hasPrefix(categoryName + "/")
+            }
+            self.notes = notes
+        }
+        places.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        routines.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        clearFolderCache()
+        applyInitialSnapshots()
     }
 }
 
@@ -884,7 +908,7 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
     func categoryDetailViewController(_ controller: CategoryDetailViewController, didSaveCategory category: String?, withIcon icon: String?) {
         guard let categoryName = category,
               let iconName = icon,
-              let nestService = entryRepository as? NestService else {
+              let nestService = nestItemRepository as? NestService else {
             // Only NestService can create categories
             showError("Categories can only be created by nest owners")
             return
@@ -899,11 +923,11 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                 let newCategory = NestCategory(name: fullFolderPath, symbolName: iconName)
                 try await nestService.createCategory(newCategory)
                 
-                // Refresh the categories, entries, and places
+                // Refresh the categories, notes, and places
                 async let categoriesTask = nestService.fetchCategories()
-                async let entriesTask = entryRepository.refreshEntries()
+                async let entriesTask = nestItemRepository.refreshNotes()
                 
-                let (newCategories, groupedEntries) = try await (categoriesTask, entriesTask)
+                let (newCategories, groupedNotes) = try await (categoriesTask, entriesTask)
                 
                 // Refresh places and routines too
                 let refreshedPlaces = try await nestService.fetchPlacesWithFilter(includeTemporary: false)
@@ -911,9 +935,10 @@ extension NestViewController: CategoryDetailViewControllerDelegate {
                 
                 await MainActor.run {
                     self.categories = newCategories
-                    self.entries = groupedEntries
+                    self.notes = groupedNotes
                     self.places = refreshedPlaces
                     self.routines = refreshedRoutines
+                    self.clearFolderCache()
                     self.applyInitialSnapshots()
                     self.showToast(text: "Folder Created")
                 }
@@ -950,7 +975,7 @@ extension NestViewController {
     
     func showTips() {
         // Only show tips when in read-only mode (sitter view)
-        guard !(entryRepository is NestService) else { return }
+        guard !(nestItemRepository is NestService) else { return }
         
         trackScreenVisit()
         

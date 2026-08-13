@@ -74,6 +74,10 @@ class CustomBackFolderView: UIView {
     init(color: UIColor) {
         self.fillColor = color
         super.init(frame: .zero)
+        // Redraw the custom path whenever bounds change (critical when animating size).
+        contentMode = .redraw
+        backgroundColor = .clear
+        isOpaque = false
     }
 
     required init?(coder: NSCoder) {
@@ -104,11 +108,20 @@ class FolderCollectionViewCell: UICollectionViewCell {
     private let paper1View = UIView()
     private let paper2View = UIView()
     private let paper3View = UIView()
+    private var paperConstraints: [NSLayoutConstraint] = []
+    /// Avoid rebuilding identical paper stacks on reconfigure (keeps hero handoff stable).
+    private var configuredPaperKey: String?
     
 //    private let frontColor: UIColor = UIColor(red: 229/255, green: 229/255, blue: 229/255, alpha: 1.0)
     private let frontColor: UIColor = NNColors.folderFront
 //    private let backColor: UIColor = UIColor(red: 190/255, green: 190/255, blue: 190/255, alpha: 1.0)
     private let backColor: UIColor = NNColors.folderBack
+
+    private struct PaperStyle {
+        let rotation: CGFloat
+        let offsetX: CGFloat
+        let offsetY: CGFloat
+    }
     
     override init(frame: CGRect) {
         backFolderView = CustomBackFolderView(color: backColor)
@@ -213,57 +226,96 @@ class FolderCollectionViewCell: UICollectionViewCell {
             subtitleLabel.text = "\(data.itemCount) items"
         }
         
-        addPaper(num: data.itemCount)
-        
+        // Seed from folder identity so each folder gets a unique, stable paper stack.
+        addPaper(num: data.itemCount, seed: data.fullPath.isEmpty ? data.title : data.fullPath)
     }
     
-    func addPaper(num: Int) {
-        // Remove any existing paper views
+    func addPaper(num: Int, seed: String = "") {
+        let paperCount = min(num, 3)
+        let paperKey = "\(seed)#\(paperCount)"
+        if configuredPaperKey == paperKey, paperCount == 0 || paper1View.superview != nil {
+            return
+        }
+        configuredPaperKey = paperKey
+
+        NSLayoutConstraint.deactivate(paperConstraints)
+        paperConstraints.removeAll()
         paper1View.removeFromSuperview()
         paper2View.removeFromSuperview()
         paper3View.removeFromSuperview()
-        
-        // Determine how many papers to show (max 3)
-        let paperCount = min(num, 3)
-        
-        // Add papers based on count
-        if paperCount >= 1 {
-            contentView.insertSubview(paper1View, belowSubview: frontFolderView)
-            setupPaperView(paper1View, rotation: CGFloat.random(in: -3...3) * 2, offsetX: -12, offsetY: -24)
+
+        guard paperCount > 0 else { return }
+
+        let styles = Self.paperStyles(seed: seed, count: paperCount)
+        let papers = [paper1View, paper2View, paper3View]
+
+        for index in 0..<paperCount {
+            let paper = papers[index]
+            if index == 0 {
+                contentView.insertSubview(paper, belowSubview: frontFolderView)
+            } else {
+                contentView.insertSubview(paper, aboveSubview: papers[index - 1])
+            }
+            setupPaperView(paper, style: styles[index])
         }
-        
-        if paperCount >= 2 {
-            contentView.insertSubview(paper2View, aboveSubview: paper1View)
-            setupPaperView(paper2View, rotation: CGFloat.random(in: -3...3) * 2, offsetX: 0, offsetY: -21)
+    }
+
+    /// Stable per-folder paper layouts — unique across folders, unchanged on reconfigure.
+    private static func paperStyles(seed: String, count: Int) -> [PaperStyle] {
+        var hash: UInt64 = 1_469_598_103_934_663_603 // FNV offset basis
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
         }
-        
-        if paperCount >= 3 {
-            contentView.insertSubview(paper3View, aboveSubview: paper2View)
-            setupPaperView(paper3View, rotation: CGFloat.random(in: -3...3) * 2, offsetX: 12, offsetY: -18)
+
+        let baseX: [CGFloat] = [-12, 0, 12]
+        let baseY: [CGFloat] = [-24, -21, -18]
+
+        return (0..<count).map { index in
+            var h = hash &+ UInt64(index &+ 1) &* 0x9E37_79B9_7F4A_7C15
+            h ^= h >> 30
+            h &*= 0xBF58_476D_1CE4_E5B9
+            h ^= h >> 27
+
+            // Distinct tilt per paper, folder-seeded (±6°).
+            let rotation = CGFloat(Int(h % 13)) - 6
+            // Keep the classic peek spread, with light per-folder jitter.
+            let offsetX = baseX[index] + CGFloat(Int((h >> 8) % 7)) - 3
+            let offsetY = baseY[index] + CGFloat(Int((h >> 16) % 5)) - 2
+            return PaperStyle(rotation: rotation, offsetX: offsetX, offsetY: offsetY)
         }
     }
     
-    private func setupPaperView(_ paperView: UIView, rotation: CGFloat, offsetX: CGFloat, offsetY: CGFloat) {
+    private func setupPaperView(_ paperView: UIView, style: PaperStyle) {
         paperView.backgroundColor = NNColors.paperWhite
         paperView.layer.cornerRadius = 4
+        paperView.layer.borderWidth = 0
+        paperView.layer.borderColor = nil
         paperView.layer.shadowColor = UIColor.black.cgColor
         paperView.layer.shadowOffset = CGSize(width: 0, height: 2)
         paperView.layer.shadowOpacity = 0.3
         paperView.layer.shadowRadius = 3
         paperView.translatesAutoresizingMaskIntoConstraints = false
         
-        NSLayoutConstraint.activate([
+        let constraints = [
             // Position papers behind the front folder but above the back folder  
-            paperView.topAnchor.constraint(equalTo: frontFolderView.topAnchor, constant: 10 + offsetY),
+            paperView.topAnchor.constraint(equalTo: frontFolderView.topAnchor, constant: 10 + style.offsetY),
             paperView.leadingAnchor.constraint(equalTo: frontFolderView.leadingAnchor, constant: 16),
             paperView.trailingAnchor.constraint(equalTo: frontFolderView.trailingAnchor, constant: -16),
             paperView.bottomAnchor.constraint(equalTo: frontFolderView.bottomAnchor, constant: -15)
-        ])
+        ]
+        NSLayoutConstraint.activate(constraints)
+        paperConstraints.append(contentsOf: constraints)
         
-        // Apply rotation after constraints are set
-        paperView.transform = CGAffineTransform(rotationAngle: rotation * .pi / 180)
+        paperView.transform = CGAffineTransform(rotationAngle: style.rotation * .pi / 180)
     }
     
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        resetPressAppearance()
+        configuredPaperKey = nil
+    }
+
     override var isHighlighted: Bool {
         didSet {
             if isHighlighted {
@@ -272,6 +324,14 @@ class FolderCollectionViewCell: UICollectionViewCell {
                 hideSilhouette()
             }
         }
+    }
+
+    /// Clears pressed/highlight chrome immediately (no animation).
+    func resetPressAppearance() {
+        layer.removeAllAnimations()
+        silhouetteView.layer.removeAllAnimations()
+        silhouetteView.alpha = 0
+        transform = .identity
     }
     
     private func showSilhouette() {

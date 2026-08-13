@@ -9,7 +9,7 @@ import UIKit
 
 final class NestReviewCell: UICollectionViewListCell {
     
-    weak var delegate: EntryReviewCellDelegate?
+    weak var delegate: NoteReviewCellDelegate?
     
     private let iconImageView: UIImageView = {
         let imageView = UIImageView()
@@ -101,7 +101,7 @@ final class NestReviewCell: UICollectionViewListCell {
                 reviewButton.backgroundColor = NNColors.primary.withAlphaComponent(0.15)
                 reviewButton.tintColor = NNColors.primary
             } else {
-                // No outdated entries
+                // No outdated notes
                 reviewButton.setTitle("Nest up to date", for: .normal)
                 reviewButton.backgroundColor = .systemGreen.withAlphaComponent(0.15)
                 reviewButton.tintColor = .systemGreen

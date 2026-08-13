@@ -36,6 +36,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     private var isRefreshingData = false
     private var pendingRefreshForceFlag = false
 
+    /// Set when a session is created from Home; consumed after the create sheet dismisses.
+    private var pendingCreatedSessionForToast: SessionItem?
+
     private var isNestReadinessEnabled: Bool {
         FeatureFlagService.shared.isEnabled(.nestReadinessScoreEnabled)
     }
@@ -100,11 +103,19 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         guard isNestReadinessEnabled else { return }
 
         Task {
-            let result = try? await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.updateReadinessResult(result)
-                self.applySnapshot(animatingDifferences: true)
+            do {
+                let result = try await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.updateReadinessResult(result)
+                    self.applySnapshot(animatingDifferences: true)
+                }
+            } catch {
+                Logger.log(
+                    level: .error,
+                    category: .general,
+                    message: "Failed to load Nest Score: \(error.localizedDescription)"
+                )
             }
         }
     }
@@ -156,6 +167,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 self?.refreshData(forceRefresh: true)
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .pinnedCategoriesDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData(forceRefresh: true)
+            }
+            .store(in: &cancellables)
         
         // Handle session status changes specifically
         NotificationCenter.default.publisher(for: .sessionStatusDidChange)
@@ -201,6 +219,14 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.handleAutoRefresh()
+            }
+            .store(in: &cancellables)
+
+        // Nest Score can become available after Remote Config activates on a fresh install.
+        NotificationCenter.default.publisher(for: .featureFlagsDidUpdate)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadReadinessScoreIfNeeded()
             }
             .store(in: &cancellables)
 
@@ -329,6 +355,8 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             }
         }
 
+        let addPinnedFolderCellRegistration = UICollectionView.CellRegistration<AddPinnedFolderCell, HomeItem> { _, _, _ in }
+
         let premiumPromoCellRegistration = UICollectionView.CellRegistration<PremiumPromoCell, HomeItem> { [weak self] cell, indexPath, item in
             if case .premiumPromo = item {
                 cell.configure(
@@ -375,6 +403,12 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             case .pinnedCategory:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: pinnedCategoryCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            case .addPinnedFolder:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: addPinnedFolderCellRegistration,
                     for: indexPath,
                     item: item
                 )
@@ -458,19 +492,23 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
             updatedSnapshot.appendItems([.nest(name: "No Nest Selected", address: "Please set up your nest")], toSection: .nest)
         }
         
-        // Quick access section - use pinned categories  
-        if !pinnedCategories.isEmpty {
+        // Quick access section - pinned categories, plus an add slot when under the limit of 4
+        if nestService.currentNest != nil {
             updatedSnapshot.appendSections([.quickAccess])
-            
+
             let categoryItems = pinnedCategories.map { categoryName in
                 // For categories with "/", extract the display name from the last component
                 let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
                 let iconName = iconForCategory(categoryName)
-                
+
                 return HomeItem.pinnedCategory(name: displayName, icon: iconName)
             }
-            
-            updatedSnapshot.appendItems(categoryItems, toSection: .quickAccess)
+
+            var quickAccessItems = categoryItems
+            if pinnedCategories.count < 4 {
+                quickAccessItems.append(.addPinnedFolder)
+            }
+            updatedSnapshot.appendItems(quickAccessItems, toSection: .quickAccess)
         }
         
         dataSource.apply(updatedSnapshot, animatingDifferences: animatingDifferences)
@@ -516,19 +554,29 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 async let sessionsTask = sessionService.fetchSessions(nestID: nestID, forceRefresh: shouldForceRefresh)
                 async let pinnedCategoriesTask = nestService.fetchPinnedCategories()
                 async let categoriesTask = nestService.fetchCategories()
-                async let readinessTask: NestReadinessResult? = {
-                    guard self.isNestReadinessEnabled else { return nil }
-                    return try? await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
-                }()
                 
-                let (sessions, pinnedCategoryNames, categories, readiness) = try await (sessionsTask, pinnedCategoriesTask, categoriesTask, readinessTask)
+                let (sessions, pinnedCategoryNames, categories) = try await (sessionsTask, pinnedCategoriesTask, categoriesTask)
                 
                 // Update the current session based on freshly fetched data
                 // Only show sessions with inProgress status in the current session section
                 self.currentSession = sessions.inProgress.first
                 self.pinnedCategories = pinnedCategoryNames
                 self.categories = categories
-                self.updateReadinessResult(readiness)
+
+                // Load Nest Score independently so a readiness failure doesn't blank home,
+                // and so empty nests still get a score banner (score can be 0).
+                if self.isNestReadinessEnabled {
+                    do {
+                        let readiness = try await NestReadinessService.shared.calculateReadiness(forceRefresh: false)
+                        self.updateReadinessResult(readiness)
+                    } catch {
+                        Logger.log(
+                            level: .error,
+                            category: .general,
+                            message: "Failed to load Nest Score: \(error.localizedDescription)"
+                        )
+                    }
+                }
                 
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -579,7 +627,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     // MARK: - Navigation
     func presentHouseholdView() {
         guard let _ = nestService.currentNest else { return }
-        navigationController?.pushViewController(NestViewController(entryRepository: NestService.shared), animated: true)
+        navigationController?.pushViewController(NestViewController(nestItemRepository: NestService.shared), animated: true)
+    }
+
+    private func presentPinnedCategories() {
+        guard nestService.currentNest != nil else { return }
+        let pinnedCategoriesVC = PinnedCategoriesViewController(nestItemRepository: nestService)
+        present(UINavigationController(rootViewController: pinnedCategoriesVC), animated: true)
     }
     
     func presentCategoryView(category: String) {
@@ -588,13 +642,13 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
         Task {
             do {
                 // Use efficient combined fetch to get both entries and places
-                let (_, places) = try await nestService.fetchEntriesAndPlaces()
+                let (_, places) = try await nestService.fetchNotesAndPlaces()
                 
                 await MainActor.run {
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: places,
-                        entryRepository: nestService
+                        nestItemRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -605,7 +659,7 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: [],
-                        entryRepository: nestService
+                        nestItemRepository: nestService
                     )
                     navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -621,7 +675,9 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
 
     @objc private func createSessionButtonTapped() {
         Task {
-            let canCreate = await SubscriptionService.shared.canUseFullFeatures()
+            let canCreate = DemoModeService.shared.isActive
+                ? true
+                : await SubscriptionService.shared.canUseFullFeatures()
             await MainActor.run {
                 guard canCreate else {
                     Analytics.logEvent("second_session_gate_hit", parameters: [
@@ -632,10 +688,46 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
                 }
 
                 let editSessionVC = EditSessionViewController()
-                let navController = UINavigationController(rootViewController: editSessionVC)
+                editSessionVC.delegate = self
+                // Page sheets leave Home "appeared", so viewDidAppear won't fire on dismiss.
+                // Observe the create nav's own dismissal instead.
+                let navController = CreateSessionFlowNavigationController(
+                    rootViewController: editSessionVC
+                )
                 navController.modalPresentationStyle = .pageSheet
+                navController.onFlowDismissed = { [weak self] in
+                    self?.presentPendingSessionCreatedToastIfNeeded()
+                }
                 present(navController, animated: true)
             }
+        }
+    }
+
+    private func presentPendingSessionCreatedToastIfNeeded() {
+        guard let session = pendingCreatedSessionForToast else { return }
+        pendingCreatedSessionForToast = nil
+
+        let bucket = Self.sessionBucket(for: session.status)
+        showToast(
+            delay: 0.35,
+            text: "Session Created",
+            sentiment: .positive,
+            actionTitle: "Go to sessions",
+            onAction: { [weak self] in
+                guard let self else { return }
+                SettingsViewController.presentSessions(from: self, preferredBucket: bucket)
+            }
+        )
+    }
+
+    private static func sessionBucket(for status: SessionStatus) -> SessionService.SessionBucket {
+        switch status {
+        case .upcoming, .pendingOwnerSetup:
+            return .upcoming
+        case .inProgress, .extended, .earlyAccess:
+            return .inProgress
+        case .completed, .archived:
+            return .past
         }
     }
     
@@ -749,11 +841,6 @@ final class OwnerHomeViewController: NNViewController, HomeViewControllerType, N
     }
     
     private func iconForCategory(_ categoryName: String) -> String {
-        // Handle special case for "Places" which isn't a regular category
-        if categoryName == "Places" {
-            return "map.fill"
-        }
-
         // Find the category in our categories array
         if let category = categories.first(where: { $0.name == categoryName }) {
             return category.symbolName
@@ -937,20 +1024,14 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
                 break
             }
         case .pinnedCategory(let name, _):
-            if name == "Places" {
-                let isReadOnly = false
-                let placesVC = PlaceListViewController(isSelecting: false, sitterViewService: nil)
-                placesVC.isReadOnly = isReadOnly
-                let nav = UINavigationController(rootViewController: placesVC)
-                present(nav, animated: true)
-            } else {
-                // Find the full path for this display name in pinnedCategories
-                let fullPath = pinnedCategories.first { categoryName in
-                    let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
-                    return displayName == name
-                } ?? name
-                presentCategoryView(category: fullPath)
-            }
+            // Find the full path for this display name in pinnedCategories
+            let fullPath = pinnedCategories.first { categoryName in
+                let displayName = categoryName.components(separatedBy: "/").last ?? categoryName
+                return displayName == name
+            } ?? name
+            presentCategoryView(category: fullPath)
+        case .addPinnedFolder:
+            presentPinnedCategories()
         case .currentSession(let session):
             // Dismiss the happening now tip when the current session cell is tapped
             NNTipManager.shared.dismissTip(HomeTips.happeningNowTip)
@@ -971,12 +1052,45 @@ extension OwnerHomeViewController: UICollectionViewDelegate {
     }
 }
 
+// MARK: - EditSessionViewControllerDelegate
+extension OwnerHomeViewController: EditSessionViewControllerDelegate {
+    func editSessionViewController(_ controller: EditSessionViewController, didCreateSession session: SessionItem) {
+        pendingCreatedSessionForToast = session
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+    }
+
+    func editSessionViewController(_ controller: EditSessionViewController, didUpdateSession session: SessionItem) {
+        NotificationCenter.default.post(name: .sessionDidChange, object: nil)
+    }
+}
+
+/// Observes modal dismissal for the Home create-session sheet.
+/// Page-sheet presentation does not re-call the presenter's `viewDidAppear`.
+private final class CreateSessionFlowNavigationController: UINavigationController {
+    var onFlowDismissed: (() -> Void)?
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isBeingDismissed else { return }
+        let callback = onFlowDismissed
+        onFlowDismissed = nil
+        callback?()
+    }
+}
+
 // MARK: - Nest Readiness Detail
 extension OwnerHomeViewController: NestReadinessDetailViewControllerDelegate {
     func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didSelectCategory category: String) {
         controller.dismiss(animated: true) { [weak self] in
             self?.presentCategoryView(category: category)
         }
+    }
+
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didUpdateResult result: NestReadinessResult) {
+        // Sync the home cell with the detail's fresh calculation without replaying the gain toast.
+        previousReadinessScore = result.totalScore
+        readinessResult = result
+        applySnapshot(animatingDifferences: true)
     }
 }
 

@@ -143,20 +143,33 @@ class HalfWidthCell: UICollectionViewCell {
             }
         } else {
             checkmarkImageView.isHidden = true
-            valueContainer.backgroundColor = valueContainerBackgroundColor
             valueContainer.layer.borderColor = UIColor.clear.cgColor
             valueContainer.layer.borderWidth = 0
+            updateBrowseHighlightAppearance(animated: false)
         }
         
         valueLabel.textColor = valueLabelBackgroundColor
     }
+
+    private func updateBrowseHighlightAppearance(animated: Bool = true) {
+        guard !isInEditMode else { return }
+        let highlighted = isHighlighted || isSelected
+        let updates = {
+            self.valueContainer.backgroundColor = highlighted ? .systemGray4 : self.valueContainerBackgroundColor
+        }
+        if animated {
+            UIView.animate(withDuration: highlighted ? 0.1 : 0.05, animations: updates)
+        } else {
+            updates()
+        }
+    }
     
     override var isHighlighted: Bool {
-        didSet {
-            UIView.animate(withDuration: 0.1) {
-                self.valueContainer.backgroundColor = self.isHighlighted ? .systemGray4 : self.valueContainerBackgroundColor
-            }
-        }
+        didSet { updateBrowseHighlightAppearance() }
+    }
+
+    override var isSelected: Bool {
+        didSet { updateBrowseHighlightAppearance() }
     }
     
     func flash() {

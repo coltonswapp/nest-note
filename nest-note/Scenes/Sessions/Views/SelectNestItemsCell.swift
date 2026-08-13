@@ -1,5 +1,5 @@
 //
-//  SelectEntriesCell.swift
+//  SelectNestItemsCell.swift
 //  nest-note
 //
 //  Created by Colton Swapp on 1/29/25
@@ -7,12 +7,12 @@
 
 import UIKit
 
-//protocol SelectEntriesCellDelegate: AnyObject {
-//    func selectEntriesCellDidTapButton(_ cell: SelectEntriesCell)
+//protocol SelectNestItemsCellDelegate: AnyObject {
+//    func selectNestItemsCellDidTapButton(_ cell: SelectNestItemsCell)
 //}
 
-final class SelectEntriesCell: UICollectionViewListCell {
-    weak var delegate: SelectEntriesCellDelegate?
+final class SelectNestItemsCell: UICollectionViewListCell {
+    weak var delegate: SelectNestItemsCellDelegate?
     private var selectedCount: Int = 0
     
     private let iconImageView: UIImageView = {
@@ -96,6 +96,6 @@ final class SelectEntriesCell: UICollectionViewListCell {
     }
     
     @objc private func selectButtonTapped() {
-        delegate?.selectEntriesCellDidTapButton(self)
+        delegate?.selectNestItemsCellDidTapButton(self)
     }
 }

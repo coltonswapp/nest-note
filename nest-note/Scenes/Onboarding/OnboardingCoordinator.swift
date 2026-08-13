@@ -10,6 +10,17 @@ import Combine
 import AuthenticationServices
 import FirebaseAnalytics
 
+/// Lets `OBFolderPreviewViewController` consume back (detail → grid) before popping.
+private final class OnboardingNavigationController: UINavigationController {
+    override func popViewController(animated: Bool) -> UIViewController? {
+        if let folderPreview = topViewController as? OBFolderPreviewViewController,
+           folderPreview.handleBackIfNeeded() {
+            return nil
+        }
+        return super.popViewController(animated: animated)
+    }
+}
+
 // MARK: - Onboarding Errors
 enum OnboardingError: LocalizedError {
     case setupFailed(underlyingError: Error, completedSteps: [String], failedAtStep: String)
@@ -36,7 +47,7 @@ protocol OnboardingCoordinatorDelegate: AnyObject {
 final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, OnboardingContainerDelegate {
     
     // MARK: - Properties
-    private let navigationController: UINavigationController
+    private let navigationController: OnboardingNavigationController
     private weak var delegate: OnboardingCoordinatorDelegate?
     weak var authenticationDelegate: AuthenticationDelegate?
     private var containerViewController: OnboardingContainerViewController!
@@ -44,9 +55,13 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     private var currentStepIndex: Int = 0
     private var isNavigating: Bool = false
     private var hasProcessedRoleSelection: Bool = false
+    /// After email-already-in-use at finish, skip paywall/nest/password and jump back to finish.
+    private var shouldSkipToFinishAfterEmailChange = false
 
     private static let parentOnboardingConfigFileName = "onboarding_config"
     private static let sitterOnboardingValuePropConfigFileName = "sitter_onboarding_value_prop"
+    private static let folderPreviewStepId = "folder_preview"
+    private static let careResponsibilitiesQuestionId = "care_responsibilities"
 
     private var onboardingConfig: OnboardingConfiguration?
 
@@ -169,7 +184,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     // MARK: - Initialization
     init(delegate: OnboardingCoordinatorDelegate? = nil) {
-        self.navigationController = UINavigationController()
+        self.navigationController = OnboardingNavigationController()
         self.delegate = delegate
         
         // Configure navigation bar appearance
@@ -285,6 +300,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             return "bullet"
         case is OnboardingPreviewViewController:
             return "preview"
+        case is OBFolderPreviewViewController:
+            return Self.folderPreviewStepId
         case is OnboardingMissingInfoViewController:
             return "missing_info"
         case is OBReferralViewController:
@@ -335,6 +352,8 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 }
             case .preview:
                 viewController = OnboardingPreviewViewController()
+            case .folderPreview:
+                viewController = makeFolderPreviewViewController(stepId: step.id)
             case .missingInfo:
                 if case .missingInfo(let missingConfig) = step.config {
                     viewController = createMissingInfoViewController(from: missingConfig)
@@ -411,6 +430,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
                 options: options,
                 optionSubtitles: optionSubtitles.isEmpty ? nil : optionSubtitles,
                 isMultiSelect: config.isMultiSelect,
+                layout: config.layout,
                 category: nil,
                 order: nil
             )
@@ -558,6 +578,46 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         )
     }
 
+    /// Places the animated folder preview immediately after the care-responsibilities survey (parents only).
+    private func insertFolderPreviewStepIfNeeded() {
+        // Sitters never see this beat.
+        steps.removeAll { $0 is OBFolderPreviewViewController }
+        guard userInfo.role == .nestOwner else { return }
+
+        let preview = makeFolderPreviewViewController()
+        let insertionIndex: Int
+        if let careIndex = steps.firstIndex(where: isCareResponsibilitiesStep) {
+            insertionIndex = careIndex + 1
+        } else if let lastSurveyIndex = steps.lastIndex(where: { $0 is NNOnboardingSurveyViewController }) {
+            insertionIndex = lastSurveyIndex + 1
+        } else {
+            insertionIndex = steps.count
+        }
+
+        steps.insert(preview, at: min(insertionIndex, steps.count))
+        Logger.log(
+            level: .info,
+            category: .signup,
+            message: "🎯 ONBOARDING: Inserted folder preview step at index \(insertionIndex)"
+        )
+    }
+
+    private func isCareResponsibilitiesStep(_ viewController: NNOnboardingViewController) -> Bool {
+        if viewController.onboardingStepId == Self.careResponsibilitiesQuestionId {
+            return true
+        }
+        return (viewController as? NNOnboardingSurveyViewController)?.currentQuestion?.id
+            == Self.careResponsibilitiesQuestionId
+    }
+
+    private func makeFolderPreviewViewController(stepId: String = OnboardingCoordinator.folderPreviewStepId) -> OBFolderPreviewViewController {
+        let responsibilities = userInfo.surveyResponses[Self.careResponsibilitiesQuestionId] ?? []
+        let folders = OBFolderPreviewViewController.folders(fromCareResponsibilities: responsibilities)
+        let viewController = OBFolderPreviewViewController(folders: folders)
+        viewController.onboardingStepId = stepId
+        return viewController
+    }
+
     private func loadSurveyQuestion(id: String) -> SurveyQuestion? {
         if let parentConfig = SurveyConfiguration.loadLocal(named: "parent_survey_config") {
             if let question = parentConfig.questions.first(where: { $0.id == id }) {
@@ -608,6 +668,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             // So we can proceed with incrementing it
         }
 
+        // After fixing an email-already-in-use error, jump straight to finish.
+        if shouldSkipToFinishAfterEmailChange, currentVC is OBEmailViewController,
+           let finishVC = allSteps.first(where: { $0 is OBFinishViewController }),
+           let finishIndex = allSteps.firstIndex(where: { $0 === finishVC }) {
+            shouldSkipToFinishAfterEmailChange = false
+            performUnlessPreviewMode {
+                OnboardingAnalyticsService.shared.recordStepCompleted(analyticsStepId(for: currentVC))
+            }
+            finishVC.reset()
+            currentStepIndex = finishIndex
+            configureStep(finishVC)
+            navigationController.pushViewController(finishVC, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.containerViewController.updateProgress(step: self.currentStepIndex)
+            }
+            return
+        }
+
         performUnlessPreviewMode {
             OnboardingAnalyticsService.shared.recordStepCompleted(analyticsStepId(for: currentVC))
         }
@@ -615,7 +693,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         currentStepIndex += 1
         
         if currentStepIndex < allSteps.count {
-            let nextStep = allSteps[currentStepIndex]
+            let nextStep = resolvedStepForNavigation(at: currentStepIndex)
             configureStep(nextStep)
             navigationController.pushViewController(nextStep, animated: true)
             // Update progress after the push animation completes
@@ -625,6 +703,16 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         } else {
             completeOnboarding()
         }
+    }
+
+    /// Rebuilds folder preview with the latest care-responsibilities answers before showing it.
+    private func resolvedStepForNavigation(at index: Int) -> NNOnboardingViewController {
+        let step = allSteps[index]
+        guard step is OBFolderPreviewViewController else { return step }
+
+        let refreshed = makeFolderPreviewViewController(stepId: step.onboardingStepId ?? Self.folderPreviewStepId)
+        steps[index] = refreshed
+        return refreshed
     }
     
     @objc private func handleBackTapped() {
@@ -962,6 +1050,17 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
     
     func handleErrorNavigation(_ error: Error) {
         let presentation = OnboardingSetupErrorPresentation.presentation(for: error)
+        let rootError = {
+            if let onboardingError = error as? OnboardingError,
+               let failureInfo = onboardingError.failureInfo {
+                return failureInfo.underlyingError
+            }
+            return error
+        }()
+        let isEmailAlreadyInUse: Bool = {
+            if case .emailAlreadyInUse = rootError as? AuthError { return true }
+            return false
+        }()
 
         let targetStep: NNOnboardingViewController? = {
             switch presentation.targetStep {
@@ -981,8 +1080,15 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
             return
         }
 
-        for index in (targetIndex + 1)..<steps.count {
-            steps[index].reset()
+        if isEmailAlreadyInUse {
+            // Keep password / nest / paywall state; only reset finish so retry can run again.
+            shouldSkipToFinishAfterEmailChange = true
+            steps.first(where: { $0 is OBFinishViewController })?.reset()
+        } else {
+            shouldSkipToFinishAfterEmailChange = false
+            for index in (targetIndex + 1)..<steps.count {
+                steps[index].reset()
+            }
         }
 
         currentStepIndex = targetIndex
@@ -1034,23 +1140,24 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         if roleSelectionIndex == nil {
             // In config-driven flows, role selection is the survey VC with id "role_selection"
-            roleSelectionIndex = steps.firstIndex(where: {
-                ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
-            })
-            // Fall back to first survey VC if we can't find one with that id
-            if roleSelectionIndex == nil {
-                roleSelectionIndex = steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
-            }
+            roleSelectionIndex = steps.firstIndex(where: { $0.onboardingStepId == "role_selection" })
+                ?? steps.firstIndex(where: {
+                    ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
+                })
+                // Fall back to first survey VC if we can't find one with that id
+                ?? steps.firstIndex(where: { $0 is NNOnboardingSurveyViewController })
             Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Role selection is a survey VC at index: \(roleSelectionIndex ?? -1)")
         }
 
         // Remove ALL survey steps (but keep the role_selection one if it's a survey, since it's already been answered)
-        // Also remove bullet, preview, and missing_info steps that were from the config
-        // (the role-appropriate ones are re-added below via insertValuePropStepsIfNeeded())
+        // Also remove bullet, preview, folder preview, and missing_info steps that were from the config
+        // (the role-appropriate ones are re-added below via insertValuePropStepsIfNeeded() /
+        // insertFolderPreviewStepIfNeeded())
         steps.removeAll { vc in
             if vc is NNOnboardingSurveyViewController { return true }
             if vc is NNOnboardingBulletViewController { return true }
             if vc is OnboardingPreviewViewController { return true }
+            if vc is OBFolderPreviewViewController { return true }
             if vc is OnboardingMissingInfoViewController { return true }
             return false
         }
@@ -1082,6 +1189,7 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
         }
 
         insertValuePropStepsIfNeeded()
+        insertFolderPreviewStepIfNeeded()
 
         Logger.log(level: .info, category: .signup, message: "🎯 ROLE UPDATE: Final step count before ensuring required steps: \(steps.count)")
 
@@ -1323,24 +1431,35 @@ final class OnboardingCoordinator: NSObject, UINavigationControllerDelegate, Onb
 
         containerViewController.updateTotalSteps(allSteps.count)
 
-        // Find the role selection step -- could be OBRoleViewController or a survey VC with role_selection id
+        // Config-driven role selection is a survey with onboardingStepId "role_selection".
+        // Prefer that over currentQuestion.id — survey VCs often haven't loaded their view yet,
+        // so currentQuestion can still be nil (pendingConfiguration only).
         let roleStep: NNOnboardingViewController? = allSteps.first(where: { $0 is OBRoleViewController })
+            ?? allSteps.first(where: { $0.onboardingStepId == "role_selection" })
             ?? allSteps.first(where: {
                 ($0 as? NNOnboardingSurveyViewController)?.currentQuestion?.id == "role_selection"
             })
 
         guard let roleStep = roleStep,
               let roleIndex = allSteps.firstIndex(where: { $0 === roleStep }) else {
+            Logger.log(
+                level: .error,
+                category: .signup,
+                message: "🎯 ONBOARDING: skipToRoleSelection failed — no role step found. steps=\(allSteps.map { $0.onboardingStepId ?? String(describing: type(of: $0)) })"
+            )
+            if let first = allSteps.first {
+                currentStepIndex = 0
+                configureStep(first)
+                navigationController.setViewControllers([first], animated: false)
+                containerViewController.updateProgress(step: 0)
+            }
             return
         }
 
         currentStepIndex = roleIndex
         configureStep(roleStep)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.navigationController.setViewControllers([roleStep], animated: false)
-            self.containerViewController.updateProgress(step: self.currentStepIndex)
-        }
+        navigationController.setViewControllers([roleStep], animated: false)
+        containerViewController.updateProgress(step: currentStepIndex)
     }
     
     // MARK: - Survey Configuration
@@ -1471,11 +1590,12 @@ extension OnboardingCoordinator {
             ])
         }
 
-        // Remove all survey, bullet, preview, and missing_info steps from the flow
+        // Remove all survey, bullet, preview, folder preview, and missing_info steps from the flow
         steps.removeAll { vc in
             vc is NNOnboardingSurveyViewController ||
             vc is NNOnboardingBulletViewController ||
             vc is OnboardingPreviewViewController ||
+            vc is OBFolderPreviewViewController ||
             vc is OnboardingMissingInfoViewController
         }
         

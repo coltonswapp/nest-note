@@ -107,7 +107,9 @@ class OnboardingMissingInfoViewController: NNOnboardingViewController {
     /// extends under both (header height changes with configured text).
     @available(iOS 26.0, *)
     private func updateScrollViewInsets() {
-        let headerBottom = headerContainerView.convert(labelStack.frame, to: view).maxY
+        // Measure from the header container itself (not labelStack): the container extends
+        // 16pt past the stack and hosts the scroll-edge interaction that hard-clips content.
+        let headerBottom = headerContainerView.convert(headerContainerView.bounds, to: view).maxY
         let topTarget = headerBottom + 12 - scrollView.safeAreaInsets.top
 
         var bottomTarget: CGFloat = 0

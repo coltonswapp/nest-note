@@ -144,6 +144,7 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
     }
     
     private var currentState: SelectionState = .initial
+    private var isPreparingThumbnail = false
     
     // Add properties for temporary place selection
     var isTemporarySelection = false
@@ -448,24 +449,19 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
     @objc private func addPlaceButtonTapped() {
         switch currentState {
         case .initial:
-            // First tap - Drop pin at center
-            let coordinate = mapView.centerCoordinate
-            selectPlace(at: coordinate)
-            
-            // Update button for next state
-            if isTemporarySelection {
-                addPlaceButton.setTitle("Use This Location")
-            } else {
-                addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
-            }
-            currentState = .pinDropped
+            // First tap - Drop pin; CTA stays disabled until reverse geocode finishes
+            selectPlace(at: mapView.centerCoordinate)
             
         case .pinDropped:
-            // Second tap - Generate thumbnail and proceed
-            guard let placemark = currentPlacemark else { return }
+            guard !isPreparingThumbnail else { return }
+            guard let placemark = currentPlacemark else {
+                // Retry geocode if the first attempt failed or is still in flight
+                let coordinate = selectedAnnotation?.coordinate ?? mapView.centerCoordinate
+                selectPlace(at: coordinate)
+                return
+            }
             
             if isTemporarySelection {
-                // For temporary places, just pass back the location data
                 let address = formatAddress(from: placemark)
                 let coordinate = placemark.location?.coordinate ?? mapView.centerCoordinate
                 
@@ -478,18 +474,26 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
                 return
             }
             
-            // For permanent places, continue with thumbnail generation
+            beginThumbnailPreparation()
+            
             MapThumbnailGenerator.shared.generateDynamicThumbnail(
                 for: placemark.location?.coordinate ?? mapView.centerCoordinate,
                 visibleRegion: mapView.region
             ) { [weak self] thumbnail in
-                guard let self = self,
-                      let thumbnail = thumbnail else { return }
-                
                 DispatchQueue.main.async {
+                    guard let self else { return }
+                    
+                    guard let thumbnail else {
+                        self.finishThumbnailPreparation(success: false)
+                        self.showToast(text: "Couldn't create map preview", sentiment: .negative)
+                        return
+                    }
+                    
                     if let existingPlace = self.existingPlace {
-                        // Update existing place
-                        let address = self.formatAddress(from: placemark)
+                        var address = self.formatAddress(from: placemark)
+                        if address.isEmpty {
+                            address = existingPlace.address
+                        }
                         let coordinate = placemark.location?.coordinate ?? existingPlace.locationCoordinate
                         
                         self.locationDelegate?.didUpdatePlaceLocation(
@@ -499,9 +503,9 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
                             newThumbnail: thumbnail
                         )
                         
+                        self.finishThumbnailPreparation(success: true)
                         self.dismiss(animated: true)
                     } else {
-                        // Create new place
                         let newPlaceVC = PlaceDetailViewController(
                             placemark: placemark,
                             alias: self.suggestedPlaceName ?? "",
@@ -512,10 +516,33 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
                         let placeListViewController = self.navigationController?.viewControllers.first as? PlaceListViewController
                         
                         newPlaceVC.placeListDelegate = placeListViewController
+                        self.finishThumbnailPreparation(success: true)
                         self.present(newPlaceVC, animated: true)
                     }
                 }
             }
+        }
+    }
+    
+    private func readyCTATitle() -> String {
+        if isTemporarySelection {
+            return "Use This Location"
+        }
+        return existingPlace == nil ? "Add Place" : "Update Location"
+    }
+    
+    private func beginThumbnailPreparation() {
+        isPreparingThumbnail = true
+        addPlaceButton.isEnabled = false
+        addPlaceButton.setTitle("Creating map...")
+    }
+    
+    private func finishThumbnailPreparation(success: Bool) {
+        isPreparingThumbnail = false
+        addPlaceButton.setTitle(readyCTATitle())
+        addPlaceButton.isEnabled = currentPlacemark != nil
+        if !success {
+            HapticsHelper.failureHaptic()
         }
     }
     
@@ -547,6 +574,12 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
     }
     
     private func selectPlace(at coordinate: CLLocationCoordinate2D) {
+        geocoder.cancelGeocode()
+        currentPlacemark = nil
+        currentState = .pinDropped
+        addPlaceButton.isEnabled = false
+        addPlaceButton.setTitle("Finding address...")
+        
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         
         geocoder.reverseGeocodeLocation(location) { [weak self] (placemarks, error) in
@@ -554,12 +587,14 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
             
             DispatchQueue.main.async {
                 if let error = error {
-                    print("Reverse geocoding error: \(error.localizedDescription)")
+                    Logger.log(level: .error, category: .general, message: "Reverse geocoding error: \(error.localizedDescription)")
+                    self.handleAddressResolutionFailure()
                     return
                 }
                 
                 guard let placemark = placemarks?.first else {
-                    print("No address found")
+                    Logger.log(level: .error, category: .general, message: "No address found for selected coordinate")
+                    self.handleAddressResolutionFailure()
                     return
                 }
                 
@@ -570,9 +605,20 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
                 self.addAnnotation(at: coordinate, with: address)
                 self.centerPinView.isHidden = true
                 self.hasSelectedPlace = true
+                self.addPlaceButton.setTitle(self.readyCTATitle())
+                self.addPlaceButton.isEnabled = true
                 HapticsHelper.lightHaptic()
             }
         }
+    }
+    
+    private func handleAddressResolutionFailure() {
+        currentPlacemark = nil
+        currentState = .pinDropped
+        addPlaceButton.setTitle("Try again")
+        addPlaceButton.isEnabled = true
+        showToast(text: "Couldn't find address", sentiment: .negative)
+        HapticsHelper.failureHaptic()
     }
     
     private func addAnnotation(at coordinate: CLLocationCoordinate2D, with title: String) {
@@ -590,8 +636,10 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
     }
     
     private func clearSelection() {
+        geocoder.cancelGeocode()
         hasSelectedPlace = false
-        addPlaceButton.setTitle("Select Place")
+        currentPlacemark = nil
+        isPreparingThumbnail = false
         
         // Animate button disappearing
         UIView.animate(withDuration: 0.3) {
@@ -611,6 +659,7 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
         // Reset state
         currentState = .initial
         addPlaceButton.setTitle("Select Place")
+        addPlaceButton.isEnabled = true
     }
     
     private func saveCurrentPlace() {
@@ -821,15 +870,8 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
             longitudinalMeters: 750
         )
         mapView.setRegion(region, animated: true)
+        // selectPlace handles pinDropped state + CTA enablement after geocode
         selectPlace(at: mapItem.placemark.coordinate)
-        
-        // Update state and button since user has selected a place from search
-        currentState = .pinDropped
-        if isTemporarySelection {
-            addPlaceButton.setTitle("Use This Location")
-        } else {
-            addPlaceButton.setTitle(existingPlace == nil ? "Add Place" : "Update Location")
-        }
     }
     
     func getCurrentLocation() -> CLLocation {
@@ -864,20 +906,22 @@ class SelectPlaceViewController: NNViewController, UISearchResultsUpdating, Sear
         )
         mapView.setRegion(region, animated: false)
         
-        // Update button title
-        addPlaceButton.setTitle("Update Location")
-        
-        // Show the clear button since we have a selection
+        // Seed placemark so Update Location works immediately; refine via reverse geocode
+        currentState = .pinDropped
+        currentPlacemark = MKPlacemark(coordinate: place.locationCoordinate)
         hasSelectedPlace = true
         showFoundPlace(place.address)
+        addPlaceButton.setTitle(readyCTATitle())
+        addPlaceButton.isEnabled = true
         
-        // Reverse geocode to get placemark
         geocoder.reverseGeocodeLocation(
             CLLocation(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
         ) { [weak self] placemarks, error in
             guard let self = self,
                   let placemark = placemarks?.first else { return }
-            self.currentPlacemark = placemark
+            DispatchQueue.main.async {
+                self.currentPlacemark = placemark
+            }
         }
     }
 }

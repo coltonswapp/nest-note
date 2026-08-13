@@ -127,7 +127,7 @@ extension CompleteSitterSessionRequestViewController: EditSessionViewControllerD
                     Task {
                         try? await Task.sleep(for: .seconds(0.75))
                         await MainActor.run {
-                            SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
+                            SessionNotificationPrompt.presentIfNeeded(from: self, audience: .owner) { [weak self] in
                                 self?.showSuccessAndDismiss()
                             }
                         }

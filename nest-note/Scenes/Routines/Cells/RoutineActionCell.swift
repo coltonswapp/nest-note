@@ -11,6 +11,13 @@ protocol RoutineActionCellDelegate: AnyObject {
     func routineActionCell(_ cell: RoutineActionCell, didToggleCompletion isCompleted: Bool)
     func routineActionCell(_ cell: RoutineActionCell, didRequestDelete action: String)
     func routineActionCell(_ cell: RoutineActionCell, didUpdateAction newAction: String, at indexPath: IndexPath)
+    func routineActionCellDidBeginEditing(_ cell: RoutineActionCell)
+    func routineActionCellDidChangeText(_ cell: RoutineActionCell)
+}
+
+extension RoutineActionCellDelegate {
+    func routineActionCellDidBeginEditing(_ cell: RoutineActionCell) {}
+    func routineActionCellDidChangeText(_ cell: RoutineActionCell) {}
 }
 
 class RoutineActionCell: UITableViewCell {
@@ -182,6 +189,7 @@ class RoutineActionCell: UITableViewCell {
             editTextView.isHidden = false
             editTextView.text = action
             editTextView.becomeFirstResponder()
+            delegate?.routineActionCellDidBeginEditing(self)
         } else {
             actionLabel.isHidden = false
             editTextView.isHidden = true
@@ -249,6 +257,7 @@ class RoutineActionCell: UITableViewCell {
 // MARK: - UITextViewDelegate
 extension RoutineActionCell: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
+        delegate?.routineActionCellDidChangeText(self)
         // Auto-resize the table view cell with smoother animation
         if let tableView = superview as? UITableView {
             UIView.performWithoutAnimation {

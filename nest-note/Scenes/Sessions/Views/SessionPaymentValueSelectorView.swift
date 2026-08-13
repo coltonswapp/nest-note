@@ -19,6 +19,7 @@ final class SessionPaymentValueSelectorView: UIView {
     static let tickSpacing: CGFloat = 8
     static let tickSize: (CGFloat, CGFloat) = (22, 12) // (major, minor)
     static let selectionBarHeight: CGFloat = 34
+    static let trackHeight: CGFloat = 44
     static let chevronHorizontalInset: CGFloat = 12
 
     private var majorTickFrequency: Int = 10

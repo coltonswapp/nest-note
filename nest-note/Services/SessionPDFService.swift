@@ -113,11 +113,13 @@ final class SessionPDFService {
         session.pdfContentHash = hash
         try await SessionService.shared.updateSession(session)
 
-        NotificationCenter.default.post(
-            name: .sessionPDFDidUpdate,
-            object: nil,
-            userInfo: ["sessionId": session.id]
-        )
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .sessionPDFDidUpdate,
+                object: nil,
+                userInfo: ["sessionId": session.id]
+            )
+        }
     }
 
     func removeLocalPDFFile(nestID: String, sessionID: String) {
@@ -131,11 +133,13 @@ final class SessionPDFService {
         session.pdfContentHash = nil
         try await SessionService.shared.updateSession(session)
 
-        NotificationCenter.default.post(
-            name: .sessionPDFDidUpdate,
-            object: nil,
-            userInfo: ["sessionId": session.id]
-        )
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .sessionPDFDidUpdate,
+                object: nil,
+                userInfo: ["sessionId": session.id]
+            )
+        }
     }
 
     func regenerateIfNeededAfterSave(

@@ -2,6 +2,11 @@ import UIKit
 
 protocol NestReadinessDetailViewControllerDelegate: AnyObject {
     func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didSelectCategory category: String)
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didUpdateResult result: NestReadinessResult)
+}
+
+extension NestReadinessDetailViewControllerDelegate {
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didUpdateResult result: NestReadinessResult) {}
 }
 
 final class NestReadinessDetailViewController: NNViewController, UICollectionViewDelegate {
@@ -55,6 +60,12 @@ final class NestReadinessDetailViewController: NNViewController, UICollectionVie
         super.viewWillAppear(animated)
         guard hasPlayedRingArrivalAnimation else { return }
         reloadReadiness(animated: true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard isBeingDismissed, let result else { return }
+        delegate?.readinessDetailViewController(self, didUpdateResult: result)
     }
 
     private func setupCollectionView() {
@@ -372,7 +383,7 @@ final class NestReadinessDetailViewController: NNViewController, UICollectionVie
     }
 
     private func presentNotificationsPrompt() {
-        SessionNotificationPrompt.presentIfNeeded(from: self) { [weak self] in
+        SessionNotificationPrompt.presentIfNeeded(from: self, audience: .owner) { [weak self] in
             self?.reloadReadiness(animated: true)
         }
     }
@@ -380,10 +391,10 @@ final class NestReadinessDetailViewController: NNViewController, UICollectionVie
     private func presentCreationFlow(for essential: NestReadinessEssential, category: String) {
         switch essential.preferredItemType {
         case .entry, .contact:
-            present(EntryDetailViewController(category: category, title: essential.title, content: ""), animated: true)
+            present(NoteDetailViewController(category: category, title: essential.title, content: ""), animated: true)
         case .routine:
             present(RoutineDetailViewController(category: category, routineName: essential.title), animated: true)
-        case .place, .pilotCard, .unknownDocument:
+        case .place, .unknownDocument:
             delegate?.readinessDetailViewController(self, didSelectCategory: category)
         }
     }

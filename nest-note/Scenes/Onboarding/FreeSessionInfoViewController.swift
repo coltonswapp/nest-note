@@ -11,7 +11,7 @@ final class FreeSessionInfoViewController: NNViewController {
     var onContinue: (() -> Void)?
 
     private static let freeSessionFeatures: [ProFeature] = [
-        .unlimitedEntries,
+        .unlimitedNotes,
         .multiDaySessions,
         .sessionEvents,
         .sessionPDFExport

@@ -11,7 +11,7 @@ import RevenueCatUI
 
 class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, PaywallViewControllerDelegate {
     // MARK: - Properties
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     weak var delegate: ModifiedSelectFolderViewControllerDelegate?
     
     private var collectionView: UICollectionView!
@@ -40,6 +40,15 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     /// When true, shows an instructional title/subtitle and keeps Continue always visible (session creation step).
     var showsCreationHeader = false
+
+    /// When set, hard-caps selection (e.g. attachments max 3) and overrides the pro/free limit.
+    var maxSelectionCount: Int? = nil
+
+    /// Item IDs that cannot be selected (e.g. the host entry/routine when picking attachments).
+    var excludedItemIds: Set<String> = []
+
+    /// When true, omits the Select All / Clear All bar button (attachment picker).
+    var hidesSelectAllButton = false
     
     private var currentSelectedIds: [String] = []
     private var allSelectableItemIds: [String] = []
@@ -52,7 +61,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // MARK: - PaywallPresentable
     var proFeature: ProFeature {
-        return .unlimitedEntries
+        return .unlimitedNotes
     }
     
     enum Section: Int, CaseIterable {
@@ -61,7 +70,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     enum SelectedSection: Int, CaseIterable {
         case contacts
-        case entries
+        case notes
         case places
         case routines
         case other
@@ -70,7 +79,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         var nestStyleHeaderTitle: String {
             switch self {
             case .contacts: return "CONTACTS"
-            case .entries:  return "ENTRIES"
+            case .notes:  return "NOTES"
             case .places:   return "PLACES"
             case .routines: return "ROUTINES"
             case .other:    return "OTHER"
@@ -80,10 +89,10 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         init(itemType: ItemType) {
             switch itemType {
             case .contact:         self = .contacts
-            case .entry:           self = .entries
+            case .entry:           self = .notes
             case .place:           self = .places
             case .routine:         self = .routines
-            case .pilotCard, .unknownDocument: self = .other
+            case .unknownDocument: self = .other
             }
         }
     }
@@ -112,8 +121,8 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         }
     }
     
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository) {
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -216,6 +225,14 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Check user's pro status and set selection limit
     private func checkProStatusAndSetLimit() async {
+        if let maxSelectionCount {
+            selectionLimit = maxSelectionCount
+            await MainActor.run {
+                selectionCounterView?.selectionLimit = selectionLimit
+            }
+            return
+        }
+
         // Use the same pro status checking as other features for consistency
         isProUser = await SubscriptionService.shared.canUseFullFeatures()
         selectionLimit = isProUser ? nil : FeatureFlagService.shared.getFreeUserSelectionLimit()
@@ -233,6 +250,17 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Show an alert when selection limit is reached
     private func showSelectionLimitAlert() {
+        if let maxSelectionCount {
+            let alert = UIAlertController(
+                title: "Selection Limit Reached",
+                message: "You can attach up to \(maxSelectionCount) items.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+
         let limit = FeatureFlagService.shared.getFreeUserSelectionLimit()
         let alert = UIAlertController(
             title: "Selection Limit Reached",
@@ -251,11 +279,11 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     // Consolidated initial load to fetch categories and all items once
     private func initialLoad() async {
         do {
-            async let categoriesTask = entryRepository.fetchCategories()
+            async let categoriesTask = nestItemRepository.fetchCategories()
             // Use preloaded snapshot if available
             let allItems = try await { () -> [BaseItem] in
                 if let items = self.preloadedAllItems { return items }
-                return try await self.entryRepository.fetchAllItems()
+                return try await self.nestItemRepository.fetchAllItems()
             }()
             let fetchedCategories = try await categoriesTask
 
@@ -270,15 +298,20 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
                 counts[path] = total
             }
 
-            let ids = allItems.map { $0.id }
+            let ids = allItems
+                .map { $0.id }
+                .filter { !self.excludedItemIds.contains($0) }
 
             await MainActor.run {
                 self.categories = fetchedCategories
                 self.itemFolderMapping = mapping
                 self.folderItemCounts = counts
                 self.allSelectableItemIds = ids
+                // Drop any excluded IDs that were pre-selected
+                self.currentSelectedIds = self.currentSelectedIds.filter { !self.excludedItemIds.contains($0) }
                 self.applySnapshot()
                 self.updateSelectAllButtonTitle()
+                self.updateSelectionCounter()
             }
         } catch {
             await MainActor.run {
@@ -300,7 +333,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         do {
             let allItems = try await { () -> [BaseItem] in
                 if let items = self.preloadedAllItems { return items }
-                return try await self.entryRepository.fetchAllItems()
+                return try await self.nestItemRepository.fetchAllItems()
             }()
             var mapping: [String: String] = [:]
             for item in allItems { mapping[item.id] = item.category }
@@ -320,26 +353,30 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Method to set initial selected IDs (from EditSessionViewController)
     func setInitialSelectedItemIds(_ ids: [String]) {
-        currentSelectedIds = ids
-        initialPeakSelectionCount = ids.count
+        currentSelectedIds = ids.filter { !excludedItemIds.contains($0) }
+        if let maxSelectionCount {
+            currentSelectedIds = Array(currentSelectedIds.prefix(maxSelectionCount))
+        }
+        initialPeakSelectionCount = currentSelectedIds.count
         updateSelectionCounter()
     }
     
     // Method to update current selections (called by NestCategoryViewController)
     func updateCurrentSelectedIds(_ ids: [String]) {
-        
+        let filtered = ids.filter { !excludedItemIds.contains($0) }
+
         // Check selection limit
         if let limit = selectionLimit {
-            if ids.count > limit {
+            if filtered.count > limit {
                 // Limit exceeded, show alert and take only the allowed number
                 showSelectionLimitAlert()
-                currentSelectedIds = Array(ids.prefix(limit))
+                currentSelectedIds = Array(filtered.prefix(limit))
             } else {
-                currentSelectedIds = ids
+                currentSelectedIds = filtered
             }
         } else {
             // No limit (pro user)
-            currentSelectedIds = ids
+            currentSelectedIds = filtered
         }
         
         updateSelectionCounter()
@@ -348,12 +385,11 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     /// Current selected items by type (for restoring in `NestCategoryViewController`).
     func getCurrentSelectedItems() async -> SelectedNestItems {
         do {
-            let allItems = try await entryRepository.fetchAllItems()
+            let allItems = try await nestItemRepository.fetchAllItems()
             
-            var selectedEntries: Set<BaseEntry> = []
+            var selectedNotes: Set<NoteItem> = []
             var selectedPlaces: Set<PlaceItem> = []
             var selectedRoutines: Set<RoutineItem> = []
-            var selectedPilotCards: Set<PilotCardItem> = []
             var selectedContacts: Set<ContactItem> = []
             var selectedUnknown: Set<UnknownItem> = []
             
@@ -361,8 +397,8 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
                 if currentSelectedIds.contains(item.id) {
                     switch item.type {
                     case .entry:
-                        if let entry = item as? BaseEntry {
-                            selectedEntries.insert(entry)
+                        if let entry = item as? NoteItem {
+                            selectedNotes.insert(entry)
                         }
                     case .place:
                         if let place = item as? PlaceItem {
@@ -371,10 +407,6 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
                     case .routine:
                         if let routine = item as? RoutineItem {
                             selectedRoutines.insert(routine)
-                        }
-                    case .pilotCard:
-                        if let pilot = item as? PilotCardItem {
-                            selectedPilotCards.insert(pilot)
                         }
                     case .contact:
                         if let contact = item as? ContactItem {
@@ -389,10 +421,9 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             }
             
             return SelectedNestItems(
-                entries: selectedEntries,
+                notes: selectedNotes,
                 places: selectedPlaces,
                 routines: selectedRoutines,
-                pilotCards: selectedPilotCards,
                 contacts: selectedContacts,
                 unknownItems: selectedUnknown
             )
@@ -434,6 +465,12 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     }
     
     private func setupNavigationItems() {
+        if hidesSelectAllButton {
+            selectAllBarButtonItem = nil
+            // Keep any Cancel (or other) item that was already installed by the presenter.
+            return
+        }
+
         // Creation flow already has a Cancel-free back button; keep Select All on the right.
         // Edit sheet may already have a Cancel button — place Select All beside it when present.
         let button = UIBarButtonItem(title: "Select All", style: .plain, target: self, action: #selector(didTapSelectAll))
@@ -464,6 +501,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     
     // Toggle Select All / Clear All button title based on selection state
     private func updateSelectAllButtonTitle() {
+        guard !hidesSelectAllButton, selectAllBarButtonItem != nil else { return }
         if let control = segmentedControl, control.selectedSegmentIndex == 1 {
             selectAllBarButtonItem?.title = "Clear All"
             selectAllBarButtonItem?.isEnabled = !currentSelectedIds.isEmpty
@@ -481,6 +519,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         if !itemFolderMapping.isEmpty {
             await MainActor.run {
                 self.allSelectableItemIds = Array(self.itemFolderMapping.keys)
+                    .filter { !self.excludedItemIds.contains($0) }
                 self.updateSelectAllButtonTitle()
             }
             return
@@ -489,11 +528,13 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         do {
             let allItems = try await { () -> [BaseItem] in
                 if let items = self.preloadedAllItems { return items }
-                return try await self.entryRepository.fetchAllItems()
+                return try await self.nestItemRepository.fetchAllItems()
             }()
             var mapping: [String: String] = [:]
             for item in allItems { mapping[item.id] = item.category }
-            let ids = allItems.map { $0.id }
+            let ids = allItems
+                .map { $0.id }
+                .filter { !self.excludedItemIds.contains($0) }
             await MainActor.run {
                 self.itemFolderMapping = mapping
                 self.allSelectableItemIds = ids
@@ -616,7 +657,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         
         if let header = visibleCollection?
             .visibleSupplementaryViews(ofKind: Self.creationHeaderElementKind)
-            .first as? SelectEntriesCreationHeaderView {
+            .first as? SelectNestItemsCreationHeaderView {
             configureCreationHeaderView(header)
         } else {
             // Header may not be visible yet; reload so the provider embeds the control.
@@ -643,9 +684,9 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         
         collectionView.register(FolderCollectionViewCell.self, forCellWithReuseIdentifier: FolderCollectionViewCell.reuseIdentifier)
         collectionView.register(
-            SelectEntriesCreationHeaderView.self,
+            SelectNestItemsCreationHeaderView.self,
             forSupplementaryViewOfKind: Self.creationHeaderElementKind,
-            withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier
+            withReuseIdentifier: SelectNestItemsCreationHeaderView.reuseIdentifier
         )
         
         collectionView.allowsSelection = true
@@ -690,9 +731,9 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         ])
         
         selectedItemsCollectionView.register(
-            SelectEntriesCreationHeaderView.self,
+            SelectNestItemsCreationHeaderView.self,
             forSupplementaryViewOfKind: Self.creationHeaderElementKind,
-            withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier
+            withReuseIdentifier: SelectNestItemsCreationHeaderView.reuseIdentifier
         )
     }
     
@@ -742,7 +783,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         return layout
     }
     
-    private func configureCreationHeaderView(_ headerView: SelectEntriesCreationHeaderView) {
+    private func configureCreationHeaderView(_ headerView: SelectNestItemsCreationHeaderView) {
         headerView.configure(
             title: "Share with your sitter",
             subtitle: "Choose which nest items sitters can see during this session."
@@ -769,7 +810,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             )
             
             // Configure the cell with custom subtitle format for selection flow
-            self.configureSelectEntriesCell(cell, with: folderData, selectedCount: item.selectedCount, totalCount: item.totalItemCount)
+            self.configureSelectNestItemsCell(cell, with: folderData, selectedCount: item.selectedCount, totalCount: item.totalItemCount)
             return cell
         }
         
@@ -777,9 +818,9 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             guard let self, kind == Self.creationHeaderElementKind else { return nil }
             let header = collectionView.dequeueReusableSupplementaryView(
                 ofKind: kind,
-                withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier,
+                withReuseIdentifier: SelectNestItemsCreationHeaderView.reuseIdentifier,
                 for: indexPath
-            ) as! SelectEntriesCreationHeaderView
+            ) as! SelectNestItemsCreationHeaderView
             self.configureCreationHeaderView(header)
             return header
         }
@@ -796,7 +837,6 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             case .place:           iconName = "map"
             case .routine:         iconName = "arrow.triangle.2.circlepath"
             case .contact:         iconName = "person.crop.circle"
-            case .pilotCard:       iconName = "creditcard"
             case .unknownDocument: iconName = "doc.questionmark"
             }
             content.image = UIImage(systemName: iconName)
@@ -843,9 +883,9 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
             if kind == Self.creationHeaderElementKind {
                 let header = collectionView.dequeueReusableSupplementaryView(
                     ofKind: kind,
-                    withReuseIdentifier: SelectEntriesCreationHeaderView.reuseIdentifier,
+                    withReuseIdentifier: SelectNestItemsCreationHeaderView.reuseIdentifier,
                     for: indexPath
-                ) as! SelectEntriesCreationHeaderView
+                ) as! SelectNestItemsCreationHeaderView
                 self.configureCreationHeaderView(header)
                 return header
             }
@@ -860,7 +900,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     private func loadSelectedItems() {
         Task {
             do {
-                let allItems = try await entryRepository.fetchAllItems()
+                let allItems = try await nestItemRepository.fetchAllItems()
                 let idSet = Set(currentSelectedIds)
                 let infos: [SelectedItemInfo] = allItems
                     .filter { idSet.contains($0.id) }
@@ -892,7 +932,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         
         // Keep at least one section so the scrolling creation header can layout when empty.
         if snapshot.sectionIdentifiers.isEmpty && showsCreationHeader {
-            snapshot.appendSections([.entries])
+            snapshot.appendSections([.notes])
         }
         
         selectedItemsDataSource.apply(snapshot, animatingDifferences: true)
@@ -912,7 +952,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
         segmentedControl?.setTitle("Selected (\(count))", forSegmentAt: 1)
     }
     
-    private func configureSelectEntriesCell(_ cell: FolderCollectionViewCell, with data: FolderData, selectedCount: Int, totalCount: Int) {
+    private func configureSelectNestItemsCell(_ cell: FolderCollectionViewCell, with data: FolderData, selectedCount: Int, totalCount: Int) {
         // Set the basic data
         cell.iconImageView.image = data.image
         cell.titleLabel.text = data.title
@@ -927,7 +967,7 @@ class ModifiedSelectFolderViewController: UIViewController, PaywallPresentable, 
     private func loadCategories() {
         Task {
             do {
-                let fetchedCategories = try await entryRepository.fetchCategories()
+                let fetchedCategories = try await nestItemRepository.fetchCategories()
                 
                 await MainActor.run {
                     self.categories = fetchedCategories
@@ -1001,14 +1041,14 @@ protocol ModifiedSelectFolderViewControllerDelegate: AnyObject {
     func modifiedSelectFolderViewController(_ controller: ModifiedSelectFolderViewController, didSelectFolder folderPath: String)
 }
 
-protocol NestCategoryViewControllerSelectEntriesDelegate: AnyObject {
+protocol NestCategoryViewControllerSelectNestItemsDelegate: AnyObject {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedItems items: SelectedNestItems)
     /// Provide current selected items so child folders can restore selection state
     func getCurrentSelectedItems() async -> SelectedNestItems
 }
 
-// MARK: - NestCategoryViewControllerSelectEntriesDelegate
-extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectEntriesDelegate {
+// MARK: - NestCategoryViewControllerSelectNestItemsDelegate
+extension ModifiedSelectFolderViewController: NestCategoryViewControllerSelectNestItemsDelegate {
     func nestCategoryViewController(_ controller: NestCategoryViewController, didUpdateSelectedItems items: SelectedNestItems) {
         updateAllSelectedIds(from: controller)
     }
@@ -1100,8 +1140,8 @@ extension ModifiedSelectFolderViewController {
 
 // MARK: - Creation Header
 
-private final class SelectEntriesCreationHeaderView: UICollectionReusableView {
-    static let reuseIdentifier = "SelectEntriesCreationHeaderView"
+private final class SelectNestItemsCreationHeaderView: UICollectionReusableView {
+    static let reuseIdentifier = "SelectNestItemsCreationHeaderView"
     
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()

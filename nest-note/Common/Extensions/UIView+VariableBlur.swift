@@ -63,6 +63,8 @@ extension UIView {
         let visualEffectView = UIVisualEffectView()
         visualEffectView.effect = UIBlurEffect.variableBlurEffect(radius: blurRadius, maskImage: maskImage)
         visualEffectView.translatesAutoresizingMaskIntoConstraints = false
+        // Decorative only — must not sit above sheet chrome and swallow taps.
+        visualEffectView.isUserInteractionEnabled = false
         
         view.insertSubview(visualEffectView, belowSubview: self)
         

@@ -9,6 +9,13 @@ import UIKit
 
 protocol AddRoutineActionCellDelegate: AnyObject {
     func addRoutineActionCell(_ cell: AddRoutineActionCell, didAddAction action: String)
+    func addRoutineActionCellDidBeginEditing(_ cell: AddRoutineActionCell)
+    func addRoutineActionCellDidChangeText(_ cell: AddRoutineActionCell)
+}
+
+extension AddRoutineActionCellDelegate {
+    func addRoutineActionCellDidBeginEditing(_ cell: AddRoutineActionCell) {}
+    func addRoutineActionCellDidChangeText(_ cell: AddRoutineActionCell) {}
 }
 
 class AddRoutineActionCell: UITableViewCell {
@@ -123,6 +130,7 @@ class AddRoutineActionCell: UITableViewCell {
 extension AddRoutineActionCell: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = !textView.text.isEmpty
+        delegate?.addRoutineActionCellDidChangeText(self)
         
         // Auto-resize the table view cell with smoother animation
         if let tableView = superview as? UITableView {
@@ -142,6 +150,7 @@ extension AddRoutineActionCell: UITextViewDelegate {
     
     func textViewDidBeginEditing(_ textView: UITextView) {
         placeholderLabel.isHidden = !textView.text.isEmpty
+        delegate?.addRoutineActionCellDidBeginEditing(self)
         
         // Scroll to show the cell when editing begins - with delay to ensure keyboard is shown
         if let tableView = superview as? UITableView,

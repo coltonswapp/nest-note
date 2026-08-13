@@ -31,6 +31,7 @@ struct OnboardingStep: Codable {
         case bullet = "bullet"
         case image = "image"
         case preview = "preview"
+        case folderPreview = "folder_preview"
         case missingInfo = "missing_info"
         case name = "name"
         case phone = "phone"
@@ -50,6 +51,7 @@ enum StepConfiguration: Codable {
     case bullet(BulletStepConfig)
     case image(ImageStepConfig)
     case preview(PreviewStepConfig)
+    case folderPreview(BasicStepConfig)
     case missingInfo(MissingInfoStepConfig)
     case basic(BasicStepConfig)
 
@@ -74,6 +76,9 @@ enum StepConfiguration: Codable {
         case "preview":
             let config = try PreviewStepConfig(from: decoder)
             self = .preview(config)
+        case "folder_preview":
+            let config = try BasicStepConfig(from: decoder)
+            self = .folderPreview(config)
         case "missing_info":
             let config = try MissingInfoStepConfig(from: decoder)
             self = .missingInfo(config)
@@ -99,6 +104,9 @@ enum StepConfiguration: Codable {
         case .preview(let config):
             try container.encode("preview", forKey: .type)
             try config.encode(to: encoder)
+        case .folderPreview(let config):
+            try container.encode("folder_preview", forKey: .type)
+            try config.encode(to: encoder)
         case .missingInfo(let config):
             try container.encode("missing_info", forKey: .type)
             try config.encode(to: encoder)
@@ -116,6 +124,7 @@ struct SurveyStepConfig: Codable {
     let subtitle: String?
     let options: [SurveyOptionConfig]
     let isMultiSelect: Bool
+    let layout: SurveyQuestion.Layout?
     let ctaText: String?
 
     enum CodingKeys: String, CodingKey {
@@ -124,6 +133,7 @@ struct SurveyStepConfig: Codable {
         case subtitle
         case options
         case isMultiSelect = "multi_select"
+        case layout
         case ctaText = "cta_text"
     }
 }

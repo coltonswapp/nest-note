@@ -1,5 +1,5 @@
 //
-//  EntryReviewViewController.swift
+//  DebugCardStackView.swift
 //  nest-note
 //
 //  Created by Colton Swapp on 1/1/25.
@@ -108,7 +108,7 @@ class DebugCardStackView: UIViewController {
         setupUI()
         setupCardStack()
         cardStackView.delegate = self
-        title = "Review Entries"
+        title = "Review Notes"
     }
     
     private func setupUI() {
@@ -263,7 +263,7 @@ class DebugCardStackView: UIViewController {
 
 extension DebugCardStackView: CardStackViewDelegate {
     func cardStackView(_ stackView: CardStackView, didTapCard card: UIView) {
-        let vc = EntryDetailViewController(category: "Test Category", sourceFrame: card.frame)
+        let vc = NoteDetailViewController(category: "Test Category", sourceFrame: card.frame)
         present(vc, animated: true)
     }
     

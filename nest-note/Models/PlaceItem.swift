@@ -10,6 +10,8 @@ import CoreLocation
 import FirebaseFirestore
 
 struct PlaceItem: BaseItem, Codable {
+    static let maxAttachmentCount = 3
+
     let id: String
     let type: ItemType = .place
     var category: String
@@ -24,6 +26,8 @@ struct PlaceItem: BaseItem, Codable {
     var coordinate: GeoPoint
     var thumbnailURLs: ThumbnailURLs?
     var isTemporary: Bool
+    /// Ordered IDs of attached nest items (any type). Soft references; max 3.
+    var attachmentIds: [String]
     
     struct ThumbnailURLs: Codable, Hashable {
         let light: String
@@ -40,7 +44,8 @@ struct PlaceItem: BaseItem, Codable {
          thumbnailURLs: ThumbnailURLs? = nil,
          isTemporary: Bool = false,
          createdAt: Date = Date(),
-         updatedAt: Date = Date()) {
+         updatedAt: Date = Date(),
+         attachmentIds: [String] = []) {
         self.id = id
         self.nestId = nestId
         self.category = category
@@ -52,6 +57,7 @@ struct PlaceItem: BaseItem, Codable {
         self.isTemporary = isTemporary
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.attachmentIds = Self.normalizedAttachmentIds(attachmentIds, excluding: id)
     }
     
     
@@ -82,6 +88,9 @@ struct PlaceItem: BaseItem, Codable {
             // If no isTemporary field exists, infer from alias (no alias = temporary)
             isTemporary = alias == nil
         }
+
+        let decodedIds = try container.decodeIfPresent([String].self, forKey: .attachmentIds) ?? []
+        attachmentIds = Self.normalizedAttachmentIds(decodedIds, excluding: id)
     }
     
     // MARK: - Encoding
@@ -100,12 +109,26 @@ struct PlaceItem: BaseItem, Codable {
         try container.encode(coordinate, forKey: .coordinate)
         try container.encode(thumbnailURLs, forKey: .thumbnailURLs)
         try container.encode(isTemporary, forKey: .isTemporary)
+        try container.encode(attachmentIds, forKey: .attachmentIds)
     }
     
     // MARK: - CodingKeys
     enum CodingKeys: String, CodingKey {
         case id, type, category, title, createdAt, updatedAt
-        case nestId, alias, address, coordinate, thumbnailURLs, isTemporary
+        case nestId, alias, address, coordinate, thumbnailURLs, isTemporary, attachmentIds
+    }
+
+    /// Dedupes, drops empty/self IDs, and caps at `maxAttachmentCount`.
+    static func normalizedAttachmentIds(_ ids: [String], excluding hostId: String?) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for id in ids {
+            guard !id.isEmpty, id != hostId, !seen.contains(id) else { continue }
+            seen.insert(id)
+            result.append(id)
+            if result.count >= maxAttachmentCount { break }
+        }
+        return result
     }
 }
 

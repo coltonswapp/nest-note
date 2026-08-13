@@ -65,10 +65,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             name: ModeManager.modeDidChangeNotification,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDemoModeChange),
+            name: .demoModeDidChange,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        Task { await DemoModeService.shared.refreshConfig() }
         if isFirstAppearance {
             isFirstAppearance = false
         } else {
@@ -248,7 +256,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 section.boundarySupplementaryItems = [header]
                 return section
                 
-            case .myNest, .mySitting, .general, .support, .admin, .experimental:
+            case .myNest, .mySitting, .general, .support, .admin, .stateTrackers, .experimental:
                 var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
                 config.headerMode = .supplementary
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: layoutEnvironment)
@@ -325,7 +333,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             switch item {
             case .readinessScore:
                 break
-            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .supportItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
+            case .myNestItem(let title, let symbolName), .generalItem(let title, let symbolName), .supportItem(let title, let symbolName), .stateTrackerItem(let title, let symbolName), .experimentalItem(let title, let symbolName):
                 content.text = title
 
                 // Create a symbol configuration with semibold weight
@@ -422,7 +430,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 return collectionView.dequeueConfiguredReusableCell(using: accountCellRegistration, for: indexPath, item: item)
             case .currentNest:
                 return collectionView.dequeueConfiguredReusableCell(using: currentNestCellRegistration, for: indexPath, item: item)
-            case .myNestItem, .generalItem, .supportItem, .adminItem, .experimentalItem:
+            case .myNestItem, .generalItem, .supportItem, .adminItem, .stateTrackerItem, .experimentalItem:
                 return collectionView.dequeueConfiguredReusableCell(using: listCellRegistration, for: indexPath, item: item)
             }
         }
@@ -468,7 +476,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         
         // Account section
         let currentUser = UserService.shared.currentUser
-        snapshot.appendItems([.account(email: currentUser?.personalInfo.email.lowercased() ?? "Not signed in",
+        let accountEmail = DemoModeService.shared.isActive
+            ? ""
+            : (currentUser?.personalInfo.email.lowercased() ?? "Not signed in")
+        snapshot.appendItems([.account(email: accountEmail,
                                      name: currentUser?.personalInfo.name ?? "Tap to sign in")],
                            toSection: .account)
         
@@ -497,13 +508,21 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 let sittingItems = sittingRows.map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(sittingItems, toSection: .mySitting)
             } else {
-                let nestItems = [
+                var nestRows = [
                     ("Sessions", "calendar"),
                     ("Nest Members", "person.2.fill"),
                     ("Permanent Access", "person.badge.key.fill"),
                     ("Saved Sitters", "heart"),
                     ("Subscription", "creditcard")
-                ].map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
+                ]
+                if DemoModeService.shared.shouldShowEntryRow {
+                    if DemoModeService.shared.isActive {
+                        nestRows.append(("Exit demo nest", "arrow.uturn.backward"))
+                    } else {
+                        nestRows.append(("View demo nest", "play.rectangle.fill"))
+                    }
+                }
+                let nestItems = nestRows.map { Item.myNestItem(title: $0.0, symbolName: $0.1) }
                 snapshot.appendItems(nestItems, toSection: .myNest)
             }
         } else {
@@ -543,51 +562,51 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             ("Debug as", "person.crop.circle.badge.checkmark"),
         ].map { Item.adminItem(title: $0.0, symbolName: $0.1) }
         snapshot.appendItems(adminItems, toSection: .admin)
+
+        snapshot.appendSections([.stateTrackers])
+        var stateTrackerItems = [
+            ("Reset Tooltips", "questionmark.circle.fill"),
+            ("Session Help Banner", "info.circle"),
+            ("Premium Promo Banner", "sparkles"),
+            ("About Attachments Intro", "paperclip"),
+        ].map { Item.stateTrackerItem(title: $0.0, symbolName: $0.1) }
+
+        if isNestReadinessEnabled, NestService.shared.currentNest != nil {
+            stateTrackerItems.append(.stateTrackerItem(title: "Nest Score (Home Banner)", symbolName: "house.fill"))
+        }
+
+        snapshot.appendItems(stateTrackerItems, toSection: .stateTrackers)
+
         snapshot.appendSections([.experimental])
-        var experimentalItems = [
+        let experimentalItems = [
             ("Test Crash", "exclamationmark.triangle"),
             ("Button Playground", "switch.2"),
             ("Explosion Playground", "sparkles.rectangle.stack"),
             ("Finish Screen", "slider.horizontal.below.rectangle"),
             ("Sitter Finish Screen", "person.crop.circle.badge.checkmark"),
             ("Sitter Payment Setup", "dollarsign.circle"),
+            ("Session Payment Receipt", "dollarsign.square"),
             ("Onboarding", "sparkles"),
-            ("Create Session", "calendar.badge.plus"),
-            ("Test Category Sheet", "rectangle.stack.badge.plus"),
-            ("Test Entry Sheet", "note.text.badge.plus"),
-            ("Test Session Sheet", "calendar.badge.plus"),
-            ("Test Calendar Events", "calendar.badge.clock"),
-            ("Test Event Creation", "calendar.badge.plus"),
-            ("Test Invite Sitter Screen", "person.badge.plus"),
-            ("Glassy Button Playground", "slider.horizontal.3"),
-            ("Entry Review", "rectangle.portrait.on.rectangle.portrait.angled.fill"),
-            ("Debug Card Stack", "rectangle.stack"),
-            ("Test Session Bar", "rectangle.bottomthird.inset.filled"),
+            ("Folder Preview Experiment", "folder.fill"),
+            ("Waterfall → Folder Experiment", "square.grid.2x2.fill"),
             ("Load Debug Sessions", "folder.badge.plus"),
+            ("Create Demo Nest", "house.fill"),
+            ("Publish Demo Content", "square.and.arrow.up"),
             ("Test Add Place", "mappin.and.ellipse.circle.fill"),
             ("Test Place List", "list.star"),
-            ("Test Place Map", "map.fill"),
-            ("Test Invite Card", "rectangle.stack.badge.person.crop"),
-            ("Test Invite Card Animation", "rectangle.portrait.inset.filled"),
             ("Test Invite Your Sitter", "person.wave.2.fill"),
             ("Toast Test", "text.bubble.fill"),
             ("Markdown Preview", "doc.richtext"),
             ("Sitters article (full)", "text.book.closed"),
             ("Sitters article (brief)", "text.book.closed.fill"),
-            ("Test Schedule View", "calendar.day.timeline.left"),
-            ("Test Routine Detail", "list.bullet.clipboard"),
-            ("Reset Tooltips", "questionmark.circle.fill"),
             ("Test Subscription Status", "creditcard.circle"),
             ("Feature Info Paywall", "sparkles.rectangle.stack"),
-            ("Waterfall Grid", "square.grid.2x2"),
             ("Sitter Referral Screen", "gift.fill"),
             ("Delete Sitter Referral Code", "trash"),
+            ("Enable Notifications (Owner)", "bell.badge"),
+            ("Enable Notifications (Sitter)", "bell.badge.fill"),
+            ("About Attachments", "paperclip"),
         ].map { Item.experimentalItem(title: $0.0, symbolName: $0.1) }
-
-        if isNestReadinessEnabled, NestService.shared.currentNest != nil {
-            experimentalItems.append(.experimentalItem(title: "Show on Home Screen", symbolName: "house.fill"))
-        }
-
         snapshot.appendItems(experimentalItems, toSection: .experimental)
         #endif
         
@@ -617,6 +636,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case general = "General"
         case support = "Support"
         case admin = "Admin"
+        case stateTrackers = "State Trackers"
         case experimental = "Experimental"
     }
 
@@ -630,6 +650,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         case generalItem(title: String, symbolName: String)
         case supportItem(title: String, symbolName: String)
         case adminItem(title: String, symbolName: String)
+        case stateTrackerItem(title: String, symbolName: String)
         case experimentalItem(title: String, symbolName: String)
     }
 
@@ -669,46 +690,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             venmoVC.enableDebugMode()
             let nav = UINavigationController(rootViewController: venmoVC)
             present(nav, animated: true)
+        case "Session Payment Receipt":
+            presentSessionPaymentReceiptExperiment()
         case "Onboarding":
             let coordinator = OnboardingCoordinator()
             coordinator.enablePreviewMode()
             present(coordinator.start(), animated: true)
-        case "Create Session":
-            let vc = EditSessionViewController()
-            vc.modalPresentationStyle = .pageSheet
-            present(vc, animated: true)
-        case "Test Category Sheet":
-            let vc = CategoryDetailViewController(sourceFrame: nil)
-            present(vc, animated: true)
-        case "Test Entry Sheet":
-            let vc = EntryDetailViewController(category: "Test Category", sourceFrame: nil)
-            vc.entryDelegate = self
-            present(vc, animated: true)
-        case "Test Session Sheet":
-            let vc = SessionDetailViewController(sourceFrame: nil)
-//            vc.sessionDelegate = self
-            present(vc, animated: true)
-        case "Test Calendar Events":
-            let dateRange = DateInterval(
-                start: Date.from(year: 2024, month: 12, day: 9)!,
-                end: Date.from(year: 2024, month: 12, day: 12)!
-            )
-            let vc = SessionCalendarViewController(nestID: "", dateRange: dateRange)
-            let nav = UINavigationController(rootViewController: vc)
-            present(nav, animated: true)
-        case "Test Event Creation":
-            let vc = SessionEventViewController(entryRepository: NestService.shared)
-            present(vc, animated: true)
-        case "Entry Review":
-            break
-//            let reviewVC = UINavigationController(rootViewController: EntryReviewViewController())
-//            present(reviewVC, animated: true)
-        case "Debug Card Stack":
-            let reviewVC = DebugCardStackView()
-            present(reviewVC, animated: true)
-        case "Test Session Bar":
-            let sessionDebugVC = SessionDebugViewController()
-            navigationController?.pushViewController(sessionDebugVC, animated: true)
+        case "Folder Preview Experiment":
+            let coordinator = FolderPreviewExperimentCoordinator()
+            present(coordinator.start(), animated: true)
+        case "Waterfall → Folder Experiment":
+            let coordinator = WaterfallToFolderExperimentCoordinator()
+            present(coordinator.start(), animated: true)
         case "Load Debug Sessions":
             SessionService.shared.loadDebugSessions()
             // If the sessions view is visible, refresh it
@@ -716,6 +709,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                let topVC = sessionsVC.topViewController as? NestSessionsViewController {
                 topVC.refreshSessions()
             }
+        case "Create Demo Nest":
+            createDemoNestFromDebugMenu()
+        case "Publish Demo Content":
+            publishDemoContentFromDebugMenu()
         case "Test Add Place":
             let viewController = SelectPlaceViewController()
             let nav = UINavigationController(rootViewController: viewController)
@@ -724,15 +721,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let viewController = PlaceListViewController()
             let nav = UINavigationController(rootViewController: viewController)
             present(nav, animated: true)
-        case "Test Place Map":
-            let viewController = PlacesMapViewController()
-            navigationController?.pushViewController(viewController, animated: true)
-        case "Test Invite Card":
-            let vc = InviteCardDebugViewController()
-            navigationController?.pushViewController(vc, animated: true)
-        case "Test Invite Card Animation":
-            let vc = InviteCardAnimationDebugViewController()
-            navigationController?.pushViewController(vc, animated: true)
         case "Test Invite Your Sitter":
             let vc = InviteYourSitterViewController.makeDebugInstance()
             let nav = UINavigationController(rootViewController: vc)
@@ -753,37 +741,30 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             let vc = SurveyDashboardViewController()
             let nav = UINavigationController(rootViewController: vc)
             present(nav, animated: true)
-        case "Test Schedule View":
-            let vc = CalendarViewController()
-            let nav = UINavigationController(rootViewController: vc)
-            present(nav, animated: true)
-        case "Test Routine Detail":
-            let mockRoutine = RoutineItem(
-                title: "House Night-time",
-                category: "Household",
-                routineActions: [
-                    "Lock garage door",
-                    "Lock front, side, & back door",
-                    "Put down shades with remote (on fridge)",
-                    "Turn off all lights, leave porch light on"
-                ]
-            )
-            let vc = RoutineDetailViewController(category: "Household", routine: mockRoutine, sourceFrame: nil)
-            vc.routineDelegate = self
-            present(vc, animated: true)
         case "Reset Tooltips":
-            resetTooltipsDatastore()
+            let vc = TipResetViewController()
+            navigationController?.pushViewController(vc, animated: true)
         case "Test Subscription Status":
             showSubscriptionStatus()
         case "Feature Info Paywall":
             showFeatureInfoPaywall()
-        case "Waterfall Grid":
-            presentWaterfallGridExperiment()
         case "Sitter Referral Screen":
             presentSitterReferralScreen()
         case "Delete Sitter Referral Code":
             deleteSitterReferralCodeForDebug()
-        case "Show on Home Screen":
+        case "Session Help Banner":
+            presentSessionHelpBannerDebugPreview()
+        case "Premium Promo Banner":
+            resetPremiumPromoBanner()
+        case "Enable Notifications (Owner)":
+            presentEnableNotificationsDebugPreview(audience: .owner)
+        case "Enable Notifications (Sitter)":
+            presentEnableNotificationsDebugPreview(audience: .sitter)
+        case "About Attachments":
+            presentIntroducingAttachmentsExperiment()
+        case "About Attachments Intro":
+            resetAboutAttachmentsIntro()
+        case "Nest Score (Home Banner)":
             showReadinessHomeBannerPicker()
         case "Referral Admin":
             let vc = ReferralAdminViewController()
@@ -848,7 +829,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
         let showOnHome = !NestReadinessBannerStore.isHomeBannerDismissed(for: nestID)
         let alert = UIAlertController(
-            title: "Show on Home Screen",
+            title: "Nest Score (Home Banner)",
             message: "Choose where the Nest Score banner appears.",
             preferredStyle: .actionSheet
         )
@@ -891,7 +872,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
         #if DEBUG
         switch item {
-        case .adminItem(let title, _), .experimentalItem(let title, _):
+        case .adminItem(let title, _), .stateTrackerItem(let title, _), .experimentalItem(let title, _):
             handleDebugItemSelection(title)
             collectionView.deselectItem(at: indexPath, animated: true)
             return
@@ -918,6 +899,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             // Check if this is the "no nest" placeholder
             if name.contains("Let's Setup") {
                 showNestSetup()
+            } else if DemoModeService.shared.isActive {
+                showDemoNestInfo()
             } else {
                 // Regular nest detail flow
                 let vc = NestDetailViewController()
@@ -929,8 +912,9 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             if UserService.shared.isSignedIn {
                 // Check if there's a current nest (skip for sitter-only rows that don't need a nest)
                 let hasCurrentNest = NestService.shared.currentNest != nil
-                let skipsNestRequirement = ModeManager.shared.isSitterMode
-                    && (title == "Sessions" || title == SitterReferralCopy.settingsRowTitle)
+                let skipsNestRequirement = title == "View demo nest" || title == "Exit demo nest"
+                    || (ModeManager.shared.isSitterMode
+                    && (title == "Sessions" || title == "Saved Nests" || title == SitterReferralCopy.settingsRowTitle))
                 if !hasCurrentNest && !skipsNestRequirement {
                     // Show prompt to set up nest first
                     showNestSetupPrompt()
@@ -940,19 +924,15 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                 
                 switch title {
                 case "Sessions":
-                    if ModeManager.shared.isNestOwnerMode {
-                        let sessionsVC = NestSessionsViewController()
-                        let nav = UINavigationController(rootViewController: sessionsVC)
-                        present(nav, animated: true) {
-//                            NNTipManager.shared.dismissTip(SettingsTips.sessionsTip)
-                        }
-                    } else {
-                        let sessionsVC = SitterSessionsViewController()
-                        let nav = UINavigationController(rootViewController: sessionsVC)
-                        present(nav, animated: true)
-                    }
+                    presentSessionsList()
                 case SitterReferralCopy.settingsRowTitle:
                     presentSitterReferralScreen()
+                case "Saved Nests":
+                    let featurePreviewVC = NNFeaturePreviewViewController(
+                        feature: SurveyService.Feature.savedNests
+                    )
+                    featurePreviewVC.modalPresentationStyle = .formSheet
+                    present(featurePreviewVC, animated: true)
                 case "Saved Sitters":
                     let sitterListVC = SitterListViewController(displayMode: .default)
                     let nav = UINavigationController(rootViewController: sitterListVC)
@@ -982,6 +962,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                             }
                         }
                     }
+                case "View demo nest":
+                    enterDemoMode()
+                case "Exit demo nest":
+                    exitDemoMode()
                 default:
                     print("Selected My Nest item: \(title)")
                 }
@@ -1008,6 +992,10 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             switch title {
             case "How It Works":
                 showHowItWorks()
+            case "How Sessions Work":
+                showHowSessionsWork()
+            case "Release Notes":
+                showReleaseNotes()
             case "Text Support":
                 showTextSupport()
             case "Contact Support":
@@ -1093,6 +1081,38 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     #if DEBUG
+    private func presentEnableNotificationsDebugPreview(audience: EnableNotificationsViewController.Audience) {
+        let vc = EnableNotificationsViewController(audience: audience)
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+
+    private func presentIntroducingAttachmentsExperiment() {
+        let vc = IntroducingAttachmentsViewController()
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        nav.presentationController?.delegate = vc
+        present(nav, animated: true)
+    }
+
+    private func resetAboutAttachmentsIntro() {
+        AttachmentsIntroStore.enableDebugPreview()
+        showToast(text: "About Attachments will show next time you open Attach Items", sentiment: .positive)
+    }
+
+    private func presentSessionHelpBannerDebugPreview() {
+        SessionHelpBannerStore.enableDebugPreview()
+        let vc = EditSessionViewController()
+        vc.modalPresentationStyle = .pageSheet
+        present(vc, animated: true)
+    }
+
+    private func resetPremiumPromoBanner() {
+        PremiumPromoBannerStore.resetHomeBannerDismissal()
+        showToast(text: "Premium promo banner reset", sentiment: .positive)
+    }
+
     private func deleteSitterReferralCodeForDebug() {
         guard let user = UserService.shared.currentUser else {
             showToast(text: "Sign in required")
@@ -1156,12 +1176,12 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
 
         Task {
             do {
-                let (_, places) = try await NestService.shared.fetchEntriesAndPlaces()
+                let (_, places) = try await NestService.shared.fetchNotesAndPlaces()
                 await MainActor.run {
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: places,
-                        entryRepository: NestService.shared
+                        nestItemRepository: NestService.shared
                     )
                     self.navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -1171,7 +1191,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
                     let categoryVC = NestCategoryViewController(
                         category: category,
                         places: [],
-                        entryRepository: NestService.shared
+                        nestItemRepository: NestService.shared
                     )
                     self.navigationController?.pushViewController(categoryVC, animated: true)
                 }
@@ -1180,55 +1200,18 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     }
 
     #if DEBUG
-    private func presentWaterfallGridExperiment() {
-        guard UserService.shared.isSignedIn else {
-            showSignInPrompt()
-            return
-        }
-
-        guard NestService.shared.currentNest != nil else {
-            showNestSetupPrompt()
-            return
-        }
-
-        Task {
-            do {
-                let (groupedEntries, places) = try await NestService.shared.fetchEntriesAndPlaces()
-                let category = Self.bestCategoryForWaterfallExperiment(from: groupedEntries)
-
-                await MainActor.run {
-                    let categoryVC = NestCategoryViewController(
-                        category: category,
-                        places: places,
-                        entryRepository: NestService.shared,
-                        itemDisplayLayout: .waterfallGrid
-                    )
-                    self.navigationController?.pushViewController(categoryVC, animated: true)
-                }
-            } catch {
-                Logger.log(
-                    level: .error,
-                    category: .general,
-                    message: "Failed to launch waterfall grid experiment: \(error)"
-                )
-                await MainActor.run {
-                    self.showToast(text: "Couldn't load category data")
-                }
-            }
-        }
-    }
-
-    private static func bestCategoryForWaterfallExperiment(from groupedEntries: [String: [BaseEntry]]) -> String {
-        let topLevelCounts = groupedEntries.reduce(into: [String: Int]()) { counts, pair in
-            let topLevel = pair.key.components(separatedBy: "/").first ?? pair.key
-            counts[topLevel, default: 0] += pair.value.count
-        }
-
-        if let richest = topLevelCounts.max(by: { $0.value < $1.value })?.key, richest.isEmpty == false {
-            return richest
-        }
-
-        return "Household"
+    private func presentSessionPaymentReceiptExperiment() {
+        let configuration = SessionPaymentViewController.Configuration(
+            sessionId: "debug-session-payment",
+            nestId: NestService.shared.currentNest?.id ?? "debug-nest",
+            sessionTitle: "Friday Date Night",
+            startDate: Date().addingTimeInterval(-4 * 3600),
+            scheduledHours: 3.5,
+            defaultHourlyRateCents: SessionPaymentCalculator.defaultHourlyRateCents,
+            venmoUsername: "demo.sitter",
+            sitterName: "Alex"
+        )
+        SessionPaymentCalculator.presentPaymentCalculator(from: self, configuration: configuration)
     }
     #endif
 
@@ -1281,6 +1264,8 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func makeSupportItems() -> [Item] {
         var items: [(String, String)] = [
             ("How It Works", "book.pages"),
+            ("How Sessions Work", "calendar"),
+            ("Release Notes", "newspaper"),
         ]
 
         if FeatureFlagService.shared.isEnabled(.supportTextEnabled) {
@@ -1297,6 +1282,29 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
             showsShareButton: false
         )
         navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showHowSessionsWork() {
+        let vc = MarkdownTestViewController(
+            markdown: HowSessionsWorkArticle.markdown,
+            showsShareButton: false
+        )
+        navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showReleaseNotes() {
+        let vc = MarkdownTestViewController(
+            markdown: ReleaseNotesArticle.markdown,
+            showsShareButton: false
+        )
+        vc.modalPresentationStyle = .pageSheet
+
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = false
+        }
+
+        present(vc, animated: true)
     }
 
     private func showTextSupport() {
@@ -1347,7 +1355,7 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
     private func showDeleteAccountConfirmation() {
         let firstAlert = UIAlertController(
             title: "Delete Account",
-            message: "Are you sure you want to delete your account? This action cannot be undone and will permanently delete:\n\n• Your nest and all its data\n• All your entries, routines, and places\n• Your saved sitters\n• Your account information",
+            message: "Are you sure you want to delete your account? This action cannot be undone and will permanently delete:\n\n• Your nest and all its data\n• All your notes, routines, and places\n• Your saved sitters\n• Your account information",
             preferredStyle: .alert
         )
 
@@ -1459,32 +1467,6 @@ class SettingsViewController: NNViewController, UICollectionViewDelegate, NNTipp
         applyInitialSnapshots()
     }
     
-    private func resetTooltipsDatastore() {
-        let alert = UIAlertController(
-            title: "Reset Tooltips",
-            message: "This will reset all tooltip data and they will show again. Are you sure?",
-            preferredStyle: .alert
-        )
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Reset", style: .destructive) { _ in
-            print("🔄 [TipKit Debug] SettingsViewController: User confirmed tooltip reset")
-            NNTipManager.shared.resetAllTips()
-            
-            // Show confirmation
-            let successAlert = UIAlertController(
-                title: "Tooltips Reset",
-                message: "All tooltip data has been reset. Tips will show again when appropriate.",
-                preferredStyle: .alert
-            )
-            successAlert.addAction(UIAlertAction(title: "OK", style: .default))
-            self.present(successAlert, animated: true)
-        })
-        
-        present(alert, animated: true)
-    }
-    
-    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
@@ -1509,16 +1491,6 @@ extension SettingsViewController: AuthenticationDelegate {
     func signUpComplete() {
         applyInitialSnapshots()
         self.showToast(text: "Welcome to NestNote")
-    }
-}
-
-extension SettingsViewController: EntryDetailViewControllerDelegate {
-    func entryDetailViewController(didDeleteEntry: BaseEntry) {
-        showToast(text: "Entry saved: \(didDeleteEntry.title)")
-    }
-    
-    func entryDetailViewController(didSaveEntry entry: BaseEntry?) {
-        //
     }
 }
 
@@ -1561,24 +1533,130 @@ extension SettingsViewController: PaywallViewControllerDelegate {
     }
 }
 
-extension SettingsViewController: RoutineDetailViewControllerDelegate {
-    func routineDetailViewController(didSaveRoutine routine: RoutineItem?) {
-        if let routine = routine {
-            showToast(text: "Routine saved: \(routine.title)")
-        }
-    }
-
-    func routineDetailViewController(didDeleteRoutine routine: RoutineItem) {
-        showToast(text: "Routine deleted: \(routine.title)")
-    }
-}
-
 extension SettingsViewController: JoinSessionViewControllerDelegate {
     func joinSessionViewController(didAcceptInvite session: SitterSession) {
         // For nest owners redeeming a sitter-initiated request, this won't be called
         // since they go through the completion flow instead
         showToast(text: "Session created successfully")
     }
+}
+
+// MARK: - Sessions presentation
+extension SettingsViewController {
+    /// Presents Settings (if needed), then the owner Sessions list with an optional filter.
+    static func presentSessions(
+        from presenter: UIViewController,
+        preferredBucket: SessionService.SessionBucket? = nil
+    ) {
+        if let existingSettings = findPresentedSettings(from: presenter) {
+            existingSettings.presentSessionsList(preferredBucket: preferredBucket)
+            return
+        }
+
+        let settingsVC = SettingsViewController()
+        let settingsNav = UINavigationController(rootViewController: settingsVC)
+        let host = topmostPresented(from: presenter)
+        host.present(settingsNav, animated: true) {
+            settingsVC.presentSessionsList(preferredBucket: preferredBucket)
+        }
+    }
+
+    private static func findPresentedSettings(from presenter: UIViewController) -> SettingsViewController? {
+        var current: UIViewController? = presenter
+        while let presented = current?.presentedViewController {
+            if let settings = presented as? SettingsViewController {
+                return settings
+            }
+            if let nav = presented as? UINavigationController,
+               let settings = nav.viewControllers.first as? SettingsViewController {
+                return settings
+            }
+            current = presented
+        }
+        return nil
+    }
+
+    private static func topmostPresented(from root: UIViewController) -> UIViewController {
+        var current = root
+        while let presented = current.presentedViewController {
+            current = presented
+        }
+        return current
+    }
+
+    func presentSessionsList(preferredBucket: SessionService.SessionBucket? = nil) {
+        if ModeManager.shared.isNestOwnerMode {
+            let sessionsVC = NestSessionsViewController()
+            sessionsVC.preferredBucket = preferredBucket
+            let nav = UINavigationController(rootViewController: sessionsVC)
+            present(nav, animated: true)
+        } else {
+            let sessionsVC = SitterSessionsViewController()
+            let nav = UINavigationController(rootViewController: sessionsVC)
+            present(nav, animated: true)
+        }
+    }
+
+    @objc private func handleDemoModeChange() {
+        applyInitialSnapshots()
+    }
+
+    private func showDemoNestInfo() {
+        let alert = UIAlertController(
+            title: "Demo nest",
+            message: "You’re viewing the NestNote demo nest. Your nest is unchanged.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Exit demo nest", style: .default) { [weak self] _ in
+            self?.exitDemoMode()
+        })
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func enterDemoMode() {
+        Task { @MainActor in
+            do {
+                try await DemoModeService.shared.enter()
+            } catch {
+                showToast(text: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    private func exitDemoMode() {
+        Task { @MainActor in
+            do {
+                try await DemoModeService.shared.exit()
+            } catch {
+                showToast(text: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    #if DEBUG
+    private func createDemoNestFromDebugMenu() {
+        Task { @MainActor in
+            do {
+                let nestId = try await DemoNestSeeder.createDemoNestIfNeeded()
+                showToast(text: "Demo nest ready", subtitle: nestId, sentiment: .positive)
+            } catch {
+                showToast(text: "Couldn’t create demo nest", subtitle: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+
+    private func publishDemoContentFromDebugMenu() {
+        Task { @MainActor in
+            do {
+                try await DemoNestSeeder.publishContent()
+                showToast(text: "Demo content published", sentiment: .positive)
+            } catch {
+                showToast(text: "Publish failed", subtitle: error.localizedDescription, sentiment: .negative)
+            }
+        }
+    }
+    #endif
 }
 
 extension SettingsViewController: CreateSessionRequestViewControllerDelegate {
@@ -1595,5 +1673,10 @@ extension SettingsViewController: NestReadinessDetailViewControllerDelegate {
         controller.dismiss(animated: true) { [weak self] in
             self?.presentCategoryView(category: category)
         }
+    }
+
+    func readinessDetailViewController(_ controller: NestReadinessDetailViewController, didUpdateResult result: NestReadinessResult) {
+        readinessScore = result.totalScore
+        applyInitialSnapshots()
     }
 }

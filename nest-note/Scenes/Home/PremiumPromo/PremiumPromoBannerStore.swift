@@ -22,6 +22,10 @@ enum PremiumPromoBannerStore {
         UserDefaults.standard.set(hiddenUntil, forKey: hiddenUntilLaunchKey)
     }
 
+    static func resetHomeBannerDismissal() {
+        UserDefaults.standard.removeObject(forKey: hiddenUntilLaunchKey)
+    }
+
     private static var currentLaunchCount: Int {
         UserDefaults.standard.integer(forKey: launchCountKey)
     }

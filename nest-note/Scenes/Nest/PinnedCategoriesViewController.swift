@@ -9,15 +9,16 @@ import UIKit
 
 class PinnedCategoriesViewController: UIViewController {
     // MARK: - Properties
-    private let entryRepository: EntryRepository
+    private let nestItemRepository: NestItemRepository
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, CategoryItem>!
     private var instructionLabel: BlurBackgroundLabel!
     private var saveButton: NNLoadingButton!
     
     private var categories: [NestCategory] = []
-    private var pinnedCategoryNames: Set<String> = []
-    private var originalPinnedCategoryNames: Set<String> = []
+    /// Ordered pin list — append on pin, remove on unpin so Home stays stable.
+    private var pinnedCategoryNames: [String] = []
+    private var originalPinnedCategoryNames: [String] = []
     
     enum Section: Int, CaseIterable {
         case categories
@@ -40,8 +41,8 @@ class PinnedCategoriesViewController: UIViewController {
         }
     }
     
-    init(entryRepository: EntryRepository) {
-        self.entryRepository = entryRepository
+    init(nestItemRepository: NestItemRepository) {
+        self.nestItemRepository = nestItemRepository
         super.init(nibName: nil, bundle: nil)
         self.title = "Pinned Folders"
     }
@@ -165,15 +166,17 @@ class PinnedCategoriesViewController: UIViewController {
         Task {
             do {
                 // Fetch both categories and Pinned Folders
-                async let categoriesTask = entryRepository.fetchCategories()
-                async let pinnedCategoriesTask = (entryRepository as? NestService)?.fetchPinnedCategories() ?? []
+                async let categoriesTask = nestItemRepository.fetchCategories()
+                async let pinnedCategoriesTask = (nestItemRepository as? NestService)?.fetchPinnedCategories() ?? []
                 
                 let (fetchedCategories, pinnedCategoryNames) = try await (categoriesTask, pinnedCategoriesTask)
                 
                 await MainActor.run {
                     self.categories = fetchedCategories
-                    self.pinnedCategoryNames = Set(pinnedCategoryNames)
-                    self.originalPinnedCategoryNames = Set(pinnedCategoryNames)
+                    // Drop legacy "Places" pin — it was a synthetic option, not a real folder
+                    let sanitized = pinnedCategoryNames.filter { $0 != "Places" }
+                    self.pinnedCategoryNames = sanitized
+                    self.originalPinnedCategoryNames = sanitized
                     self.applySnapshot()
                     self.updateSaveButtonState()
                 }
@@ -200,16 +203,6 @@ class PinnedCategoriesViewController: UIViewController {
             )
         }
         
-        // Always add "Places" as an option
-        let placesItem = CategoryItem(
-            name: "Places",
-            fullPath: "Places",
-            symbolName: "map.fill",
-            isPinned: pinnedCategoryNames.contains("Places"),
-            id: "123"
-        )
-        categoryItems.append(placesItem)
-        
         // Sort all items alphabetically
         categoryItems.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         
@@ -218,18 +211,13 @@ class PinnedCategoriesViewController: UIViewController {
     }
     
     private func togglePin(for categoryName: String) {
-        if pinnedCategoryNames.contains(categoryName) {
-            pinnedCategoryNames.remove(categoryName)
+        if let index = pinnedCategoryNames.firstIndex(of: categoryName) {
+            pinnedCategoryNames.remove(at: index)
         } else {
-            // Check if we're at the limit
-            if pinnedCategoryNames.count >= 4 {
-                return
-            }
-            pinnedCategoryNames.insert(categoryName)
+            guard pinnedCategoryNames.count < 4 else { return }
+            pinnedCategoryNames.append(categoryName)
         }
-        
-        print(pinnedCategoryNames)
-        
+
         applySnapshot()
         updateSaveButtonState()
     }
@@ -246,12 +234,8 @@ class PinnedCategoriesViewController: UIViewController {
             }
             
             do {
-                // Convert Set to Array for saving
-                let categoryNamesArray = Array(pinnedCategoryNames)
-                
-                // Save using NestService
-                if let nestService = entryRepository as? NestService {
-                    try await nestService.savePinnedCategories(categoryNamesArray)
+                if let nestService = nestItemRepository as? NestService {
+                    try await nestService.savePinnedCategories(pinnedCategoryNames)
                 }
                 
                 await MainActor.run {

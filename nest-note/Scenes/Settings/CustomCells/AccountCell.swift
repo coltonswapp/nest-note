@@ -71,7 +71,8 @@ class AccountCell: UICollectionViewCell {
     }
     
     func configure(email: String, name: String) {
-        emailLabel.text = email
         nameLabel.text = name
+        emailLabel.text = email
+        emailLabel.isHidden = email.isEmpty
     }
 }

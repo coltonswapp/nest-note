@@ -332,23 +332,25 @@ extension SubscriptionService {
 
 // MARK: - Pro Features Enum
 enum ProFeature {
-    case unlimitedEntries
+    case unlimitedNotes
     case multiDaySessions
     case sessionEvents
     case nestReview
     case sessionPDFExport
+    case attachments
 
     static let paywallFeatures: [ProFeature] = [
-        .unlimitedEntries,
+        .unlimitedNotes,
         .multiDaySessions,
         .sessionEvents,
         .nestReview,
-        .sessionPDFExport
+        .sessionPDFExport,
+        .attachments
     ]
 
     var iconName: String {
         switch self {
-        case .unlimitedEntries:
+        case .unlimitedNotes:
             return "infinity"
         case .multiDaySessions:
             return "calendar.badge.clock"
@@ -358,6 +360,8 @@ enum ProFeature {
             return "doc.text.magnifyingglass"
         case .sessionPDFExport:
             return "doc.richtext"
+        case .attachments:
+            return "paperclip"
         }
     }
     
@@ -372,8 +376,8 @@ enum ProFeature {
     
     var displayName: String {
         switch self {
-        case .unlimitedEntries:
-            return "Unlimited Entries"
+        case .unlimitedNotes:
+            return "Unlimited Notes"
         case .multiDaySessions:
             return "Multi-day Sessions"
         case .sessionEvents:
@@ -382,13 +386,15 @@ enum ProFeature {
             return "Nest Review"
         case .sessionPDFExport:
             return "Session PDF Export"
+        case .attachments:
+            return "Attachments"
         }
     }
     
     var description: String {
         switch self {
-        case .unlimitedEntries:
-            return "Create unlimited entries across all categories"
+        case .unlimitedNotes:
+            return "Create unlimited notes across all categories"
         case .multiDaySessions:
             return "Schedule overnight stays and extended care sessions"
         case .sessionEvents:
@@ -397,6 +403,8 @@ enum ProFeature {
             return "Quickly review and update outdated nest information"
         case .sessionPDFExport:
             return "Generate and share a printable PDF of session details"
+        case .attachments:
+            return "Link related notes, contacts, places, and routines together"
         }
     }
     
@@ -404,23 +412,17 @@ enum ProFeature {
     
     var alertTitle: String {
         switch self {
-        case .unlimitedEntries:
-            return "Entry Limit Reached"
-        case .multiDaySessions:
-            return "Pro Feature"
-        case .sessionEvents:
-            return "Pro Feature"
-        case .nestReview:
-            return "Pro Feature"
-        case .sessionPDFExport:
+        case .unlimitedNotes:
+            return "Note Limit Reached"
+        case .multiDaySessions, .sessionEvents, .nestReview, .sessionPDFExport, .attachments:
             return "Pro Feature"
         }
     }
     
     var alertMessage: String {
         switch self {
-        case .unlimitedEntries:
-            return "You've reached the 10 entry limit on the free plan. Upgrade to Pro for unlimited entries and more features."
+        case .unlimitedNotes:
+            return "You've reached the 10 note limit on the free plan. Upgrade to Pro for unlimited notes and more features."
         case .multiDaySessions:
             return "Multi-day sessions are a Pro feature. Upgrade to Pro for multi-day sessions and more features."
         case .sessionEvents:
@@ -429,13 +431,15 @@ enum ProFeature {
             return "Nest Review is a Pro feature. Upgrade to Pro to quickly update outdated information and more features."
         case .sessionPDFExport:
             return "Session PDF export is a Pro feature. Upgrade to Pro to generate and share session PDFs and more features."
+        case .attachments:
+            return "Attachments are a Pro feature. Upgrade to Pro to link related nest items and more features."
         }
     }
     
     var successMessage: String {
         switch self {
-        case .unlimitedEntries:
-            return "Subscription activated! You can now create unlimited entries & do so much more!"
+        case .unlimitedNotes:
+            return "Subscription activated! You can now create unlimited notes & do so much more!"
         case .multiDaySessions:
             return "Subscription activated! You can now create multi-day sessions & do so much more!"
         case .sessionEvents:
@@ -444,6 +448,8 @@ enum ProFeature {
             return "Subscription activated! You can now use Nest Review & do so much more!"
         case .sessionPDFExport:
             return "Subscription activated! You can now export session PDFs & do so much more!"
+        case .attachments:
+            return "Subscription activated! You can now use attachments & do so much more!"
         }
     }
 }

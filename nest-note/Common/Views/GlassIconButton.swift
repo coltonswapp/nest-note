@@ -40,6 +40,15 @@ class GlassIconButton: UIControl {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setSymbol(
+        _ systemName: String,
+        pointSize: CGFloat = 14,
+        weight: UIImage.SymbolWeight = .semibold
+    ) {
+        let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+        iconView.image = UIImage(systemName: systemName, withConfiguration: configuration)
+    }
+
     static func makeGlassBackgroundView(size: CGFloat = sheetHeaderSize) -> UIVisualEffectView {
         let effectView: UIVisualEffectView
         if #available(iOS 26.0, *) {

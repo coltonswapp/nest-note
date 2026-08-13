@@ -68,7 +68,7 @@ final class NestReadinessService {
                 component: .itemsDocumented,
                 earnedPoints: itemPoints,
                 detailText: "\(qualifyingItems.count) items",
-                statusSubtitle: itemPoints < Int(Double(itemMaxPoints) * 0.75) ? "Add more entries and places" : nil
+                statusSubtitle: itemPoints < Int(Double(itemMaxPoints) * 0.75) ? "Add more notes and places" : nil
             ),
             NestReadinessComponentScore(
                 component: .itemTypes,
@@ -274,7 +274,7 @@ final class NestReadinessService {
             suggestions.append(
                 NestReadinessBoostSuggestion(
                     title: "Add more nest items",
-                    subtitle: "Entries, places, routines, and contacts all count",
+                    subtitle: "Notes, places, routines, and contacts all count",
                     pointsAvailable: 2,
                     categoryName: "Household",
                     iconName: "plus.circle.fill",
@@ -300,18 +300,18 @@ final class NestReadinessService {
     private func isQualifyingItem(_ item: BaseItem) -> Bool {
         switch item.type {
         case .entry:
-            guard let entry = item as? BaseEntry else { return false }
+            guard let entry = item as? NoteItem else { return false }
             return entry.content.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
         case .contact:
             guard let contact = item as? ContactItem else { return false }
-            let digits = contact.phoneNumber.filter(\.isNumber)
+            let digits = (contact.primaryPhoneNumber ?? contact.content).filter(\.isNumber)
             return digits.count >= 7
         case .routine:
             guard let routine = item as? RoutineItem else { return false }
             return routine.routineActions.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count >= 2
         case .place:
             return true
-        case .pilotCard, .unknownDocument:
+        case .unknownDocument:
             return false
         }
     }
@@ -330,8 +330,8 @@ final class NestReadinessService {
 
         let normalizedTitle = normalize(item.title)
         let normalizedContent: String = {
-            if let entry = item as? BaseEntry { return normalize(entry.content) }
-            if let contact = item as? ContactItem { return normalize(contact.phoneNumber) }
+            if let entry = item as? NoteItem { return normalize(entry.content) }
+            if let contact = item as? ContactItem { return normalize(contact.content) }
             if let routine = item as? RoutineItem { return normalize(routine.routineActions.joined(separator: " ")) }
             return ""
         }()
@@ -354,22 +354,20 @@ final class NestReadinessService {
 
     private func displayName(for type: ItemType) -> String {
         switch type {
-        case .entry: return "Entries"
+        case .entry: return "Notes"
         case .place: return "Places"
         case .routine: return "Routines"
         case .contact: return "Contacts"
-        case .pilotCard: return "Cards"
         case .unknownDocument: return "Items"
         }
     }
 
     private func boostTitle(for type: ItemType) -> String {
         switch type {
-        case .entry: return "Add an entry"
+        case .entry: return "Add a note"
         case .place: return "Add a place"
         case .routine: return "Add a routine"
         case .contact: return "Add a contact"
-        case .pilotCard: return "Add a card"
         case .unknownDocument: return "Add an item"
         }
     }
@@ -380,7 +378,6 @@ final class NestReadinessService {
         case .place: return "mappin.and.ellipse"
         case .routine: return "checklist"
         case .contact: return "phone.fill"
-        case .pilotCard: return "rectangle.on.rectangle"
         case .unknownDocument: return "doc.fill"
         }
     }

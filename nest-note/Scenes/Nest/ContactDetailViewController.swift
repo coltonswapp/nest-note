@@ -19,6 +19,15 @@ final class ContactDetailViewController: NNSheetViewController {
     private let category: String
     private let existingContact: ContactItem?
     private let isReadOnly: Bool
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        if existingContact == nil {
+            let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !title.isEmpty || !normalizedContentString().isEmpty
+        }
+        return hasUnsavedChanges
+    }
 
     private enum ContactNameField {
         case fullName
@@ -27,20 +36,18 @@ final class ContactDetailViewController: NNSheetViewController {
         case organization
     }
 
-    private let phoneTextView: UITextView = {
+    private let contentTextView: UITextView = {
         let textView = UITextView()
         textView.font = .bodyXL
         textView.backgroundColor = .clear
-        textView.setPlaceHolder("Phone")
+        textView.setPlaceHolder("Phone, notes…")
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isScrollEnabled = true
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
-        textView.keyboardType = .phonePad
-        textView.textContentType = .telephoneNumber
-        textView.autocorrectionType = .no
-        textView.smartDashesType = .no
-        textView.smartQuotesType = .no
-        textView.dataDetectorTypes = .phoneNumber
+        textView.keyboardType = .default
+        textView.textContentType = nil
+        textView.autocorrectionType = .yes
+        textView.dataDetectorTypes = [.phoneNumber, .link]
         textView.isEditable = true
         textView.isSelectable = true
         return textView
@@ -68,6 +75,17 @@ final class ContactDetailViewController: NNSheetViewController {
         return button
     }()
 
+    private lazy var callBarButtonItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "phone.fill"),
+            style: .plain,
+            target: self,
+            action: #selector(callButtonTapped)
+        )
+        item.accessibilityLabel = "Call"
+        return item
+    }()
+
     private lazy var ctaStack: UIStackView = {
         let stack = UIStackView(arrangedSubviews: [importButton, saveButton])
         stack.axis = .horizontal
@@ -78,28 +96,17 @@ final class ContactDetailViewController: NNSheetViewController {
         return stack
     }()
 
-    private lazy var callButton: NNSmallPrimaryButton = {
-        let button = NNSmallPrimaryButton(
-            title: "Call",
-            image: UIImage(systemName: "phone.fill"),
-            imagePlacement: .left,
-            backgroundColor: NNColors.primary,
-            foregroundColor: .white
-        )
-        button.addTarget(self, action: #selector(callButtonTapped), for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-
     private lazy var folderLabel: NNSmallLabel = {
         let label = NNSmallLabel()
         return label
     }()
 
     private var pendingImportFromContacts = false
+    private let initialTitle: String?
+    private let initialContent: String?
 
     private var originalTitle: String?
-    private var originalPhone: String?
+    private var originalContent: String?
 
     private var hasUnsavedChanges = false {
         didSet {
@@ -111,6 +118,18 @@ final class ContactDetailViewController: NNSheetViewController {
         self.category = category
         self.existingContact = contact
         self.isReadOnly = isReadOnly
+        self.initialTitle = nil
+        self.initialContent = nil
+        super.init(sourceFrame: sourceFrame)
+    }
+
+    /// Creates a new contact form prefilled with suggested name and content (often a phone).
+    init(category: String, title: String, phoneNumber: String, sourceFrame: CGRect? = nil) {
+        self.category = category
+        self.existingContact = nil
+        self.isReadOnly = false
+        self.initialTitle = title
+        self.initialContent = phoneNumber
         super.init(sourceFrame: sourceFrame)
     }
 
@@ -123,33 +142,35 @@ final class ContactDetailViewController: NNSheetViewController {
 
         titleLabel.text = existingContact == nil ? "New Contact" : isReadOnly ? "View Contact" : "Edit Contact"
         titleField.placeholder = "Name"
-        titleField.text = existingContact?.title
+        titleField.textContentType = nil
+        titleField.text = existingContact?.title ?? initialTitle
         titleField.delegate = self
         titleField.addTarget(self, action: #selector(titleFieldChanged), for: .editingChanged)
 
-        phoneTextView.text = existingContact?.phoneNumber
-        phoneTextView.delegate = self
+        contentTextView.text = existingContact?.content ?? initialContent ?? ""
+        contentTextView.delegate = self
 
         originalTitle = existingContact?.title
-        originalPhone = existingContact?.phoneNumber
+        originalContent = existingContact?.content
 
         configureFolderLabel()
 
         if isReadOnly {
             titleField.isEnabled = false
-            phoneTextView.isEditable = false
-            phoneTextView.isUserInteractionEnabled = true
+            contentTextView.isEditable = false
+            contentTextView.isUserInteractionEnabled = true
             itemsHiddenDuringTransition = []
             configureReadOnlyInfoMenu()
-            updateCallButtonEnabled()
         } else {
             itemsHiddenDuringTransition = [ctaStack]
             let bottomInset: CGFloat = 104
-            phoneTextView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
-            phoneTextView.scrollIndicatorInsets = phoneTextView.contentInset
+            contentTextView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomInset, right: 0)
+            contentTextView.scrollIndicatorInsets = contentTextView.contentInset
             setupInfoButton()
         }
 
+        setTrailingBarButtonItems([callBarButtonItem])
+        updateCallButtonEnabled()
         updateSaveButtonState()
     }
 
@@ -161,18 +182,17 @@ final class ContactDetailViewController: NNSheetViewController {
 
     override func addContentToContainer() {
         super.addContentToContainer()
-        containerView.addSubview(phoneTextView)
+        containerView.addSubview(contentTextView)
         containerView.addSubview(folderLabel)
-        if isReadOnly {
-            containerView.addSubview(callButton)
-        } else {
+        if !isReadOnly {
             containerView.addSubview(ctaStack)
         }
 
         var constraints: [NSLayoutConstraint] = [
-            phoneTextView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
-            phoneTextView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
-            phoneTextView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            contentTextView.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 8),
+            contentTextView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
+            contentTextView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            contentTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
 
             folderLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
             folderLabel.trailingAnchor.constraint(lessThanOrEqualTo: containerView.trailingAnchor, constant: -16),
@@ -181,24 +201,23 @@ final class ContactDetailViewController: NNSheetViewController {
 
         if !isReadOnly {
             constraints.append(contentsOf: [
-                phoneTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
                 folderLabel.bottomAnchor.constraint(equalTo: ctaStack.topAnchor, constant: -16),
+
                 ctaStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
                 ctaStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
                 ctaStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding),
                 ctaStack.heightAnchor.constraint(equalToConstant: 46),
+
                 importButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: 0.45),
                 saveButton.widthAnchor.constraint(lessThanOrEqualTo: ctaStack.widthAnchor, multiplier: 0.55),
             ])
         } else {
-            constraints.append(contentsOf: [
-                phoneTextView.bottomAnchor.constraint(equalTo: folderLabel.topAnchor, constant: -16),
-                folderLabel.bottomAnchor.constraint(equalTo: callButton.topAnchor, constant: -16),
-                callButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-                callButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-                callButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -Self.ctaBottomPadding).with(priority: .defaultHigh),
-                callButton.heightAnchor.constraint(equalToConstant: 46),
-            ])
+            constraints.append(
+                folderLabel.bottomAnchor.constraint(
+                    equalTo: containerView.bottomAnchor,
+                    constant: -Self.ctaBottomPadding
+                )
+            )
         }
 
         NSLayoutConstraint.activate(constraints)
@@ -235,7 +254,14 @@ final class ContactDetailViewController: NNSheetViewController {
         let createdAtAction = UIAction(title: "Created at: \(formattedDate(createdAt))", handler: { _ in })
         let modifiedAtAction = UIAction(title: "Modified at: \(formattedDate(modifiedAt))", handler: { _ in })
 
-        var items: [UIMenuElement] = []
+        var menuChildren: [UIMenuElement] = []
+        let topSection = UIMenu(
+            title: "",
+            options: .displayInline,
+            children: [createdAtAction, modifiedAtAction]
+        )
+        menuChildren.append(topSection)
+
         if existingContact != nil {
             let deleteAction = UIAction(
                 title: "Delete Contact",
@@ -244,10 +270,10 @@ final class ContactDetailViewController: NNSheetViewController {
             ) { [weak self] _ in
                 self?.confirmDelete()
             }
-            items.append(deleteAction)
+            menuChildren.append(deleteAction)
         }
-        items.append(contentsOf: [createdAtAction, modifiedAtAction])
-        return UIMenu(title: "", children: items)
+
+        return UIMenu(title: "", children: menuChildren)
     }
 
     private func configureReadOnlyInfoMenu() {
@@ -267,26 +293,38 @@ final class ContactDetailViewController: NNSheetViewController {
     }
 
     private func updateCallButtonEnabled() {
-        guard isReadOnly else { return }
-        let raw = (phoneTextView.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        callButton.isEnabled = !sanitizedDialString(from: raw).isEmpty
-    }
-
-    /// Keeps leading `+` and decimal digits for `tel:` URLs.
-    private func sanitizedDialString(from raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        let hasPlus = trimmed.first == "+"
-        let digits = trimmed.filter(\.isNumber)
-        if hasPlus, !digits.isEmpty {
-            return "+" + digits
-        }
-        return digits
+        let phones = PhoneNumberExtractor.phoneNumbers(in: normalizedContentString())
+        callBarButtonItem.isEnabled = !phones.isEmpty
     }
 
     @objc private func callButtonTapped() {
-        let raw = (phoneTextView.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let dial = sanitizedDialString(from: raw)
+        let phones = PhoneNumberExtractor.phoneNumbers(in: normalizedContentString())
+        guard !phones.isEmpty else { return }
+
+        if phones.count == 1 {
+            dial(phones[0])
+            return
+        }
+
+        let sheet = UIAlertController(
+            title: "Choose a phone number",
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        for phone in phones {
+            sheet.addAction(UIAlertAction(title: phone, style: .default) { [weak self] _ in
+                self?.dial(phone)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.barButtonItem = callBarButtonItem
+        }
+        present(sheet, animated: true)
+    }
+
+    private func dial(_ raw: String) {
+        let dial = PhoneNumberExtractor.dialString(from: raw)
         guard !dial.isEmpty, let url = URL(string: "tel:\(dial)") else { return }
         UIApplication.shared.open(url)
     }
@@ -352,7 +390,7 @@ final class ContactDetailViewController: NNSheetViewController {
 
         if !phones.isEmpty {
             sheet.addAction(UIAlertAction(title: "Import phone only", style: .default) { [weak self] _ in
-                self?.importPhoneOnly(contact: contact, phones: phones)
+                self?.importPhoneOnly(phones: phones)
             })
         }
 
@@ -404,23 +442,22 @@ final class ContactDetailViewController: NNSheetViewController {
         checkForUnsavedChanges()
     }
 
-    private func importPhoneOnly(contact: CNContact, phones: [String]) {
+    private func importPhoneOnly(phones: [String]) {
         guard !phones.isEmpty else {
             shakeContainerView()
             return
         }
         if phones.count == 1 {
-            phoneTextView.text = phones[0]
+            appendPhoneToContent(phones[0])
+            markImported()
+            checkForUnsavedChanges()
         } else {
             presentPhonePicker(phones: phones) { [weak self] chosen in
-                self?.phoneTextView.text = chosen
+                self?.appendPhoneToContent(chosen)
                 self?.markImported()
                 self?.checkForUnsavedChanges()
             }
-            return
         }
-        markImported()
-        checkForUnsavedChanges()
     }
 
     private func importNameAndPhone(contact: CNContact, phones: [String]) {
@@ -439,15 +476,28 @@ final class ContactDetailViewController: NNSheetViewController {
         }
 
         if phones.count == 1 {
-            phoneTextView.text = phones[0]
+            appendPhoneToContent(phones[0])
             markImported()
             checkForUnsavedChanges()
         } else {
             presentPhonePicker(phones: phones) { [weak self] chosen in
-                self?.phoneTextView.text = chosen
+                self?.appendPhoneToContent(chosen)
                 self?.markImported()
                 self?.checkForUnsavedChanges()
             }
+        }
+    }
+
+    private func appendPhoneToContent(_ phone: String) {
+        let existing = normalizedContentString()
+        if existing.isEmpty {
+            contentTextView.text = phone
+        } else if PhoneNumberExtractor.phoneNumbers(in: existing).contains(where: {
+            PhoneNumberExtractor.dialString(from: $0) == PhoneNumberExtractor.dialString(from: phone)
+        }) {
+            return
+        } else {
+            contentTextView.text = existing + "\n" + phone
         }
     }
 
@@ -480,33 +530,26 @@ final class ContactDetailViewController: NNSheetViewController {
 
     private func checkForUnsavedChanges() {
         let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let currentPhone = normalizedPhoneString()
+        let currentContent = normalizedContentString()
 
-        let titleChanged = currentTitle != originalTitle
-        let phoneChanged = currentPhone != originalPhone
-
-        hasUnsavedChanges = titleChanged || phoneChanged
+        hasUnsavedChanges = currentTitle != originalTitle || currentContent != (originalContent ?? "")
+        updateCallButtonEnabled()
     }
 
-    private func normalizedPhoneString() -> String {
-        let raw = phoneTextView.text ?? ""
-        raw
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+    private func normalizedContentString() -> String {
+        (contentTextView.text ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        return raw
     }
 
     private func updateSaveButtonState() {
-        let nameOk = !(titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        let phoneOk = !normalizedPhoneString().isEmpty
+        guard !isReadOnly else { return }
 
+        let nameOk = !(titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let contentOk = !normalizedContentString().isEmpty
         if existingContact == nil {
-            saveButton.isEnabled = nameOk && phoneOk
+            saveButton.isEnabled = nameOk && contentOk
         } else {
-            saveButton.isEnabled = nameOk && phoneOk && hasUnsavedChanges
+            saveButton.isEnabled = nameOk && contentOk && hasUnsavedChanges
         }
     }
 
@@ -515,25 +558,26 @@ final class ContactDetailViewController: NNSheetViewController {
             shakeContainerView()
             return
         }
-        let phone = normalizedPhoneString()
-        guard !phone.isEmpty else {
+        let content = normalizedContentString()
+        guard !content.isEmpty else {
             shakeContainerView()
             return
         }
 
         saveButton.startLoading()
+        prepareToSaveAndDismiss()
         Task {
             do {
                 let item: ContactItem
                 if let existing = existingContact {
                     var updated = existing
                     updated.title = title
-                    updated.phoneNumber = phone
+                    updated.content = content
                     updated.updatedAt = Date()
                     item = updated
                     try await NestService.shared.updateItem(item)
                 } else {
-                    item = ContactItem(category: category, title: title, phoneNumber: phone)
+                    item = ContactItem(category: category, title: title, content: content)
                     try await NestService.shared.createItem(item)
                 }
                 if pendingImportFromContacts {
@@ -544,10 +588,11 @@ final class ContactDetailViewController: NNSheetViewController {
                 await MainActor.run {
                     self.saveButton.stopLoading()
                     self.contactDelegate?.contactDetailViewController(self, didSave: item)
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     self.saveButton.stopLoading()
                     self.shakeContainerView()
                 }
@@ -575,7 +620,7 @@ final class ContactDetailViewController: NNSheetViewController {
                 try await NestService.shared.deleteItem(id: contact.id)
                 await MainActor.run {
                     self.contactDelegate?.contactDetailViewController(self, didDelete: contact)
-                    self.dismiss(animated: true)
+                    self.dismissSheet()
                 }
             } catch {
                 await MainActor.run {
@@ -589,7 +634,7 @@ final class ContactDetailViewController: NNSheetViewController {
 extension ContactDetailViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField === titleField {
-            phoneTextView.becomeFirstResponder()
+            contentTextView.becomeFirstResponder()
         } else {
             textField.resignFirstResponder()
         }
@@ -605,8 +650,6 @@ extension ContactDetailViewController: UITextViewDelegate {
 
 extension ContactDetailViewController: CNContactPickerDelegate {
     func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
-        // Dismiss keyboard first to avoid RTI session noise; copy contact data before async dismiss
-        // (CNContact is only guaranteed valid during this callback).
         view.endEditing(true)
         guard let contactCopy = contact.mutableCopy() as? CNMutableContact else {
             picker.dismiss(animated: true)
