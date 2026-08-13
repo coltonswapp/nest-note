@@ -82,14 +82,12 @@ final class SignupLogService {
         isCapturing = true
         capturedLogs.removeAll()
         
-        // Subscribe to logger updates on main thread, then move to background for processing
+        // Subscribe on main — Logger publishes `lines` on the main queue only.
+        // Copy there so we never race Array CoW against Logger mutations.
         logCancellable = Logger.shared.$lines
             .receive(on: DispatchQueue.main)
             .sink { [weak self] lines in
-                // Process on background queue to avoid blocking UI
-                DispatchQueue.global(qos: .background).async {
-                    self?.capturedLogs = Array(lines) // Create a copy to avoid reference issues
-                }
+                self?.capturedLogs = Array(lines)
             }
         
         // Add initial log entry

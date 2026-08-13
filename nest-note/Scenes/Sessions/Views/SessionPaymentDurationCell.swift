@@ -25,15 +25,15 @@ final class SessionPaymentDurationCell: UICollectionViewListCell {
         contentView.addSubview(selectorView)
 
         NSLayoutConstraint.activate([
-            valueLabelHost.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 12),
+            valueLabelHost.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 4),
             valueLabelHost.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
             valueLabelHost.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
 
-            selectorView.topAnchor.constraint(equalTo: valueLabelHost.bottomAnchor, constant: 12),
+            selectorView.topAnchor.constraint(equalTo: valueLabelHost.bottomAnchor, constant: 4),
             selectorView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
             selectorView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            selectorView.heightAnchor.constraint(equalToConstant: 58),
-            selectorView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -12)
+            selectorView.heightAnchor.constraint(equalToConstant: SessionPaymentValueSelectorView.trackHeight),
+            selectorView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -4)
         ])
     }
 
@@ -88,10 +88,10 @@ final class SessionPaymentHourlyRateCell: UICollectionViewListCell {
         contentView.addSubview(hourlyRateSelector)
 
         NSLayoutConstraint.activate([
-            hourlyRateSelector.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 12),
+            hourlyRateSelector.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: 4),
             hourlyRateSelector.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
             hourlyRateSelector.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            hourlyRateSelector.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -12)
+            hourlyRateSelector.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -4)
         ])
     }
 

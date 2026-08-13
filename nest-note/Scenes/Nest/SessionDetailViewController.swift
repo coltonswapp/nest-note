@@ -12,6 +12,13 @@ final class SessionDetailViewController: NNSheetViewController {
     private var session: (any SessionDisplayable)?
     private var isArchived: Bool = false
     
+    override var hasDiscardableContent: Bool {
+        guard !isArchived else { return false }
+        let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if session == nil { return !title.isEmpty }
+        return title != (session?.title ?? "")
+    }
+    
     private lazy var startControl: NNDateTimeControl = {
         let control = NNDateTimeControl(style: .both, type: .start)
         control.translatesAutoresizingMaskIntoConstraints = false

@@ -109,12 +109,29 @@ final class NNBulletStack: UIView {
         initialDelay: TimeInterval = 0,
         completion: (() -> Void)? = nil
     ) {
-        UIView.animateSlideIn(
-            itemContainers,
-            duration: duration,
-            stagger: stagger,
-            initialDelay: initialDelay,
-            completion: completion
-        )
+        guard !itemContainers.isEmpty else {
+            completion?()
+            return
+        }
+
+        for (index, view) in itemContainers.enumerated() {
+            let isLast = index == itemContainers.count - 1
+            let delay = initialDelay + (TimeInterval(index) * stagger)
+
+            let start: () -> Void = {
+                HapticsHelper.superLightHaptic()
+                view.animateSlideIn(duration: duration, delay: 0) {
+                    if isLast {
+                        completion?()
+                    }
+                }
+            }
+
+            if delay > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: start)
+            } else {
+                start()
+            }
+        }
     }
 } 

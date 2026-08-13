@@ -796,7 +796,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
                         // Temporarily set the view state for this session context
                         sitterService.setTemporarySessionContext(session: self.session, nest: nest)
                         
-                        let nestViewController = NestViewController(entryRepository: sitterService)
+                        let nestViewController = NestViewController(nestItemRepository: sitterService)
                         let navigationController = UINavigationController(rootViewController: nestViewController)
                         
                         // Configure the presentation style
@@ -823,7 +823,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             
         case .sessionEvent(let event):
             // Present event details in read-only mode
-            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true, entryRepository: SitterViewService.shared)
+            let eventVC = SessionEventViewController(sessionID: session.id, event: event, isReadOnly: true, nestItemRepository: SitterViewService.shared)
             present(eventVC, animated: true)
             
         case .events, .moreEvents:
@@ -838,7 +838,7 @@ extension SitterSessionDetailViewController: UICollectionViewDelegate {
             
             // Present calendar view
             let dateRange = DateInterval(start: startDate, end: endDate)
-            let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents)
+            let calendarVC = SessionCalendarViewController(sessionID: session.id, nestID: session.nestID, dateRange: dateRange, events: sessionEvents, isSitter: true)
             let nav = UINavigationController(rootViewController: calendarVC)
             present(nav, animated: true)
             

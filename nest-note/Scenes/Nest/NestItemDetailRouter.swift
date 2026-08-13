@@ -11,27 +11,29 @@ enum NestItemDetailRouter {
     static func presentDetail(
         for item: any BaseItem,
         from viewController: UIViewController,
-        entryRepository: EntryRepository,
+        nestItemRepository: NestItemRepository,
         category: String,
         sourceFrame: CGRect?,
         placeListDelegate: PlaceListViewControllerDelegate?,
-        entryDelegate: EntryDetailViewControllerDelegate?,
+        noteDelegate: NoteDetailViewControllerDelegate?,
         routineDelegate: RoutineDetailViewControllerDelegate?,
-        contactDelegate: ContactDetailViewControllerDelegate? = nil
+        contactDelegate: ContactDetailViewControllerDelegate? = nil,
+        onDismiss: (() -> Void)? = nil
     ) {
-        let isReadOnly = !(entryRepository is NestService)
+        let isReadOnly = !nestItemRepository.allowsNestEdits
         let frame = sourceFrame ?? .zero
 
         switch item.type {
         case .entry:
-            guard let entry = item as? BaseEntry else { return }
-            let vc = EntryDetailViewController(
+            guard let entry = item as? NoteItem else { return }
+            let vc = NoteDetailViewController(
                 category: category,
                 entry: entry,
                 sourceFrame: frame,
                 isReadOnly: isReadOnly
             )
-            vc.entryDelegate = entryDelegate
+            vc.noteDelegate = noteDelegate
+            vc.onSheetDidDismiss = onDismiss
             viewController.present(vc, animated: true)
 
         case .place:
@@ -43,6 +45,7 @@ enum NestItemDetailRouter {
                 sourceFrame: frame
             )
             vc.placeListDelegate = placeListDelegate
+            vc.onSheetDidDismiss = onDismiss
             viewController.present(vc, animated: true)
 
         case .routine:
@@ -54,6 +57,7 @@ enum NestItemDetailRouter {
                 isReadOnly: isReadOnly
             )
             vc.routineDelegate = routineDelegate
+            vc.onSheetDidDismiss = onDismiss
             viewController.present(vc, animated: true)
 
         case .contact:
@@ -65,37 +69,8 @@ enum NestItemDetailRouter {
                 isReadOnly: isReadOnly
             )
             vc.contactDelegate = contactDelegate
+            vc.onSheetDidDismiss = onDismiss
             viewController.present(vc, animated: true)
-
-        case .pilotCard:
-            guard let pilot = item as? PilotCardItem else { return }
-            let alert = UIAlertController(
-                title: pilot.title,
-                message: pilot.body,
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            if !isReadOnly, entryRepository is NestService {
-                alert.addAction(UIAlertAction(title: "Edit", style: .default) { _ in
-                    let edit = UIAlertController(title: "Edit pilot card", message: nil, preferredStyle: .alert)
-                    edit.addTextField { $0.text = pilot.title }
-                    edit.addTextField { $0.text = pilot.body }
-                    edit.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-                    edit.addAction(UIAlertAction(title: "Save", style: .default) { _ in
-                        guard let t = edit.textFields?[0].text,
-                              let b = edit.textFields?[1].text else { return }
-                        Task {
-                            var updated = pilot
-                            updated.title = t
-                            updated.body = b
-                            updated.updatedAt = Date()
-                            try? await NestService.shared.updateItem(updated)
-                        }
-                    })
-                    viewController.present(edit, animated: true)
-                })
-            }
-            viewController.present(alert, animated: true)
 
         case .unknownDocument:
             guard let unknown = item as? UnknownItem else { return }
@@ -104,7 +79,9 @@ enum NestItemDetailRouter {
                 message: "This item uses a newer type (\(unknown.originalTypeString)) that this version of Nest Note doesn’t fully support yet.",
                 preferredStyle: .alert
             )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                onDismiss?()
+            })
             viewController.present(alert, animated: true)
         }
     }

@@ -10,10 +10,20 @@ final class SessionEventViewController: NNSheetViewController {
     // MARK: - Properties
     weak var eventDelegate: SessionEventViewControllerDelegate?
     private let sessionID: String?
+    private let nestID: String?
     private let event: SessionEvent?
     private let isReadOnly: Bool
     private var sessionDateRange: DateInterval?
-    private let entryRepository: EntryRepository?
+    private let nestItemRepository: NestItemRepository?
+    
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        if event == nil {
+            let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return !title.isEmpty || hasUnsavedChanges
+        }
+        return hasUnsavedChanges
+    }
     
     // Track original values for change detection
     private var originalTitle: String?
@@ -21,6 +31,12 @@ final class SessionEventViewController: NNSheetViewController {
     private var originalEndDate: Date?
     private var originalPlaceId: String?
     private var originalColorIndex: Int = 0
+    /// True when init already applied a calendar/session selected date (skip now defaults).
+    private var didConfigureSelectedDate = false
+    /// Suppress change detection while applying initial defaults.
+    private var isApplyingInitialDefaults = false
+    /// True while the existing event's place is still loading (avoid nil ≠ placeID false dirty).
+    private var isLoadingInitialPlace = false
     
     // Track changes
     private var hasUnsavedChanges: Bool = false {
@@ -87,7 +103,7 @@ final class SessionEventViewController: NNSheetViewController {
     }()
     
     private lazy var locationView: SessionEventLocationView = {
-        let view = SessionEventLocationView(place: nil, entryRepository: entryRepository)
+        let view = SessionEventLocationView(place: nil, nestItemRepository: nestItemRepository)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.editButton.addTarget(self, action: #selector(showLocationSelector), for: .touchUpInside)
         view.delegate = self
@@ -129,12 +145,13 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     // MARK: - Initialization
-    init(sessionID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, entryRepository: EntryRepository? = nil) {
+    init(sessionID: String? = nil, nestID: String? = nil, event: SessionEvent? = nil, sourceFrame: CGRect? = nil, isReadOnly: Bool = false, selectedDate: Date? = nil, sessionDateRange: DateInterval? = nil, nestItemRepository: NestItemRepository? = nil) {
         self.sessionID = sessionID
+        self.nestID = nestID
         self.event = event
         self.isReadOnly = isReadOnly
         self.sessionDateRange = sessionDateRange
-        self.entryRepository = entryRepository
+        self.nestItemRepository = nestItemRepository
         super.init(sourceFrame: sourceFrame)
         titleLabel.text = isReadOnly ? "Event Details" : (event == nil ? "New Event" : "Edit Event")
         titleField.placeholder = "Event Title"
@@ -142,17 +159,54 @@ final class SessionEventViewController: NNSheetViewController {
         // Configure date controls with selected date if provided
         if let selectedDate = selectedDate, event == nil {
             configureWithSelectedDate(selectedDate)
+            didConfigureSelectedDate = true
         }
     }
     
     private func configureWithSelectedDate(_ selectedDate: Date) {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: selectedDate)
-        let defaultStartTime = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: startOfDay) ?? startOfDay
-        let defaultEndTime = calendar.date(byAdding: .hour, value: 1, to: defaultStartTime) ?? defaultStartTime
+        let preferredStart = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: startOfDay) ?? startOfDay
+        let (defaultStartTime, defaultEndTime) = defaultEventTimes(preferredStart: preferredStart)
         
+        isApplyingInitialDefaults = true
         startControl.date = defaultStartTime
         endControl.date = defaultEndTime
+        isApplyingInitialDefaults = false
+    }
+
+    /// Defaults an event into the session window when one is provided.
+    private func defaultEventTimes(preferredStart: Date) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let duration: TimeInterval = 45 * 60
+
+        guard let sessionDateRange else {
+            let end = preferredStart.addingTimeInterval(duration)
+            return (preferredStart, end)
+        }
+
+        let sessionStart = sessionDateRange.start
+        let sessionEnd = sessionDateRange.end
+        let usableDuration = max(sessionEnd.timeIntervalSince(sessionStart), 0)
+
+        // Degenerate / tiny session windows: pin to the session bounds.
+        guard usableDuration > 60 else {
+            return (sessionStart, sessionEnd > sessionStart ? sessionEnd : sessionStart.addingTimeInterval(duration))
+        }
+
+        let clampedDuration = min(duration, usableDuration)
+        var start = max(preferredStart, sessionStart)
+        if start.addingTimeInterval(clampedDuration) > sessionEnd {
+            start = sessionEnd.addingTimeInterval(-clampedDuration)
+        }
+        start = max(start, sessionStart)
+        let end = min(start.addingTimeInterval(clampedDuration), sessionEnd)
+        // Keep end after start even if calendar math collapses the window.
+        if end <= start {
+            let fallbackEnd = calendar.date(byAdding: .minute, value: 45, to: sessionStart) ?? sessionStart.addingTimeInterval(duration)
+            return (sessionStart, min(fallbackEnd, sessionEnd))
+        }
+        return (start, end)
     }
     
     required init?(coder: NSCoder) {
@@ -175,9 +229,11 @@ final class SessionEventViewController: NNSheetViewController {
         
         // Configure with existing event
         if let event = event {
+            isApplyingInitialDefaults = true
             titleField.text = event.title
             startControl.date = event.startDate
             endControl.date = event.endDate
+            isApplyingInitialDefaults = false
             
             // Set color selection
             if let colorIndex = colors.firstIndex(where: { $0 == event.eventColor }) {
@@ -190,17 +246,26 @@ final class SessionEventViewController: NNSheetViewController {
             originalEndDate = event.endDate
             originalPlaceId = event.placeID
             originalColorIndex = selectedColorIndex
+            // Clear any dirty flag from lazy date-control init before originals existed.
+            hasUnsavedChanges = false
             
-            Task {
-                if let placeID = event.placeID {
+            if let placeID = event.placeID {
+                isLoadingInitialPlace = true
+                Task {
                     do {
                         // Use the provided repository or fall back to NestService
-                        let repository = entryRepository ?? NestService.shared
+                        let repository = nestItemRepository ?? NestService.shared
                         let place = try await repository.getPlace(for: placeID)
                         await MainActor.run {
-                            locationView.configureWith(place)
+                            self.locationView.configureWith(place)
+                            self.isLoadingInitialPlace = false
+                            self.checkForUnsavedChanges()
                         }
                     } catch {
+                        await MainActor.run {
+                            self.isLoadingInitialPlace = false
+                            self.checkForUnsavedChanges()
+                        }
                         Logger.log(level: .error, category: .sessionService, message: "Failed to load place: \(error.localizedDescription)")
                     }
                 }
@@ -208,6 +273,9 @@ final class SessionEventViewController: NNSheetViewController {
             
             // Update save button
             saveButton.setTitle(isReadOnly ? "" : "Update Event")
+        } else {
+            // Baseline so default start/end don't look like discardable draft content.
+            captureBaselineForNewEvent()
         }
         
         // Configure read-only mode if needed
@@ -326,9 +394,23 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     private func setupDateTimeControls() {
-        let now = Date()
-        startControl.date = now
-        endControl.date = Calendar.current.date(byAdding: .minute, value: 45, to: now) ?? now
+        guard event == nil, !didConfigureSelectedDate else { return }
+        
+        let preferredStart = sessionDateRange.map { max(Date(), $0.start) } ?? Date()
+        let (start, end) = defaultEventTimes(preferredStart: preferredStart)
+        isApplyingInitialDefaults = true
+        startControl.date = start
+        endControl.date = end
+        isApplyingInitialDefaults = false
+    }
+    
+    private func captureBaselineForNewEvent() {
+        originalTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        originalStartDate = startControl.date
+        originalEndDate = endControl.date
+        originalPlaceId = locationView.place?.id
+        originalColorIndex = selectedColorIndex
+        hasUnsavedChanges = false
     }
     
     private func setupInfoMenu() {
@@ -382,7 +464,7 @@ final class SessionEventViewController: NNSheetViewController {
                 
                 await MainActor.run {
                     eventDelegate?.sessionEventViewController(self, didDeleteEvent: event)
-                    dismiss(animated: true)
+                    dismissSheet()
                 }
             } catch {
                 await MainActor.run {
@@ -461,23 +543,20 @@ final class SessionEventViewController: NNSheetViewController {
             endControl.date = calendar.date(byAdding: .hour, value: 1, to: startDate) ?? startDate
         }
         
-        // Check if event dates are within session date range
+        // Warn when the event is scheduled outside the session's start/end times
         if let sessionDateRange = sessionDateRange {
             let eventStart = startControl.date
             let eventEnd = endControl.date
-            
-            // Check if event falls within session start & end (using calendar comparison to handle same-day events properly)
-            let calendar = Calendar.current
             let sessionStart = sessionDateRange.start
             let sessionEnd = sessionDateRange.end
             
-            if calendar.compare(eventStart, to: sessionStart, toGranularity: .day) == .orderedAscending ||
-               calendar.compare(eventEnd, to: sessionEnd, toGranularity: .day) == .orderedDescending {
+            if eventStart < sessionStart || eventEnd > sessionEnd {
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateStyle = .medium
+                dateFormatter.timeStyle = .short
                 let alert = UIAlertController(
                     title: "Event Outside Session Range",
-                    message: "Events can only be scheduled during the session; \(dateFormatter.string(from: sessionDateRange.start)) to \(dateFormatter.string(from: sessionDateRange.end)).",
+                    message: "This event is scheduled outside the session (\(dateFormatter.string(from: sessionStart)) – \(dateFormatter.string(from: sessionEnd))). Adjust the time to stay within the session.",
                     preferredStyle: .alert
                 )
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -501,8 +580,8 @@ final class SessionEventViewController: NNSheetViewController {
             return
         }
         
-        // Start loading state
         saveButton.startLoading()
+        prepareToSaveAndDismiss()
         
         // Create or update the event
         let event = SessionEvent(
@@ -524,7 +603,11 @@ final class SessionEventViewController: NNSheetViewController {
                 
                 // Save to server only if we have a sessionID (existing session)
                 if let sessionID = sessionID {
-                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
+                    try await SessionService.shared.updateSessionEvent(
+                        event,
+                        sessionID: sessionID,
+                        nestID: nestID
+                    )
                 }
                 // If no sessionID (new session), skip server save - the event will be saved via callback
                 
@@ -534,18 +617,22 @@ final class SessionEventViewController: NNSheetViewController {
                     
                     // Small delay to show success state before dismissing
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self.dismiss(animated: true)
+                        self.dismissSheet()
                     }
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     saveButton.stopLoading(withSuccess: false)
                     
+                    let detail = error.localizedDescription
                     // Small delay to show error state before alert
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         let alert = UIAlertController(
-                            title: "Error",
-                            message: "Failed to save event. Please try again.",
+                            title: "Unable to Save",
+                            message: detail.isEmpty
+                                ? "Failed to save event. Please try again."
+                                : detail,
                             preferredStyle: .alert
                         )
                         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -614,6 +701,7 @@ final class SessionEventViewController: NNSheetViewController {
     
     @objc private func colorButtonTapped(_ sender: UIButton) {
         HapticsHelper.lightHaptic()
+        let previousIndex = selectedColorIndex
         // Update border for previously selected button
         UIView.animate(withDuration: 0.1) { [weak self] in
             guard let self else { return }
@@ -625,6 +713,11 @@ final class SessionEventViewController: NNSheetViewController {
             sender.transform = .init(scaleX: 1.4, y: 1.4)
             sender.layer.borderWidth = 6
             sender.bounce()
+        }
+        // Only re-evaluate dirty state when the user actually changes color
+        // (viewDidAppear re-taps the current color to animate selection).
+        if sender.tag != previousIndex {
+            checkForUnsavedChanges()
         }
     }
     
@@ -653,22 +746,36 @@ final class SessionEventViewController: NNSheetViewController {
     }
     
     private func checkForUnsavedChanges() {
+        guard !isApplyingInitialDefaults else { return }
+        
         let currentTitle = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentStartDate = startControl.date
         let currentEndDate = endControl.date
         let currentPlaceId = locationView.place?.id
         let currentColorIndex = selectedColorIndex
         
+        // While the saved place is loading, ignore place mismatch (view is still empty).
+        let placeChanged: Bool
+        if isLoadingInitialPlace {
+            placeChanged = false
+        } else {
+            placeChanged = currentPlaceId != originalPlaceId
+        }
+        
+        // Compare against captured baseline; avoid `Date()` fallback which made events
+        // look dirty immediately (lazy controls init to "now", not the event dates).
         hasUnsavedChanges = currentTitle != (originalTitle ?? "") ||
-                           currentStartDate != (originalStartDate ?? Date()) ||
-                           currentEndDate != (originalEndDate ?? Date()) ||
-                           currentPlaceId != originalPlaceId ||
+                           currentStartDate != (originalStartDate ?? currentStartDate) ||
+                           currentEndDate != (originalEndDate ?? currentEndDate) ||
+                           placeChanged ||
                            currentColorIndex != originalColorIndex
     }
     
     private func updateSaveButtonState() {
-        saveButton.isEnabled = hasUnsavedChanges || event == nil
-        saveButton.alpha = saveButton.isEnabled ? 1.0 : 0.6
+        // New events: always allow create. Existing: only after a real edit.
+        let shouldEnable = event == nil ? true : hasUnsavedChanges
+        saveButton.isEnabled = shouldEnable
+        saveButton.alpha = shouldEnable ? 1.0 : 0.6
     }
 }
 
@@ -729,6 +836,7 @@ extension SessionEventViewController: PlaceSelectionDelegate {
         locationView.configureWith(place)
         locationView.thumbnailImageView.bounce()
         Tracker.shared.track(.sessionEventPlaceAttached)
+        checkForUnsavedChanges()
     }
 }
 
@@ -815,12 +923,12 @@ class SessionEventLocationView: UIView {
     }()
     
     weak var delegate: PlaceAddressCellDelegate?
-    private let entryRepository: EntryRepository?
+    private let nestItemRepository: NestItemRepository?
     
     var place: PlaceItem?
     
-    init(place: PlaceItem?, entryRepository: EntryRepository? = nil) {
-        self.entryRepository = entryRepository
+    init(place: PlaceItem?, nestItemRepository: NestItemRepository? = nil) {
+        self.nestItemRepository = nestItemRepository
         super.init(frame: .zero)
         addSubviews()
         constrainSubviews()
@@ -902,7 +1010,7 @@ class SessionEventLocationView: UIView {
                 Task {
                     do {
                         // Use the provided repository or fall back to NestService
-                        let repository = entryRepository ?? NestService.shared
+                        let repository = nestItemRepository ?? NestService.shared
                         let image = try await repository.loadImages(for: place)
                         await MainActor.run {
                             thumbnailImageView.image = image

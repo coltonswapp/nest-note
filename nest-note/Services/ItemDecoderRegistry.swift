@@ -41,13 +41,11 @@ enum ItemDecoderRegistry {
         }
         switch type {
         case .entry:
-            return try document.data(as: BaseEntry.self)
+            return try document.data(as: NoteItem.self)
         case .place:
             return try document.data(as: PlaceItem.self)
         case .routine:
             return try document.data(as: RoutineItem.self)
-        case .pilotCard:
-            return try document.data(as: PilotCardItem.self)
         case .contact:
             return try document.data(as: ContactItem.self)
         case .unknownDocument:

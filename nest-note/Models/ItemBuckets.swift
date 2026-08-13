@@ -15,8 +15,8 @@ struct ItemBuckets {
         self.grouped = Dictionary(grouping: items, by: { $0.type })
     }
 
-    var entries: [BaseEntry] {
-        grouped[.entry]?.compactMap { $0 as? BaseEntry } ?? []
+    var notes: [NoteItem] {
+        grouped[.entry]?.compactMap { $0 as? NoteItem } ?? []
     }
 
     var places: [PlaceItem] {
@@ -25,10 +25,6 @@ struct ItemBuckets {
 
     var routines: [RoutineItem] {
         grouped[.routine]?.compactMap { $0 as? RoutineItem } ?? []
-    }
-
-    var pilotCards: [PilotCardItem] {
-        grouped[.pilotCard]?.compactMap { $0 as? PilotCardItem } ?? []
     }
 
     var contacts: [ContactItem] {

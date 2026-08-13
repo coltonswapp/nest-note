@@ -108,7 +108,10 @@ class NNOnboardingViewController: UIViewController {
     
     // MARK: - CTA Button
     func addCTAButton(title: String, image: UIImage? = nil) {
-        let button = NNPrimaryLabeledButton(title: title, image: image)
+        let button = NNLoadingButton(title: title)
+        if let image {
+            button.setImage(image)
+        }
 
         if #available(iOS 26.0, *) {
             pinButtonToBottomEdgeContainer(button, horizontalPadding: 24, bottomPadding: 12, height: 55)

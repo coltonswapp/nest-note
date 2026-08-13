@@ -14,8 +14,6 @@ enum ItemType: String, CaseIterable, Codable {
     case routine = "routine"
     /// Placeholder for documents whose `type` string is not recognized by this app version.
     case unknownDocument = "unknown_document"
-    /// Pilot extensibility type (see `PilotCardItem`); register new kinds in `ItemDecoderRegistry`.
-    case pilotCard = "pilot_card"
     /// Phone contact (see `ContactItem`).
     case contact = "contact"
 }

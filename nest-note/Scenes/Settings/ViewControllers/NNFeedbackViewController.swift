@@ -13,6 +13,13 @@ final class NNFeedbackViewController: NNSheetViewController {
     private let feedback: Feedback?
     private let isReadOnly: Bool
     
+    override var hasDiscardableContent: Bool {
+        guard !isReadOnly else { return false }
+        let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let body = contentTextView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !title.isEmpty || !body.isEmpty
+    }
+    
     // MARK: - Initialization
     init() {
         self.feedback = nil
@@ -257,6 +264,7 @@ final class NNFeedbackViewController: NNSheetViewController {
         }
         
         // Disable submit button to prevent multiple submissions
+        prepareToSaveAndDismiss()
         saveButton.isEnabled = false
         saveButton.setTitle("Submitting...", for: .normal)
         
@@ -275,12 +283,13 @@ final class NNFeedbackViewController: NNSheetViewController {
                 try await SurveyService.shared.submitFeedback(feedback)
                 
                 await MainActor.run {
-                    self.dismiss(animated: true) {
+                    self.dismissSheet {
                         self.showToast(text: "Thank you!", subtitle: "Your feedback has been recorded", sentiment: .positive)
                     }
                 }
             } catch {
                 await MainActor.run {
+                    self.cancelSaveAndDismiss()
                     self.saveButton.isEnabled = true
                     self.saveButton.setTitle("Submit", for: .normal)
                     self.showErrorAlert(message: "Failed to submit feedback. Please try again.")
@@ -342,7 +351,7 @@ final class NNFeedbackViewController: NNSheetViewController {
                 try await SurveyService.shared.deleteFeedback(feedback)
                 
                 await MainActor.run {
-                    self.dismiss(animated: true) {
+                    self.dismissSheet {
                         self.showToast(text: "Deleted", subtitle: "Feedback has been removed", sentiment: .negative)
                     }
                 }

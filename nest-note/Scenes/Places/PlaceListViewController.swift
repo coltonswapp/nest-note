@@ -91,6 +91,12 @@ final class PlaceListViewController: NNViewController, NNTippable {
             name: .placeDidSave,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(placeDidSave),
+            name: .placeThumbnailsDidUpdate,
+            object: nil
+        )
         
         // Only show the "Choose on Map" button when in selection mode
         if isSelecting {

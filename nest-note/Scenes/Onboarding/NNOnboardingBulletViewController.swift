@@ -7,6 +7,7 @@ final class NNOnboardingBulletViewController: NNOnboardingViewController {
     private var configuredTitle: String = ""
     private var configuredSubtitle: String?
     private var ctaText: String = "Continue"
+    private var hasAnimatedBullets = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -18,6 +19,8 @@ final class NNOnboardingBulletViewController: NNOnboardingViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        guard !hasAnimatedBullets else { return }
+        hasAnimatedBullets = true
         bulletStack?.animateItemsIn(initialDelay: 0.08)
     }
 

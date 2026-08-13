@@ -166,6 +166,19 @@ final class OBFinishViewController: NNOnboardingViewController, MFMailComposeVie
         beginFinishFlow()
     }
 
+    override func reset() {
+        super.reset()
+        setupTask?.cancel()
+        setupTask = nil
+        isSetupInProgress = false
+        hasStartedInitialSetup = false
+        lastSetupError = nil
+        Self.resetFailureCount()
+        supportButton.isHidden = true
+        supportButton.alpha = 0
+        activityIndicator.reset()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true

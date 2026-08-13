@@ -12,7 +12,7 @@ struct PaywallFeatureCarouselCard: Hashable {
 }
 
 let paywallFeatureCarouselCards: [PaywallFeatureCarouselCard] = [
-    .init(id: "unlimited", feature: .unlimitedEntries, imageName: "L1"),
+    .init(id: "unlimited", feature: .unlimitedNotes, imageName: "L1"),
     .init(id: "multiday", feature: .multiDaySessions, imageName: "L2"),
     .init(id: "events", feature: .sessionEvents, imageName: "L3"),
     .init(id: "review", feature: .nestReview, imageName: "L4"),

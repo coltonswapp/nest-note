@@ -22,7 +22,7 @@ enum OnboardingScreenContent {
     var subtitle: String {
         switch self {
         case .aboutNestNote:
-            return "NestNote will help keep your sitters informed. You'll add entries, places, & routines to your nest."
+            return "NestNote will help keep your sitters informed. You'll add notes, places, & routines to your nest."
         case .createSessions:
             return "Pick a title, add when your session will take place, then add any relevant details such as calendar events, etc."
         case .pickAndChoose:

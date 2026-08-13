@@ -5,6 +5,10 @@ final class MapThumbnailGenerator {
     static let shared = MapThumbnailGenerator()
     private init() {}
     
+    /// Cap retina scale so 300×300 thumbs stay reasonably sized for Storage.
+    private let maxSnapshotScale: CGFloat = 2.0
+    private let snapshotSize = CGSize(width: 300, height: 300)
+    
     enum ZoomLevel: Double {
         case veryClose = 1    // Building level (0.001)
         case close = 2        // Block level (0.002)
@@ -28,31 +32,46 @@ final class MapThumbnailGenerator {
         visibleRegion: MKCoordinateRegion,
         completion: @escaping (UIImage?) -> Void
     ) {
-        let size = CGSize(width: 300, height: 300)
+        generateDynamicThumbnailAsset(
+            for: coordinate,
+            visibleRegion: visibleRegion
+        ) { asset in
+            guard let asset else {
+                completion(nil)
+                return
+            }
+            completion(asset.image(with: UITraitCollection.current))
+        }
+    }
+    
+    /// Generates light/dark map snapshots and returns the shared `UIImageAsset`.
+    func generateDynamicThumbnailAsset(
+        for coordinate: CLLocationCoordinate2D,
+        visibleRegion: MKCoordinateRegion,
+        completion: @escaping (UIImageAsset?) -> Void
+    ) {
+        let scale = min(UIScreen.main.scale, maxSnapshotScale)
         
-        // Create light mode options
         let lightOptions = MKMapSnapshotter.Options()
         lightOptions.region = MKCoordinateRegion(
             center: coordinate,
             span: visibleRegion.span
         )
-        lightOptions.size = size
-        lightOptions.scale = UIScreen.main.scale
+        lightOptions.size = snapshotSize
+        lightOptions.scale = scale
         lightOptions.pointOfInterestFilter = .includingAll
         lightOptions.traitCollection = UITraitCollection(userInterfaceStyle: .light)
         
-        // Create dark mode options
         let darkOptions = MKMapSnapshotter.Options()
         darkOptions.region = MKCoordinateRegion(
             center: coordinate,
             span: visibleRegion.span
         )
-        darkOptions.size = size
-        darkOptions.scale = UIScreen.main.scale
+        darkOptions.size = snapshotSize
+        darkOptions.scale = scale
         darkOptions.pointOfInterestFilter = .includingAll
         darkOptions.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
         
-        // Create both snapshots
         let lightSnapshotter = MKMapSnapshotter(options: lightOptions)
         let darkSnapshotter = MKMapSnapshotter(options: darkOptions)
         
@@ -82,20 +101,16 @@ final class MapThumbnailGenerator {
                 return
             }
             
-            // Create image asset
             let asset = UIImageAsset()
-            
-            // Register light mode image
             asset.register(light, with: UITraitCollection(userInterfaceStyle: .light))
             
-            // Register dark mode image if available
             if let dark = darkImage {
                 asset.register(dark, with: UITraitCollection(userInterfaceStyle: .dark))
+            } else {
+                asset.register(light, with: UITraitCollection(userInterfaceStyle: .dark))
             }
             
-            // Get the appropriate image for current trait collection
-            let dynamicImage = asset.image(with: UITraitCollection.current)
-            completion(dynamicImage)
+            completion(asset)
         }
     }
     
@@ -136,4 +151,4 @@ final class MapThumbnailGenerator {
         
         return UIGraphicsGetImageFromCurrentImageContext()
     }
-} 
+}

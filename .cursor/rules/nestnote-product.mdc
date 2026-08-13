@@ -1,0 +1,14 @@
+---
+description: NestNote product language, brand, and repo split
+alwaysApply: true
+---
+
+# NestNote product
+
+Read `docs/product.md` before writing copy or proposing architecture.
+
+- NestNote is a digital babysitter binder (iPhone app). Families keep a **nest**; each sit is a **session**; sitters join with an **invite code**.
+- Audience: nest owners (parents) and sitters. Access is session-based, not a standing view of the whole nest.
+- Brand: NestNote, green `#1CB71A`, support@nestnoteapp.com, nestnoteapp.com.
+- This repo is the iOS app and Cloud Functions. The marketing site is `nest-note-web`.
+- Do not add a website or Firebase web SDK here. Preserve `/terms`, `/privacypolicy`, `/contact`, and `/invite` on the public site.

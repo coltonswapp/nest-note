@@ -41,7 +41,7 @@ final class OBPasswordViewController: NNOnboardingViewController {
     private let requirementsStack: UIStackView = {
         let stack = UIStackView()
         stack.axis = .vertical
-        stack.spacing = 12
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }()
@@ -55,20 +55,25 @@ final class OBPasswordViewController: NNOnboardingViewController {
     private func createRequirementView(text: String) -> UIStackView {
         let stack = UIStackView()
         stack.axis = .horizontal
-        stack.spacing = 8
+        stack.spacing = 6
         stack.alignment = .center
         
         let imageView = UIImageView()
         imageView.image = UIImage(systemName: "circle")
         imageView.tintColor = .systemGray3
         imageView.contentMode = .scaleAspectFit
-        imageView.widthAnchor.constraint(equalToConstant: 20).isActive = true
-        imageView.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        imageView.setContentHuggingPriority(.required, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        imageView.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        imageView.heightAnchor.constraint(equalToConstant: 18).isActive = true
         
         let label = UILabel()
         label.text = text
         label.textColor = .systemGray
         label.font = .captionBoldS
+        label.numberOfLines = 2
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.85
         
         stack.addArrangedSubview(imageView)
         stack.addArrangedSubview(label)
@@ -76,9 +81,13 @@ final class OBPasswordViewController: NNOnboardingViewController {
         return stack
     }
 
-    override func loadView() {
-        super.loadView()
-        shouldHandleKeyboard = false
+    private func makeRequirementRow(_ left: UIStackView, _ right: UIStackView) -> UIStackView {
+        let row = UIStackView(arrangedSubviews: [left, right])
+        row.axis = .horizontal
+        row.spacing = 12
+        row.distribution = .fillEqually
+        row.alignment = .center
+        return row
     }
     
     // MARK: - Lifecycle
@@ -93,8 +102,19 @@ final class OBPasswordViewController: NNOnboardingViewController {
         addCTAButton(title: "Next")
         setupActions()
         setupValidation()
+        setupKeyboardDismiss()
         
         ctaButton?.isEnabled = false
+    }
+
+    private func setupKeyboardDismiss() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tap.cancelsTouchesInView = false
+        view.addGestureRecognizer(tap)
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -118,27 +138,28 @@ final class OBPasswordViewController: NNOnboardingViewController {
         view.addSubview(confirmPasswordTextField)
         view.addSubview(requirementsStack)
         
-        // Add requirement views to stack
-        requirementsStack.addArrangedSubview(lengthRequirement)
-        requirementsStack.addArrangedSubview(capitalRequirement)
-        requirementsStack.addArrangedSubview(numberRequirement)
-        requirementsStack.addArrangedSubview(symbolRequirement)
+        requirementsStack.addArrangedSubview(
+            makeRequirementRow(lengthRequirement, capitalRequirement)
+        )
+        requirementsStack.addArrangedSubview(
+            makeRequirementRow(numberRequirement, symbolRequirement)
+        )
         requirementsStack.addArrangedSubview(passwordMatchRequirement)
         
         NSLayoutConstraint.activate([
-            passwordTextField.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 32),
+            passwordTextField.topAnchor.constraint(equalTo: labelStack.bottomAnchor, constant: 24),
             passwordTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             passwordTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             passwordTextField.heightAnchor.constraint(equalToConstant: 50),
             
-            confirmPasswordTextField.topAnchor.constraint(equalTo: passwordTextField.bottomAnchor, constant: 16),
+            confirmPasswordTextField.topAnchor.constraint(equalTo: passwordTextField.bottomAnchor, constant: 12),
             confirmPasswordTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             confirmPasswordTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             confirmPasswordTextField.heightAnchor.constraint(equalToConstant: 50),
             
-            requirementsStack.topAnchor.constraint(equalTo: confirmPasswordTextField.bottomAnchor, constant: 24),
-            requirementsStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            requirementsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32)
+            requirementsStack.topAnchor.constraint(equalTo: confirmPasswordTextField.bottomAnchor, constant: 16),
+            requirementsStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            requirementsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
         ])
     }
     

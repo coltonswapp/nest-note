@@ -75,6 +75,8 @@ class NestSessionsViewController: NNViewController {
         }
     }
     private var currentBucket: SessionService.SessionBucket = .inProgress
+    /// When set, opens on this filter instead of the default In Progress.
+    var preferredBucket: SessionService.SessionBucket?
     private var lastLocalUpdateTime: Date?
     
     private var filteredSessions: [any SessionDisplayable] {
@@ -133,17 +135,18 @@ class NestSessionsViewController: NNViewController {
         setupNavigationBar()
         // Create filter view early so it exists when we need to enable/disable it during fetch
         createFilterSegmentedControl()
-        loadSessions()
 
-        // Set initial filter to inProgress
-        currentBucket = .inProgress
+        currentBucket = preferredBucket ?? .inProgress
+        applyFilterSegment(for: currentBucket)
+
+        loadSessions()
     }
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // Add palette to navigation bar after view is laid out
         addPaletteToNavigationBar()
-        filterSegmentedControl.selectedSegmentIndex = 1 // inProgress is at index 1
+        applyFilterSegment(for: currentBucket)
     }
     
     override func viewDidLayoutSubviews() {
@@ -245,8 +248,21 @@ class NestSessionsViewController: NNViewController {
         
         filterSegmentedControl = NNSegmentedFilterView(items: ["Past", "In Progress", "Upcoming"])
         filterSegmentedControl.delegate = self
-        filterSegmentedControl.selectedSegmentIndex = 1 // Default to "In Progress"
+        applyFilterSegment(for: preferredBucket ?? .inProgress)
         filterSegmentedControl.frame.size.height = 48
+    }
+
+    private func applyFilterSegment(for bucket: SessionService.SessionBucket) {
+        guard filterSegmentedControl != nil else { return }
+        filterSegmentedControl.selectedSegmentIndex = Self.segmentIndex(for: bucket)
+    }
+
+    private static func segmentIndex(for bucket: SessionService.SessionBucket) -> Int {
+        switch bucket {
+        case .past: return 0
+        case .inProgress: return 1
+        case .upcoming: return 2
+        }
     }
     
     private func addPaletteToNavigationBar() {
@@ -549,7 +565,9 @@ class NestSessionsViewController: NNViewController {
     
     @objc private func ctaTapped() {
         Task {
-            let canCreate = await SubscriptionService.shared.canUseFullFeatures()
+            let canCreate = DemoModeService.shared.isActive
+                ? true
+                : await SubscriptionService.shared.canUseFullFeatures()
             await MainActor.run {
                 guard canCreate else {
                     Analytics.logEvent("second_session_gate_hit", parameters: [

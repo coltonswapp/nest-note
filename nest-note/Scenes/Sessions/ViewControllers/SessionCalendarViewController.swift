@@ -62,11 +62,12 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     private var eventsUpdateCallback: (([SessionEvent]) -> Void)?
     
     private lazy var emptyStateView: NNEmptyStateView = {
+        let config = emptyStateConfig(for: dateRange)
         let view = NNEmptyStateView(
-            icon: UIImage(systemName: "calendar.badge.plus"),
-            title: "No events",
-            subtitle: "Tap anywhere on the calendar to add an event.",
-            actionButtonTitle: "Add Event"
+            icon: config.icon,
+            title: config.title,
+            subtitle: config.subtitle,
+            actionButtonTitle: config.actionButtonTitle
         )
         view.isHidden = true
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -90,14 +91,9 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         self.eventsUpdateCallback = eventsUpdateCallback
         let calendar = Calendar.current
         
-        // Strip time components and get start of day for both dates
-        let startOfStartDay = calendar.startOfDay(for: dateRange.start)
-        let startOfEndDay = calendar.startOfDay(for: dateRange.end)
-        
-        // Create new DateInterval with clean dates
-        let cleanDateRange = DateInterval(start: startOfStartDay, end: startOfEndDay)
-        
-        self.dateRange = cleanDateRange
+        // Keep real session start/end times — event validation and defaults need them.
+        // The compact calendar already normalizes to start/end-of-day for day cells.
+        self.dateRange = dateRange
         
         // Group provided events by date
         if !events.isEmpty {
@@ -106,7 +102,7 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             }
         }
 
-        self.compactCalendarView = NNCompactCalendarView(dateRange: cleanDateRange, events: events)
+        self.compactCalendarView = NNCompactCalendarView(dateRange: dateRange, events: events)
         
         super.init(nibName: nil, bundle: nil)
         self.compactCalendarView.delegate = self
@@ -193,9 +189,12 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
             emptyStateView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
         ])
         
-        // Initial load
-        Task {
-            await loadData()
+        // Show local/passed-in events immediately; refresh from network when editing an existing session.
+        handleLoadedData()
+        if sessionID != nil {
+            Task {
+                await loadData()
+            }
         }
     }
     
@@ -208,35 +207,53 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         navigationController?.navigationBar.scrollEdgeAppearance = appearance
         navigationController?.navigationBar.standardAppearance = appearance
         
-        // Create debug button
-        #if DEBUG
-        let debugButton = UIBarButtonItem(
-            image: UIImage(systemName: "ellipsis"),
+        let infoButton = UIBarButtonItem(
+            image: UIImage(systemName: "info.circle"),
             style: .plain,
             target: self,
-            action: #selector(debugButtonTapped)
+            action: #selector(aboutEventsTapped)
         )
-        #endif
-        
+        infoButton.accessibilityLabel = "About Events"
+        navigationItem.leftBarButtonItem = infoButton
+
+        var rightItems: [UIBarButtonItem] = []
+
         // Only show add button for non-sitters
         if !isSitter {
-            let addButton = UIBarButtonItem(
+            rightItems.append(UIBarButtonItem(
                 image: UIImage(systemName: "plus"),
                 style: .plain,
                 target: self,
                 action: #selector(addEventTapped)
-            )
-            navigationItem.rightBarButtonItems = [addButton]
+            ))
         }
-        
-    #if DEBUG
-    navigationItem.rightBarButtonItems?.append(debugButton)
-    #endif
+
+        #if DEBUG
+        rightItems.append(UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis"),
+            style: .plain,
+            target: self,
+            action: #selector(debugButtonTapped)
+        ))
+        #endif
+
+        navigationItem.rightBarButtonItems = rightItems.isEmpty ? nil : rightItems
+    }
+
+    @objc private func aboutEventsTapped() {
+        present(AboutEventsViewController(), animated: true)
+        HapticsHelper.lightHaptic()
     }
     
     @objc private func addEventTapped() {
         let dateToUse = selectedDate ?? dateRange.start
-        let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
+        let eventVC = SessionEventViewController(
+            sessionID: sessionID,
+            nestID: nestID,
+            selectedDate: dateToUse,
+            sessionDateRange: dateRange,
+            nestItemRepository: NestService.shared
+        )
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -479,41 +496,58 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
     }
     
     private func updateEmptyState() {
-        // Only update empty state for non-sitters
-        if !isSitter {
-            let hasEvents = !eventsByDate.isEmpty
-            
-            if !hasEvents {
-                let (title, subtitle, icon) = emptyStateConfig(for: dateRange)
-                emptyStateView.configure(icon: icon, title: title, subtitle: subtitle)
-                emptyStateView.animateIn()
-            } else {
-                emptyStateView.animateOut()
-            }
+        let hasEvents = !eventsByDate.isEmpty
+        
+        if !hasEvents {
+            let config = emptyStateConfig(for: dateRange)
+            emptyStateView.configure(
+                icon: config.icon,
+                title: config.title,
+                subtitle: config.subtitle,
+                actionButtonTitle: config.actionButtonTitle
+            )
+            collectionView.isHidden = true
+            emptyStateView.animateIn()
+        } else {
+            collectionView.isHidden = false
+            emptyStateView.animateOut()
         }
     }
     
-    private func emptyStateConfig(for dateRange: DateInterval) -> (title: String, subtitle: String, icon: UIImage?) {
+    private func emptyStateConfig(for dateRange: DateInterval) -> (title: String, subtitle: String, icon: UIImage?, actionButtonTitle: String?) {
+        if isSitter {
+            return (
+                "No events",
+                "Events for this session will appear here.",
+                UIImage(systemName: "calendar"),
+                nil
+            )
+        }
+        
         let calendar = Calendar.current
         let days = calendar.dateComponents([.day], from: dateRange.start, to: dateRange.end).day ?? 0
+        let icon = UIImage(systemName: "calendar.badge.plus")
         
         if days <= 1 {
             return (
                 "No events today",
-                "Tap anywhere to add an event.",
-                UIImage(systemName: "calendar.badge.plus")
+                "Add an event for this session day.",
+                icon,
+                "Add Event"
             )
         } else if days <= 7 {
             return (
                 "No events this week",
-                "Tap any day to add events.",
-                UIImage(systemName: "calendar.badge.plus")
+                "Add events across the session days.",
+                icon,
+                "Add Event"
             )
         } else {
             return (
-                "No events in this period",
-                "Tap any day to start adding events.",
-                UIImage(systemName: "calendar.badge.plus")
+                "No events yet",
+                "Add events for this session.",
+                icon,
+                "Add Event"
             )
         }
     }
@@ -693,10 +727,11 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             // Present event editing with source frame
             let eventVC = SessionEventViewController(
                 sessionID: sessionID,
+                nestID: nestID,
                 event: item,
                 sourceFrame: sourceFrame,
                 sessionDateRange: dateRange,
-                entryRepository: NestService.shared
+                nestItemRepository: NestService.shared
             )
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
@@ -709,7 +744,13 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
                 dateToUse = selectedDate ?? dateRange.start
             }
             
-            let eventVC = SessionEventViewController(sessionID: sessionID, selectedDate: dateToUse, sessionDateRange: dateRange, entryRepository: NestService.shared)
+            let eventVC = SessionEventViewController(
+                sessionID: sessionID,
+                nestID: nestID,
+                selectedDate: dateToUse,
+                sessionDateRange: dateRange,
+                nestItemRepository: NestService.shared
+            )
             eventVC.eventDelegate = self
             present(eventVC, animated: true)
         }
@@ -826,7 +867,11 @@ extension SessionCalendarViewController: UICollectionViewDelegate {
             // Existing session - save to server
             Task {
                 do {
-                    try await SessionService.shared.updateSessionEvent(duplicatedEvent, sessionID: sessionID)
+                    try await SessionService.shared.updateSessionEvent(
+                        duplicatedEvent,
+                        sessionID: sessionID,
+                        nestID: self.nestID
+                    )
                 } catch {
                     Logger.log(level: .error, category: .sessionService, message: "Failed to duplicate event: \(error.localizedDescription)")
                     
@@ -965,20 +1010,10 @@ extension SessionCalendarViewController: SessionEventViewControllerDelegate {
             }
         }
         
-        // Save the event based on context
+        // EventVC already persists for existing sessions; only sync local state here.
         let allEvents = eventsByDate.values.flatMap { $0 }
         
-        if let sessionID = sessionID {
-            // Existing session - save to server immediately
-            Task {
-                do {
-                    try await SessionService.shared.updateSessionEvent(event, sessionID: sessionID)
-                } catch {
-                    Logger.log(level: .error, category: .sessionService, message: "Failed to save event: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            // New session - update parent's sessionEvents array via callback
+        if sessionID == nil {
             eventsUpdateCallback?(allEvents)
         }
         

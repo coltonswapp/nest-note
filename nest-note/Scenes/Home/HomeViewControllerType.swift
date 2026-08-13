@@ -46,6 +46,7 @@ enum HomeItem: Hashable {
     case quickAccess(HomeQuickAccessType)
     case pinnedCategory(name: String, icon: String)
     case pinnedFolder(FolderData)
+    case addPinnedFolder
     case currentSession(SessionItem)
     case upcomingSession(SessionItem)
     case events
@@ -93,6 +94,8 @@ enum HomeItem: Hashable {
             hasher.combine(12)
             hasher.combine(score)
             hasher.combine(tierLabel)
+        case .addPinnedFolder:
+            hasher.combine(13)
         }
     }
     
@@ -106,6 +109,8 @@ enum HomeItem: Hashable {
             return n1 == n2 && i1 == i2
         case let (.pinnedFolder(f1), .pinnedFolder(f2)):
             return f1 == f2
+        case (.addPinnedFolder, .addPinnedFolder):
+            return true
         case let (.currentSession(s1), .currentSession(s2)):
             return s1 == s2
         case let (.upcomingSession(s1), .upcomingSession(s2)):

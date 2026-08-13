@@ -11,12 +11,12 @@ protocol DatePresentationDelegate: AnyObject {
     func didChangeEarlyAccess(_ duration: EarlyAccessDuration)
 }
 
-protocol EntryReviewCellDelegate: AnyObject {
+protocol NoteReviewCellDelegate: AnyObject {
     func didTapReview()
 }
 
-protocol SelectEntriesCellDelegate: AnyObject {
-    func selectEntriesCellDidTapButton(_ cell: SelectEntriesCell)
+protocol SelectNestItemsCellDelegate: AnyObject {
+    func selectNestItemsCellDidTapButton(_ cell: SelectNestItemsCell)
 }
 
 protocol EditSessionViewControllerDelegate: AnyObject {
@@ -36,7 +36,7 @@ protocol InviteSitterViewControllerDelegate: AnyObject {
 }
 
 // MARK: - EditSessionViewController
-class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate, QLPreviewControllerDataSource, UIAdaptivePresentationControllerDelegate {
+class EditSessionViewController: NNViewController, PaywallPresentable, PaywallViewControllerDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate, UIAdaptivePresentationControllerDelegate {
     // MARK: - Properties
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -72,8 +72,26 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private var selectedItemPreviews: [SelectedItemPreview] = []
     
     // Properties for select entries flow
-    private var currentSelectEntriesNavController: UINavigationController?
+    private var currentSelectNestItemsNavController: UINavigationController?
     private var hasCreatedSessionInFlow = false
+
+    private var shouldShowSessionHelpBanner: Bool {
+        guard !isEditingSession,
+              !hasCreatedSessionInFlow,
+              !isCompletingRequest,
+              !isArchivedSession,
+              !SessionHelpBannerStore.isDismissed else {
+            return false
+        }
+
+        #if DEBUG
+        if SessionHelpBannerStore.debugForceShow {
+            return true
+        }
+        #endif
+
+        return SessionService.shared.sessions.isEmpty
+    }
     
     private var sessionItem: SessionItem
     private var hasUnsavedChanges: Bool = false {
@@ -88,6 +106,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private var sessionEvents: [SessionEvent] = []
     private var pdfURL: URL?
+    /// Temp copy used for QuickLook — avoids Application Support / FileProvider share-mode hangs.
+    private var pdfPreviewURL: URL?
     private var isGeneratingPDF = false
     private var pdfGenerationOverlay: UIView?
     private let maxVisibleEvents = 4
@@ -136,7 +156,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         isEditingSession || hasCreatedSessionInFlow
     }
     
-    private var shouldShowSelectEntriesSection: Bool {
+    private var shouldShowSelectNestItemsSection: Bool {
         isEditingSession || hasCreatedSessionInFlow || isCompletingRequest
     }
     
@@ -167,8 +187,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     // Add a property to track if events are loading
     private var isLoadingEvents = false
     
-    // Add property for EntryRepository
-    private var entryRepository: EntryRepository {
+    // Add property for NestItemRepository
+    private var nestItemRepository: NestItemRepository {
         return NestService.shared
     }
     
@@ -208,7 +228,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         sessionItem.startDate = archivedSession.startDate
         sessionItem.endDate = archivedSession.endDate
         sessionItem.isMultiDay = Calendar.current.dateComponents([.day], from: archivedSession.startDate, to: archivedSession.endDate).day ?? 0 > 0
-        // Note: visibilityLevel is no longer used, will use selectedEntries instead
+        // Note: visibilityLevel is no longer used, will use selectedNotes instead
         sessionItem.status = archivedSession.status
         
         // Set assigned sitter if available
@@ -282,7 +302,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         )
         
         // Restore selected entries if editing an existing session
-        restoreSelectedEntriesFromSession()
+        restoreSelectedNotesFromSession()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -290,12 +310,19 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Refresh outdated entries count each time the view appears
         if !isArchivedSession {
-            fetchOutdatedEntries()
+            fetchOutdatedNotes()
         }
     }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        
+        // New sessions: focus the title so people don't miss naming the session.
+        if !isEditingSession && !hasCreatedSessionInFlow && !isArchivedSession,
+           (titleTextField.text ?? "").isEmpty,
+           !titleTextField.isFirstResponder {
+            titleTextField.becomeFirstResponder()
+        }
     }
     
     override func setup() {
@@ -321,7 +348,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         Logger.log(level: .debug, category: .sessionService, message: "isEditingSession: \(isEditingSession)")
         Logger.log(level: .debug, category: .sessionService, message: "sessionItem.entryIds: \(sessionItem.entryIds?.description ?? "nil")")
         Logger.log(level: .debug, category: .sessionService, message: "originalSession.entryIds: \(originalSession.entryIds?.description ?? "nil")")
-        Logger.log(level: .debug, category: .sessionService, message: "selectedEntries count: \(selectedItemIds.count)")
+        Logger.log(level: .debug, category: .sessionService, message: "selectedNotes count: \(selectedItemIds.count)")
         Logger.log(level: .debug, category: .sessionService, message: "=== End Initial Setup Debug ===")
         
         updateSaveButtonState()
@@ -371,7 +398,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         // Pre-populate other fields if editing
-        // Note: visibilityLevel is no longer used, using selectedEntries instead
+        // Note: visibilityLevel is no longer used, using selectedNotes instead
         
         // Note: sessionItem.assignedSitter already contains the sitter information
         // No need to fetch additional sitter details since AssignedSitter has all necessary data
@@ -488,9 +515,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 self.updateDataSourceAfterRefresh()
                 
                 // Restore selected entries from refreshed session
-                self.restoreSelectedEntriesFromSession()
+                self.restoreSelectedNotesFromSession()
                 
-                // Note: checkForChanges() is now called within restoreSelectedEntriesFromSession() 
+                // Note: checkForChanges() is now called within restoreSelectedNotesFromSession() 
                 // after proper synchronization, so we don't need to call it again here
                 
                 // Refresh session events if needed
@@ -521,8 +548,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // MARK: - Entry Selection Restoration
     
-    private func restoreSelectedEntriesFromSession() {
-        Logger.log(level: .info, category: .general, message: "restoreSelectedEntriesFromSession called - isEditingSession: \(isEditingSession)")
+    private func restoreSelectedNotesFromSession() {
+        Logger.log(level: .info, category: .general, message: "restoreSelectedNotesFromSession called - isEditingSession: \(isEditingSession)")
         Logger.log(level: .info, category: .general, message: "sessionItem.entryIds: \(sessionItem.entryIds?.description ?? "nil")")
         
         guard isEditingSession, let entryIds = sessionItem.entryIds, !entryIds.isEmpty else {
@@ -539,42 +566,40 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 let allItems = try await nestService.fetchAllItems()
                 
                 // Separate by type
-                let matchingEntries = allItems.compactMap { $0 as? BaseEntry }.filter { entryIds.contains($0.id) }
+                let matchingNotes = allItems.compactMap { $0 as? NoteItem }.filter { entryIds.contains($0.id) }
                 let matchingPlaces = allItems.compactMap { $0 as? PlaceItem }.filter { entryIds.contains($0.id) }
                 let matchingRoutines = allItems.compactMap { $0 as? RoutineItem }.filter { entryIds.contains($0.id) }
-                let matchingPilots = allItems.compactMap { $0 as? PilotCardItem }.filter { entryIds.contains($0.id) }
                 let matchingContacts = allItems.compactMap { $0 as? ContactItem }.filter { entryIds.contains($0.id) }
                 let matchingUnknown = allItems.compactMap { $0 as? UnknownItem }.filter { entryIds.contains($0.id) }
                 
                 Logger.log(level: .info, category: .general, message: "Fetched \(allItems.count) total items")
                 Logger.log(level: .info, category: .general, message: "Looking for item IDs: \(entryIds)")
                 
-                Logger.log(level: .info, category: .general, message: "Found \(matchingEntries.count) matching entries")
+                Logger.log(level: .info, category: .general, message: "Found \(matchingNotes.count) matching entries")
                 Logger.log(level: .info, category: .general, message: "Found \(matchingPlaces.count) matching places")
                 Logger.log(level: .info, category: .general, message: "Found \(matchingRoutines.count) matching routines")
-                Logger.log(level: .info, category: .general, message: "Matching entry titles: \(matchingEntries.map { $0.title })")
+                Logger.log(level: .info, category: .general, message: "Matching entry titles: \(matchingNotes.map { $0.title })")
                 Logger.log(level: .info, category: .general, message: "Matching place aliases: \(matchingPlaces.map { $0.alias ?? "Unnamed"})")
                 Logger.log(level: .info, category: .general, message: "Matching routine titles: \(matchingRoutines.map { $0.title })")
                 
                 // If no matching items found, the stored items may have been deleted
-                if matchingEntries.isEmpty && matchingPlaces.isEmpty && matchingRoutines.isEmpty
-                    && matchingPilots.isEmpty && matchingContacts.isEmpty && matchingUnknown.isEmpty && !entryIds.isEmpty {
+                if matchingNotes.isEmpty && matchingPlaces.isEmpty && matchingRoutines.isEmpty
+                    && matchingContacts.isEmpty && matchingUnknown.isEmpty && !entryIds.isEmpty {
                     Logger.log(level: .info, category: .general, message: "No matching items found for stored IDs - items may have been deleted. Clearing session entryIds.")
                     
                     await MainActor.run {
                         self.sessionItem.entryIds = nil
                         self.selectedItemIds = []
                         self.selectedItemPreviews = []
-                        self.updateSelectEntriesSection()
+                        self.updateSelectNestItemsSection()
                         Logger.log(level: .info, category: .general, message: "Cleared invalid entryIds from session")
                     }
                 } else {
                     // Store only the IDs that were found
                     var restoredIds: [String] = []
-                    restoredIds.append(contentsOf: matchingEntries.map(\.id))
+                    restoredIds.append(contentsOf: matchingNotes.map(\.id))
                     restoredIds.append(contentsOf: matchingPlaces.map(\.id))
                     restoredIds.append(contentsOf: matchingRoutines.map(\.id))
-                    restoredIds.append(contentsOf: matchingPilots.map(\.id))
                     restoredIds.append(contentsOf: matchingContacts.map(\.id))
                     restoredIds.append(contentsOf: matchingUnknown.map(\.id))
                     
@@ -588,7 +613,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                         self.selectedItemPreviews = previews
                         
                         Logger.log(level: .info, category: .general, message: "Updated selectedItemIds count to: \(self.selectedItemIds.count)")
-                        self.updateSelectEntriesSection()
+                        self.updateSelectNestItemsSection()
                         
                         self.originalSession.entryIds = restoredIds.isEmpty ? nil : restoredIds
                         
@@ -598,7 +623,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 }
                 
             } catch {
-                Logger.log(level: .error, category: .general, message: "Failed to restore selected entries: \(error.localizedDescription)")
+                Logger.log(level: .error, category: .general, message: "Failed to restore selected notes: \(error.localizedDescription)")
             }
         }
     }
@@ -783,18 +808,16 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
             do {
                 pdfURL = try await generateCachedPDF()
+                await setPDFGenerationLoading(false)
 
                 await MainActor.run {
                     refreshExportPDFCell()
-                    let previewController = QLPreviewController()
-                    previewController.dataSource = self
-                    present(previewController, animated: true)
+                    presentPDFPreview()
                 }
             } catch {
+                await setPDFGenerationLoading(false)
                 await showError(message: "Failed to export PDF: \(error.localizedDescription)")
             }
-
-            await setPDFGenerationLoading(false)
         }
     }
 
@@ -831,7 +854,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func presentGeneratePDFConfirmation() {
         let alert = UIAlertController(
             title: "Export Session as PDF",
-            message: "Selected entries and session events will be included in the PDF export.",
+            message: "Selected notes and session events will be included in the PDF export.",
             preferredStyle: .alert
         )
 
@@ -846,8 +869,37 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
     private func viewCachedPDF() {
         pdfURL = SessionPDFService.shared.localPDFURL(nestID: sessionItem.nestID, sessionID: sessionItem.id)
+        presentPDFPreview()
+    }
+
+    @MainActor
+    private func presentPDFPreview() {
+        guard let sourceURL = pdfURL,
+              FileManager.default.fileExists(atPath: sourceURL.path) else {
+            showError(message: "PDF file not found.")
+            return
+        }
+
+        // QuickLook + Application Support often hits FileProvider/LaunchServices errors and
+        // can leave the preview non-interactive. Preview a temp copy instead.
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("session-preview-\(sessionItem.id).pdf")
+        do {
+            if FileManager.default.fileExists(atPath: tempURL.path) {
+                try FileManager.default.removeItem(at: tempURL)
+            }
+            try FileManager.default.copyItem(at: sourceURL, to: tempURL)
+            pdfPreviewURL = tempURL
+        } catch {
+            // Fall back to the cached URL if copy fails.
+            pdfPreviewURL = sourceURL
+        }
+
+        ExplosionManager.setOverlayWindowsHidden(true)
+
         let previewController = QLPreviewController()
         previewController.dataSource = self
+        previewController.delegate = self
         present(previewController, animated: true)
     }
     
@@ -860,11 +912,21 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     // MARK: - QLPreviewControllerDataSource
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-        return pdfURL != nil ? 1 : 0
+        return pdfPreviewURL != nil ? 1 : 0
     }
     
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        return pdfURL! as QLPreviewItem
+        return pdfPreviewURL! as QLPreviewItem
+    }
+
+    // MARK: - QLPreviewControllerDelegate
+    func previewControllerDidDismiss(_ controller: QLPreviewController) {
+        ExplosionManager.setOverlayWindowsHidden(false)
+        if let previewURL = pdfPreviewURL,
+           previewURL.path.contains("session-preview-") {
+            try? FileManager.default.removeItem(at: previewURL)
+        }
+        pdfPreviewURL = nil
     }
     
     @objc private func saveButtonTapped() {
@@ -907,7 +969,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 sessionItem.startDate = startDate
                 sessionItem.endDate = endDate
                 sessionItem.isMultiDay = isMultiDay
-                // Note: visibilityLevel is no longer used, replaced by selectedEntries
+                // Note: visibilityLevel is no longer used, replaced by selectedNotes
                 sessionItem.ownerID = NestService.shared.currentNest?.ownerId
                 
                 // Ensure nestID is set (critical for completing sitter requests)
@@ -945,33 +1007,29 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
                 if isSessionPersisted {
                     try await updateSession()
-                } else {
-                    
-                    saveButton.startLoading()
-                    
-                    let newSession = try await SessionService.shared.createSession(sessionItem)
-                    sessionItem = newSession // Update sessionItem with the created session
-                    
-                    // Save any events that were created during session setup
-                    if !sessionEvents.isEmpty {
-                        try await savePendingEvents(to: newSession.id)
-                    }
-                    
-                    try await Task.sleep(for: .seconds(0.75))
-                    saveButton.stopLoading(withSuccess: true)
-                    
-                    // Notify sessions list to reload now that a new session exists
-                    delegate?.editSessionViewController(self, didCreateSession: newSession)
-
-                    await MainActor.run {
-                        self.transitionToPostCreateState()
-                        self.pushSelectEntriesCreationStep()
-                    }
                     return
                 }
-                
-                dismiss(animated: true)
-                
+
+                saveButton.startLoading()
+
+                let newSession = try await SessionService.shared.createSession(sessionItem)
+                sessionItem = newSession // Update sessionItem with the created session
+
+                // Save any events that were created during session setup
+                if !sessionEvents.isEmpty {
+                    try await savePendingEvents(to: newSession.id)
+                }
+
+                try await Task.sleep(for: .seconds(0.75))
+                saveButton.stopLoading(withSuccess: true)
+
+                // Notify sessions list to reload now that a new session exists
+                delegate?.editSessionViewController(self, didCreateSession: newSession)
+
+                await MainActor.run {
+                    self.transitionToPostCreateState()
+                    self.pushSelectNestItemsCreationStep()
+                } 
             } catch ServiceError.noCurrentNest {
                 showToast(text: "Something went wrong", sentiment: .negative)
             } catch {
@@ -1007,11 +1065,29 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         // Set delegate and other properties after collection view is fully configured
         collectionView.delegate = self
         collectionView.delaysContentTouches = false
+        collectionView.keyboardDismissMode = .onDrag
         collectionView.refreshControl = refreshControl
     }
     
     private func createLayout() -> UICollectionViewLayout {
-        let layout = UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
+        let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, layoutEnvironment in
+            guard let self else { return nil }
+
+            let sectionIdentifiers = self.dataSource?.snapshot().sectionIdentifiers ?? []
+            if sectionIdentifiers.indices.contains(sectionIndex),
+               sectionIdentifiers[sectionIndex] == .overview {
+                let height = SitterInfoBannerCell.preferredHeight
+                let itemSize = NSCollectionLayoutSize(
+                    widthDimension: .fractionalWidth(1.0),
+                    heightDimension: .absolute(height)
+                )
+                let item = NSCollectionLayoutItem(layoutSize: itemSize)
+                let group = NSCollectionLayoutGroup.horizontal(layoutSize: itemSize, subitems: [item])
+                let section = NSCollectionLayoutSection(group: group)
+                section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 18, bottom: 8, trailing: 18)
+                return section
+            }
+
             var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
             
             // Enable footer
@@ -1176,7 +1252,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             cell.contentConfiguration = content
         }
 
-        let selectEntriesRegistration = UICollectionView.CellRegistration<SelectEntriesCell, Item> { [weak self] cell, indexPath, item in
+        let selectEntriesRegistration = UICollectionView.CellRegistration<SelectNestItemsCell, Item> { [weak self] cell, indexPath, item in
             guard let self else { return }
             if case let .selectEntries(count) = item {
                 cell.configure(with: count)
@@ -1277,6 +1353,17 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             ))
             cell.accessories = [seeAllAccessory]
         }
+
+        let sessionHelpBannerRegistration = UICollectionView.CellRegistration<SitterInfoBannerCell, Item> { [weak self] cell, _, item in
+            guard case .sessionHelpBanner = item else { return }
+            cell.configure(
+                title: "How sessions work",
+                subtitle: "Everything you share with your sitter is attached to the session."
+            )
+            cell.onClose = { [weak self] in
+                self?.dismissSessionHelpBanner()
+            }
+        }
         
         // Register footer
         let footerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -1324,6 +1411,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
+            case .sessionHelpBanner:
+                return collectionView.dequeueConfiguredReusableCell(using: sessionHelpBannerRegistration, for: indexPath, item: item)
             case .inviteSitter:
                 return collectionView.dequeueConfiguredReusableCell(using: inviteSitterRegistration, for: indexPath, item: item)
             case .selectEntries(let count):
@@ -1367,33 +1456,29 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         if !isArchivedSession {
             var sections: [Section] = [.date, .status]
-            if shouldShowSelectEntriesSection {
+            if shouldShowSelectNestItemsSection {
                 sections.append(.selectEntries)
             }
             sections.append(.events)
             
-            // Only show expenses section if user hasn't voted on the feature
-            if !SurveyService.shared.hasVotedForFeature(SurveyService.Feature.expenses.id) {
-                sections.insert(.expenses, at: sections.count - 1) // Insert before .events
-            }
-            
             if isEditingSession {
                 sections.insert(.sitter, at: 0)
             }
+            if shouldShowSessionHelpBanner {
+                sections.insert(.overview, at: 0)
+            }
             snapshot.appendSections(sections)
-            
+
+            if shouldShowSessionHelpBanner {
+                snapshot.appendItems([.sessionHelpBanner], toSection: .overview)
+            }
             if isEditingSession {
                 snapshot.appendItems([.inviteSitter], toSection: .sitter)
             }
             snapshot.appendItems([.dateSelection(startDate: dateRange.start, endDate: dateRange.end, isMultiDay: sessionItem.isMultiDay)], toSection: .date)
             snapshot.appendItems([.sessionStatus(sessionItem.status)], toSection: .status)
-            if shouldShowSelectEntriesSection {
+            if shouldShowSelectNestItemsSection {
                 snapshot.appendItems([.selectEntries(count: selectedItemIds.count)] + selectEntriesAccessoryItems(), toSection: .selectEntries)
-            }
-            
-            // Only add expenses item if section exists
-            if sections.contains(.expenses) {
-                snapshot.appendItems([.expenses], toSection: .expenses)
             }
             
             snapshot.appendItems([.events], toSection: .events)
@@ -1403,8 +1488,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 snapshot.appendItems([.exportPDF], toSection: .exportPDF)
             }
 
-            // Add End Session section only for in-progress sessions
-            if isEditingSession && sessionItem.status == .inProgress && !isArchivedSession {
+            // Add End Session section for in-progress and extended sessions
+            if shouldShowEndSessionButton(for: sessionItem.status) {
                 snapshot.appendSections([.endSession])
                 snapshot.appendItems([.endSession], toSection: .endSession)
             }
@@ -1421,14 +1506,21 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         dataSource.apply(snapshot, animatingDifferences: false)
         
-        // The fetchOutdatedEntries will be called from viewWillAppear
+        // The fetchOutdatedNotes will be called from viewWillAppear
     }
     
     
     // Add this method to present the SessionEventViewController
     private func presentSessionEventViewController() {
-        let selectedDate = sessionItem.isMultiDay ? nil : sessionItem.startDate
-        let eventVC = SessionEventViewController(sessionID: sessionItem.id, selectedDate: selectedDate, entryRepository: NestService.shared)
+        let selectedDate = sessionItem.isMultiDay ? nil : currentStartDate
+        let sessionDateRange = DateInterval(start: currentStartDate, end: currentEndDate)
+        let eventVC = SessionEventViewController(
+            sessionID: sessionItem.id,
+            nestID: sessionItem.nestID,
+            selectedDate: selectedDate,
+            sessionDateRange: sessionDateRange,
+            nestItemRepository: NestService.shared
+        )
         eventVC.eventDelegate = self
         present(eventVC, animated: true)
     }
@@ -1497,6 +1589,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func expenseButtonTapped() {
         let vc = NNFeaturePreviewViewController(feature: .expenses)
         present(vc, animated: true)
+    }
+
+    private func shouldShowEndSessionButton(for status: SessionStatus) -> Bool {
+        isEditingSession && !isArchivedSession && (status == .inProgress || status == .extended)
     }
 
     private func endSessionButtonTapped() {
@@ -1609,9 +1705,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(nav, animated: true)
     }
     
-    private func presentEntryReview() {
-        // Create EntryReviewViewController with our entryRepository
-        let reviewVC = EntryReviewViewController(entryRepository: entryRepository)
+    private func presentNoteReview() {
+        // Create NoteReviewViewController with our nestItemRepository
+        let reviewVC = NoteReviewViewController(nestItemRepository: nestItemRepository)
         
         // Set ourselves as the delegate
         reviewVC.reviewDelegate = self
@@ -1629,11 +1725,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         present(nav, animated: true)
     }
     
-    private func presentSelectEntriesFlow(showSelectedTab: Bool = false) {
-        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+    private func presentSelectNestItemsFlow(showSelectedTab: Bool = false) {
+        guard let nestItemRepository = (NestService.shared as NestItemRepository?) else { return }
         
-        let folderVC = makeSelectEntriesFolderViewController(
-            entryRepository: entryRepository,
+        let folderVC = makeSelectNestItemsFolderViewController(
+            nestItemRepository: nestItemRepository,
             showsSelectedTabInitially: showSelectedTab,
             includeCancelButton: true
         )
@@ -1649,16 +1745,16 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         navController.modalPresentationStyle = .pageSheet
         
         // Store reference for later use
-        currentSelectEntriesNavController = navController
+        currentSelectNestItemsNavController = navController
         
         present(navController, animated: true)
     }
     
-    private func pushSelectEntriesCreationStep() {
-        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+    private func pushSelectNestItemsCreationStep() {
+        guard let nestItemRepository = (NestService.shared as NestItemRepository?) else { return }
         
-        let folderVC = makeSelectEntriesFolderViewController(
-            entryRepository: entryRepository,
+        let folderVC = makeSelectNestItemsFolderViewController(
+            nestItemRepository: nestItemRepository,
             showsSelectedTabInitially: false,
             includeCancelButton: false,
             showsCreationHeader: true
@@ -1672,13 +1768,13 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         navigationController?.pushViewController(folderVC, animated: true)
     }
     
-    private func makeSelectEntriesFolderViewController(
-        entryRepository: EntryRepository,
+    private func makeSelectNestItemsFolderViewController(
+        nestItemRepository: NestItemRepository,
         showsSelectedTabInitially: Bool,
         includeCancelButton: Bool,
         showsCreationHeader: Bool = false
     ) -> ModifiedSelectFolderViewController {
-        let folderVC = ModifiedSelectFolderViewController(entryRepository: entryRepository)
+        let folderVC = ModifiedSelectFolderViewController(nestItemRepository: nestItemRepository)
         folderVC.showsSelectedTabInitially = showsSelectedTabInitially
         folderVC.allowsEmptySelection = true
         folderVC.showsCreationHeader = showsCreationHeader
@@ -1700,16 +1796,46 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func transitionToPostCreateState() {
         hasCreatedSessionInFlow = true
         syncOriginalSessionFromCurrent()
-        addSelectEntriesSectionIfNeeded()
+        removeSessionHelpBannerIfNeeded()
+        addSelectNestItemsSectionIfNeeded()
         updateSaveButtonState()
     }
+
+    private func presentSessionHelpArticle() {
+        HapticsHelper.lightHaptic()
+        let vc = MarkdownTestViewController(
+            markdown: HowSessionsWorkArticle.markdown,
+            showsShareButton: false
+        )
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+            sheet.preferredCornerRadius = 24
+        }
+        present(nav, animated: true)
+    }
+
+    private func dismissSessionHelpBanner() {
+        guard !SessionHelpBannerStore.isDismissed else { return }
+        SessionHelpBannerStore.dismiss()
+        removeSessionHelpBannerIfNeeded()
+    }
+
+    private func removeSessionHelpBannerIfNeeded() {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.sectionIdentifiers.contains(.overview) else { return }
+        snapshot.deleteSections([.overview])
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
     
-    private func addSelectEntriesSectionIfNeeded() {
-        guard shouldShowSelectEntriesSection else { return }
+    private func addSelectNestItemsSectionIfNeeded() {
+        guard shouldShowSelectNestItemsSection else { return }
         
         var snapshot = dataSource.snapshot()
         guard !snapshot.sectionIdentifiers.contains(.selectEntries) else {
-            updateSelectEntriesSection()
+            updateSelectNestItemsSection()
             return
         }
         
@@ -1727,26 +1853,40 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     }
     
     @objc private func selectEntriesDidCancel() {
-        currentSelectEntriesNavController?.dismiss(animated: true)
-        currentSelectEntriesNavController = nil
+        currentSelectNestItemsNavController?.dismiss(animated: true)
+        currentSelectNestItemsNavController = nil
     }
     
     private func selectEntriesDidFinish(with selectedIds: [String]) {
-        let alert = makeSelectEntriesConfirmationAlert(selectedIds: selectedIds) { [weak self] in
+        let alert = makeSelectNestItemsConfirmationAlert(selectedIds: selectedIds) { [weak self] in
             guard let self else { return }
             self.selectedItemIds = selectedIds
             self.sessionItem.entryIds = selectedIds.isEmpty ? nil : selectedIds
-            self.currentSelectEntriesNavController?.dismiss(animated: true)
-            self.currentSelectEntriesNavController = nil
+            self.currentSelectNestItemsNavController?.dismiss(animated: true)
+            self.currentSelectNestItemsNavController = nil
             self.fetchSelectedItemPreviews()
             self.checkForChanges()
         }
         
-        currentSelectEntriesNavController?.present(alert, animated: true)
+        currentSelectNestItemsNavController?.present(alert, animated: true)
     }
     
     private func selectEntriesCreationDidFinish(
         with selectedIds: [String],
+        from folderVC: ModifiedSelectFolderViewController
+    ) {
+        let alert = makeSelectNestItemsConfirmationAlert(
+            selectedIds: selectedIds,
+            isCreationFlow: true
+        ) { [weak self, weak folderVC] in
+            guard let self, let folderVC else { return }
+            self.persistSelectedEntriesAndCreateInvite(selectedIds: selectedIds, from: folderVC)
+        }
+        folderVC.present(alert, animated: true)
+    }
+    
+    private func persistSelectedEntriesAndCreateInvite(
+        selectedIds: [String],
         from folderVC: ModifiedSelectFolderViewController
     ) {
         selectedItemIds = selectedIds
@@ -1782,8 +1922,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
     }
     
-    private func makeSelectEntriesConfirmationAlert(
+    private func makeSelectNestItemsConfirmationAlert(
         selectedIds: [String],
+        isCreationFlow: Bool = false,
         confirmHandler: @escaping () -> Void
     ) -> UIAlertController {
         let totalCount = selectedIds.count
@@ -1791,15 +1932,18 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         let alert: UIAlertController
         if totalCount == 0 {
             alert = UIAlertController(
-                title: "Remove All Items?",
-                message: "No items will be visible to sitters during this session.",
+                title: isCreationFlow ? "Continue Without Items?" : "Remove All Items?",
+                message: "No items will be visible to sitters during this session. You can update this later.",
                 preferredStyle: .alert
             )
         } else {
             let itemText = totalCount == 1 ? "item" : "items"
+            let message = isCreationFlow
+                ? "Sitters will see these \(totalCount) \(itemText) during the session. You can update this later."
+                : "Add \(totalCount) \(itemText) to the session? Sitters will see them for the duration of the session. You can update this later."
             alert = UIAlertController(
                 title: "Confirm Selection",
-                message: "Add \(totalCount) \(itemText) to the session? These items will be visible to sitters throughout the duration of the session.",
+                message: message,
                 preferredStyle: .alert
             )
         }
@@ -1824,7 +1968,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     
     private func pushInviteYourSitter(for session: SessionItem, inviteCode: String?) {
         let code = inviteCode ?? "000000"
-        let inviteVC = InviteYourSitterViewController(inviteCode: code, session: session)
+        let inviteVC = InviteYourSitterViewController(
+            inviteCode: code,
+            session: session,
+            promptsForNotificationsOnDismiss: true
+        )
         navigationController?.pushViewController(inviteVC, animated: true)
     }
     
@@ -1839,10 +1987,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         }
         
         let contacts = counts[.contact] ?? 0
-        let entries = counts[.entry] ?? 0
+        let notes = counts[.entry] ?? 0
         let places = counts[.place] ?? 0
         let routines = counts[.routine] ?? 0
-        let other = (counts[.pilotCard] ?? 0) + (counts[.unknownDocument] ?? 0)
+        let other = counts[.unknownDocument] ?? 0
         
         var parts: [String] = []
         func appendCount(_ n: Int, singular: String, plural: String) {
@@ -1850,10 +1998,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             parts.append(n == 1 ? "1 \(singular)" : "\(n) \(plural)")
         }
         
-        let hasContactsOrEntries = contacts > 0 || entries > 0
+        let hasContactsOrEntries = contacts > 0 || notes > 0
         if hasContactsOrEntries {
             appendCount(contacts, singular: "contact", plural: "contacts")
-            appendCount(entries, singular: "entry", plural: "entries")
+            appendCount(notes, singular: "note", plural: "notes")
             let rest = places + routines + other
             if rest > 0 {
                 parts.append(rest == 1 ? "1 more" : "\(rest) more")
@@ -1872,7 +2020,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         return [.selectedEntriesSummary(summary: summary)]
     }
     
-    private func updateSelectEntriesSection() {
+    private func updateSelectNestItemsSection() {
         var snapshot = dataSource.snapshot()
         guard snapshot.sectionIdentifiers.contains(.selectEntries) else { return }
         
@@ -1885,7 +2033,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func fetchSelectedItemPreviews() {
         guard !selectedItemIds.isEmpty else {
             selectedItemPreviews = []
-            updateSelectEntriesSection()
+            updateSelectNestItemsSection()
             return
         }
         
@@ -1899,7 +2047,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 
                 await MainActor.run {
                     self.selectedItemPreviews = previews
-                    self.updateSelectEntriesSection()
+                    self.updateSelectNestItemsSection()
                 }
             } catch {
                 Logger.log(level: .error, category: .general, message: "Failed to fetch item previews: \(error.localizedDescription)")
@@ -2231,7 +2379,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         if snapshot.sectionIdentifiers.contains(.endSession) {
             snapshot.deleteSections([.endSession])
         }
-        if isEditingSession && status == .inProgress && !isArchivedSession {
+        if shouldShowEndSessionButton(for: status) {
             snapshot.appendSections([.endSession])
             snapshot.appendItems([.endSession], toSection: .endSession)
         }
@@ -2332,6 +2480,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func updateSession() async throws {
         // Validate session before updating
         guard validateSession() else { return }
+
+        let didJustComplete = originalSession.status != .completed && sessionItem.status == .completed
         
         saveButton.startLoading()
         
@@ -2369,6 +2519,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         await finalizeCompletedSessionIfNeeded()
 
         if shouldShowSessionPaymentSection {
+            if didJustComplete {
+                await MainActor.run {
+                    self.presentSessionPaymentCalculator()
+                }
+            }
             return
         }
 
@@ -2382,7 +2537,9 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
             return
         }
 
-        refreshExportPDFCell()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshExportPDFCell()
+        }
     }
 
     @objc private func handleSessionStatusChange(_ notification: Notification) {
@@ -2421,8 +2578,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         NotificationCenter.default.removeObserver(self)
     }
     
-    // Update this method to use entryRepository and hide section if no entries need review
-    private func fetchOutdatedEntries() {
+    // Update this method to use nestItemRepository and hide section if no entries need review
+    private func fetchOutdatedNotes() {
         // Only fetch if we need to (not for archived sessions)
         guard !isArchivedSession else { return }
         
@@ -2442,7 +2599,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         
         // Check if we've fetched recently to avoid duplicate calls
         if let lastFetch = lastFetchTime, Date().timeIntervalSince(lastFetch) < minimumFetchInterval {
-            Logger.log(level: .debug, category: .nestService, message: "Skipping fetchOutdatedEntries - called too soon")
+            Logger.log(level: .debug, category: .nestService, message: "Skipping fetchOutdatedNotes - called too soon")
             return
         }
         
@@ -2465,24 +2622,24 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 Logger.log(level: .debug, category: .nestService, message: "Fetching outdated entries...")
                 
                 // Use the entry repository to fetch outdated entries directly via the protocol
-                let outdatedEntries = try await entryRepository.fetchOutdatedEntries(olderThan: 90)
+                let outdatedNotes = try await nestItemRepository.fetchOutdatedNotes(olderThan: 90)
                 
                 // Add this additional logging to be explicit
-                if outdatedEntries.isEmpty {
+                if outdatedNotes.isEmpty {
                     Logger.log(level: .debug, category: .nestService, message: "No outdated entries found")
                 } else {
-                    Logger.log(level: .debug, category: .nestService, message: "Fetched \(outdatedEntries.count) outdated entries: \(outdatedEntries.map { $0.title }.joined(separator: ", "))")
+                    Logger.log(level: .debug, category: .nestService, message: "Fetched \(outdatedNotes.count) outdated notes: \(outdatedNotes.map { $0.title }.joined(separator: ", "))")
                 }
                 
                 // Store the count to help with race conditions
-                self.lastOutdatedCount = outdatedEntries.count
+                self.lastOutdatedCount = outdatedNotes.count
                 
                 await MainActor.run {
                     // Only update if the view is still in the window hierarchy
                     guard self.view.window != nil else { return }
                     
-                    let hasOutdatedEntries = !outdatedEntries.isEmpty
-                    let outdatedCount = outdatedEntries.count
+                    let hasOutdatedEntries = !outdatedNotes.isEmpty
+                    let outdatedCount = outdatedNotes.count
                     
                     // Update the nest review section with the fetched count
                     if hasOutdatedEntries {
@@ -2502,7 +2659,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                     }
                 }
             } catch {
-                Logger.log(level: .error, category: .nestService, message: "Error fetching outdated entries: \(error.localizedDescription)")
+                Logger.log(level: .error, category: .nestService, message: "Error fetching outdated notes: \(error.localizedDescription)")
                 
                 // Even on error, we should update the cell to not show the loading state
                 await MainActor.run {
@@ -2556,6 +2713,7 @@ extension EditSessionViewController {
     }
     
     enum Item: Hashable {
+        case sessionHelpBanner
         case inviteSitter
         case selectEntries(count: Int)
         case sessionStatus(SessionStatus)
@@ -2572,6 +2730,8 @@ extension EditSessionViewController {
         
         func hash(into hasher: inout Hasher) {
             switch self {
+            case .sessionHelpBanner:
+                hasher.combine(0)
             case .inviteSitter:
                 hasher.combine(1)
             case .selectEntries(let count):
@@ -2612,7 +2772,8 @@ extension EditSessionViewController {
         
         static func == (lhs: Item, rhs: Item) -> Bool {
             switch (lhs, rhs) {
-            case (.inviteSitter, .inviteSitter),
+            case (.sessionHelpBanner, .sessionHelpBanner),
+                 (.inviteSitter, .inviteSitter),
                  (.expenses, .expenses),
                  (.exportPDF, .exportPDF),
                  (.events, .events),
@@ -2645,6 +2806,8 @@ extension EditSessionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch item {
+        case .sessionHelpBanner:
+            return true
         case .inviteSitter:
             return !isArchivedSession
         case .events, .moreEvents:
@@ -2684,11 +2847,13 @@ extension EditSessionViewController: UICollectionViewDelegate {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
         
         switch item {
+        case .sessionHelpBanner:
+            presentSessionHelpArticle()
         case .inviteSitter:
             guard !isArchivedSession && isEditingSession else { break }
             inviteSitterButtonTapped()
         case .selectEntries:
-            presentSelectEntriesFlow()
+            presentSelectNestItemsFlow()
         case .sessionStatus:
             break
         case .dateSelection:
@@ -2705,11 +2870,11 @@ extension EditSessionViewController: UICollectionViewDelegate {
                     updateNestReviewSection(with: lastOutdatedCount)
                 } else {
                     // Otherwise, fetch again
-                    fetchOutdatedEntries()
+                    fetchOutdatedNotes()
                 }
             } else {
                 // Has a count (loading is complete), present the review controller
-                presentEntryReview()
+                presentNoteReview()
             }
         case .expenses:
             expenseButtonTapped()
@@ -2749,13 +2914,20 @@ extension EditSessionViewController: UICollectionViewDelegate {
                 
                 await MainActor.run {
                     // Present event details
-                    let eventVC = SessionEventViewController(sessionID: self.sessionItem.id, event: event, entryRepository: NestService.shared)
+                    let sessionDateRange = DateInterval(start: self.currentStartDate, end: self.currentEndDate)
+                    let eventVC = SessionEventViewController(
+                        sessionID: self.sessionItem.id,
+                        nestID: self.sessionItem.nestID,
+                        event: event,
+                        sessionDateRange: sessionDateRange,
+                        nestItemRepository: NestService.shared
+                    )
                     eventVC.eventDelegate = self
                     self.present(eventVC, animated: true)
                 }
             }
         case .selectedEntriesSummary:
-            presentSelectEntriesFlow(showSelectedTab: true)
+            presentSelectNestItemsFlow(showSelectedTab: true)
         case .endSession:
             endSessionButtonTapped()
         case .payWithVenmo:
@@ -2882,9 +3054,9 @@ extension EditSessionViewController: DatePresentationDelegate {
 }
 
 // MARK: - Communicate from NestReviewCell to present entry review
-extension EditSessionViewController: EntryReviewCellDelegate {
+extension EditSessionViewController: NoteReviewCellDelegate {
     func didTapReview() {
-        presentEntryReview()
+        presentNoteReview()
     }
 }
 
@@ -2978,9 +3150,9 @@ extension EditSessionViewController: SitterListViewControllerDelegate {
     }
 }
 
-extension EditSessionViewController: SelectEntriesCellDelegate {
-    func selectEntriesCellDidTapButton(_ cell: SelectEntriesCell) {
-        presentSelectEntriesFlow()
+extension EditSessionViewController: SelectNestItemsCellDelegate {
+    func selectNestItemsCellDidTapButton(_ cell: SelectNestItemsCell) {
+        presentSelectNestItemsFlow()
     }
 }
 
@@ -3255,20 +3427,24 @@ extension EditSessionViewController: StatusCellDelegate {
 // MARK: - ModifiedSelectFolderViewControllerDelegate
 extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate {
     func modifiedSelectFolderViewController(_ controller: ModifiedSelectFolderViewController, didSelectFolder folderPath: String) {
-        guard let entryRepository = (NestService.shared as EntryRepository?) else { return }
+        guard let nestItemRepository = (NestService.shared as NestItemRepository?) else { return }
         
         // Create and push the category view controller
         let categoryVC = NestCategoryViewController(
-            entryRepository: entryRepository,
+            nestItemRepository: nestItemRepository,
             initialCategory: folderPath,
             isEditOnlyMode: true
         )
         // Set the folder view controller as the delegate to receive selection updates
-        categoryVC.selectEntriesDelegate = controller
+        categoryVC.selectNestItemsDelegate = controller
         categoryVC.title = folderPath.components(separatedBy: "/").last ?? folderPath
         
         // Pass selection limit information for enforcement
-        categoryVC.setSelectionLimit(controller.getCurrentSelectionLimit())
+        categoryVC.setSelectionLimit(
+            controller.getCurrentSelectionLimit(),
+            offersUpgrade: controller.maxSelectionCount == nil
+        )
+        categoryVC.setExcludedItemIds(controller.excludedItemIds)
         
         // Restore previously selected items
         Task {
@@ -3278,7 +3454,7 @@ extension EditSessionViewController: ModifiedSelectFolderViewControllerDelegate 
             }
         }
         
-        currentSelectEntriesNavController?.pushViewController(categoryVC, animated: true)
+        currentSelectNestItemsNavController?.pushViewController(categoryVC, animated: true)
             ?? controller.navigationController?.pushViewController(categoryVC, animated: true)
     }
 }
@@ -3366,8 +3542,8 @@ extension EditSessionViewController: InviteSitterViewControllerDelegate {
     }
 }
 
-// Add the EntryReviewViewControllerDelegate conformance
-extension EditSessionViewController: EntryReviewViewControllerDelegate {
+// Add the NoteReviewViewControllerDelegate conformance
+extension EditSessionViewController: NoteReviewViewControllerDelegate {
     func entryReviewDidComplete() {
         Logger.log(level: .debug, category: .general, message: "Entry review completed - removing nest review section")
         

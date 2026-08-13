@@ -122,7 +122,63 @@ final class OBEmailViewController: NNOnboardingViewController {
     }
     
     @objc private func nextButtonTapped() {
-        (coordinator as? OnboardingCoordinator)?.next()
+        let email = emailTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !email.isEmpty else { return }
+
+        emailTextField.resignFirstResponder()
+        (ctaButton as? NNLoadingButton)?.startLoading()
+        ctaButton?.isEnabled = false
+
+        Task {
+            do {
+                let available = try await UserService.shared.isEmailAvailable(email)
+                await MainActor.run {
+                    (self.ctaButton as? NNLoadingButton)?.stopLoading()
+                    self.ctaButton?.isEnabled = true
+                    if available {
+                        (self.coordinator as? OnboardingCoordinator)?.next()
+                    } else {
+                        self.showToast(
+                            delay: 0.15,
+                            text: "Email Already Registered",
+                            subtitle: "Try signing in or use a different email.",
+                            sentiment: .negative
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    (self.ctaButton as? NNLoadingButton)?.stopLoading()
+                    self.ctaButton?.isEnabled = true
+
+                    if let authError = error as? AuthError {
+                        switch authError {
+                        case .emailInvalid:
+                            self.showToast(
+                                delay: 0.3,
+                                text: "Invalid Email",
+                                subtitle: authError.errorDescription,
+                                sentiment: .negative
+                            )
+                            return
+                        case .networkError:
+                            self.showToast(
+                                delay: 0.3,
+                                text: "Connection Problem",
+                                subtitle: authError.errorDescription,
+                                sentiment: .negative
+                            )
+                            return
+                        default:
+                            break
+                        }
+                    }
+
+                    // Availability unknown (e.g. email enumeration protection) — continue to signup.
+                    (self.coordinator as? OnboardingCoordinator)?.next()
+                }
+            }
+        }
     }
     
     @objc private func signInWithAppleTapped() {

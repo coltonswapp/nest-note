@@ -8,10 +8,10 @@ import UIKit
 
 class LoadingViewController: UIViewController {
     private let birdImageView: UIImageView = {
-        let imageView = UIImageView(image: NNImage.primaryLogo)
+        // Use LaunchLogo (original light/dark assets) so this screen matches
+        // LaunchScreen.storyboard — template tinting isn't reliable there.
+        let imageView = UIImageView(image: UIImage(named: "LaunchLogo"))
         imageView.contentMode = .scaleAspectFit
-        imageView.tintColor = .label
-        imageView.preferredSymbolConfiguration = .init(pointSize: 80, weight: .regular)
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
     }()

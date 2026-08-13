@@ -33,6 +33,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         // Prepare the explosion overlay after the main window is visible.
         ExplosionManager.prepare(windowScene: windowScene)
+        DemoModeBadgeOverlay.shared.install(windowScene: windowScene)
         
         Task {
             do {

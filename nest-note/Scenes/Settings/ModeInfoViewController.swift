@@ -62,11 +62,21 @@ final class ModeInfoViewController: NNViewController {
         button.addTarget(self, action: #selector(gotItTapped), for: .touchUpInside)
         return button
     }()
+
+    private var hasAnimatedBullets = false
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
         setupView()
+        infoView.prepareItemsForSlideIn()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasAnimatedBullets else { return }
+        hasAnimatedBullets = true
+        infoView.animateItemsIn(initialDelay: 0.08)
     }
     
     // MARK: - Setup

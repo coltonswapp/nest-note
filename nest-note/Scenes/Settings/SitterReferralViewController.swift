@@ -1,7 +1,7 @@
 import UIKit
 
 /// Dedicated sitter referral destination — pattern header, benefits, and shareable code.
-final class SitterReferralViewController: NNViewController {
+final class SitterReferralViewController: NNViewController, NNTippable {
 
     private let topImageView: UIImageView = {
         let view = UIImageView()
@@ -104,6 +104,7 @@ final class SitterReferralViewController: NNViewController {
     private var referralCode: String?
     private var isGeneratingCode = false
     private var isSharing = false
+    private var hasAnimatedBullets = false
 
     init() {
         self.infoView = NNBulletStack(items: [
@@ -224,7 +225,33 @@ final class SitterReferralViewController: NNViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        guard !hasAnimatedBullets else { return }
+        hasAnimatedBullets = true
         infoView.animateItemsIn(initialDelay: 0.08)
+    }
+
+    // MARK: - NNTippable
+
+    func showTips() {
+        trackScreenVisit()
+        showCodeCopyTipIfNeeded()
+    }
+
+    private func showCodeCopyTipIfNeeded() {
+        guard !codeCopyButton.isHidden,
+              referralCode != nil,
+              NNTipManager.shared.shouldShowTip(SettingsTips.sitterReferralCodeTip),
+              !NNTipManager.shared.isShowingTip(SettingsTips.sitterReferralCodeTip) else {
+            return
+        }
+
+        NNTipManager.shared.showTip(
+            SettingsTips.sitterReferralCodeTip,
+            sourceView: codeCopyButton,
+            in: self,
+            pinToEdge: .top,
+            offset: CGPoint(x: 0, y: -8)
+        )
     }
 
     private func setupBottomBlurEffect() {
@@ -296,6 +323,8 @@ final class SitterReferralViewController: NNViewController {
         ) {
             self.codeCopyButton.alpha = 1
             self.codeCopyButton.transform = .identity
+        } completion: { [weak self] _ in
+            self?.showCodeCopyTipIfNeeded()
         }
     }
 
@@ -359,6 +388,7 @@ final class SitterReferralViewController: NNViewController {
     @objc private func codeCopyTapped() {
         guard let code = referralCode, !code.isEmpty else { return }
 
+        NNTipManager.shared.dismissTip(SettingsTips.sitterReferralCodeTip)
         UIPasteboard.general.string = code
         codeCopyButton.showCopiedFeedback()
         HapticsHelper.lightHaptic()

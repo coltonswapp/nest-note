@@ -3,7 +3,7 @@
     "questions": [
         {
             "id": "sitting_frequency",
-            "title": "How often do you leave your children with a sitter on a monthly basis?",
+            "title": "How often do you leave your children / pets with a sitter on a monthly basis?",
             "subtitle": "This helps us understand your needs better",
             "options": [
                 "< 1 time per month",
@@ -37,6 +37,7 @@
             "options": [
                 "Children",
                 "Pets",
+                "House",
                 "Plants"
             ],
             "multi_select": true,
@@ -85,6 +86,7 @@
                 "DEBUG - Testing"
             ],
             "multi_select": false,
+            "layout": "grid",
             "category": "discovery",
             "order": 5
         }

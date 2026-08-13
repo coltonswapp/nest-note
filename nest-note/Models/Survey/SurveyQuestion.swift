@@ -1,12 +1,19 @@
 import Foundation
 
 struct SurveyQuestion: Codable {
+    enum Layout: String, Codable {
+        case list
+        case grid
+    }
+
     let id: String
     let title: String
     let subtitle: String?
     let options: [String]
     let optionSubtitles: [String]?
     let isMultiSelect: Bool
+    /// `grid` renders options in a 2-column layout; defaults to single-column `list`.
+    let layout: Layout?
 
     // Optional metadata that might be useful
     let category: String?
@@ -19,8 +26,13 @@ struct SurveyQuestion: Codable {
         case options
         case optionSubtitles = "option_subtitles"
         case isMultiSelect = "multi_select"
+        case layout
         case category
         case order
+    }
+
+    var columnCount: Int {
+        layout == .grid ? 2 : 1
     }
 
     // Filter out DEBUG options in release builds

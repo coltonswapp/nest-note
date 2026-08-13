@@ -151,7 +151,11 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     private var collectionView: UICollectionView!
     private var options: [SurveyOption] = []
     private var isMultiSelect: Bool = true
+    private var columnCount: Int = 1
     private(set) var currentQuestion: SurveyQuestion?
+
+    /// When set, invoked instead of `OnboardingCoordinator` — used by alternate / experiment flows.
+    var onContinueWithAnswers: ((String, [String]) -> Void)?
     
     private lazy var nextButton: NNPrimaryLabeledButton = {
         let button = NNPrimaryLabeledButton(title: "Next")
@@ -165,6 +169,7 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         let question: SurveyQuestion
     }
     private var pendingConfiguration: PendingConfiguration?
+    private var pendingPreselectedTitles: Set<String> = []
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
@@ -258,39 +263,73 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     }
     
     private func createLayout() -> UICollectionViewLayout {
+        let itemHeight: CGFloat = 56
+        let interItemSpacing: CGFloat = 12
+
         let itemSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1.0),
-            heightDimension: .estimated(50)  // Increased height for better touch targets
+            heightDimension: .estimated(itemHeight)
         )
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
-        
+
         let groupSize = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1.0),
-            heightDimension: .estimated(50)  // Match item height
+            heightDimension: .estimated(itemHeight)
         )
-        let group = NSCollectionLayoutGroup.vertical(layoutSize: groupSize, subitems: [item])
-        
+
+        let group: NSCollectionLayoutGroup
+        if columnCount >= 2 {
+            group = NSCollectionLayoutGroup.horizontal(
+                layoutSize: groupSize,
+                repeatingSubitem: item,
+                count: columnCount
+            )
+            group.interItemSpacing = .fixed(interItemSpacing)
+        } else {
+            group = NSCollectionLayoutGroup.vertical(layoutSize: groupSize, subitems: [item])
+        }
+
         let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = 12  // Increased spacing between cells
+        section.interGroupSpacing = interItemSpacing
         section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 24, bottom: 8, trailing: 24)
-        
+
         return UICollectionViewCompositionalLayout(section: section)
+    }
+
+    private func applyLayoutIfNeeded() {
+        guard collectionView != nil else { return }
+        collectionView.setCollectionViewLayout(createLayout(), animated: false)
     }
     
     // MARK: - Public Methods
     func configure(with question: SurveyQuestion) {
+        // Always keep the question identity available before the view loads
+        // (coordinators look up steps by currentQuestion.id / onboardingStepId).
+        currentQuestion = question
+
         // If collection view isn't ready, store configuration for later
         if collectionView == nil {
             pendingConfiguration = PendingConfiguration(question: question)
             return
         }
-        
-        currentQuestion = question
+
         setupOnboarding(title: question.title, subtitle: question.subtitle)
-        
+
         self.options = question.filteredOptions.map { SurveyOption(title: $0) }
         self.isMultiSelect = question.isMultiSelect
+        self.columnCount = question.columnCount
+        applyLayoutIfNeeded()
+        applyPendingPreselection()
         collectionView.reloadData()
+        updateNextButtonEnabled()
+    }
+
+    /// Marks matching options as selected (e.g. preselect Household). Safe before or after load.
+    func preselectOptions(_ titles: [String]) {
+        pendingPreselectedTitles = Set(titles)
+        applyPendingPreselection()
+        collectionView?.reloadData()
+        updateNextButtonEnabled()
     }
     
     func getSelectedOptions() -> [String] {
@@ -314,6 +353,18 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
     }
     
     // MARK: - Private Methods
+    private func applyPendingPreselection() {
+        guard !pendingPreselectedTitles.isEmpty, !options.isEmpty else { return }
+        for index in options.indices {
+            options[index].isSelected = pendingPreselectedTitles.contains(options[index].title)
+        }
+    }
+
+    private func updateNextButtonEnabled() {
+        let hasSelectedOptions = !getSelectedOptions().isEmpty
+        nextButton.isEnabled = hasSelectedOptions
+    }
+
     private func updateScrollingBehavior() {
         // Calculate if content fits without scrolling
         let contentHeight = collectionView.collectionViewLayout.collectionViewContentSize.height
@@ -329,6 +380,11 @@ class NNOnboardingSurveyViewController: NNOnboardingViewController {
         guard let response = getCurrentQuestionResponse(),
               !response.answers.isEmpty else {
             showToast(text: "Please select an option", sentiment: .negative)
+            return
+        }
+
+        if let onContinueWithAnswers {
+            onContinueWithAnswers(response.questionId, response.answers)
             return
         }
         
@@ -380,7 +436,6 @@ extension NNOnboardingSurveyViewController: UICollectionViewDataSource, UICollec
             collectionView.reloadData()
         } else {
             // For multi-select, toggle the selected option
-            let wasSelected = options[indexPath.item].isSelected
             options[indexPath.item].isSelected.toggle()
             let isNowSelected = options[indexPath.item].isSelected
             
@@ -389,16 +444,12 @@ extension NNOnboardingSurveyViewController: UICollectionViewDataSource, UICollec
             }
             
             HapticsHelper.lightHaptic()
-            // Trigger explosion for both selecting AND deselecting (multi-select)
-            ExplosionManager.trigger(.tiny, at: explosionPoint)
+            // Trigger explosion only when selecting (not deselecting)
+            if isNowSelected {
+                ExplosionManager.trigger(.tiny, at: explosionPoint)
+            }
         }
         
-        // Check the current state of selected options
-        let hasSelectedOptions = !getSelectedOptions().isEmpty
-        
-        // Only update isEnabled if the state is different from current state
-        if nextButton.isEnabled != hasSelectedOptions {
-            nextButton.isEnabled = hasSelectedOptions
-        }
+        updateNextButtonEnabled()
     }
 } 
