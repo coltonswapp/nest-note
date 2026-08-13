@@ -401,6 +401,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             name: .placeThumbnailsDidUpdate,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(nestCategoryDidChange(_:)),
+            name: .nestCategoryDidChange,
+            object: nil
+        )
     }
     
     @objc private func placeDidSave(_ notification: Notification) {
@@ -408,6 +414,25 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         Task {
             await loadFolderContents()
         }
+    }
+
+    @objc private func nestCategoryDidChange(_ notification: Notification) {
+        guard let path = notification.object as? String else { return }
+        Task { @MainActor in
+            self.removeFolderLocally(path)
+        }
+    }
+
+    private func removeFolderLocally(_ path: String) {
+        let stillPresent = folders.contains { $0.fullPath == path || $0.fullPath.hasPrefix(path + "/") }
+        guard stillPresent else { return }
+
+        shouldApplySnapshotAutomatically = false
+        folders.removeAll { $0.fullPath == path || $0.fullPath.hasPrefix(path + "/") }
+        shouldApplySnapshotAutomatically = true
+        applySnapshot(animated: true)
+        updateFilterView()
+        refreshEmptyState()
     }
     
     override func viewDidLoad() {
@@ -1820,8 +1845,9 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                     let itemText = totalDeleted == 1 ? "item" : "items"
                     self.showToast(text: "\(totalDeleted) \(itemText) deleted")
 
-                    // Refresh empty state
+                    // Refresh empty state and filter chips
                     self.refreshEmptyState()
+                    self.updateFilterView()
                 }
             } catch {
                 await MainActor.run {
@@ -2218,6 +2244,7 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
             }
             self.shouldApplySnapshotAutomatically = true
 
+            self.applyContactContentToVisibleCell(contact)
             self.refreshGridItem(
                 matching: { ($0 as? ContactItem)?.id == contact.id },
                 updatedItem: contact,
@@ -2229,12 +2256,45 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 },
                 idFromItem: { ($0 as? ContactItem)?.id },
                 flash: {
-                    if let indexPath = self.dataSource?.indexPath(for: contact),
-                       let cell = self.collectionView.cellForItem(at: indexPath) as? WaterfallGridCell {
-                        cell.flash()
-                    }
+                    self.applyContactContentToVisibleCell(contact)
+                    self.flashContactCell(for: contact)
                 }
             )
+        }
+    }
+
+    private func applyContactContentToVisibleCell(_ contact: ContactItem) {
+        guard let indexPath = dataSource?.indexPath(for: contact),
+              let cell = collectionView.cellForItem(at: indexPath) else { return }
+
+        if let waterfallCell = cell as? WaterfallGridCell {
+            waterfallCell.configure(
+                title: contact.title,
+                content: contact.content,
+                isEditMode: isEditingMode,
+                isSelected: selectedContacts.contains(contact)
+            )
+        } else if let halfWidthCell = cell as? HalfWidthCell {
+            halfWidthCell.configure(
+                key: contact.title,
+                value: contact.content,
+                isNestOwner: allowsNestEdits,
+                isEditMode: isEditingMode,
+                isSelected: selectedContacts.contains(contact),
+                isModalInPresentation: navigationController?.modalPresentationStyle == .formSheet
+                    || navigationController?.modalPresentationStyle == .pageSheet
+            )
+        }
+    }
+
+    private func flashContactCell(for contact: ContactItem) {
+        guard let indexPath = dataSource?.indexPath(for: contact),
+              let cell = collectionView.cellForItem(at: indexPath) else { return }
+
+        if let waterfallCell = cell as? WaterfallGridCell {
+            waterfallCell.flash()
+        } else if let halfWidthCell = cell as? HalfWidthCell {
+            halfWidthCell.flash()
         }
     }
 
@@ -2292,6 +2352,10 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
                 snapshot.appendItems(replaced, toSection: section)
             } else {
                 snapshot.appendItems([updatedItem], toSection: section)
+            }
+            // Identity is id-only, so apply() would otherwise treat this as a no-op.
+            if snapshot.itemIdentifiers.contains(where: matching) {
+                snapshot.reconfigureItems([AnyHashable(updatedItem)])
             }
         } else if orderChanged {
             // Reference-type items were mutated in place; rebuild to re-sort,
@@ -2471,15 +2535,12 @@ class NestCategoryViewController: NNViewController, NestLoadable, CollectionView
         
         Task {
             do {
-                // Delete the category/folder from the backend
                 try await nestService.deleteCategory(folderData.fullPath)
-                
                 await MainActor.run {
                     Logger.log(level: .info, category: logCategory, message: "Folder deleted: \(folderData.fullPath)")
                     self.showToast(text: "Folder Deleted")
-                    
-                    // Simply remove the deleted folder from the local folders array
-                    self.folders.removeAll { $0.fullPath == folderData.fullPath }
+                    // List, chips, and parent nest screens refresh via `.nestCategoryDidChange`.
+                    self.removeFolderLocally(folderData.fullPath)
                 }
             } catch {
                 await MainActor.run {
@@ -3240,6 +3301,7 @@ extension NestCategoryViewController: NoteDetailViewControllerDelegate {
             
             showToast(text: "Note Deleted")
             refreshEmptyState()
+            updateFilterView()
         }
     }
 }
@@ -3269,6 +3331,7 @@ extension NestCategoryViewController: ContactDetailViewControllerDelegate {
             contacts.remove(at: index)
             showToast(text: "Contact deleted")
             refreshEmptyState()
+            updateFilterView()
         }
     }
 }

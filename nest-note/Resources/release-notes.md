@@ -6,8 +6,11 @@ You're on **{{APP_VERSION}}**. Here's what's new.
 ## 1.3.2
 
 - Attach related nest items to notes, routines, and places
-- New “How Sessions Work” guide, with a helpful tip when creating your first session
 - PDF exports now include attached items
+- New “How Sessions Work” guide, with a helpful tip when creating your first session
+- Signup now previews the folders your nest will start with
+- Pin extra folders to your home screen
+- Nest Score on home, so you can see how ready your nest is for sitters
 - Clearer Venmo payment details on sessions
 
 ## 1.3.1

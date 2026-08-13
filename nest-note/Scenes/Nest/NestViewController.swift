@@ -226,6 +226,17 @@ class NestViewController: NNViewController, NestLoadable, PaywallPresentable, Pa
                 setupToolbar()
             }
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(nestCategoryDidChange(_:)),
+            name: .nestCategoryDidChange,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -839,20 +850,8 @@ extension NestViewController {
             do {
                 try await nestService.deleteCategory(folderData.fullPath)
 
-                // Refresh categories, notes, places, and routines
-                async let categoriesTask = nestService.fetchCategories()
-                async let entriesPlacesTask = nestService.fetchNotesAndPlaces()
-                async let routinesTask: [RoutineItem] = nestService.fetchItems(ofType: .routine)
-
-                let (newCategories, (groupedNotes, places), routines) = try await (categoriesTask, entriesPlacesTask, routinesTask)
-
                 await MainActor.run {
-                    self.categories = newCategories
-                    self.notes = groupedNotes
-                    self.places = places
-                    self.routines = routines
-                    self.clearFolderCache()
-                    self.applyInitialSnapshots()
+                    self.removeCategoryLocally(folderData.fullPath)
                     self.showToast(text: "Folder Deleted")
                 }
             } catch {
@@ -862,6 +861,33 @@ extension NestViewController {
                 }
             }
         }
+    }
+
+    @objc private func nestCategoryDidChange(_ notification: Notification) {
+        guard let path = notification.object as? String else { return }
+        Task { @MainActor in
+            self.removeCategoryLocally(path)
+        }
+    }
+
+    private func removeCategoryLocally(_ categoryName: String) {
+        let stillPresent = categories.contains {
+            $0.name == categoryName || $0.name.hasPrefix(categoryName + "/")
+        }
+        guard stillPresent else { return }
+
+        categories.removeAll { $0.name == categoryName || $0.name.hasPrefix(categoryName + "/") }
+        allItems.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        if var notes {
+            notes = notes.filter { key, _ in
+                key != categoryName && !key.hasPrefix(categoryName + "/")
+            }
+            self.notes = notes
+        }
+        places.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        routines.removeAll { $0.category == categoryName || $0.category.hasPrefix(categoryName + "/") }
+        clearFolderCache()
+        applyInitialSnapshots()
     }
 }
 

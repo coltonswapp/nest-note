@@ -248,6 +248,8 @@ final class NestService: NestItemRepository {
 
     // MARK: - Category Methods
     private var cachedCategories: [NestCategory]?
+    /// Bumped on category mutations so an in-flight fetch cannot write stale data back into the cache.
+    private var categoriesCacheEpoch = 0
     
     func fetchCategories() async throws -> [NestCategory] {
         // Return cached categories if available
@@ -260,6 +262,7 @@ final class NestService: NestItemRepository {
             return try await inflightFetchCategoriesTask.value
         }
 
+        let epoch = categoriesCacheEpoch
         let task = Task { [self] () throws -> [NestCategory] in
             guard let nestId = currentNest?.id else {
                 throw NestError.noCurrentNest
@@ -269,15 +272,20 @@ final class NestService: NestItemRepository {
             let snapshot = try await db.collection("nests").document(nestId).collection("nestCategories").getDocuments()
             let categories = try snapshot.documents.map { try $0.data(as: NestCategory.self) }
 
-            self.cachedCategories = categories
+            if epoch == categoriesCacheEpoch {
+                self.cachedCategories = categories
 
-            if var updatedNest = currentNest {
-                updatedNest.categories = categories
-                currentNest = updatedNest
+                if var updatedNest = currentNest {
+                    updatedNest.categories = categories
+                    currentNest = updatedNest
+                }
+
+                Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories")
+                return categories
             }
 
-            Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories")
-            return categories
+            Logger.log(level: .info, category: .nestService, message: "Fetched \(categories.count) categories (discarded stale cache write)")
+            return self.cachedCategories ?? categories
         }
 
         inflightFetchCategoriesTask = task
@@ -288,13 +296,15 @@ final class NestService: NestItemRepository {
     
     func refreshCategories() async throws -> [NestCategory] {
         Logger.log(level: .info, category: .nestService, message: "Refreshing categories")
-        cachedCategories = nil
+        clearCategoriesCache()
         return try await fetchCategories()
     }
     
     func clearCategoriesCache() {
         Logger.log(level: .info, category: .nestService, message: "Clearing categories cache")
+        categoriesCacheEpoch += 1
         cachedCategories = nil
+        inflightFetchCategoriesTask = nil
     }
     
     func clearPlacesCache() {
@@ -556,6 +566,8 @@ final class NestService: NestItemRepository {
     private let cacheValidityDuration: TimeInterval = 600 // 10 minutes - more reasonable for navigation
     private var inflightFetchAllItemsTask: Task<[BaseItem], Error>?
     private var inflightFetchCategoriesTask: Task<[NestCategory], Error>?
+    /// Bumped on item mutations so an in-flight fetch cannot write stale data back into the cache.
+    private var itemsCacheEpoch = 0
     
     // Computed property that filters places from cached items
     private var cachedPlaces: [PlaceItem]? {
@@ -591,6 +603,7 @@ final class NestService: NestItemRepository {
             return try await inflightFetchAllItemsTask.value
         }
 
+        let epoch = itemsCacheEpoch
         let task = Task { [self] () throws -> [BaseItem] in
             guard let itemRepository = itemRepository else {
                 throw NestError.noCurrentNest
@@ -599,10 +612,13 @@ final class NestService: NestItemRepository {
             let items = try await itemRepository.fetchItems()
             Logger.log(level: .info, category: .nestService, message: "Fetched \(items.count) total items from repository")
 
-            cachedItems = items
-            lastFetchTime = Date()
+            if epoch == itemsCacheEpoch {
+                cachedItems = items
+                lastFetchTime = Date()
+                return items
+            }
 
-            return items
+            return cachedItems.isEmpty ? items : cachedItems
         }
 
         inflightFetchAllItemsTask = task
@@ -623,8 +639,10 @@ final class NestService: NestItemRepository {
     /// Invalidate the cache (call when items are created/updated/deleted)
     func invalidateItemsCache() {
         Logger.log(level: .info, category: .nestService, message: "🗑️ CACHE INVALIDATED: Clearing \(cachedItems.count) cached items")
+        itemsCacheEpoch += 1
         cachedItems = []
         lastFetchTime = nil
+        inflightFetchAllItemsTask = nil
         itemRepository?.clearItemsCache()
     }
 
@@ -1196,7 +1214,7 @@ extension NestService {
             }
             
             // Clear the cached categories to force fresh fetch next time
-            cachedCategories = nil
+            clearCategoriesCache()
             
             Logger.log(level: .info, category: .nestService, message: "Folder created successfully: \(category.name)")
             
@@ -1258,15 +1276,26 @@ extension NestService {
                     category.name == categoryName || category.name.hasPrefix(categoryName + "/")
                 }
                 currentNest = updatedNest
+                cachedCategories = updatedNest.categories
+            } else {
+                cachedCategories = nil
             }
-            
-            // Clear the cached categories to force fresh fetch next time
-            cachedCategories = nil
+            categoriesCacheEpoch += 1
+            inflightFetchCategoriesTask = nil
+
+            // Drop cached items in this folder so FolderUtility cannot reconstruct it.
+            itemsCacheEpoch += 1
+            inflightFetchAllItemsTask = nil
+            cachedItems.removeAll { item in
+                item.category == categoryName || item.category.hasPrefix(categoryName + "/")
+            }
+            itemRepository?.clearItemsCache()
             
             Logger.log(level: .info, category: .nestService, message: "Category deleted successfully: \(categoryName)")
             
             // Log success event
             Tracker.shared.track(.nestCategoryDeleted)
+            NotificationCenter.default.post(name: .nestCategoryDidChange, object: categoryName)
         } catch {
             // Log failure event  
             Tracker.shared.track(.nestCategoryDeleted, result: false, error: error.localizedDescription)

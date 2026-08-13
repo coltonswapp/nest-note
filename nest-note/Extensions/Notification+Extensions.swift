@@ -7,6 +7,8 @@ extension Notification.Name {
     /// Posted after a place's map thumbnails finish uploading in the background.
     static let placeThumbnailsDidUpdate = Notification.Name("placeThumbnailsDidUpdate")
     static let pinnedCategoriesDidChange = Notification.Name("pinnedCategoriesDidChange")
+    /// Posted after a nest folder/category is created or deleted so other nest screens can refresh.
+    static let nestCategoryDidChange = Notification.Name("nestCategoryDidChange")
     static let apnsTokenDidRegister = Notification.Name("apnsTokenDidRegister")
     static let apnsTokenRegistrationFailed = Notification.Name("apnsTokenRegistrationFailed")
     static let fcmTokenDidUpdate = Notification.Name("fcmTokenDidUpdate")

@@ -1007,33 +1007,29 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
 
                 if isSessionPersisted {
                     try await updateSession()
-                } else {
-                    
-                    saveButton.startLoading()
-                    
-                    let newSession = try await SessionService.shared.createSession(sessionItem)
-                    sessionItem = newSession // Update sessionItem with the created session
-                    
-                    // Save any events that were created during session setup
-                    if !sessionEvents.isEmpty {
-                        try await savePendingEvents(to: newSession.id)
-                    }
-                    
-                    try await Task.sleep(for: .seconds(0.75))
-                    saveButton.stopLoading(withSuccess: true)
-                    
-                    // Notify sessions list to reload now that a new session exists
-                    delegate?.editSessionViewController(self, didCreateSession: newSession)
-
-                    await MainActor.run {
-                        self.transitionToPostCreateState()
-                        self.pushSelectNestItemsCreationStep()
-                    }
                     return
                 }
-                
-                dismiss(animated: true)
-                
+
+                saveButton.startLoading()
+
+                let newSession = try await SessionService.shared.createSession(sessionItem)
+                sessionItem = newSession // Update sessionItem with the created session
+
+                // Save any events that were created during session setup
+                if !sessionEvents.isEmpty {
+                    try await savePendingEvents(to: newSession.id)
+                }
+
+                try await Task.sleep(for: .seconds(0.75))
+                saveButton.stopLoading(withSuccess: true)
+
+                // Notify sessions list to reload now that a new session exists
+                delegate?.editSessionViewController(self, didCreateSession: newSession)
+
+                await MainActor.run {
+                    self.transitionToPostCreateState()
+                    self.pushSelectNestItemsCreationStep()
+                } 
             } catch ServiceError.noCurrentNest {
                 showToast(text: "Something went wrong", sentiment: .negative)
             } catch {
@@ -1492,8 +1488,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
                 snapshot.appendItems([.exportPDF], toSection: .exportPDF)
             }
 
-            // Add End Session section only for in-progress sessions
-            if isEditingSession && sessionItem.status == .inProgress && !isArchivedSession {
+            // Add End Session section for in-progress and extended sessions
+            if shouldShowEndSessionButton(for: sessionItem.status) {
                 snapshot.appendSections([.endSession])
                 snapshot.appendItems([.endSession], toSection: .endSession)
             }
@@ -1593,6 +1589,10 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func expenseButtonTapped() {
         let vc = NNFeaturePreviewViewController(feature: .expenses)
         present(vc, animated: true)
+    }
+
+    private func shouldShowEndSessionButton(for status: SessionStatus) -> Bool {
+        isEditingSession && !isArchivedSession && (status == .inProgress || status == .extended)
     }
 
     private func endSessionButtonTapped() {
@@ -2379,7 +2379,7 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         if snapshot.sectionIdentifiers.contains(.endSession) {
             snapshot.deleteSections([.endSession])
         }
-        if isEditingSession && status == .inProgress && !isArchivedSession {
+        if shouldShowEndSessionButton(for: status) {
             snapshot.appendSections([.endSession])
             snapshot.appendItems([.endSession], toSection: .endSession)
         }
@@ -2480,6 +2480,8 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
     private func updateSession() async throws {
         // Validate session before updating
         guard validateSession() else { return }
+
+        let didJustComplete = originalSession.status != .completed && sessionItem.status == .completed
         
         saveButton.startLoading()
         
@@ -2517,6 +2519,11 @@ class EditSessionViewController: NNViewController, PaywallPresentable, PaywallVi
         await finalizeCompletedSessionIfNeeded()
 
         if shouldShowSessionPaymentSection {
+            if didJustComplete {
+                await MainActor.run {
+                    self.presentSessionPaymentCalculator()
+                }
+            }
             return
         }
 

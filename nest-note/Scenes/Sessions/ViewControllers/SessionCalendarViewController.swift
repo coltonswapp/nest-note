@@ -207,30 +207,42 @@ final class SessionCalendarViewController: NNViewController, CollectionViewLoada
         navigationController?.navigationBar.scrollEdgeAppearance = appearance
         navigationController?.navigationBar.standardAppearance = appearance
         
-        // Create debug button
-        #if DEBUG
-        let debugButton = UIBarButtonItem(
-            image: UIImage(systemName: "ellipsis"),
+        let infoButton = UIBarButtonItem(
+            image: UIImage(systemName: "info.circle"),
             style: .plain,
             target: self,
-            action: #selector(debugButtonTapped)
+            action: #selector(aboutEventsTapped)
         )
-        #endif
-        
+        infoButton.accessibilityLabel = "About Events"
+        navigationItem.leftBarButtonItem = infoButton
+
+        var rightItems: [UIBarButtonItem] = []
+
         // Only show add button for non-sitters
         if !isSitter {
-            let addButton = UIBarButtonItem(
+            rightItems.append(UIBarButtonItem(
                 image: UIImage(systemName: "plus"),
                 style: .plain,
                 target: self,
                 action: #selector(addEventTapped)
-            )
-            navigationItem.rightBarButtonItems = [addButton]
+            ))
         }
-        
-    #if DEBUG
-    navigationItem.rightBarButtonItems?.append(debugButton)
-    #endif
+
+        #if DEBUG
+        rightItems.append(UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis"),
+            style: .plain,
+            target: self,
+            action: #selector(debugButtonTapped)
+        ))
+        #endif
+
+        navigationItem.rightBarButtonItems = rightItems.isEmpty ? nil : rightItems
+    }
+
+    @objc private func aboutEventsTapped() {
+        present(AboutEventsViewController(), animated: true)
+        HapticsHelper.lightHaptic()
     }
     
     @objc private func addEventTapped() {

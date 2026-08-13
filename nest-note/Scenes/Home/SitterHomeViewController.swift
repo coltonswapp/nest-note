@@ -18,6 +18,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     private var isLoadingEvents = false
     private var pinnedCategories: [String] = []
     private var categories: [NestCategory] = []
+    private var refreshTask: Task<Void, Never>?
 
     /// Persisted dismissal for the "Getting families on NestNote" intro banner shown to new sitters.
     private static let familiesBannerDismissedKey = "SitterHome.familiesBanner.dismissed"
@@ -512,12 +513,14 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             
         case .ready(let session, let nest):
             loadingSpinner.stopAnimating()
+            refreshControl.endRefreshing()
             emptyStateView.isHidden = true
             applySnapshot(session: session, nest: nest)
             fetchSessionEvents(session: session)
             
         case .noSession:
             loadingSpinner.stopAnimating()
+            refreshControl.endRefreshing()
             emptyStateView.isHidden = false
 
             // Clear the collection view content but keep it visible so the
@@ -529,6 +532,7 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
             
         case .error(let error):
             loadingSpinner.stopAnimating()
+            refreshControl.endRefreshing()
             
             var empty = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
             dataSource.apply(empty, animatingDifferences: false)
@@ -709,48 +713,27 @@ final class SitterHomeViewController: NNViewController, HomeViewControllerType, 
     }
     
     func refreshData(forceRefresh: Bool = false) {
-        Task {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
             do {
-                try await sitterViewService.fetchCurrentSession()
+                try await self.sitterViewService.fetchCurrentSession(forceRefresh: forceRefresh)
+            } catch is CancellationError {
+                return
             } catch {
-                handleError(error)
+                await MainActor.run {
+                    self.handleError(error)
+                }
             }
         }
     }
     
     @objc private func handlePullToRefresh() {
-        Task {
-            do {
-                try await sitterViewService.fetchCurrentSession()
-                await MainActor.run {
-                    self.refreshControl.endRefreshing()
-                }
-            } catch {
-                await MainActor.run {
-                    self.refreshControl.endRefreshing()
-                    self.handleError(error)
-                }
-            }
-        }
+        refreshData(forceRefresh: true)
     }
     
     private func handleAutoRefresh() {
-        // Show loading indicator for auto-refresh
-        loadingSpinner.startAnimating()
-        
-        Task {
-            do {
-                try await sitterViewService.fetchCurrentSession()
-                await MainActor.run {
-                    self.loadingSpinner.stopAnimating()
-                }
-            } catch {
-                await MainActor.run {
-                    self.loadingSpinner.stopAnimating()
-                    self.handleError(error)
-                }
-            }
-        }
+        refreshData(forceRefresh: true)
     }
     
     func handleError(_ error: Error) {
@@ -966,7 +949,7 @@ extension SitterHomeViewController: JoinSessionViewControllerDelegate {
                     if sessionItem.status == .inProgress || sessionItem.status == .extended || sessionItem.status == .earlyAccess {
                         // If it's in progress or in early access, refresh the data to show it
                         await MainActor.run {
-                            self.refreshData()
+                            self.refreshData(forceRefresh: true)
                         }
                     }
                 }

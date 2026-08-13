@@ -72,10 +72,9 @@ public final class Logger {
     }
 
     private func log(level: Level, category: Category?, message: String) {
-        // Capture value types on the caller, then do all formatting and mutation
-        // on the serial queue so concurrent Swift-concurrency callers cannot race
-        // DateFormatter / StringGuts / providers / lines.
-        let categoryValue = category?.rawValue ?? ""
+        // Hop first. Do not read Category.rawValue or interpolate on the caller.
+        // Release inlines this into Swift-concurrency jobs; concurrent
+        // StringGuts.append on shared storage SIGSEGVs (sitter launch crash).
         let now = Date()
 
         appendQueue.async { [weak self] in
@@ -84,7 +83,7 @@ public final class Logger {
             let logLine = LogLine(
                 timestamp: self.timestampFormatter.string(from: now),
                 level: level,
-                category: categoryValue,
+                category: category?.rawValue ?? "",
                 content: message
             )
 
@@ -112,37 +111,39 @@ public extension Logger {
         case error
     }
 
+    /// ASCII-only raw values. Emoji strings are stored as UTF-16 and lazily
+    /// transcoded; concurrent reads SIGSEGV in StringGuts / sharedUTF8.
     enum Category: String {
         case general = "General"
 
-        case launcher = "🚀 Launcher"
-        case router = "🚦 Router"
+        case launcher = "Launcher"
+        case router = "Router"
 
-        case auth = "🧑🏼‍🦯 Auth"
-        case signup = "🥽 Signup"
+        case auth = "Auth"
+        case signup = "Signup"
 
-        case userService = "🧍🏼 UserService"
-        case nestService = "👨🏼‍🤝‍👨🏽 NestService"
-        case demoMode = "🎬 DemoMode"
-        case sitterViewService = "🧘‍♂️ SitterViewService"
-        case sessionService = "📅 SessionService"
-        
-        case firebaseItemRepo = "🔥 FirebaseItemRepo"
-        
-        case placesService = "🏙️ PlaceService"
+        case userService = "UserService"
+        case nestService = "NestService"
+        case demoMode = "DemoMode"
+        case sitterViewService = "SitterViewService"
+        case sessionService = "SessionService"
 
-        case cachedImageController = "🗾 CachedImageController"
-        
-        case routineStateManager = "🕒 RoutineStateManager"
+        case firebaseItemRepo = "FirebaseItemRepo"
 
-        case purchases = "💰 Purchases"
-        case subscription = "💵 Subscriptions"
-        case migration = "🦣 Migrations"
+        case placesService = "PlaceService"
 
-        case testing = "🧪 Testing"
-        case survey = "📝 Survey"
-        case referral = "🎟️ Referral"
-        case paywall = "🤑 Paywall"
+        case cachedImageController = "CachedImageController"
+
+        case routineStateManager = "RoutineStateManager"
+
+        case purchases = "Purchases"
+        case subscription = "Subscriptions"
+        case migration = "Migrations"
+
+        case testing = "Testing"
+        case survey = "Survey"
+        case referral = "Referral"
+        case paywall = "Paywall"
     }
 
 }
